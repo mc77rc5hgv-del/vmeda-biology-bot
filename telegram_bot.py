@@ -8,6 +8,7 @@ from aiogram.filters import CommandStart, Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.enums import ChatMemberStatus
 
+# ==================== НАСТРОЙКИ ====================
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -15,13 +16,18 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "8469931783:AAFhj045ghZz4MBDBzfqP2Vs-SN4tucAn
 CHANNEL_ID = "@Vmeda_examen"
 
 # ==================== ЗАГРУЗКА ДАННЫХ ====================
+print("Загрузка tickets.json...")
 with open("tickets.json", "r", encoding="utf-8") as f:
     TICKETS = json.load(f)
 TICKETS_DICT = {str(t["num"]): t for t in TICKETS}
+print(f"Загружено {len(TICKETS)} билетов")
 
+print("Загрузка questions.json...")
 with open("questions.json", "r", encoding="utf-8") as f:
     QUESTIONS = json.load(f)
+print(f"Загружено {len(QUESTIONS)} вопросов")
 
+# Статистика
 stats = {
     "total_users": set(),
     "start_count": 0,
@@ -33,23 +39,43 @@ stats = {
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
+# ==================== ПРОВЕРКА ПОДПИСКИ ====================
 async def is_subscribed(user_id: int) -> bool:
     try:
         member = await bot.get_chat_member(CHANNEL_ID, user_id)
         return member.status in [ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR]
-    except:
+    except Exception as e:
+        logger.warning(f"Ошибка проверки подписки: {e}")
         return False
 
 # ==================== КЛАВИАТУРЫ ====================
+def get_main_menu():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="📘 Билеты", callback_data="menu_tickets")
+    builder.button(text="📝 Готовиться по вопросам", callback_data="menu_questions")
+    builder.adjust(1)
+    return builder.as_markup()
+
 def get_ticket_keyboard():
     builder = InlineKeyboardBuilder()
     for i in range(1, 51):
-        builder.button(text=f"🟢 {i}", callback_data=f"ticket:{i}")
+        builder.button(text=f"🟢 {i}", callback_data=f"ticket:{i}")   # Зелёные кнопки
     builder.adjust(4)
     builder.row(InlineKeyboardButton(text="🎲 Случайный билет", callback_data="random_ticket"))
     builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
     return builder.as_markup()
 
+def get_questions_main_menu():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="📄 Страница 1 (1-50)", callback_data="qpage:1")
+    builder.button(text="📄 Страница 2 (51-100)", callback_data="qpage:2")
+    builder.button(text="📄 Страница 3 (101-150)", callback_data="qpage:3")
+    builder.button(text="📄 Страница 4 (151-185)", callback_data="qpage:4")
+    builder.button(text="🎲 Случайный вопрос", callback_data="question_random")
+    builder.button(text="🔢 Ввести номер вручную", callback_data="question_by_number")
+    builder.adjust(1)
+    builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
+    return builder.as_markup()
 
 def get_question_page_keyboard(page: int):
     builder = InlineKeyboardBuilder()
@@ -72,7 +98,6 @@ def get_question_page_keyboard(page: int):
     builder.row(InlineKeyboardButton(text="🔙 К списку страниц", callback_data="menu_questions"))
     return builder.as_markup()
 
-
 def get_ticket_questions_keyboard(ticket_num: str):
     builder = InlineKeyboardBuilder()
     ticket = TICKETS_DICT.get(ticket_num, {})
@@ -85,7 +110,8 @@ def get_ticket_questions_keyboard(ticket_num: str):
     builder.adjust(1)
     builder.row(InlineKeyboardButton(text="🔙 Назад к билетам", callback_data="menu_tickets"))
     return builder.as_markup()
-# ==================== КОМАНДЫ ====================
+
+# ==================== ОБРАБОТЧИКИ ====================
 @dp.message(CommandStart())
 async def cmd_start(message: Message):
     user_id = message.from_user.id
@@ -93,14 +119,22 @@ async def cmd_start(message: Message):
     stats["start_count"] += 1
 
     if not await is_subscribed(user_id):
-        await message.answer("👋 Привет!\n\nЧтобы пользоваться ботом, подпишись на канал:\nhttps://t.me/Vmeda_examen\n\nПосле подписки нажми /start ещё раз.")
+        await message.answer(
+            "👋 Привет!\n\nЧтобы пользоваться ботом, подпишись на канал:\n"
+            "https://t.me/Vmeda_examen\n\nПосле подписки нажми /start ещё раз."
+        )
         return
 
     await message.answer("👋 Привет! Выбери режим подготовки:", reply_markup=get_main_menu())
 
 @dp.message(Command("stats"))
 async def cmd_stats(message: Message):
-    text = f"📊 <b>Статистика бота</b>\n\n👥 Уникальных пользователей: <b>{len(stats['total_users'])}</b>\n▶️ Запусков: <b>{stats['start_count']}</b>\n❓ Вопросов просмотрено: <b>{sum(stats['question_opened'].values())}</b>"
+    text = (
+        f"📊 <b>Статистика бота</b>\n\n"
+        f"👥 Уникальных пользователей: <b>{len(stats['total_users'])}</b>\n"
+        f"▶️ Запусков бота: <b>{stats['start_count']}</b>\n"
+        f"❓ Вопросов просмотрено: <b>{sum(stats['question_opened'].values())}</b>"
+    )
     await message.answer(text, parse_mode="HTML")
 
 # ==================== МЕНЮ ====================
@@ -112,18 +146,22 @@ async def cb_menu_tickets(callback: CallbackQuery):
 @dp.callback_query(F.data == "menu_questions")
 async def cb_menu_questions(callback: CallbackQuery):
     await callback.answer()
-    await callback.message.edit_text("📝 <b>Готовиться по вопросам</b>\n\nВыбери страницу:", parse_mode="HTML", reply_markup=get_questions_main_menu())
+    await callback.message.edit_text(
+        "📝 <b>Готовиться по вопросам</b>\n\nВыбери страницу:",
+        parse_mode="HTML",
+        reply_markup=get_questions_main_menu()
+    )
 
 @dp.callback_query(F.data == "back_to_main")
 async def cb_back_to_main(callback: CallbackQuery):
     await callback.answer()
     await callback.message.edit_text("Выбери режим подготовки:", reply_markup=get_main_menu())
 
-# ==================== БИЛЕТЫ (ПОЛНАЯ ВЕРСИЯ) ====================
+# ==================== БИЛЕТЫ ====================
 @dp.callback_query(F.data == "random_ticket")
 async def cb_random_ticket(callback: CallbackQuery):
     if not await is_subscribed(callback.from_user.id):
-        await callback.answer("Подпишись на канал!", show_alert=True)
+        await callback.answer("Сначала подпишись на канал!", show_alert=True)
         return
     stats["random_ticket_used"] += 1
     ticket = random.choice(TICKETS)
@@ -147,9 +185,8 @@ async def cb_ticket_question(callback: CallbackQuery):
     _, ticket_num, q_num = callback.data.split(":")
     ticket = TICKETS_DICT.get(ticket_num, {})
     questions = ticket.get("questions", [])
-    
     question = next((q for q in questions if str(q.get("num")) == q_num), None)
-    
+
     if question:
         text = f"❓ <b>Вопрос {q_num}</b>\n\n<b>{question['title']}</b>\n\n{question['answer']}"
         await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_ticket_questions_keyboard(ticket_num))
@@ -177,7 +214,7 @@ async def cb_show_question(callback: CallbackQuery):
 @dp.callback_query(F.data == "question_random")
 async def cb_question_random(callback: CallbackQuery):
     if not QUESTIONS:
-        await callback.answer("Вопросы не загружены")
+        await callback.answer("Вопросы ещё не загружены")
         return
     stats["random_question_used"] += 1
     q_num = random.choice(list(QUESTIONS.keys()))
@@ -188,7 +225,7 @@ async def cb_question_random(callback: CallbackQuery):
 @dp.callback_query(F.data == "question_by_number")
 async def cb_question_by_number(callback: CallbackQuery):
     await callback.answer()
-    await callback.message.edit_text("Введите номер вопроса (1–185):", parse_mode="HTML")
+    await callback.message.edit_text("Введите номер вопроса (от 1 до 185):", parse_mode="HTML")
 
 @dp.message(F.text.isdigit())
 async def handle_question_number(message: Message):
@@ -200,8 +237,9 @@ async def handle_question_number(message: Message):
     else:
         await message.answer("Вопрос с таким номером не найден.")
 
-# ==================== ЗАПУСК ====================
+# ==================== ЗАПУСК БОТА ====================
 async def main():
+    logger.info("Бот запускается...")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
