@@ -19,14 +19,16 @@ try:
     with open("tickets.json", "r", encoding="utf-8") as f:
         TICKETS = json.load(f)
     TICKETS_DICT = {str(t["num"]): t for t in TICKETS}
-except:
+except Exception as e:
+    logger.warning(f"Ошибка загрузки tickets.json: {e}")
     TICKETS = []
     TICKETS_DICT = {}
 
 try:
     with open("questions.json", "r", encoding="utf-8") as f:
         QUESTIONS = json.load(f)
-except:
+except Exception as e:
+    logger.warning(f"Ошибка загрузки questions.json: {e}")
     QUESTIONS = {}
 
 stats = {
@@ -81,11 +83,12 @@ def get_question_page_keyboard(page: int):
     builder = InlineKeyboardBuilder()
     start = (page - 1) * 50 + 1
     end = min(page * 50, 185)
-    
+
     for i in range(start, end + 1, 5):
-        row = [InlineKeyboardButton(text=str(num), callback_data=f"q:{num}") for num in range(i, min(i+5, end+1))]
+        row = [InlineKeyboardButton(text=str(num), callback_data=f"q:{num}") 
+               for num in range(i, min(i + 5, end + 1))]
         builder.row(*row)
-    
+
     nav = []
     if page > 1:
         nav.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"qpage:{page-1}"))
@@ -93,7 +96,7 @@ def get_question_page_keyboard(page: int):
         nav.append(InlineKeyboardButton(text="Вперёд ➡️", callback_data=f"qpage:{page+1}"))
     if nav:
         builder.row(*nav)
-    
+
     builder.row(InlineKeyboardButton(text="🔙 К списку страниц", callback_data="menu_questions"))
     return builder.as_markup()
 
@@ -143,27 +146,53 @@ async def cb_back_to_main(callback: CallbackQuery):
     await callback.answer()
     await callback.message.edit_text("Выбери режим подготовки:", reply_markup=get_main_menu())
 
-# ==================== БИЛЕТЫ ====================
+# ==================== БИЛЕТЫ (УЛУЧШЕННАЯ ВЕРСИЯ) ====================
 @dp.callback_query(F.data == "random_ticket")
 async def cb_random_ticket(callback: CallbackQuery):
     if not await is_subscribed(callback.from_user.id):
         await callback.answer("Подпишись на канал!", show_alert=True)
         return
-    
+
     stats["random_ticket_used"] += 1
     ticket = random.choice(TICKETS)
-    text = f"📘 <b>Билет {ticket['num']}</b>\n\n{ticket.get('content', 'Содержимое билета...')}"
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_ticket_keyboard())
+    await show_ticket(callback.message, ticket)
 
 @dp.callback_query(F.data.startswith("ticket:"))
 async def cb_ticket(callback: CallbackQuery):
     ticket_num = callback.data.split(":")[1]
     if ticket_num in TICKETS_DICT:
         ticket = TICKETS_DICT[ticket_num]
-        text = f"📘 <b>Билет {ticket_num}</b>\n\n{ticket.get('content', 'Содержимое билета...')}"
-        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_ticket_keyboard())
+        await show_ticket(callback.message, ticket)
     else:
         await callback.answer("Билет не найден")
+
+async def show_ticket(message, ticket: dict):
+    ticket_num = ticket.get("num", "?")
+    
+    # Пытаемся найти содержимое билета разными способами
+    content = (
+        ticket.get("content") or
+        ticket.get("text") or
+        ticket.get("description") or
+        ""
+    )
+
+    # Если есть список вопросов — показываем их
+    if "questions" in ticket and isinstance(ticket["questions"], list):
+        questions_text = "\n\n".join(
+            [f"• {q.get('question', q.get('q', ''))}" for q in ticket["questions"]]
+        )
+        content = content + "\n\n" + questions_text if content else questions_text
+
+    if not content:
+        content = "Содержимое билета не найдено в файле."
+
+    text = f"📘 <b>Билет {ticket_num}</b>\n\n{content}"
+
+    try:
+        await message.edit_text(text, parse_mode="HTML", reply_markup=get_ticket_keyboard())
+    except:
+        await message.edit_text(text, reply_markup=get_ticket_keyboard())
 
 # ==================== ВОПРОСЫ ====================
 @dp.callback_query(F.data.startswith("qpage:"))
