@@ -15,21 +15,12 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "8469931783:AAFhj045ghZz4MBDBzfqP2Vs-SN4tucAn
 CHANNEL_ID = "@Vmeda_examen"
 
 # ==================== ЗАГРУЗКА ДАННЫХ ====================
-try:
-    with open("tickets.json", "r", encoding="utf-8") as f:
-        TICKETS = json.load(f)
-    TICKETS_DICT = {str(t["num"]): t for t in TICKETS}
-except Exception as e:
-    logger.warning(f"Ошибка загрузки tickets.json: {e}")
-    TICKETS = []
-    TICKETS_DICT = {}
+with open("tickets.json", "r", encoding="utf-8") as f:
+    TICKETS = json.load(f)
+TICKETS_DICT = {str(t["num"]): t for t in TICKETS}
 
-try:
-    with open("questions.json", "r", encoding="utf-8") as f:
-        QUESTIONS = json.load(f)
-except Exception as e:
-    logger.warning(f"Ошибка загрузки questions.json: {e}")
-    QUESTIONS = {}
+with open("questions.json", "r", encoding="utf-8") as f:
+    QUESTIONS = json.load(f)
 
 stats = {
     "total_users": set(),
@@ -42,7 +33,6 @@ stats = {
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# ==================== ПРОВЕРКА ПОДПИСКИ ====================
 async def is_subscribed(user_id: int) -> bool:
     try:
         member = await bot.get_chat_member(CHANNEL_ID, user_id)
@@ -83,21 +73,28 @@ def get_question_page_keyboard(page: int):
     builder = InlineKeyboardBuilder()
     start = (page - 1) * 50 + 1
     end = min(page * 50, 185)
-
     for i in range(start, end + 1, 5):
-        row = [InlineKeyboardButton(text=str(num), callback_data=f"q:{num}") 
-               for num in range(i, min(i + 5, end + 1))]
+        row = [InlineKeyboardButton(text=str(num), callback_data=f"q:{num}") for num in range(i, min(i+5, end+1))]
         builder.row(*row)
-
     nav = []
-    if page > 1:
-        nav.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"qpage:{page-1}"))
-    if page < 4:
-        nav.append(InlineKeyboardButton(text="Вперёд ➡️", callback_data=f"qpage:{page+1}"))
-    if nav:
-        builder.row(*nav)
-
+    if page > 1: nav.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"qpage:{page-1}"))
+    if page < 4: nav.append(InlineKeyboardButton(text="Вперёд ➡️", callback_data=f"qpage:{page+1}"))
+    if nav: builder.row(*nav)
     builder.row(InlineKeyboardButton(text="🔙 К списку страниц", callback_data="menu_questions"))
+    return builder.as_markup()
+
+def get_ticket_questions_keyboard(ticket_num: str):
+    """Клавиатура с вопросами билета + кнопка назад"""
+    builder = InlineKeyboardBuilder()
+    ticket = TICKETS_DICT.get(ticket_num, {})
+    questions = ticket.get("questions", [])
+    
+    for q in questions:
+        q_num = q.get("num")
+        builder.button(text=f"❓ Вопрос {q_num}", callback_data=f"ticket_q:{ticket_num}:{q_num}")
+    
+    builder.adjust(1)
+    builder.row(InlineKeyboardButton(text="🔙 Назад к билетам", callback_data="menu_tickets"))
     return builder.as_markup()
 
 # ==================== КОМАНДЫ ====================
@@ -108,22 +105,14 @@ async def cmd_start(message: Message):
     stats["start_count"] += 1
 
     if not await is_subscribed(user_id):
-        await message.answer(
-            "👋 Привет!\n\nЧтобы пользоваться ботом, подпишись на канал:\n"
-            "https://t.me/Vmeda_examen\n\nПосле подписки нажми /start ещё раз."
-        )
+        await message.answer("👋 Привет!\n\nЧтобы пользоваться ботом, подпишись на канал:\nhttps://t.me/Vmeda_examen\n\nПосле подписки нажми /start ещё раз.")
         return
 
     await message.answer("👋 Привет! Выбери режим подготовки:", reply_markup=get_main_menu())
 
 @dp.message(Command("stats"))
 async def cmd_stats(message: Message):
-    text = (
-        f"📊 <b>Статистика бота</b>\n\n"
-        f"👥 Уникальных пользователей: <b>{len(stats['total_users'])}</b>\n"
-        f"▶️ Запусков: <b>{stats['start_count']}</b>\n"
-        f"❓ Вопросов просмотрено: <b>{sum(stats['question_opened'].values())}</b>\n"
-    )
+    text = f"📊 <b>Статистика бота</b>\n\n👥 Уникальных пользователей: <b>{len(stats['total_users'])}</b>\n▶️ Запусков: <b>{stats['start_count']}</b>\n❓ Вопросов просмотрено: <b>{sum(stats['question_opened'].values())}</b>"
     await message.answer(text, parse_mode="HTML")
 
 # ==================== МЕНЮ ====================
@@ -135,24 +124,19 @@ async def cb_menu_tickets(callback: CallbackQuery):
 @dp.callback_query(F.data == "menu_questions")
 async def cb_menu_questions(callback: CallbackQuery):
     await callback.answer()
-    await callback.message.edit_text(
-        "📝 <b>Готовиться по вопросам</b>\n\nВыбери страницу:",
-        parse_mode="HTML",
-        reply_markup=get_questions_main_menu()
-    )
+    await callback.message.edit_text("📝 <b>Готовиться по вопросам</b>\n\nВыбери страницу:", parse_mode="HTML", reply_markup=get_questions_main_menu())
 
 @dp.callback_query(F.data == "back_to_main")
 async def cb_back_to_main(callback: CallbackQuery):
     await callback.answer()
     await callback.message.edit_text("Выбери режим подготовки:", reply_markup=get_main_menu())
 
-# ==================== БИЛЕТЫ (УЛУЧШЕННАЯ ВЕРСИЯ) ====================
+# ==================== БИЛЕТЫ (ПОЛНАЯ ВЕРСИЯ) ====================
 @dp.callback_query(F.data == "random_ticket")
 async def cb_random_ticket(callback: CallbackQuery):
     if not await is_subscribed(callback.from_user.id):
         await callback.answer("Подпишись на канал!", show_alert=True)
         return
-
     stats["random_ticket_used"] += 1
     ticket = random.choice(TICKETS)
     await show_ticket(callback.message, ticket)
@@ -161,49 +145,35 @@ async def cb_random_ticket(callback: CallbackQuery):
 async def cb_ticket(callback: CallbackQuery):
     ticket_num = callback.data.split(":")[1]
     if ticket_num in TICKETS_DICT:
-        ticket = TICKETS_DICT[ticket_num]
-        await show_ticket(callback.message, ticket)
+        await show_ticket(callback.message, TICKETS_DICT[ticket_num])
     else:
         await callback.answer("Билет не найден")
 
 async def show_ticket(message, ticket: dict):
     ticket_num = ticket.get("num", "?")
+    text = f"📘 <b>Билет {ticket_num}</b>\n\nВыбери вопрос:"
+    await message.edit_text(text, parse_mode="HTML", reply_markup=get_ticket_questions_keyboard(str(ticket_num)))
+
+@dp.callback_query(F.data.startswith("ticket_q:"))
+async def cb_ticket_question(callback: CallbackQuery):
+    _, ticket_num, q_num = callback.data.split(":")
+    ticket = TICKETS_DICT.get(ticket_num, {})
+    questions = ticket.get("questions", [])
     
-    # Пытаемся найти содержимое билета разными способами
-    content = (
-        ticket.get("content") or
-        ticket.get("text") or
-        ticket.get("description") or
-        ""
-    )
-
-    # Если есть список вопросов — показываем их
-    if "questions" in ticket and isinstance(ticket["questions"], list):
-        questions_text = "\n\n".join(
-            [f"• {q.get('question', q.get('q', ''))}" for q in ticket["questions"]]
-        )
-        content = content + "\n\n" + questions_text if content else questions_text
-
-    if not content:
-        content = "Содержимое билета не найдено в файле."
-
-    text = f"📘 <b>Билет {ticket_num}</b>\n\n{content}"
-
-    try:
-        await message.edit_text(text, parse_mode="HTML", reply_markup=get_ticket_keyboard())
-    except:
-        await message.edit_text(text, reply_markup=get_ticket_keyboard())
+    question = next((q for q in questions if str(q.get("num")) == q_num), None)
+    
+    if question:
+        text = f"❓ <b>Вопрос {q_num}</b>\n\n<b>{question['title']}</b>\n\n{question['answer']}"
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_ticket_questions_keyboard(ticket_num))
+    else:
+        await callback.answer("Вопрос не найден")
 
 # ==================== ВОПРОСЫ ====================
 @dp.callback_query(F.data.startswith("qpage:"))
 async def cb_question_page(callback: CallbackQuery):
     page = int(callback.data.split(":")[1])
     await callback.answer()
-    await callback.message.edit_text(
-        f"📄 <b>Страница {page}</b>",
-        parse_mode="HTML",
-        reply_markup=get_question_page_keyboard(page)
-    )
+    await callback.message.edit_text(f"📄 <b>Страница {page}</b>", parse_mode="HTML", reply_markup=get_question_page_keyboard(page))
 
 @dp.callback_query(F.data.startswith("q:"))
 async def cb_show_question(callback: CallbackQuery):
