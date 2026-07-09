@@ -41,62 +41,50 @@ async def is_subscribed(user_id: int) -> bool:
         return False
 
 # ==================== КЛАВИАТУРЫ ====================
-def get_main_menu():
-    builder = InlineKeyboardBuilder()
-    builder.button(text="📘 Билеты", callback_data="menu_tickets")
-    builder.button(text="📝 Готовиться по вопросам", callback_data="menu_questions")
-    builder.adjust(1)
-    return builder.as_markup()
-
 def get_ticket_keyboard():
     builder = InlineKeyboardBuilder()
     for i in range(1, 51):
-        builder.button(text=f"📘 {i}", callback_data=f"ticket:{i}")
+        builder.button(text=f"🟢 {i}", callback_data=f"ticket:{i}")
     builder.adjust(4)
     builder.row(InlineKeyboardButton(text="🎲 Случайный билет", callback_data="random_ticket"))
     builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
     return builder.as_markup()
 
-def get_questions_main_menu():
-    builder = InlineKeyboardBuilder()
-    builder.button(text="📄 Страница 1 (1-50)", callback_data="qpage:1")
-    builder.button(text="📄 Страница 2 (51-100)", callback_data="qpage:2")
-    builder.button(text="📄 Страница 3 (101-150)", callback_data="qpage:3")
-    builder.button(text="📄 Страница 4 (151-185)", callback_data="qpage:4")
-    builder.button(text="🎲 Случайный вопрос", callback_data="question_random")
-    builder.button(text="🔢 Ввести номер вручную", callback_data="question_by_number")
-    builder.adjust(1)
-    builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
-    return builder.as_markup()
 
 def get_question_page_keyboard(page: int):
     builder = InlineKeyboardBuilder()
     start = (page - 1) * 50 + 1
     end = min(page * 50, 185)
+
     for i in range(start, end + 1, 5):
-        row = [InlineKeyboardButton(text=str(num), callback_data=f"q:{num}") for num in range(i, min(i+5, end+1))]
+        row = [InlineKeyboardButton(text=f"🟢 {num}", callback_data=f"q:{num}") 
+               for num in range(i, min(i + 5, end + 1))]
         builder.row(*row)
+
     nav = []
-    if page > 1: nav.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"qpage:{page-1}"))
-    if page < 4: nav.append(InlineKeyboardButton(text="Вперёд ➡️", callback_data=f"qpage:{page+1}"))
-    if nav: builder.row(*nav)
+    if page > 1:
+        nav.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"qpage:{page-1}"))
+    if page < 4:
+        nav.append(InlineKeyboardButton(text="Вперёд ➡️", callback_data=f"qpage:{page+1}"))
+    if nav:
+        builder.row(*nav)
+
     builder.row(InlineKeyboardButton(text="🔙 К списку страниц", callback_data="menu_questions"))
     return builder.as_markup()
 
+
 def get_ticket_questions_keyboard(ticket_num: str):
-    """Клавиатура с вопросами билета + кнопка назад"""
     builder = InlineKeyboardBuilder()
     ticket = TICKETS_DICT.get(ticket_num, {})
     questions = ticket.get("questions", [])
-    
+
     for q in questions:
         q_num = q.get("num")
-        builder.button(text=f"❓ Вопрос {q_num}", callback_data=f"ticket_q:{ticket_num}:{q_num}")
-    
+        builder.button(text=f"🟢 Вопрос {q_num}", callback_data=f"ticket_q:{ticket_num}:{q_num}")
+
     builder.adjust(1)
     builder.row(InlineKeyboardButton(text="🔙 Назад к билетам", callback_data="menu_tickets"))
     return builder.as_markup()
-
 # ==================== КОМАНДЫ ====================
 @dp.message(CommandStart())
 async def cmd_start(message: Message):
