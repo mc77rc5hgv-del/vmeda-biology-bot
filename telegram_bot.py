@@ -8,7 +8,6 @@ from aiogram.filters import CommandStart, Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.enums import ChatMemberStatus
 
-# ==================== НАСТРОЙКИ ====================
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -16,18 +15,16 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "8469931783:AAFhj045ghZz4MBDBzfqP2Vs-SN4tucAn
 CHANNEL_ID = "@Vmeda_examen"
 
 # ==================== ЗАГРУЗКА ДАННЫХ ====================
-print("Загрузка tickets.json...")
 with open("tickets.json", "r", encoding="utf-8") as f:
     TICKETS = json.load(f)
 TICKETS_DICT = {str(t["num"]): t for t in TICKETS}
-print(f"Загружено {len(TICKETS)} билетов")
 
-print("Загрузка questions.json...")
 with open("questions.json", "r", encoding="utf-8") as f:
     QUESTIONS = json.load(f)
-print(f"Загружено {len(QUESTIONS)} вопросов")
 
-# Статистика
+with open("physics_questions.json", "r", encoding="utf-8") as f:
+    PHYSICS_QUESTIONS = json.load(f)
+
 stats = {
     "total_users": set(),
     "start_count": 0,
@@ -39,27 +36,26 @@ stats = {
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# ==================== ПРОВЕРКА ПОДПИСКИ ====================
 async def is_subscribed(user_id: int) -> bool:
     try:
         member = await bot.get_chat_member(CHANNEL_ID, user_id)
         return member.status in [ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR]
-    except Exception as e:
-        logger.warning(f"Ошибка проверки подписки: {e}")
+    except:
         return False
 
 # ==================== КЛАВИАТУРЫ ====================
 def get_main_menu():
     builder = InlineKeyboardBuilder()
-    builder.button(text="📘 Билеты", callback_data="menu_tickets")
-    builder.button(text="📝 Готовиться по вопросам", callback_data="menu_questions")
+    builder.button(text="📘 Билеты (Биология)", callback_data="menu_tickets")
+    builder.button(text="📝 Готовиться по вопросам (Биология)", callback_data="menu_questions")
+    builder.button(text="⚛️ Физика", callback_data="menu_physics")
     builder.adjust(1)
     return builder.as_markup()
 
 def get_ticket_keyboard():
     builder = InlineKeyboardBuilder()
     for i in range(1, 51):
-        builder.button(text=f"🟢 {i}", callback_data=f"ticket:{i}")   # Зелёные кнопки
+        builder.button(text=f"🟢 {i}", callback_data=f"ticket:{i}")
     builder.adjust(4)
     builder.row(InlineKeyboardButton(text="🎲 Случайный билет", callback_data="random_ticket"))
     builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
@@ -111,6 +107,46 @@ def get_ticket_questions_keyboard(ticket_num: str):
     builder.row(InlineKeyboardButton(text="🔙 Назад к билетам", callback_data="menu_tickets"))
     return builder.as_markup()
 
+# ==================== КЛАВИАТУРЫ ФИЗИКИ ====================
+def get_physics_menu():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="📝 Тестовая часть (186 вопросов)", callback_data="physics_test")
+    builder.button(text="📘 Билеты", callback_data="physics_tickets")
+    builder.adjust(1)
+    builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
+    return builder.as_markup()
+
+def get_physics_test_pages():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="📄 Страница 1 (1-50)", callback_data="physics_page:1")
+    builder.button(text="📄 Страница 2 (51-100)", callback_data="physics_page:2")
+    builder.button(text="📄 Страница 3 (101-150)", callback_data="physics_page:3")
+    builder.button(text="📄 Страница 4 (151-186)", callback_data="physics_page:4")
+    builder.adjust(1)
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="menu_physics"))
+    return builder.as_markup()
+
+def get_physics_question_keyboard(page: int):
+    builder = InlineKeyboardBuilder()
+    start = (page - 1) * 50 + 1
+    end = min(page * 50, 186)
+
+    for i in range(start, end + 1, 5):
+        row = [InlineKeyboardButton(text=f"🟢 {num}", callback_data=f"physics_q:{num}") 
+               for num in range(i, min(i + 5, end + 1))]
+        builder.row(*row)
+
+    nav = []
+    if page > 1:
+        nav.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"physics_page:{page-1}"))
+    if page < 4:
+        nav.append(InlineKeyboardButton(text="Вперёд ➡️", callback_data=f"physics_page:{page+1}"))
+    if nav:
+        builder.row(*nav)
+
+    builder.row(InlineKeyboardButton(text="🔙 К страницам", callback_data="physics_test"))
+    return builder.as_markup()
+
 # ==================== ОБРАБОТЧИКИ ====================
 @dp.message(CommandStart())
 async def cmd_start(message: Message):
@@ -157,7 +193,12 @@ async def cb_back_to_main(callback: CallbackQuery):
     await callback.answer()
     await callback.message.edit_text("Выбери режим подготовки:", reply_markup=get_main_menu())
 
-# ==================== БИЛЕТЫ ====================
+@dp.callback_query(F.data == "menu_physics")
+async def cb_menu_physics(callback: CallbackQuery):
+    await callback.answer()
+    await callback.message.edit_text("⚛️ <b>Раздел Физика</b>\n\nВыбери раздел:", parse_mode="HTML", reply_markup=get_physics_menu())
+
+# ==================== БИЛЕТЫ (БИОЛОГИЯ) ====================
 @dp.callback_query(F.data == "random_ticket")
 async def cb_random_ticket(callback: CallbackQuery):
     if not await is_subscribed(callback.from_user.id):
@@ -193,7 +234,7 @@ async def cb_ticket_question(callback: CallbackQuery):
     else:
         await callback.answer("Вопрос не найден")
 
-# ==================== ВОПРОСЫ ====================
+# ==================== ВОПРОСЫ (БИОЛОГИЯ) ====================
 @dp.callback_query(F.data.startswith("qpage:"))
 async def cb_question_page(callback: CallbackQuery):
     page = int(callback.data.split(":")[1])
@@ -237,7 +278,34 @@ async def handle_question_number(message: Message):
     else:
         await message.answer("Вопрос с таким номером не найден.")
 
-# ==================== ЗАПУСК БОТА ====================
+# ==================== ФИЗИКА ====================
+@dp.callback_query(F.data == "physics_tickets")
+async def cb_physics_tickets(callback: CallbackQuery):
+    await callback.answer()
+    await callback.message.answer("😁")
+
+@dp.callback_query(F.data == "physics_test")
+async def cb_physics_test(callback: CallbackQuery):
+    await callback.answer()
+    await callback.message.edit_text("📝 <b>Тестовая часть — Физика</b>\n\nВыбери страницу:", parse_mode="HTML", reply_markup=get_physics_test_pages())
+
+@dp.callback_query(F.data.startswith("physics_page:"))
+async def cb_physics_page(callback: CallbackQuery):
+    page = int(callback.data.split(":")[1])
+    await callback.answer()
+    await callback.message.edit_text(f"📄 <b>Страница {page}</b>", parse_mode="HTML", reply_markup=get_physics_question_keyboard(page))
+
+@dp.callback_query(F.data.startswith("physics_q:"))
+async def cb_physics_question(callback: CallbackQuery):
+    q_num = callback.data.split(":")[1]
+    if q_num in PHYSICS_QUESTIONS:
+        q = PHYSICS_QUESTIONS[q_num]
+        text = f"❓ <b>Вопрос {q_num}</b>\n\n{q.get('title', '')}\n\n{q.get('answer', '')}"
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_physics_test_pages())
+    else:
+        await callback.answer("Вопрос пока не добавлен в файл")
+
+# ==================== ЗАПУСК ====================
 async def main():
     logger.info("Бот запускается...")
     await dp.start_polling(bot)
