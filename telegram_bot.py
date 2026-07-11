@@ -25,6 +25,9 @@ with open("questions.json", "r", encoding="utf-8") as f:
 with open("physics_questions.json", "r", encoding="utf-8") as f:
     PHYSICS_QUESTIONS = json.load(f)
 
+with open("chemistry_labs.json", "r", encoding="utf-8") as f:
+    CHEMISTRY_LABS = json.load(f)
+
 stats = {
     "total_users": set(),
     "start_count": 0,
@@ -49,6 +52,7 @@ def get_main_menu():
     builder.button(text="📘 Билеты (Биология)", callback_data="menu_tickets")
     builder.button(text="📝 Готовиться по вопросам (Биология)", callback_data="menu_questions")
     builder.button(text="⚛️ Физика", callback_data="menu_physics")
+    builder.button(text="🧪 Химия", callback_data="menu_chemistry")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -90,7 +94,6 @@ def get_question_page_keyboard(page: int):
         nav.append(InlineKeyboardButton(text="Вперёд ➡️", callback_data=f"qpage:{page+1}"))
     if nav:
         builder.row(*nav)
-
     builder.row(InlineKeyboardButton(text="🔙 К списку страниц", callback_data="menu_questions"))
     return builder.as_markup()
 
@@ -98,16 +101,14 @@ def get_ticket_questions_keyboard(ticket_num: str):
     builder = InlineKeyboardBuilder()
     ticket = TICKETS_DICT.get(ticket_num, {})
     questions = ticket.get("questions", [])
-
     for q in questions:
         q_num = q.get("num")
         builder.button(text=f"🟢 Вопрос {q_num}", callback_data=f"ticket_q:{ticket_num}:{q_num}")
-
     builder.adjust(1)
     builder.row(InlineKeyboardButton(text="🔙 Назад к билетам", callback_data="menu_tickets"))
     return builder.as_markup()
 
-# ==================== КЛАВИАТУРЫ ФИЗИКИ ====================
+# ==================== ФИЗИКА ====================
 def get_physics_menu():
     builder = InlineKeyboardBuilder()
     builder.button(text="📝 Тестовая часть (186 вопросов)", callback_data="physics_test")
@@ -130,12 +131,10 @@ def get_physics_question_keyboard(page: int):
     builder = InlineKeyboardBuilder()
     start = (page - 1) * 50 + 1
     end = min(page * 50, 186)
-
     for i in range(start, end + 1, 5):
         row = [InlineKeyboardButton(text=f"🟢 {num}", callback_data=f"physics_q:{num}") 
                for num in range(i, min(i + 5, end + 1))]
         builder.row(*row)
-
     nav = []
     if page > 1:
         nav.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"physics_page:{page-1}"))
@@ -143,8 +142,25 @@ def get_physics_question_keyboard(page: int):
         nav.append(InlineKeyboardButton(text="Вперёд ➡️", callback_data=f"physics_page:{page+1}"))
     if nav:
         builder.row(*nav)
-
     builder.row(InlineKeyboardButton(text="🔙 К страницам", callback_data="physics_test"))
+    return builder.as_markup()
+
+# ==================== ХИМИЯ ====================
+def get_chemistry_menu():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="📚 Теория", callback_data="chemistry_theory")
+    builder.button(text="📝 Задачи", callback_data="chemistry_tasks")
+    builder.button(text="🧪 Лабораторные работы", callback_data="chemistry_labs")
+    builder.adjust(1)
+    builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
+    return builder.as_markup()
+
+def get_labs_keyboard():
+    builder = InlineKeyboardBuilder()
+    for lab in CHEMISTRY_LABS["labs"]:
+        builder.button(text=f"🧪 Лаба {lab['number']}", callback_data=f"lab:{lab['number']}")
+    builder.adjust(2)
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="menu_chemistry"))
     return builder.as_markup()
 
 # ==================== ОБРАБОТЧИКИ ====================
@@ -153,24 +169,14 @@ async def cmd_start(message: Message):
     user_id = message.from_user.id
     stats["total_users"].add(user_id)
     stats["start_count"] += 1
-
     if not await is_subscribed(user_id):
-        await message.answer(
-            "👋 Привет!\n\nЧтобы пользоваться ботом, подпишись на канал:\n"
-            "https://t.me/Vmeda_examen\n\nПосле подписки нажми /start ещё раз."
-        )
+        await message.answer("👋 Привет!\n\nЧтобы пользоваться ботом, подпишись на канал:\nhttps://t.me/Vmeda_examen\n\nПосле подписки нажми /start ещё раз.")
         return
-
     await message.answer("👋 Привет! Выбери режим подготовки:", reply_markup=get_main_menu())
 
 @dp.message(Command("stats"))
 async def cmd_stats(message: Message):
-    text = (
-        f"📊 <b>Статистика бота</b>\n\n"
-        f"👥 Уникальных пользователей: <b>{len(stats['total_users'])}</b>\n"
-        f"▶️ Запусков бота: <b>{stats['start_count']}</b>\n"
-        f"❓ Вопросов просмотрено: <b>{sum(stats['question_opened'].values())}</b>"
-    )
+    text = f"📊 <b>Статистика бота</b>\n\n👥 Уникальных пользователей: <b>{len(stats['total_users'])}</b>\n▶️ Запусков бота: <b>{stats['start_count']}</b>\n❓ Вопросов просмотрено: <b>{sum(stats['question_opened'].values())}</b>"
     await message.answer(text, parse_mode="HTML")
 
 # ==================== МЕНЮ ====================
@@ -182,11 +188,7 @@ async def cb_menu_tickets(callback: CallbackQuery):
 @dp.callback_query(F.data == "menu_questions")
 async def cb_menu_questions(callback: CallbackQuery):
     await callback.answer()
-    await callback.message.edit_text(
-        "📝 <b>Готовиться по вопросам</b>\n\nВыбери страницу:",
-        parse_mode="HTML",
-        reply_markup=get_questions_main_menu()
-    )
+    await callback.message.edit_text("📝 <b>Готовиться по вопросам</b>\n\nВыбери страницу:", parse_mode="HTML", reply_markup=get_questions_main_menu())
 
 @dp.callback_query(F.data == "back_to_main")
 async def cb_back_to_main(callback: CallbackQuery):
@@ -198,7 +200,72 @@ async def cb_menu_physics(callback: CallbackQuery):
     await callback.answer()
     await callback.message.edit_text("⚛️ <b>Раздел Физика</b>\n\nВыбери раздел:", parse_mode="HTML", reply_markup=get_physics_menu())
 
-# ==================== БИЛЕТЫ (БИОЛОГИЯ) ====================
+@dp.callback_query(F.data == "menu_chemistry")
+async def cb_menu_chemistry(callback: CallbackQuery):
+    await callback.answer()
+    await callback.message.edit_text("🧪 <b>Раздел Химия</b>\n\nВыбери раздел:", parse_mode="HTML", reply_markup=get_chemistry_menu())
+
+# ==================== ХИМИЯ ====================
+@dp.callback_query(F.data == "chemistry_theory")
+async def cb_chemistry_theory(callback: CallbackQuery):
+    await callback.answer()
+    await callback.message.answer("📚 Теория по химии скоро будет добавлена!")
+
+@dp.callback_query(F.data == "chemistry_tasks")
+async def cb_chemistry_tasks(callback: CallbackQuery):
+    await callback.answer()
+    await callback.message.answer("📝 Задачи по химии скоро будут добавлены!")
+
+@dp.callback_query(F.data == "chemistry_labs")
+async def cb_chemistry_labs(callback: CallbackQuery):
+    await callback.answer()
+    await callback.message.edit_text("🧪 <b>Лабораторные работы по химии</b>\n\nВыбери лабораторную работу:", reply_markup=get_labs_keyboard())
+
+@dp.callback_query(F.data.startswith("lab:"))
+async def cb_show_lab(callback: CallbackQuery):
+    lab_num = int(callback.data.split(":")[1])
+    lab = next((l for l in CHEMISTRY_LABS["labs"] if l["number"] == lab_num), None)
+    if not lab:
+        await callback.answer("Лабораторная работа не найдена")
+        return
+
+    text = f"🧪 <b>Лабораторная работа {lab['number']}</b>\n\n<b>Тема:</b> {lab.get('theme', '')}\n\n<b>Условие:</b>\n{lab.get('condition', '')}"
+    builder = InlineKeyboardBuilder()
+    if lab.get("experiments"):
+        builder.button(text="🔬 Опыты", callback_data=f"lab_exp:{lab_num}")
+    if lab.get("calculations"):
+        builder.button(text="📐 Расчёты", callback_data=f"lab_calc:{lab_num}")
+    builder.button(text="🔙 Назад к лабам", callback_data="chemistry_labs")
+    builder.adjust(1)
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=builder.as_markup())
+
+@dp.callback_query(F.data.startswith("lab_exp:"))
+async def cb_lab_experiments(callback: CallbackQuery):
+    lab_num = int(callback.data.split(":")[1])
+    lab = next((l for l in CHEMISTRY_LABS["labs"] if l["number"] == lab_num), None)
+    if not lab or not lab.get("experiments"):
+        await callback.answer("Опыты не найдены")
+        return
+    text = f"🔬 <b>Опыты — Лабораторная работа {lab_num}</b>\n\n"
+    for exp in lab["experiments"]:
+        text += f"<b>{exp.get('name', '')}</b>\n{exp.get('description', '')}\n\n"
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔙 Назад", callback_data=f"lab:{lab_num}")
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=builder.as_markup())
+
+@dp.callback_query(F.data.startswith("lab_calc:"))
+async def cb_lab_calculations(callback: CallbackQuery):
+    lab_num = int(callback.data.split(":")[1])
+    lab = next((l for l in CHEMISTRY_LABS["labs"] if l["number"] == lab_num), None)
+    if not lab or not lab.get("calculations"):
+        await callback.answer("Расчёты не найдены")
+        return
+    text = f"📐 <b>Расчёты — Лабораторная работа {lab_num}</b>\n\n{lab['calculations']}"
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔙 Назад", callback_data=f"lab:{lab_num}")
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=builder.as_markup())
+
+# ==================== БИЛЕТЫ БИОЛОГИИ ====================
 @dp.callback_query(F.data == "random_ticket")
 async def cb_random_ticket(callback: CallbackQuery):
     if not await is_subscribed(callback.from_user.id):
@@ -227,14 +294,13 @@ async def cb_ticket_question(callback: CallbackQuery):
     ticket = TICKETS_DICT.get(ticket_num, {})
     questions = ticket.get("questions", [])
     question = next((q for q in questions if str(q.get("num")) == q_num), None)
-
     if question:
         text = f"❓ <b>Вопрос {q_num}</b>\n\n<b>{question['title']}</b>\n\n{question['answer']}"
         await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_ticket_questions_keyboard(ticket_num))
     else:
         await callback.answer("Вопрос не найден")
 
-# ==================== ВОПРОСЫ (БИОЛОГИЯ) ====================
+# ==================== ВОПРОСЫ БИОЛОГИИ ====================
 @dp.callback_query(F.data.startswith("qpage:"))
 async def cb_question_page(callback: CallbackQuery):
     page = int(callback.data.split(":")[1])
