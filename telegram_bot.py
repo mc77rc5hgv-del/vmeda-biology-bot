@@ -28,6 +28,9 @@ with open("physics_questions.json", "r", encoding="utf-8") as f:
 with open("chemistry_labs.json", "r", encoding="utf-8") as f:
     CHEMISTRY_LABS = json.load(f)
 
+with open("chemistry_theory.json", "r", encoding="utf-8") as f:
+    CHEMISTRY_THEORY = json.load(f)["topics"]
+
 stats = {
     "total_users": set(),
     "start_count": 0,
@@ -81,12 +84,9 @@ def get_question_page_keyboard(page: int):
     builder = InlineKeyboardBuilder()
     start = (page - 1) * 50 + 1
     end = min(page * 50, 185)
-
     for i in range(start, end + 1, 5):
-        row = [InlineKeyboardButton(text=f"🟢 {num}", callback_data=f"q:{num}") 
-               for num in range(i, min(i + 5, end + 1))]
+        row = [InlineKeyboardButton(text=f"🟢 {num}", callback_data=f"q:{num}") for num in range(i, min(i + 5, end + 1))]
         builder.row(*row)
-
     nav = []
     if page > 1:
         nav.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"qpage:{page-1}"))
@@ -132,8 +132,7 @@ def get_physics_question_keyboard(page: int):
     start = (page - 1) * 50 + 1
     end = min(page * 50, 186)
     for i in range(start, end + 1, 5):
-        row = [InlineKeyboardButton(text=f"🟢 {num}", callback_data=f"physics_q:{num}") 
-               for num in range(i, min(i + 5, end + 1))]
+        row = [InlineKeyboardButton(text=f"🟢 {num}", callback_data=f"physics_q:{num}") for num in range(i, min(i + 5, end + 1))]
         builder.row(*row)
     nav = []
     if page > 1:
@@ -153,6 +152,24 @@ def get_chemistry_menu():
     builder.button(text="🧪 Лабораторные работы", callback_data="chemistry_labs")
     builder.adjust(1)
     builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
+    return builder.as_markup()
+
+def get_chemistry_theory_list():
+    builder = InlineKeyboardBuilder()
+    for num in range(1, 17):
+        builder.button(text=f"📖 Тема {num}", callback_data=f"chem_theory:{num}")
+    builder.adjust(2)
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="menu_chemistry"))
+    return builder.as_markup()
+
+def get_theory_navigation(current_num: int):
+    builder = InlineKeyboardBuilder()
+    if current_num > 1:
+        builder.button(text="⬅️ Предыдущая", callback_data=f"chem_theory:{current_num-1}")
+    if current_num < 16:
+        builder.button(text="Следующая ➡️", callback_data=f"chem_theory:{current_num+1}")
+    builder.adjust(2)
+    builder.row(InlineKeyboardButton(text="🔙 К списку тем", callback_data="chemistry_theory_list"))
     return builder.as_markup()
 
 def get_labs_keyboard():
@@ -205,17 +222,34 @@ async def cb_menu_chemistry(callback: CallbackQuery):
     await callback.answer()
     await callback.message.edit_text("🧪 <b>Раздел Химия</b>\n\nВыбери раздел:", parse_mode="HTML", reply_markup=get_chemistry_menu())
 
-# ==================== ХИМИЯ ====================
+# ==================== ХИМИЯ - ТЕОРИЯ (С НАВИГАЦИЕЙ) ====================
 @dp.callback_query(F.data == "chemistry_theory")
 async def cb_chemistry_theory(callback: CallbackQuery):
     await callback.answer()
-    await callback.message.answer("📚 Теория по химии скоро будет добавлена!")
+    await callback.message.edit_text("📚 <b>Теория по химии</b>\n\nВыбери тему:", parse_mode="HTML", reply_markup=get_chemistry_theory_list())
 
+@dp.callback_query(F.data.startswith("chem_theory:"))
+async def cb_show_theory_topic(callback: CallbackQuery):
+    num = int(callback.data.split(":")[1])
+    topic = CHEMISTRY_THEORY.get(str(num))
+    if not topic:
+        await callback.answer("Тема не найдена")
+        return
+    text = f"📖 <b>{topic['title']}</b>\n\n{topic['content']}"
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_theory_navigation(num))
+
+@dp.callback_query(F.data == "chemistry_theory_list")
+async def cb_theory_list(callback: CallbackQuery):
+    await callback.answer()
+    await callback.message.edit_text("📚 <b>Теория по химии</b>\n\nВыбери тему:", parse_mode="HTML", reply_markup=get_chemistry_theory_list())
+
+# ==================== ХИМИЯ - ЗАДАЧИ (пока заглушка) ====================
 @dp.callback_query(F.data == "chemistry_tasks")
 async def cb_chemistry_tasks(callback: CallbackQuery):
     await callback.answer()
-    await callback.message.answer("📝 Задачи по химии скоро будут добавлены!")
+    await callback.message.answer("📝 Раздел «Задачи» по химии скоро будет добавлен!")
 
+# ==================== ХИМИЯ - ЛАБОРАТОРНЫЕ РАБОТЫ ====================
 @dp.callback_query(F.data == "chemistry_labs")
 async def cb_chemistry_labs(callback: CallbackQuery):
     await callback.answer()
@@ -228,7 +262,6 @@ async def cb_show_lab(callback: CallbackQuery):
     if not lab:
         await callback.answer("Лабораторная работа не найдена")
         return
-
     text = f"🧪 <b>Лабораторная работа {lab['number']}</b>\n\n<b>Тема:</b> {lab.get('theme', '')}\n\n<b>Условие:</b>\n{lab.get('condition', '')}"
     builder = InlineKeyboardBuilder()
     if lab.get("experiments"):
