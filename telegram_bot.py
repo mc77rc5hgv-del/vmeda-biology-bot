@@ -284,6 +284,21 @@ def get_questions_main_menu():
     builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="menu_biology"))
     return builder.as_markup()
 
+def get_question_answer_keyboard(q_num: str):
+    builder = InlineKeyboardBuilder()
+    n = int(q_num)
+    nav = []
+    if str(n - 1) in QUESTIONS:
+        nav.append(InlineKeyboardButton(text="⬅️ Предыдущий вопрос", callback_data=f"q:{n - 1}"))
+    if str(n + 1) in QUESTIONS:
+        nav.append(InlineKeyboardButton(text="Следующий вопрос ➡️", callback_data=f"q:{n + 1}"))
+    if nav:
+        builder.row(*nav)
+    builder.row(InlineKeyboardButton(text="🎲 Случайный вопрос", callback_data="question_random"))
+    builder.row(InlineKeyboardButton(text="🔢 Ввести номер вручную", callback_data="question_by_number"))
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="menu_biology"))
+    return builder.as_markup()
+
 def get_question_page_keyboard(page: int):
     builder = InlineKeyboardBuilder()
     start = (page - 1) * 50 + 1
@@ -736,7 +751,7 @@ async def cb_show_question(callback: CallbackQuery):
         header = f"❓ <b>Вопрос {q_num}</b>"
         body = f"{header}\n{DIVIDER}\n\n<b>{q['title']}</b>\n\n{q['answer']}"
         short_caption = f"{header}\n{DIVIDER}\n\n<b>{q['title']}</b>"
-        await send_answer(callback.message, body, short_caption, q, get_questions_main_menu(), edit=True)
+        await send_answer(callback.message, body, short_caption, q, get_question_answer_keyboard(q_num), edit=True)
     else:
         await callback.answer("Вопрос не найден", show_alert=True)
 
@@ -754,7 +769,7 @@ async def cb_question_random(callback: CallbackQuery):
     header = f"❓ <b>Вопрос {q_num}</b>"
     body = f"{header}\n{DIVIDER}\n\n<b>{q['title']}</b>\n\n{q['answer']}"
     short_caption = f"{header}\n{DIVIDER}\n\n<b>{q['title']}</b>"
-    await send_answer(callback.message, body, short_caption, q, get_questions_main_menu(), edit=True)
+    await send_answer(callback.message, body, short_caption, q, get_question_answer_keyboard(q_num), edit=True)
 
 @dp.callback_query(F.data == "question_by_number")
 async def cb_question_by_number(callback: CallbackQuery):
@@ -774,7 +789,7 @@ async def handle_question_number(message: Message):
         header = f"❓ <b>Вопрос {q_num}</b>"
         body = f"{header}\n{DIVIDER}\n\n<b>{q['title']}</b>\n\n{q['answer']}"
         short_caption = f"{header}\n{DIVIDER}\n\n<b>{q['title']}</b>"
-        await send_answer(message, body, short_caption, q, get_questions_main_menu(), edit=False)
+        await send_answer(message, body, short_caption, q, get_question_answer_keyboard(q_num), edit=False)
     else:
         await message.answer("⚠️ Вопрос с таким номером не найден.")
 
