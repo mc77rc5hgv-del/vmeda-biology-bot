@@ -8,6 +8,7 @@ import json
 import os
 import sys
 import subprocess
+import time
 from io import BytesIO
 from urllib.parse import quote
 
@@ -64,6 +65,7 @@ def main():
             print(f"OK   {commons_name} -> {out_path} ({size} bytes)")
         except Exception as e:
             print(f"FAIL {commons_name}: {e}")
+        time.sleep(1.5)
 
 
 if __name__ == "__main__":
