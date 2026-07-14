@@ -132,12 +132,15 @@ async def safe_edit_text(message, text, **kwargs) -> None:
         await message.answer(text, **kwargs)
 
 async def send_answer(target, body: str, short_caption: str, question: dict, keyboard, edit: bool) -> None:
-    """Показывает текст вопроса+ответа. Если у вопроса есть картинка-схема:
+    """Показывает текст вопроса+ответа. Если у вопроса есть картинка-схема, она всегда
+    приходит первым сообщением:
     - при коротком ответе (уместился в лимит подписи Telegram) — единое сообщение "фото + текст";
-    - при длинном ответе — фото с коротким заголовком, а сразу следом текст с полным ответом
-      (объединить в одно сообщение технически невозможно: Telegram ограничивает подпись к фото
-      1024 символами).
-    target — CallbackQuery.message при edit=True, либо обычное Message при edit=False."""
+    - при длинном ответе — сначала фото (с коротким заголовком), затем отдельным сообщением
+      полный текст ответа (объединить в одно сообщение технически невозможно: Telegram
+      ограничивает подпись к фото 1024 символами).
+    target — CallbackQuery.message при edit=True, либо обычное Message при edit=False.
+    При edit=True старое сообщение удаляется, а не редактируется — иначе оно осталось бы
+    на прежнем месте в чате, выше нового фото."""
     image_name = question.get("image")
     image_path = os.path.join(IMAGES_DIR, image_name) if image_name else None
     if image_path and not os.path.exists(image_path):
@@ -152,12 +155,11 @@ async def send_answer(target, body: str, short_caption: str, question: dict, key
         return
 
     photo = FSInputFile(image_path)
+    if edit:
+        await target.delete()
+
     if len(body) <= CAPTION_LIMIT:
-        if edit:
-            await target.delete()
-            await target.answer_photo(photo, caption=body, parse_mode="HTML", reply_markup=keyboard)
-        else:
-            await target.answer_photo(photo, caption=body, parse_mode="HTML", reply_markup=keyboard)
+        await target.answer_photo(photo, caption=body, parse_mode="HTML", reply_markup=keyboard)
         return
 
     caption = short_caption if len(short_caption) <= CAPTION_LIMIT else short_caption[:CAPTION_LIMIT - 1] + "…"
@@ -165,10 +167,7 @@ async def send_answer(target, body: str, short_caption: str, question: dict, key
         await target.answer_photo(photo, caption=caption, parse_mode="HTML")
     except Exception:
         logger.exception("Не удалось отправить изображение %s", image_path)
-    if edit:
-        await safe_edit_text(target, body, parse_mode="HTML", reply_markup=keyboard)
-    else:
-        await target.answer(body, parse_mode="HTML", reply_markup=keyboard)
+    await target.answer(body, parse_mode="HTML", reply_markup=keyboard)
 
 # ==================== КЛАВИАТУРЫ ====================
 def get_main_menu():
