@@ -110,6 +110,12 @@ VISIBLE_TICKET_NUMS = sorted(
     key=_ticket_sort_key
 )
 
+def _normalize_ticket_num(s: str) -> str:
+    """Убирает пробелы и приводит букву А к единому виду (кириллица/латиница, регистр)."""
+    return (s or "").strip().upper().replace(" ", "").replace("А", "A")
+
+TICKET_LOOKUP = {_normalize_ticket_num(k): v for k, v in TICKETS_DICT.items()}
+
 async def is_subscribed(user_id: int) -> bool:
     try:
         member = await bot.get_chat_member(CHANNEL_ID, user_id)
@@ -795,6 +801,29 @@ async def handle_question_number(message: Message):
         await send_answer(message, body, short_caption, q, get_question_answer_keyboard(q_num), edit=False)
     else:
         await message.answer("⚠️ Вопрос с таким номером не найден.")
+
+# ==================== СКРЫТАЯ ФУНКЦИЯ (ВРЕМЕННО) ====================
+# Если написать боту номер билета текстом (например "20А"), в чат придут все
+# вопросы и ответы этого билета подряд, без кнопок. Без команд и упоминаний в меню.
+@dp.message(F.text)
+async def handle_hidden_ticket_dump(message: Message):
+    ticket = TICKET_LOOKUP.get(_normalize_ticket_num(message.text))
+    if not ticket:
+        return
+    ticket_num = ticket.get("num", "?")
+    questions = ticket.get("questions", [])
+    await message.answer(f"📘 <b>Билет {ticket_num}</b> — все ответы\n{DIVIDER}", parse_mode="HTML")
+    for q in questions:
+        q_num = q.get("num")
+        body = f"❓ <b>Вопрос {q_num}</b>\n{DIVIDER}\n\n<b>{q.get('title', '')}</b>\n\n{q.get('answer', '')}"
+        image_name = q.get("image")
+        image_path = os.path.join(IMAGES_DIR, image_name) if image_name else None
+        if image_path and os.path.exists(image_path):
+            try:
+                await message.answer_photo(FSInputFile(image_path))
+            except Exception:
+                logger.exception("Не удалось отправить изображение %s", image_path)
+        await message.answer(body, parse_mode="HTML")
 
 # ==================== ФИЗИКА ====================
 @dp.callback_query(F.data == "physics_tickets")
