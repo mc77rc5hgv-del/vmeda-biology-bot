@@ -296,7 +296,8 @@ def get_question_answer_keyboard(q_num: str):
         builder.row(*nav)
     builder.row(InlineKeyboardButton(text="🎲 Случайный вопрос", callback_data="question_random"))
     builder.row(InlineKeyboardButton(text="🔢 Ввести номер вручную", callback_data="question_by_number"))
-    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="menu_biology"))
+    page = (n - 1) // 50 + 1
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data=f"qpage:{page}"))
     return builder.as_markup()
 
 def get_question_page_keyboard(page: int):
@@ -734,7 +735,8 @@ async def cb_ticket_question(callback: CallbackQuery):
 async def cb_question_page(callback: CallbackQuery):
     page = int(callback.data.split(":")[1])
     await callback.answer()
-    await callback.message.edit_text(
+    await safe_edit_text(
+        callback.message,
         f"📄 <b>Вопросы — Страница {page}</b>\n{DIVIDER}",
         parse_mode="HTML",
         reply_markup=get_question_page_keyboard(page)
@@ -774,7 +776,8 @@ async def cb_question_random(callback: CallbackQuery):
 @dp.callback_query(F.data == "question_by_number")
 async def cb_question_by_number(callback: CallbackQuery):
     await callback.answer()
-    await callback.message.edit_text(
+    await safe_edit_text(
+        callback.message,
         f"🔢 <b>Поиск вопроса по номеру</b>\n{DIVIDER}\n\nВведи номер вопроса (от 1 до 185):",
         parse_mode="HTML"
     )
