@@ -518,7 +518,13 @@ async def cb_ticket(callback: CallbackQuery):
 
 async def show_ticket(message, ticket: dict):
     ticket_num = ticket.get("num", "?")
-    text = f"📘 <b>Билет {ticket_num}</b>\n{DIVIDER}\n\nВыбери вопрос:"
+    questions = ticket.get("questions", [])
+    lines = [f"📘 <b>Билет {ticket_num}</b>", DIVIDER, ""]
+    for q in questions:
+        lines.append(f"<b>{q.get('num')}.</b> {q.get('title', '')}")
+        lines.append("")
+    lines.append("👇 Нажми на номер вопроса, чтобы увидеть ответ:")
+    text = "\n".join(lines)
     await message.edit_text(text, parse_mode="HTML", reply_markup=get_ticket_questions_keyboard(str(ticket_num)))
 
 @dp.callback_query(F.data.startswith("ticket_q:"))
