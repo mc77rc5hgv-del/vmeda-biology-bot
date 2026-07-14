@@ -1,7 +1,9 @@
 import asyncio
+import html
 import json
 import logging
 import random
+import re
 import os
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, FSInputFile
@@ -9,6 +11,7 @@ from aiogram.filters import CommandStart, Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.enums import ChatMemberStatus
 from aiogram.exceptions import TelegramBadRequest
+from aiogram.dispatcher.event.bases import SkipHandler
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -115,6 +118,37 @@ def _normalize_ticket_num(s: str) -> str:
     return (s or "").strip().upper().replace(" ", "").replace("А", "A")
 
 TICKET_LOOKUP = {_normalize_ticket_num(k): v for k, v in TICKETS_DICT.items()}
+
+# ==================== ПОИСК ПО КЛЮЧЕВЫМ СЛОВАМ ====================
+SEARCH_RESULTS_LIMIT = 25
+
+def _extract_words(text: str) -> list:
+    return re.findall(r"[a-zа-яё]+", (text or "").lower().replace("ё", "е"))
+
+def _word_stem(word: str) -> str:
+    """Грубый стеммер: отбрасывает окончание, чтобы находить разные словоформы
+    ("плазмодий" / "плазмодия" / "плазмодии")."""
+    n = len(word)
+    if n <= 4:
+        return word
+    if n <= 6:
+        return word[:-1]
+    return word[:-2]
+
+def search_questions_by_keyword(query: str, limit: int = SEARCH_RESULTS_LIMIT):
+    query_stems = [_word_stem(w) for w in _extract_words(query) if len(w) >= 3]
+    if not query_stems:
+        return []
+    matches = []
+    for num in sorted(QUESTIONS.keys(), key=lambda x: int(x)):
+        # Игнорируем короткие служебные слова ("и", "с", "у"), иначе они ложно
+        # совпадают с любым стеммом запроса через startswith.
+        title_words = [w for w in _extract_words(QUESTIONS[num].get("title", "")) if len(w) >= 3]
+        if all(any(tw.startswith(qs) for tw in title_words) for qs in query_stems):
+            matches.append(num)
+            if len(matches) >= limit:
+                break
+    return matches
 
 async def is_subscribed(user_id: int) -> bool:
     try:
@@ -286,8 +320,19 @@ def get_questions_main_menu():
     builder.button(text="📄 Страница 4 (151-185)", callback_data="qpage:4")
     builder.button(text="🎲 Случайный вопрос", callback_data="question_random")
     builder.button(text="🔢 Ввести номер вручную", callback_data="question_by_number")
+    builder.button(text="🔍 Поиск по ключевым словам", callback_data="question_search")
     builder.adjust(1)
     builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="menu_biology"))
+    return builder.as_markup()
+
+def get_search_results_keyboard(nums: list):
+    builder = InlineKeyboardBuilder()
+    for num in nums:
+        title = QUESTIONS[num].get("title", "")
+        short_title = title if len(title) <= 60 else title[:57] + "…"
+        builder.button(text=f"{num}. {short_title}", callback_data=f"q:{num}")
+    builder.adjust(1)
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="menu_questions"))
     return builder.as_markup()
 
 def get_question_answer_keyboard(q_num: str):
@@ -788,6 +833,17 @@ async def cb_question_by_number(callback: CallbackQuery):
         parse_mode="HTML"
     )
 
+@dp.callback_query(F.data == "question_search")
+async def cb_question_search(callback: CallbackQuery):
+    await callback.answer()
+    await safe_edit_text(
+        callback.message,
+        f"🔍 <b>Поиск по ключевым словам</b>\n{DIVIDER}\n\n"
+        "Напиши слово или часть слова (например: <i>плазмодий</i>) — "
+        "покажу все вопросы, где оно встречается, вместе с падежами и склонениями.",
+        parse_mode="HTML"
+    )
+
 @dp.message(F.text.isdigit())
 async def handle_question_number(message: Message):
     q_num = message.text.strip()
@@ -809,7 +865,7 @@ async def handle_question_number(message: Message):
 async def handle_hidden_ticket_dump(message: Message):
     ticket = TICKET_LOOKUP.get(_normalize_ticket_num(message.text))
     if not ticket:
-        return
+        raise SkipHandler  # не билет — пусть попробует обработать поиск по словам
     ticket_num = ticket.get("num", "?")
     questions = ticket.get("questions", [])
     await message.answer(f"📘 <b>Билет {ticket_num}</b> — все ответы\n{DIVIDER}", parse_mode="HTML")
@@ -824,6 +880,27 @@ async def handle_hidden_ticket_dump(message: Message):
             except Exception:
                 logger.exception("Не удалось отправить изображение %s", image_path)
         await message.answer(body, parse_mode="HTML")
+
+# ==================== ПОИСК ПО КЛЮЧЕВЫМ СЛОВАМ (обработчик) ====================
+@dp.message(F.text)
+async def handle_keyword_search(message: Message):
+    query = (message.text or "").strip()
+    if not query or query.startswith("/"):
+        return
+    results = search_questions_by_keyword(query)
+    safe_query = html.escape(query)
+    if not results:
+        await message.answer(
+            f"🔍 По запросу «{safe_query}» ничего не найдено.\n"
+            "Попробуй другое слово или загляни в раздел «📝 Вопросы»."
+        )
+        return
+    suffix = f" (показаны первые {SEARCH_RESULTS_LIMIT})" if len(results) >= SEARCH_RESULTS_LIMIT else ""
+    text = (
+        f"🔍 <b>Результаты поиска:</b> «{safe_query}»\n{DIVIDER}\n\n"
+        f"Найдено вопросов: {len(results)}{suffix}\nВыбери нужный:"
+    )
+    await message.answer(text, parse_mode="HTML", reply_markup=get_search_results_keyboard(results))
 
 # ==================== ФИЗИКА ====================
 @dp.callback_query(F.data == "physics_tickets")
