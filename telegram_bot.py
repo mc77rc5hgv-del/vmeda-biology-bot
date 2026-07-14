@@ -15,7 +15,8 @@ logger = logging.getLogger(__name__)
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8469931783:AAFhj045ghZz4MBDBzfqP2Vs-SN4tucAngo")
 CHANNEL_ID = "@Vmeda_examen"
 ADMIN_ID = 1326779223
-STATS_FILE = "stats.json"
+STATS_DIR = os.getenv("STATS_DIR", ".")
+STATS_FILE = os.path.join(STATS_DIR, "stats.json")
 
 DIVIDER = "━━━━━━━━━━━━━━"
 
@@ -38,6 +39,7 @@ with open("chemistry_theory.json", "r", encoding="utf-8") as f:
 
 # ==================== СТАТИСТИКА (СОХРАНЯЕТСЯ НА ДИСК) ====================
 def load_stats() -> dict:
+    os.makedirs(STATS_DIR, exist_ok=True)
     if os.path.exists(STATS_FILE):
         try:
             with open(STATS_FILE, "r", encoding="utf-8") as f:
