@@ -131,9 +131,87 @@ def get_biology_menu():
     builder = InlineKeyboardBuilder()
     builder.button(text="📘 Билеты", callback_data="menu_tickets")
     builder.button(text="📝 Вопросы", callback_data="menu_questions")
+    builder.button(text="🎯 Опрос (10 вопросов)", callback_data="quiz_start")
     builder.adjust(1)
     builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
     return builder.as_markup()
+
+# ==================== БИОЛОГИЯ — РЕЖИМ ОПРОСА (ФЛЭШ-КАРТОЧКИ) ====================
+QUIZ_SESSION_SIZE = 10
+QUIZ_SESSIONS: dict[int, dict] = {}
+
+def get_quiz_question_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🙈 Показать ответ", callback_data="quiz_show_answer")
+    builder.button(text="🛑 Закончить опрос", callback_data="quiz_stop")
+    builder.adjust(1)
+    return builder.as_markup()
+
+def get_quiz_answer_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Знаю", callback_data="quiz_know")
+    builder.button(text="❌ Не знаю", callback_data="quiz_dont_know")
+    builder.adjust(2)
+    builder.row(InlineKeyboardButton(text="🛑 Закончить опрос", callback_data="quiz_stop"))
+    return builder.as_markup()
+
+def get_quiz_summary_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔁 Пройти ещё раз", callback_data="quiz_start")
+    builder.button(text="🔙 К биологии", callback_data="menu_biology")
+    builder.adjust(1)
+    return builder.as_markup()
+
+def start_quiz_session(user_id: int):
+    pool = list(QUESTIONS.keys())
+    size = min(QUIZ_SESSION_SIZE, len(pool))
+    QUIZ_SESSIONS[user_id] = {
+        "questions": random.sample(pool, size),
+        "index": 0,
+        "know": 0,
+        "dont_know": 0,
+    }
+
+async def render_quiz_question(message, user_id: int):
+    session = QUIZ_SESSIONS[user_id]
+    total = len(session["questions"])
+    q_num = session["questions"][session["index"]]
+    q = QUESTIONS[q_num]
+    text = (
+        f"🎯 <b>Опрос — вопрос {session['index'] + 1}/{total}</b>\n{DIVIDER}\n\n"
+        f"<b>{q['title']}</b>"
+    )
+    await message.edit_text(text, parse_mode="HTML", reply_markup=get_quiz_question_keyboard())
+
+async def render_quiz_answer(message, user_id: int):
+    session = QUIZ_SESSIONS[user_id]
+    total = len(session["questions"])
+    q_num = session["questions"][session["index"]]
+    q = QUESTIONS[q_num]
+    text = (
+        f"🎯 <b>Опрос — вопрос {session['index'] + 1}/{total}</b>\n{DIVIDER}\n\n"
+        f"<b>{q['title']}</b>\n\n{q['answer']}\n\n{DIVIDER}\nТы знал(а) ответ?"
+    )
+    await message.edit_text(text, parse_mode="HTML", reply_markup=get_quiz_answer_keyboard())
+
+async def render_quiz_summary(message, user_id: int, aborted: bool = False):
+    session = QUIZ_SESSIONS.pop(user_id, None)
+    if not session:
+        await message.edit_text(
+            f"🧬 <b>Биология</b>\n{DIVIDER}\n\nВыбери формат подготовки:",
+            parse_mode="HTML",
+            reply_markup=get_biology_menu()
+        )
+        return
+    answered = session["know"] + session["dont_know"]
+    title = "🛑 <b>Опрос прерван</b>" if aborted else "🏁 <b>Опрос завершён!</b>"
+    text = (
+        f"{title}\n{DIVIDER}\n\n"
+        f"Отвечено вопросов: <b>{answered}</b>\n"
+        f"✅ Знаю: <b>{session['know']}</b>\n"
+        f"❌ Не знаю: <b>{session['dont_know']}</b>"
+    )
+    await message.edit_text(text, parse_mode="HTML", reply_markup=get_quiz_summary_keyboard())
 
 def get_ticket_keyboard():
     builder = InlineKeyboardBuilder()
@@ -352,6 +430,47 @@ async def cb_menu_biology(callback: CallbackQuery):
         parse_mode="HTML",
         reply_markup=get_biology_menu()
     )
+
+@dp.callback_query(F.data == "quiz_start")
+async def cb_quiz_start(callback: CallbackQuery):
+    if not QUESTIONS:
+        await callback.answer("Вопросы ещё не загружены", show_alert=True)
+        return
+    await callback.answer()
+    start_quiz_session(callback.from_user.id)
+    await render_quiz_question(callback.message, callback.from_user.id)
+
+@dp.callback_query(F.data == "quiz_show_answer")
+async def cb_quiz_show_answer(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    if user_id not in QUIZ_SESSIONS:
+        await callback.answer("Сессия опроса истекла, начни заново", show_alert=True)
+        return
+    await callback.answer()
+    await render_quiz_answer(callback.message, user_id)
+
+@dp.callback_query(F.data.in_({"quiz_know", "quiz_dont_know"}))
+async def cb_quiz_answer(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    session = QUIZ_SESSIONS.get(user_id)
+    if not session:
+        await callback.answer("Сессия опроса истекла, начни заново", show_alert=True)
+        return
+    await callback.answer()
+    if callback.data == "quiz_know":
+        session["know"] += 1
+    else:
+        session["dont_know"] += 1
+    session["index"] += 1
+    if session["index"] >= len(session["questions"]):
+        await render_quiz_summary(callback.message, user_id)
+    else:
+        await render_quiz_question(callback.message, user_id)
+
+@dp.callback_query(F.data == "quiz_stop")
+async def cb_quiz_stop(callback: CallbackQuery):
+    await callback.answer()
+    await render_quiz_summary(callback.message, callback.from_user.id, aborted=True)
 
 @dp.callback_query(F.data == "menu_tickets")
 async def cb_menu_tickets(callback: CallbackQuery):
