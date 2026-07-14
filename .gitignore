@@ -3,4 +3,5 @@ __pycache__/
 stats.json
 stats.json.tmp
 vicegram.db
+vicegram_media_cache/
 .env

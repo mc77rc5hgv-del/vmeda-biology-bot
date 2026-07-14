@@ -1,4 +1,4 @@
-"""VICEGRAM — бот-ловец для групповых чатов Telegram.
+"""VICEGRAM — бот-ловец для групповых и личных чатов Telegram.
 
 Ловит удалённые и изменённые сообщения, стикеры, файлы и гифки,
 следит за исчезающими медиа, умеет восстанавливать историю чата,
@@ -6,16 +6,23 @@
 кастомные команды в чатах.
 
 Важное техническое ограничение Bot API: Telegram не присылает боту
-событие "сообщение удалено" никогда, ни при каких правах. Поэтому
-ловля удалений реализована через периодическую тихую проверку
-существования сообщения (copy_message в лог-чат с мгновенным
-удалением копии) — задержка до ~30 секунд вместо мгновенной ловли,
-которую даёт только MTProto-юзербот (Telethon/Pyrogram со входом
-по номеру телефона). Всё остальное (изменённые сообщения, медиа,
-анти-скам, огоньки, команды, язык) работает штатно и мгновенно.
+событие "сообщение удалено" никогда, ни при каких правах, и вообще
+не даёт боту доступа к личным перепискам между двумя другими людьми.
+Поэтому реализованы два независимых механизма ловли:
+
+- В группах (где бот состоит участником) — периодическая тихая проверка
+  существования сообщения (copy_message в лог-чат с мгновенным удалением
+  копии), задержка до ~30 секунд.
+- В личных чатах — через MTProto-юзербот (Telethon), подключаемый самим
+  пользователем командой /connect: он вводит номер телефона и код прямо
+  в диалоге с ботом, после чего Telethon-сессия видит его личные диалоги
+  как реальный участник и ловит удаления/правки в реальном времени.
+  См. vicegram_userbot.py.
 """
 
 import asyncio
+import base64
+import hashlib
 import logging
 import os
 import re
@@ -34,6 +41,9 @@ from aiogram.types import (
     Message,
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from cryptography.fernet import Fernet
+
+from vicegram_userbot import UserbotManager
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -50,10 +60,41 @@ _log_chat_env = os.getenv("VICEGRAM_LOG_CHAT_ID")
 LOG_CHAT_ID = int(_log_chat_env) if _log_chat_env else ADMIN_ID
 
 DB_PATH = os.getenv("VICEGRAM_DB_PATH", "vicegram.db")
+MEDIA_CACHE_DIR = os.getenv("VICEGRAM_MEDIA_CACHE_DIR", "vicegram_media_cache")
 DIVIDER = "━━━━━━━━━━━━━━"
+
+# Личные чаты (MTProto): нужны api_id/api_hash одного приложения на
+# my.telegram.org, зарегистрированного оператором бота. Каждый пользователь
+# логинится под своим номером — api_id/api_hash при этом общие для всех.
+USERBOT_API_ID = os.getenv("VICEGRAM_API_ID")
+USERBOT_API_HASH = os.getenv("VICEGRAM_API_HASH")
+USERBOT_FEATURE_ENABLED = bool(USERBOT_API_ID and USERBOT_API_HASH)
+
+
+def _derive_fernet_key() -> bytes:
+    """Ключ шифрования session-строк. Можно задать явно через
+    VICEGRAM_ENCRYPTION_KEY (сгенерировать: Fernet.generate_key()),
+    иначе выводится из BOT_TOKEN — отдельный секрет не обязателен."""
+    env_key = os.getenv("VICEGRAM_ENCRYPTION_KEY")
+    if env_key:
+        return env_key.encode()
+    digest = hashlib.sha256(BOT_TOKEN.encode()).digest()
+    return base64.urlsafe_b64encode(digest)
+
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
+
+userbot_manager: UserbotManager | None = None
+if USERBOT_FEATURE_ENABLED:
+    userbot_manager = UserbotManager(
+        bot=bot,
+        db_path=DB_PATH,
+        api_id=int(USERBOT_API_ID),
+        api_hash=USERBOT_API_HASH,
+        fernet=Fernet(_derive_fernet_key()),
+        media_dir=MEDIA_CACHE_DIR,
+    )
 
 # ==================== БАЗА ДАННЫХ ====================
 def db_connect() -> sqlite3.Connection:
@@ -79,6 +120,8 @@ def init_db() -> None:
         );
 
         CREATE TABLE IF NOT EXISTS messages (
+            source TEXT NOT NULL DEFAULT 'group_bot',
+            owner_id INTEGER NOT NULL DEFAULT 0,
             chat_id INTEGER NOT NULL,
             message_id INTEGER NOT NULL,
             user_id INTEGER,
@@ -86,15 +129,24 @@ def init_db() -> None:
             text TEXT,
             media_type TEXT,
             file_id TEXT,
+            media_path TEXT,
             date INTEGER NOT NULL,
             deleted INTEGER NOT NULL DEFAULT 0,
             expired INTEGER NOT NULL DEFAULT 0,
             check_count INTEGER NOT NULL DEFAULT 0,
             next_check_at INTEGER NOT NULL,
-            PRIMARY KEY (chat_id, message_id)
+            PRIMARY KEY (owner_id, chat_id, message_id)
         );
         CREATE INDEX IF NOT EXISTS idx_messages_next_check
-            ON messages (deleted, expired, next_check_at);
+            ON messages (source, deleted, expired, next_check_at);
+
+        CREATE TABLE IF NOT EXISTS user_sessions (
+            user_id INTEGER PRIMARY KEY,
+            phone TEXT,
+            session_enc BLOB NOT NULL,
+            status TEXT NOT NULL DEFAULT 'connected',
+            connected_at INTEGER NOT NULL
+        );
 
         CREATE TABLE IF NOT EXISTS custom_commands (
             chat_id INTEGER NOT NULL,
@@ -295,9 +347,9 @@ def cache_message(message: Message) -> None:
     conn.execute(
         """
         INSERT OR REPLACE INTO messages
-            (chat_id, message_id, user_id, user_name, text, media_type, file_id,
+            (source, owner_id, chat_id, message_id, user_id, user_name, text, media_type, file_id,
              date, deleted, expired, check_count, next_check_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?)
+        VALUES ('group_bot', 0, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?)
         """,
         (
             message.chat.id,
@@ -318,7 +370,7 @@ def cache_message(message: Message) -> None:
 def get_cached_message(chat_id: int, message_id: int):
     conn = db_connect()
     row = conn.execute(
-        "SELECT * FROM messages WHERE chat_id = ? AND message_id = ?",
+        "SELECT * FROM messages WHERE source = 'group_bot' AND owner_id = 0 AND chat_id = ? AND message_id = ?",
         (chat_id, message_id),
     ).fetchone()
     conn.close()
@@ -328,7 +380,7 @@ def get_cached_message(chat_id: int, message_id: int):
 def update_cached_text(chat_id: int, message_id: int, new_text: str) -> None:
     conn = db_connect()
     conn.execute(
-        "UPDATE messages SET text = ? WHERE chat_id = ? AND message_id = ?",
+        "UPDATE messages SET text = ? WHERE source = 'group_bot' AND owner_id = 0 AND chat_id = ? AND message_id = ?",
         (new_text, chat_id, message_id),
     )
     conn.commit()
@@ -457,11 +509,13 @@ async def cmd_start(message: Message):
     await message.answer(
         "🎣 <b>VICEGRAM</b>\n\n"
         "Профессионально ловлю удалённые и изменённые сообщения, "
-        "стикеры, файлы и гифки в групповых чатах.\n\n"
+        "стикеры, файлы и гифки — в группах и в личных чатах.\n\n"
         f"{DIVIDER}\n"
-        "Добавь меня в группу и выдай права администратора "
+        "📢 <b>В группе:</b> добавь меня и выдай права администратора "
         "(минимум — удаление сообщений и чтение истории), затем "
-        "напиши в группе /settings, чтобы всё настроить.",
+        "напиши в группе /settings.\n\n"
+        "💬 <b>В личных чатах:</b> напиши мне сюда /connect, чтобы "
+        "подключить ловлю удалений в твоих личных перепиcках.",
         parse_mode="HTML",
     )
 
@@ -477,6 +531,92 @@ async def cmd_settings(message: Message):
         parse_mode="HTML",
         reply_markup=get_settings_menu(message.chat.id),
     )
+
+
+# ==================== ЛИЧНЫЕ ЧАТЫ: ПОДКЛЮЧЕНИЕ MTPROTO ====================
+def get_dm_menu(user_id: int):
+    builder = InlineKeyboardBuilder()
+    if not USERBOT_FEATURE_ENABLED:
+        builder.button(text="🔐 Личные чаты (не настроено на сервере)", callback_data="dm_noop")
+    elif userbot_manager.is_connected(user_id):
+        builder.button(text="🔌 Отключить личные чаты", callback_data="dm_disconnect")
+    else:
+        builder.button(text="🔐 Подключить личные чаты", callback_data="dm_connect")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+@dp.message(Command("settings"), F.chat.type == ChatType.PRIVATE)
+async def cmd_settings_private(message: Message):
+    await message.answer(
+        f"⚙️ <b>Настройки</b>\n{DIVIDER}\n\n"
+        "Настройки конкретной группы (удалённые/изменённые сообщения, "
+        "анти-скам, огоньки, команды) задаются командой /settings прямо "
+        "в этой группе.\n\n"
+        "Здесь можно подключить ловлю удалённых и изменённых сообщений "
+        "в твоих личных перепиcках с другими людьми.",
+        parse_mode="HTML",
+        reply_markup=get_dm_menu(message.from_user.id),
+    )
+
+
+async def start_connect_flow(target: Message, user_id: int) -> None:
+    if not USERBOT_FEATURE_ENABLED or userbot_manager is None:
+        await target.answer(
+            "⚠️ Ловля личных чатов не настроена на этом сервере — "
+            "оператору бота нужно задать переменные окружения VICEGRAM_API_ID "
+            "и VICEGRAM_API_HASH (получить на my.telegram.org)."
+        )
+        return
+    if userbot_manager.is_connected(user_id):
+        await target.answer("✅ Личные чаты уже подключены. Чтобы переподключить — сначала /disconnect.")
+        return
+    await userbot_manager.begin_login(user_id)
+    await target.answer(
+        "🔐 <b>Подключение личных чатов</b>\n"
+        f"{DIVIDER}\n\n"
+        "⚠️ Дальше я попрошу код подтверждения из Telegram — это стандартный "
+        "код входа в твой аккаунт. <b>Никогда никому его не пересылай</b>, "
+        "кроме как сюда, в этот диалог, и только для собственного аккаунта.\n\n"
+        "Напиши номер телефона в международном формате, например "
+        "<code>+79991234567</code>.",
+        parse_mode="HTML",
+    )
+
+
+async def do_disconnect(target: Message, user_id: int) -> None:
+    if not userbot_manager:
+        await target.answer("Личные чаты и так не подключены.")
+        return
+    changed = await userbot_manager.disconnect_user(user_id)
+    await target.answer("🔌 Личные чаты отключены." if changed else "Личные чаты и так не были подключены.")
+
+
+@dp.message(Command("connect"), F.chat.type == ChatType.PRIVATE)
+async def cmd_connect(message: Message):
+    await start_connect_flow(message, message.from_user.id)
+
+
+@dp.message(Command("disconnect"), F.chat.type == ChatType.PRIVATE)
+async def cmd_disconnect(message: Message):
+    await do_disconnect(message, message.from_user.id)
+
+
+@dp.callback_query(F.data == "dm_connect")
+async def cb_dm_connect(callback: CallbackQuery):
+    await callback.answer()
+    await start_connect_flow(callback.message, callback.from_user.id)
+
+
+@dp.callback_query(F.data == "dm_disconnect")
+async def cb_dm_disconnect(callback: CallbackQuery):
+    await callback.answer()
+    await do_disconnect(callback.message, callback.from_user.id)
+
+
+@dp.callback_query(F.data == "dm_noop")
+async def cb_dm_noop(callback: CallbackQuery):
+    await callback.answer("Функция не настроена на этом сервере", show_alert=True)
 
 
 @dp.callback_query(F.data == "open:main")
@@ -623,7 +763,7 @@ async def deleted_message_poller() -> None:
             due = conn.execute(
                 """
                 SELECT * FROM messages
-                WHERE deleted = 0 AND expired = 0 AND next_check_at <= ?
+                WHERE source = 'group_bot' AND deleted = 0 AND expired = 0 AND next_check_at <= ?
                 ORDER BY next_check_at ASC LIMIT 15
                 """,
                 (now,),
@@ -638,7 +778,7 @@ async def deleted_message_poller() -> None:
                 if not settings["catch_deleted"] or age > MAX_MESSAGE_AGE:
                     conn = db_connect()
                     conn.execute(
-                        "UPDATE messages SET expired = 1 WHERE chat_id = ? AND message_id = ?",
+                        "UPDATE messages SET expired = 1 WHERE source = 'group_bot' AND chat_id = ? AND message_id = ?",
                         (row["chat_id"], row["message_id"]),
                     )
                     conn.commit()
@@ -649,7 +789,7 @@ async def deleted_message_poller() -> None:
                 conn = db_connect()
                 if not exists:
                     conn.execute(
-                        "UPDATE messages SET deleted = 1 WHERE chat_id = ? AND message_id = ?",
+                        "UPDATE messages SET deleted = 1 WHERE source = 'group_bot' AND chat_id = ? AND message_id = ?",
                         (row["chat_id"], row["message_id"]),
                     )
                     conn.commit()
@@ -662,17 +802,17 @@ async def deleted_message_poller() -> None:
                     check_count = row["check_count"] + 1
                     delay = BACKOFF_SCHEDULE[min(check_count, len(BACKOFF_SCHEDULE) - 1)]
                     conn.execute(
-                        "UPDATE messages SET check_count = ?, next_check_at = ? WHERE chat_id = ? AND message_id = ?",
+                        "UPDATE messages SET check_count = ?, next_check_at = ? WHERE source = 'group_bot' AND chat_id = ? AND message_id = ?",
                         (check_count, now + delay, row["chat_id"], row["message_id"]),
                     )
                     conn.commit()
                     conn.close()
                 await asyncio.sleep(0.1)
 
-            # чистим совсем старые записи, чтобы БД не росла бесконечно
+            # чистим совсем старые записи группового кэша (личный кэш чистит UserbotManager)
             conn = db_connect()
             conn.execute(
-                "DELETE FROM messages WHERE date < ?",
+                "DELETE FROM messages WHERE source = 'group_bot' AND date < ?",
                 (now - 7 * 24 * 3600,),
             )
             conn.commit()
@@ -735,7 +875,7 @@ async def cmd_restore(message: Message):
 
     conn = db_connect()
     rows = conn.execute(
-        "SELECT * FROM messages WHERE chat_id = ? ORDER BY date DESC LIMIT 200",
+        "SELECT * FROM messages WHERE source = 'group_bot' AND chat_id = ? ORDER BY date DESC LIMIT 200",
         (message.chat.id,),
     ).fetchall()
     conn.close()
@@ -815,11 +955,99 @@ async def process_pending_command_input(message: Message, pending: dict) -> None
         await message.answer(f"✅ Команда «{trigger}» добавлена.")
 
 
+# ==================== ЛИЧНЫЕ ЧАТЫ: ШАГИ ВХОДА (ТЕЛЕФОН/КОД/ПАРОЛЬ) ====================
+# Регистрируется последним среди приватных обработчиков: реагирует только
+# если у пользователя есть незавершённый вход, иначе не мешает командам.
+PHONE_RE = re.compile(r"^\+?\d{7,15}$")
+
+
+@dp.message(F.chat.type == ChatType.PRIVATE, F.text)
+async def handle_private_login_step(message: Message):
+    if message.text.startswith("/"):
+        return
+    if not userbot_manager or not userbot_manager.has_pending_login(message.from_user.id):
+        return
+
+    user_id = message.from_user.id
+    stage = userbot_manager.get_pending_stage(user_id)
+    text = message.text.strip()
+
+    if stage == "phone":
+        if not PHONE_RE.match(text):
+            await message.answer("⚠️ Это не похоже на номер телефона. Пример: +79991234567")
+            return
+        result = await userbot_manager.submit_phone(user_id, text)
+        if result == "code_sent":
+            await message.answer("📩 Код отправлен в Telegram на этот номер. Введи его сюда.")
+        elif result == "invalid_phone":
+            await message.answer("⚠️ Неверный номер телефона. Попробуй ещё раз.")
+        elif result.startswith("flood_wait"):
+            await message.answer(f"⏳ Telegram просит подождать {result.split(':')[1]} сек. Попробуй позже: /connect")
+            await userbot_manager.cancel_login(user_id)
+        else:
+            await message.answer("⚠️ Не получилось отправить код. Попробуй /connect ещё раз позже.")
+            await userbot_manager.cancel_login(user_id)
+        return
+
+    if stage == "code":
+        result = await userbot_manager.submit_code(user_id, text.replace(" ", ""))
+        try:
+            await message.delete()
+        except TelegramBadRequest:
+            pass
+        if result == "success":
+            await message.answer("✅ Личные чаты подключены! Буду ловить в них удалённые и изменённые сообщения.")
+        elif result == "need_password":
+            await message.answer("🔒 На аккаунте включена двухфакторная аутентификация. Введи пароль.")
+        elif result == "invalid_code":
+            await message.answer("⚠️ Неверный код. Попробуй ещё раз.")
+        elif result.startswith("flood_wait"):
+            await message.answer(f"⏳ Telegram просит подождать {result.split(':')[1]} сек. Попробуй позже: /connect")
+            await userbot_manager.cancel_login(user_id)
+        else:
+            await message.answer("⚠️ Ошибка входа. Попробуй /connect ещё раз позже.")
+            await userbot_manager.cancel_login(user_id)
+        return
+
+    if stage == "password":
+        result = await userbot_manager.submit_password(user_id, text)
+        try:
+            await message.delete()
+        except TelegramBadRequest:
+            pass
+        if result == "success":
+            await message.answer("✅ Личные чаты подключены! Буду ловить в них удалённые и изменённые сообщения.")
+        elif result.startswith("flood_wait"):
+            await message.answer(f"⏳ Telegram просит подождать {result.split(':')[1]} сек. Попробуй позже: /connect")
+            await userbot_manager.cancel_login(user_id)
+        else:
+            await message.answer("⚠️ Неверный пароль. Попробуй ещё раз, либо начни заново: /connect")
+        return
+
+
+async def userbot_cleanup_loop() -> None:
+    while True:
+        await asyncio.sleep(3600)
+        try:
+            await userbot_manager.cleanup_old_media()
+        except Exception:
+            logger.exception("Ошибка очистки кэша личных чатов")
+
+
 # ==================== ЗАПУСК ====================
 async def main() -> None:
     init_db()
     logger.info("VICEGRAM запускается...")
     asyncio.create_task(deleted_message_poller())
+    if userbot_manager:
+        await userbot_manager.start_existing_sessions()
+        asyncio.create_task(userbot_cleanup_loop())
+        logger.info("Ловля личных чатов включена (VICEGRAM_API_ID/HASH заданы)")
+    else:
+        logger.info(
+            "Ловля личных чатов выключена — задай VICEGRAM_API_ID и VICEGRAM_API_HASH, "
+            "чтобы включить /connect"
+        )
     await dp.start_polling(bot)
 
 
