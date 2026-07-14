@@ -82,6 +82,7 @@ dp = Dispatcher()
 
 # ==================== СКРЫТЫЕ БИЛЕТЫ (40-50) ====================
 HIDDEN_TICKET_RANGE = (40, 50)
+FORCE_VISIBLE_TICKETS = {"40A"}  # исключения из скрытого диапазона — показывать всегда
 
 def _ticket_number_part(ticket_num: str) -> int:
     """Достаёт числовую часть номера билета (например, '20A' -> 20)."""
@@ -94,6 +95,8 @@ def _ticket_number_part(ticket_num: str) -> int:
     return int(digits) if digits else 0
 
 def is_ticket_visible(ticket_num: str) -> bool:
+    if str(ticket_num) in FORCE_VISIBLE_TICKETS:
+        return True
     n = _ticket_number_part(ticket_num)
     return not (HIDDEN_TICKET_RANGE[0] <= n <= HIDDEN_TICKET_RANGE[1])
 
