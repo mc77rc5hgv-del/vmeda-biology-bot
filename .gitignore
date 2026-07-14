@@ -2,4 +2,5 @@ __pycache__/
 *.pyc
 stats.json
 stats.json.tmp
+vicegram.db
 .env
