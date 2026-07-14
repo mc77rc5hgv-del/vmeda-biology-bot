@@ -8,6 +8,7 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, FSInputF
 from aiogram.filters import CommandStart, Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.enums import ChatMemberStatus
+from aiogram.exceptions import TelegramBadRequest
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -119,19 +120,55 @@ async def is_subscribed(user_id: int) -> bool:
 def is_admin(user_id: int) -> bool:
     return user_id == ADMIN_ID
 
-async def send_question_image(message, question: dict) -> None:
-    """Отправляет картинку-схему вопроса (поле "image"), если она задана и файл существует."""
-    image_name = question.get("image")
-    if not image_name:
-        return
-    image_path = os.path.join(IMAGES_DIR, image_name)
-    if not os.path.exists(image_path):
-        logger.warning("Изображение не найдено: %s", image_path)
-        return
+CAPTION_LIMIT = 1024
+
+async def safe_edit_text(message, text, **kwargs) -> None:
+    """Как edit_text, но если сообщение больше не текстовое (например, стало фото),
+    удаляет его и отправляет новое вместо падения с ошибкой."""
     try:
-        await message.answer_photo(FSInputFile(image_path))
+        await message.edit_text(text, **kwargs)
+    except TelegramBadRequest:
+        await message.delete()
+        await message.answer(text, **kwargs)
+
+async def send_answer(target, body: str, short_caption: str, question: dict, keyboard, edit: bool) -> None:
+    """Показывает текст вопроса+ответа. Если у вопроса есть картинка-схема:
+    - при коротком ответе (уместился в лимит подписи Telegram) — единое сообщение "фото + текст";
+    - при длинном ответе — фото с коротким заголовком, а сразу следом текст с полным ответом
+      (объединить в одно сообщение технически невозможно: Telegram ограничивает подпись к фото
+      1024 символами).
+    target — CallbackQuery.message при edit=True, либо обычное Message при edit=False."""
+    image_name = question.get("image")
+    image_path = os.path.join(IMAGES_DIR, image_name) if image_name else None
+    if image_path and not os.path.exists(image_path):
+        logger.warning("Изображение не найдено: %s", image_path)
+        image_path = None
+
+    if not image_path:
+        if edit:
+            await safe_edit_text(target, body, parse_mode="HTML", reply_markup=keyboard)
+        else:
+            await target.answer(body, parse_mode="HTML", reply_markup=keyboard)
+        return
+
+    photo = FSInputFile(image_path)
+    if len(body) <= CAPTION_LIMIT:
+        if edit:
+            await target.delete()
+            await target.answer_photo(photo, caption=body, parse_mode="HTML", reply_markup=keyboard)
+        else:
+            await target.answer_photo(photo, caption=body, parse_mode="HTML", reply_markup=keyboard)
+        return
+
+    caption = short_caption if len(short_caption) <= CAPTION_LIMIT else short_caption[:CAPTION_LIMIT - 1] + "…"
+    try:
+        await target.answer_photo(photo, caption=caption, parse_mode="HTML")
     except Exception:
         logger.exception("Не удалось отправить изображение %s", image_path)
+    if edit:
+        await safe_edit_text(target, body, parse_mode="HTML", reply_markup=keyboard)
+    else:
+        await target.answer(body, parse_mode="HTML", reply_markup=keyboard)
 
 # ==================== КЛАВИАТУРЫ ====================
 def get_main_menu():
@@ -203,12 +240,10 @@ async def render_quiz_answer(message, user_id: int):
     total = len(session["questions"])
     q_num = session["questions"][session["index"]]
     q = QUESTIONS[q_num]
-    text = (
-        f"🎯 <b>Опрос — вопрос {session['index'] + 1}/{total}</b>\n{DIVIDER}\n\n"
-        f"<b>{q['title']}</b>\n\n{q['answer']}\n\n{DIVIDER}\nТы знал(а) ответ?"
-    )
-    await message.edit_text(text, parse_mode="HTML", reply_markup=get_quiz_answer_keyboard())
-    await send_question_image(message, q)
+    header = f"🎯 <b>Опрос — вопрос {session['index'] + 1}/{total}</b>"
+    body = f"{header}\n{DIVIDER}\n\n<b>{q['title']}</b>\n\n{q['answer']}\n\n{DIVIDER}\nТы знал(а) ответ?"
+    short_caption = f"{header}\n{DIVIDER}\n\n<b>{q['title']}</b>"
+    await send_answer(message, body, short_caption, q, get_quiz_answer_keyboard(), edit=True)
 
 async def render_quiz_summary(message, user_id: int, aborted: bool = False):
     session = QUIZ_SESSIONS.pop(user_id, None)
@@ -672,13 +707,11 @@ async def cb_ticket_question(callback: CallbackQuery):
     questions = ticket.get("questions", [])
     question = next((q for q in questions if str(q.get("num")) == q_num), None)
     if question:
-        text = (
-            f"❓ <b>Вопрос {q_num}</b> · Билет {ticket_num}\n"
-            f"{DIVIDER}\n\n"
-            f"<b>{question['title']}</b>\n\n{question['answer']}"
-        )
-        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_ticket_questions_keyboard(ticket_num))
-        await send_question_image(callback.message, question)
+        header = f"❓ <b>Вопрос {q_num}</b> · Билет {ticket_num}"
+        body = f"{header}\n{DIVIDER}\n\n<b>{question['title']}</b>\n\n{question['answer']}"
+        short_caption = f"{header}\n{DIVIDER}\n\n<b>{question['title']}</b>"
+        keyboard = get_ticket_questions_keyboard(ticket_num)
+        await send_answer(callback.message, body, short_caption, question, keyboard, edit=True)
     else:
         await callback.answer("Вопрос не найден", show_alert=True)
 
@@ -701,9 +734,10 @@ async def cb_show_question(callback: CallbackQuery):
         stats["question_opened"][q_num] = stats["question_opened"].get(q_num, 0) + 1
         save_stats()
         q = QUESTIONS[q_num]
-        text = f"❓ <b>Вопрос {q_num}</b>\n{DIVIDER}\n\n<b>{q['title']}</b>\n\n{q['answer']}"
-        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_questions_main_menu())
-        await send_question_image(callback.message, q)
+        header = f"❓ <b>Вопрос {q_num}</b>"
+        body = f"{header}\n{DIVIDER}\n\n<b>{q['title']}</b>\n\n{q['answer']}"
+        short_caption = f"{header}\n{DIVIDER}\n\n<b>{q['title']}</b>"
+        await send_answer(callback.message, body, short_caption, q, get_questions_main_menu(), edit=True)
     else:
         await callback.answer("Вопрос не найден", show_alert=True)
 
@@ -718,9 +752,10 @@ async def cb_question_random(callback: CallbackQuery):
     stats["question_opened"][q_num] = stats["question_opened"].get(q_num, 0) + 1
     save_stats()
     q = QUESTIONS[q_num]
-    text = f"❓ <b>Вопрос {q_num}</b>\n{DIVIDER}\n\n<b>{q['title']}</b>\n\n{q['answer']}"
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_questions_main_menu())
-    await send_question_image(callback.message, q)
+    header = f"❓ <b>Вопрос {q_num}</b>"
+    body = f"{header}\n{DIVIDER}\n\n<b>{q['title']}</b>\n\n{q['answer']}"
+    short_caption = f"{header}\n{DIVIDER}\n\n<b>{q['title']}</b>"
+    await send_answer(callback.message, body, short_caption, q, get_questions_main_menu(), edit=True)
 
 @dp.callback_query(F.data == "question_by_number")
 async def cb_question_by_number(callback: CallbackQuery):
@@ -737,9 +772,10 @@ async def handle_question_number(message: Message):
         stats["question_opened"][q_num] = stats["question_opened"].get(q_num, 0) + 1
         save_stats()
         q = QUESTIONS[q_num]
-        text = f"❓ <b>Вопрос {q_num}</b>\n{DIVIDER}\n\n<b>{q['title']}</b>\n\n{q['answer']}"
-        await message.answer(text, parse_mode="HTML", reply_markup=get_questions_main_menu())
-        await send_question_image(message, q)
+        header = f"❓ <b>Вопрос {q_num}</b>"
+        body = f"{header}\n{DIVIDER}\n\n<b>{q['title']}</b>\n\n{q['answer']}"
+        short_caption = f"{header}\n{DIVIDER}\n\n<b>{q['title']}</b>"
+        await send_answer(message, body, short_caption, q, get_questions_main_menu(), edit=False)
     else:
         await message.answer("⚠️ Вопрос с таким номером не найден.")
 
