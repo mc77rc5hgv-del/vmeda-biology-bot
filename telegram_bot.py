@@ -4,7 +4,7 @@ import logging
 import random
 import os
 from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message, CallbackQuery, InlineKeyboardButton
+from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, FSInputFile
 from aiogram.filters import CommandStart, Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.enums import ChatMemberStatus
@@ -19,6 +19,7 @@ STATS_DIR = os.getenv("STATS_DIR", ".")
 STATS_FILE = os.path.join(STATS_DIR, "stats.json")
 
 DIVIDER = "━━━━━━━━━━━━━━"
+IMAGES_DIR = "images"
 
 # ==================== ЗАГРУЗКА ДАННЫХ ====================
 with open("tickets.json", "r", encoding="utf-8") as f:
@@ -118,6 +119,20 @@ async def is_subscribed(user_id: int) -> bool:
 def is_admin(user_id: int) -> bool:
     return user_id == ADMIN_ID
 
+async def send_question_image(message, question: dict) -> None:
+    """Отправляет картинку-схему вопроса (поле "image"), если она задана и файл существует."""
+    image_name = question.get("image")
+    if not image_name:
+        return
+    image_path = os.path.join(IMAGES_DIR, image_name)
+    if not os.path.exists(image_path):
+        logger.warning("Изображение не найдено: %s", image_path)
+        return
+    try:
+        await message.answer_photo(FSInputFile(image_path))
+    except Exception:
+        logger.exception("Не удалось отправить изображение %s", image_path)
+
 # ==================== КЛАВИАТУРЫ ====================
 def get_main_menu():
     builder = InlineKeyboardBuilder()
@@ -193,6 +208,7 @@ async def render_quiz_answer(message, user_id: int):
         f"<b>{q['title']}</b>\n\n{q['answer']}\n\n{DIVIDER}\nТы знал(а) ответ?"
     )
     await message.edit_text(text, parse_mode="HTML", reply_markup=get_quiz_answer_keyboard())
+    await send_question_image(message, q)
 
 async def render_quiz_summary(message, user_id: int, aborted: bool = False):
     session = QUIZ_SESSIONS.pop(user_id, None)
@@ -662,6 +678,7 @@ async def cb_ticket_question(callback: CallbackQuery):
             f"<b>{question['title']}</b>\n\n{question['answer']}"
         )
         await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_ticket_questions_keyboard(ticket_num))
+        await send_question_image(callback.message, question)
     else:
         await callback.answer("Вопрос не найден", show_alert=True)
 
@@ -686,6 +703,7 @@ async def cb_show_question(callback: CallbackQuery):
         q = QUESTIONS[q_num]
         text = f"❓ <b>Вопрос {q_num}</b>\n{DIVIDER}\n\n<b>{q['title']}</b>\n\n{q['answer']}"
         await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_questions_main_menu())
+        await send_question_image(callback.message, q)
     else:
         await callback.answer("Вопрос не найден", show_alert=True)
 
@@ -702,6 +720,7 @@ async def cb_question_random(callback: CallbackQuery):
     q = QUESTIONS[q_num]
     text = f"❓ <b>Вопрос {q_num}</b>\n{DIVIDER}\n\n<b>{q['title']}</b>\n\n{q['answer']}"
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_questions_main_menu())
+    await send_question_image(callback.message, q)
 
 @dp.callback_query(F.data == "question_by_number")
 async def cb_question_by_number(callback: CallbackQuery):
@@ -720,6 +739,7 @@ async def handle_question_number(message: Message):
         q = QUESTIONS[q_num]
         text = f"❓ <b>Вопрос {q_num}</b>\n{DIVIDER}\n\n<b>{q['title']}</b>\n\n{q['answer']}"
         await message.answer(text, parse_mode="HTML", reply_markup=get_questions_main_menu())
+        await send_question_image(message, q)
     else:
         await message.answer("⚠️ Вопрос с таким номером не найден.")
 
