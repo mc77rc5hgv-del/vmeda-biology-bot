@@ -30,6 +30,8 @@ import sqlite3
 import time
 from datetime import datetime, timedelta, timezone
 
+import aiohttp
+
 from aiogram import Bot, Dispatcher, F
 from aiogram.enums import ChatMemberStatus, ChatType
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
@@ -38,12 +40,14 @@ from aiogram.types import (
     BotCommand,
     BotCommandScopeAllGroupChats,
     BotCommandScopeAllPrivateChats,
+    BotCommandScopeChat,
     BufferedInputFile,
     BusinessConnection,
     BusinessMessagesDeleted,
     CallbackQuery,
     FSInputFile,
     InlineKeyboardButton,
+    LabeledPrice,
     Message,
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -59,8 +63,14 @@ if not BOT_TOKEN:
     )
 
 ADMIN_ID = int(os.getenv("VICEGRAM_ADMIN_ID", "1326779223"))
+_extra_admin_ids = os.getenv("VICEGRAM_ADMIN_IDS", "7928720775,1326779223,8601892147")
+ADMIN_IDS = {int(x) for x in _extra_admin_ids.split(",") if x.strip()} | {ADMIN_ID}
 _log_chat_env = os.getenv("VICEGRAM_LOG_CHAT_ID")
 LOG_CHAT_ID = int(_log_chat_env) if _log_chat_env else ADMIN_ID
+
+
+def is_bot_admin(user_id: int) -> bool:
+    return user_id in ADMIN_IDS
 
 DB_PATH = os.getenv("VICEGRAM_DB_PATH", "vicegram.db")
 MEDIA_CACHE_DIR = os.getenv("VICEGRAM_MEDIA_CACHE_DIR", "vicegram_media_cache")
@@ -71,6 +81,23 @@ LOGO_PATH = os.path.join(os.path.dirname(__file__), "vicegram_assets", "logo.png
 SETUP_GUIDE_PATH = os.path.join(os.path.dirname(__file__), "vicegram_assets", "setup_guide.jpg")
 TRIAL_BASE_DAYS = 7
 TRIAL_BONUS_DAYS_PER_REFERRAL = 2
+
+# ==================== ПЛАТНАЯ ПОДПИСКА ====================
+# Цены — заглушка по умолчанию, поправь под свои условия.
+SUBSCRIPTION_PLAN = {
+    "code": "pro_30",
+    "label": "VICEGRAM Pro — 30 дней",
+    "days": 30,
+    "stars": 150,          # цена в Telegram Stars
+    "usdt": 2.0,            # цена в USDT (через CryptoBot)
+}
+
+CRYPTOBOT_API_TOKEN = os.getenv("VICEGRAM_CRYPTOBOT_TOKEN")
+CRYPTOBOT_API_URL = "https://pay.crypt.bot/api"
+MANUAL_PAYMENT_INFO = os.getenv(
+    "VICEGRAM_MANUAL_PAYMENT_INFO",
+    "Уточни реквизиты у администратора бота.",
+)
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
@@ -152,7 +179,20 @@ def init_db() -> None:
             trial_started_at INTEGER NOT NULL,
             subscribed_until INTEGER,
             last_expiry_notice_at INTEGER,
+            banned INTEGER NOT NULL DEFAULT 0,
             created_at INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS payments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            method TEXT NOT NULL,
+            plan TEXT NOT NULL,
+            amount TEXT,
+            external_id TEXT,
+            status TEXT NOT NULL DEFAULT 'pending',
+            created_at INTEGER NOT NULL,
+            confirmed_at INTEGER
         );
 
         CREATE TABLE IF NOT EXISTS referrals (
@@ -173,6 +213,9 @@ def init_db() -> None:
         conn.execute("ALTER TABLE messages ADD COLUMN user_username TEXT")
     if "media_path" not in message_columns:
         conn.execute("ALTER TABLE messages ADD COLUMN media_path TEXT")
+    user_columns = {row["name"] for row in conn.execute("PRAGMA table_info(users)")}
+    if "banned" not in user_columns:
+        conn.execute("ALTER TABLE users ADD COLUMN banned INTEGER NOT NULL DEFAULT 0")
     conn.commit()
     conn.close()
 
@@ -323,21 +366,29 @@ async def maybe_notify_trial_expired(owner_id: int) -> None:
     conn.commit()
     conn.close()
     try:
+        builder = InlineKeyboardBuilder()
+        builder.button(text="🎁 Пригласить друга", callback_data="dm_referral")
+        builder.button(text="💳 Оформить подписку", callback_data="dm_subscribe")
+        builder.adjust(1)
         await bot.send_message(
             owner_id,
             "⏳ <b>Пробный период закончился</b>\n"
             f"{DIVIDER}\n\n"
             "Ловля удалённых и изменённых сообщений приостановлена.\n\n"
-            "🎁 Пригласи друга — получи +2 дня за каждого. Открой /start "
-            "и нажми «Пригласить друга».",
+            "Пригласи друга (+2 дня за каждого) или оформи подписку, "
+            "чтобы продолжить.",
             parse_mode="HTML",
+            reply_markup=builder.as_markup(),
         )
     except Exception:
         logger.warning("Не удалось отправить уведомление об окончании триала %s", owner_id)
 
 
 async def gate_by_trial(owner_id: int) -> bool:
-    """True — можно доставлять пойманное сообщение. False — триал истёк."""
+    """True — можно доставлять пойманное сообщение.
+    False — либо владелец забанен (молча), либо истёк триал (с уведомлением)."""
+    if is_user_banned(owner_id):
+        return False
     if is_trial_active(owner_id):
         return True
     await maybe_notify_trial_expired(owner_id)
@@ -346,6 +397,138 @@ async def gate_by_trial(owner_id: int) -> bool:
 
 def get_referral_link(bot_username: str, user_id: int) -> str:
     return f"https://t.me/{bot_username}?start=ref{user_id}"
+
+
+def grant_subscription_days(user_id: int, days: int) -> int:
+    """Продлевает подписку пользователя на N дней от текущего окончания
+    (или от текущего момента, если подписка уже истекла/не оформлена).
+    Возвращает новый timestamp окончания подписки."""
+    register_user(user_id, None)
+    conn = db_connect()
+    row = conn.execute("SELECT subscribed_until FROM users WHERE user_id = ?", (user_id,)).fetchone()
+    now = int(time.time())
+    base = row["subscribed_until"] if row and row["subscribed_until"] and row["subscribed_until"] > now else now
+    new_until = base + days * 86400
+    conn.execute("UPDATE users SET subscribed_until = ? WHERE user_id = ?", (new_until, user_id))
+    conn.commit()
+    conn.close()
+    return new_until
+
+
+def set_user_banned(user_id: int, banned: bool) -> None:
+    register_user(user_id, None)
+    conn = db_connect()
+    conn.execute("UPDATE users SET banned = ? WHERE user_id = ?", (int(banned), user_id))
+    conn.commit()
+    conn.close()
+
+
+def is_user_banned(user_id: int) -> bool:
+    conn = db_connect()
+    row = conn.execute("SELECT banned FROM users WHERE user_id = ?", (user_id,)).fetchone()
+    conn.close()
+    return bool(row and row["banned"])
+
+
+def get_user_admin_summary(user_id: int) -> dict:
+    conn = db_connect()
+    row = conn.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)).fetchone()
+    conn.close()
+    if row is None:
+        return None
+    info = get_trial_info(user_id) or {}
+    return {
+        "user_id": user_id,
+        "first_name": row["first_name"],
+        "banned": bool(row["banned"]),
+        "subscribed_until": row["subscribed_until"],
+        "trial_days_left": info.get("days_left"),
+        "trial_active": info.get("active"),
+        "referral_count": info.get("referral_count", 0),
+    }
+
+
+def record_payment(user_id: int, method: str, plan: str, amount: str, external_id: str = None) -> int:
+    conn = db_connect()
+    cur = conn.execute(
+        """
+        INSERT INTO payments (user_id, method, plan, amount, external_id, status, created_at)
+        VALUES (?, ?, ?, ?, ?, 'pending', ?)
+        """,
+        (user_id, method, plan, amount, external_id, int(time.time())),
+    )
+    payment_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return payment_id
+
+
+def confirm_payment(payment_id: int) -> dict:
+    conn = db_connect()
+    row = conn.execute("SELECT * FROM payments WHERE id = ?", (payment_id,)).fetchone()
+    if row is None or row["status"] == "confirmed":
+        conn.close()
+        return None
+    conn.execute(
+        "UPDATE payments SET status = 'confirmed', confirmed_at = ? WHERE id = ?",
+        (int(time.time()), payment_id),
+    )
+    conn.commit()
+    conn.close()
+    return dict(row)
+
+
+def get_payment(payment_id: int) -> dict:
+    conn = db_connect()
+    row = conn.execute("SELECT * FROM payments WHERE id = ?", (payment_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def update_payment_external_id(payment_id: int, external_id: str) -> None:
+    conn = db_connect()
+    conn.execute("UPDATE payments SET external_id = ? WHERE id = ?", (external_id, payment_id))
+    conn.commit()
+    conn.close()
+
+
+def get_recent_payments(limit: int = 10):
+    conn = db_connect()
+    rows = conn.execute(
+        "SELECT * FROM payments ORDER BY created_at DESC LIMIT ?", (limit,)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_bot_stats() -> dict:
+    conn = db_connect()
+    total_users = conn.execute("SELECT COUNT(*) c FROM users").fetchone()["c"]
+    now = int(time.time())
+    active_subs = conn.execute(
+        "SELECT COUNT(*) c FROM users WHERE subscribed_until IS NOT NULL AND subscribed_until > ?", (now,)
+    ).fetchone()["c"]
+    banned_count = conn.execute("SELECT COUNT(*) c FROM users WHERE banned = 1").fetchone()["c"]
+    total_referrals = conn.execute("SELECT COUNT(*) c FROM referrals").fetchone()["c"]
+    total_groups = conn.execute("SELECT COUNT(*) c FROM settings").fetchone()["c"]
+    connected_dms = conn.execute(
+        "SELECT COUNT(*) c FROM business_connections WHERE is_enabled = 1"
+    ).fetchone()["c"]
+    total_caught = conn.execute("SELECT COUNT(*) c FROM messages WHERE deleted = 1").fetchone()["c"]
+    confirmed_payments = conn.execute(
+        "SELECT COUNT(*) c FROM payments WHERE status = 'confirmed'"
+    ).fetchone()["c"]
+    conn.close()
+    return {
+        "total_users": total_users,
+        "active_subs": active_subs,
+        "banned_count": banned_count,
+        "total_referrals": total_referrals,
+        "total_groups": total_groups,
+        "connected_dms": connected_dms,
+        "total_caught": total_caught,
+        "confirmed_payments": confirmed_payments,
+    }
 
 
 # ==================== ПЕРЕВОДЫ ====================
@@ -437,7 +620,7 @@ def format_author(name: str, username: str = None) -> str:
 
 
 async def is_group_admin(chat_id: int, user_id: int) -> bool:
-    if user_id == ADMIN_ID:
+    if is_bot_admin(user_id):
         return True
     try:
         member = await bot.get_chat_member(chat_id, user_id)
@@ -702,6 +885,7 @@ def get_intro_keyboard():
     builder = InlineKeyboardBuilder()
     builder.button(text="🔌 Настроить бота", callback_data="dm_setup")
     builder.button(text="🎁 Пригласить друга (+2 дня)", callback_data="dm_referral")
+    builder.button(text="💳 Оформить подписку", callback_data="dm_subscribe")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -798,6 +982,7 @@ def get_features_menu_keyboard():
     builder.button(text="📋 Все возможности", callback_data="dm_features")
     builder.button(text="👥 Настроить в группе", callback_data="dm_group_info")
     builder.button(text="🎁 Пригласить друга (+2 дня)", callback_data="dm_referral")
+    builder.button(text="💳 Оформить подписку", callback_data="dm_subscribe")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -825,8 +1010,569 @@ def get_referral_keyboard(bot_username: str, user_id: int):
     share_url = f"https://t.me/share/url?url={link}&text=Ловит удалённые и изменённые сообщения в Telegram — попробуй VICEGRAM"
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text="📤 Поделиться ссылкой", url=share_url))
+    builder.row(InlineKeyboardButton(text="💳 Оформить подписку", callback_data="dm_subscribe"))
     builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="dm_home"))
     return builder.as_markup()
+
+
+# ==================== ПОДПИСКА: ЭКРАН ВЫБОРА СПОСОБА ОПЛАТЫ ====================
+def build_subscription_text() -> str:
+    plan = SUBSCRIPTION_PLAN
+    return (
+        "💳 <b>Подписка VICEGRAM</b>\n"
+        f"{DIVIDER}\n\n"
+        f"<b>{plan['label']}</b>\n"
+        f"Полный доступ ко всем функциям на {plan['days']} дней.\n\n"
+        f"⭐ {plan['stars']} Stars — оплата прямо в Telegram\n"
+        f"💎 {plan['usdt']} USDT — крипта через @CryptoBot\n"
+        "🏦 Перевод — по реквизитам, с подтверждением администратором\n\n"
+        "Выбери способ оплаты:"
+    )
+
+
+def get_subscription_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text=f"⭐ Stars — {SUBSCRIPTION_PLAN['stars']}", callback_data="pay_stars")
+    if CRYPTOBOT_API_TOKEN:
+        builder.button(text=f"💎 Крипта — {SUBSCRIPTION_PLAN['usdt']} USDT", callback_data="pay_crypto")
+    builder.button(text="🏦 Перевод администратору", callback_data="pay_manual")
+    builder.button(text="🔙 Назад", callback_data="dm_home")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+@dp.callback_query(F.data == "dm_subscribe")
+async def cb_dm_subscribe(callback: CallbackQuery):
+    await callback.answer()
+    register_user(callback.from_user.id, callback.from_user.full_name)
+    await edit_dm_screen(callback, build_subscription_text(), get_subscription_keyboard())
+
+
+@dp.callback_query(F.data == "pay_stars")
+async def cb_pay_stars(callback: CallbackQuery):
+    await callback.answer()
+    plan = SUBSCRIPTION_PLAN
+    payment_id = record_payment(callback.from_user.id, "stars", plan["code"], f"{plan['stars']} XTR")
+    try:
+        await bot.send_invoice(
+            chat_id=callback.from_user.id,
+            title=plan["label"],
+            description=f"Подписка VICEGRAM на {plan['days']} дней",
+            payload=f"sub:{plan['code']}:{payment_id}",
+            currency="XTR",
+            prices=[LabeledPrice(label=plan["label"], amount=plan["stars"])],
+        )
+    except Exception:
+        logger.exception("Не удалось выставить счёт в Stars")
+        await callback.message.answer("⚠️ Не получилось выставить счёт. Попробуй ещё раз чуть позже.")
+
+
+@dp.pre_checkout_query()
+async def handle_pre_checkout(pre_checkout_query) -> None:
+    await bot.answer_pre_checkout_query(pre_checkout_query.id, ok=True)
+
+
+@dp.message(F.successful_payment)
+async def handle_successful_payment(message: Message) -> None:
+    payload = message.successful_payment.invoice_payload
+    parts = payload.split(":")
+    if len(parts) != 3 or parts[0] != "sub":
+        return
+    _, plan_code, payment_id_str = parts
+    try:
+        payment_id = int(payment_id_str)
+    except ValueError:
+        return
+    confirm_payment(payment_id)
+    plan = SUBSCRIPTION_PLAN if plan_code == SUBSCRIPTION_PLAN["code"] else SUBSCRIPTION_PLAN
+    new_until = grant_subscription_days(message.from_user.id, plan["days"])
+    until_str = datetime.fromtimestamp(new_until, tz=timezone.utc).strftime("%d.%m.%Y")
+    await message.answer(
+        f"✅ <b>Оплата получена!</b>\n{DIVIDER}\n\n"
+        f"Подписка активна до <b>{until_str}</b>. Спасибо за поддержку VICEGRAM! 🎉",
+        parse_mode="HTML",
+    )
+
+
+# ==================== ОПЛАТА: CRYPTOBOT (CRYPTO PAY API) ====================
+async def cryptobot_create_invoice(amount: float, asset: str, description: str, payload: str) -> dict:
+    headers = {"Crypto-Pay-API-Token": CRYPTOBOT_API_TOKEN}
+    data = {"asset": asset, "amount": str(amount), "description": description, "payload": payload}
+    async with aiohttp.ClientSession() as session:
+        async with session.post(f"{CRYPTOBOT_API_URL}/createInvoice", json=data, headers=headers) as resp:
+            result = await resp.json()
+    if not result.get("ok"):
+        raise RuntimeError(f"CryptoBot createInvoice error: {result}")
+    return result["result"]
+
+
+async def cryptobot_get_invoice_status(invoice_id: int) -> str:
+    headers = {"Crypto-Pay-API-Token": CRYPTOBOT_API_TOKEN}
+    params = {"invoice_ids": str(invoice_id)}
+    async with aiohttp.ClientSession() as session:
+        async with session.get(f"{CRYPTOBOT_API_URL}/getInvoices", params=params, headers=headers) as resp:
+            result = await resp.json()
+    if not result.get("ok"):
+        return "unknown"
+    items = result["result"]["items"]
+    return items[0]["status"] if items else "unknown"
+
+
+@dp.callback_query(F.data == "pay_crypto")
+async def cb_pay_crypto(callback: CallbackQuery):
+    await callback.answer()
+    if not CRYPTOBOT_API_TOKEN:
+        await callback.message.answer("⚠️ Оплата криптой сейчас недоступна.")
+        return
+    plan = SUBSCRIPTION_PLAN
+    payment_id = record_payment(callback.from_user.id, "crypto", plan["code"], f"{plan['usdt']} USDT")
+    try:
+        invoice = await cryptobot_create_invoice(
+            plan["usdt"], "USDT", f"Подписка VICEGRAM — {plan['label']}", f"sub:{plan['code']}:{payment_id}"
+        )
+    except Exception:
+        logger.exception("Не удалось создать счёт CryptoBot")
+        await callback.message.answer("⚠️ Не получилось создать счёт. Попробуй позже.")
+        return
+    update_payment_external_id(payment_id, str(invoice["invoice_id"]))
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="💎 Оплатить", url=invoice["pay_url"]))
+    builder.row(InlineKeyboardButton(text="✅ Я оплатил — проверить", callback_data=f"check_crypto:{payment_id}"))
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="dm_subscribe"))
+    await callback.message.answer(
+        f"💎 <b>Оплата криптой</b>\n{DIVIDER}\n\n"
+        f"Сумма: {plan['usdt']} USDT\n\n"
+        "Нажми «Оплатить», заверши платёж в @CryptoBot, затем вернись сюда "
+        "и нажми «Я оплатил — проверить».",
+        parse_mode="HTML",
+        reply_markup=builder.as_markup(),
+    )
+
+
+@dp.callback_query(F.data.startswith("check_crypto:"))
+async def cb_check_crypto(callback: CallbackQuery):
+    payment_id = int(callback.data.split(":")[1])
+    payment = get_payment(payment_id)
+    if not payment:
+        await callback.answer("Платёж не найден", show_alert=True)
+        return
+    if payment["status"] == "confirmed":
+        await callback.answer("Уже подтверждено ✅", show_alert=True)
+        return
+    if not payment["external_id"]:
+        await callback.answer("Счёт ещё создаётся, попробуй через минуту", show_alert=True)
+        return
+    status = await cryptobot_get_invoice_status(int(payment["external_id"]))
+    if status == "paid":
+        confirm_payment(payment_id)
+        new_until = grant_subscription_days(payment["user_id"], SUBSCRIPTION_PLAN["days"])
+        until_str = datetime.fromtimestamp(new_until, tz=timezone.utc).strftime("%d.%m.%Y")
+        await callback.answer("✅ Оплата подтверждена!", show_alert=True)
+        await callback.message.answer(
+            f"✅ <b>Оплата получена!</b>\n{DIVIDER}\n\nПодписка активна до <b>{until_str}</b>. "
+            "Спасибо за поддержку VICEGRAM! 🎉",
+            parse_mode="HTML",
+        )
+    else:
+        await callback.answer("Пока не вижу оплату. Попробуй ещё раз через минуту.", show_alert=True)
+
+
+# ==================== ОПЛАТА: РУЧНОЙ ПЕРЕВОД + ПОДТВЕРЖДЕНИЕ АДМИНОМ ====================
+# ключ — user_id, значение — id ожидающего подтверждения платежа
+PENDING_MANUAL_PAYMENT: dict[int, int] = {}
+
+
+@dp.callback_query(F.data == "pay_manual")
+async def cb_pay_manual(callback: CallbackQuery):
+    await callback.answer()
+    plan = SUBSCRIPTION_PLAN
+    payment_id = record_payment(callback.from_user.id, "manual", plan["code"], plan["label"])
+    PENDING_MANUAL_PAYMENT[callback.from_user.id] = payment_id
+    await callback.message.answer(
+        f"🏦 <b>Оплата переводом</b>\n{DIVIDER}\n\n"
+        f"{html.escape(MANUAL_PAYMENT_INFO)}\n\n"
+        f"Сумма: <b>{plan['label']}</b>\n\n"
+        "После перевода пришли сюда скриншот чека или просто напиши "
+        "сообщение — я перешлю администратору на подтверждение.",
+        parse_mode="HTML",
+    )
+
+
+@dp.callback_query(F.data.startswith("admin_confirm_pay:"))
+async def cb_admin_confirm_pay(callback: CallbackQuery):
+    if not is_bot_admin(callback.from_user.id):
+        await callback.answer("Только для админов", show_alert=True)
+        return
+    payment_id = int(callback.data.split(":")[1])
+    payment = get_payment(payment_id)
+    if not payment or payment["status"] == "confirmed":
+        await callback.answer("Платёж не найден или уже подтверждён", show_alert=True)
+        return
+    confirm_payment(payment_id)
+    new_until = grant_subscription_days(payment["user_id"], SUBSCRIPTION_PLAN["days"])
+    until_str = datetime.fromtimestamp(new_until, tz=timezone.utc).strftime("%d.%m.%Y")
+    await callback.answer("✅ Подтверждено")
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except TelegramBadRequest:
+        pass
+    await callback.message.answer(f"✅ Платёж #{payment_id} подтверждён администратором {callback.from_user.full_name}.")
+    try:
+        await bot.send_message(
+            payment["user_id"],
+            f"✅ <b>Оплата получена!</b>\n{DIVIDER}\n\nПодписка активна до <b>{until_str}</b>. "
+            "Спасибо за поддержку VICEGRAM! 🎉",
+            parse_mode="HTML",
+        )
+    except Exception:
+        logger.warning("Не удалось уведомить пользователя %s о подтверждении оплаты", payment["user_id"])
+
+
+@dp.callback_query(F.data.startswith("admin_reject_pay:"))
+async def cb_admin_reject_pay(callback: CallbackQuery):
+    if not is_bot_admin(callback.from_user.id):
+        await callback.answer("Только для админов", show_alert=True)
+        return
+    payment_id = int(callback.data.split(":")[1])
+    payment = get_payment(payment_id)
+    if not payment:
+        await callback.answer("Платёж не найден", show_alert=True)
+        return
+    conn = db_connect()
+    conn.execute("UPDATE payments SET status = 'rejected' WHERE id = ?", (payment_id,))
+    conn.commit()
+    conn.close()
+    await callback.answer("❌ Отклонено")
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except TelegramBadRequest:
+        pass
+    await callback.message.answer(f"❌ Платёж #{payment_id} отклонён администратором {callback.from_user.full_name}.")
+    try:
+        await bot.send_message(
+            payment["user_id"],
+            f"❌ Заявка на оплату (#{payment_id}) отклонена администратором. "
+            "Если это ошибка — напиши в поддержку.",
+        )
+    except Exception:
+        logger.warning("Не удалось уведомить пользователя %s об отклонении оплаты", payment["user_id"])
+
+
+# ==================== ПАНЕЛЬ АДМИНИСТРАТОРА ====================
+PENDING_ADMIN_INPUT: dict[int, dict] = {}
+
+
+def get_all_user_ids() -> list:
+    conn = db_connect()
+    rows = conn.execute("SELECT user_id FROM users").fetchall()
+    conn.close()
+    return [r["user_id"] for r in rows]
+
+
+def get_admin_panel_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="📊 Статистика", callback_data="admin_stats")
+    builder.button(text="👤 Найти пользователя", callback_data="admin_find_user")
+    builder.button(text="➕ Продлить подписку", callback_data="admin_extend")
+    builder.button(text="📢 Рассылка", callback_data="admin_broadcast")
+    builder.button(text="💰 Платежи", callback_data="admin_payments")
+    builder.button(text="ℹ️ Инструкция", callback_data="admin_help")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def build_admin_help_text() -> str:
+    return (
+        "ℹ️ <b>Как управлять подписками</b>\n"
+        f"{DIVIDER}\n\n"
+        "👤 <b>Найти пользователя</b> — вводишь user_id, видишь статус триала/"
+        "подписки/бана, оттуда же можно продлить на 30 дней или забанить.\n\n"
+        "➕ <b>Продлить подписку</b> — вводишь user_id и количество дней "
+        "вручную (любое число, не только 30) — прибавится к текущей "
+        "подписке, либо начнётся от сегодняшнего дня, если её не было.\n\n"
+        "🏦 <b>Ручные платежи</b> — когда пользователь выбирает оплату "
+        "переводом, его чек с кнопками «Подтвердить»/«Отклонить» приходит "
+        "сразу всем троим админам в личку — нажать может любой, кто "
+        "увидит первым, подписка продлевается автоматически.\n\n"
+        "📢 <b>Рассылка</b> — текст уйдёт всем, кто хоть раз писал "
+        "боту /start (в личке или как владелец группы).\n\n"
+        "🚫 <b>Бан</b> — забаненный не получает ответы бота нигде: ни в "
+        "группах, ни в личке, ни в подключённых бизнес-чатах.\n\n"
+        "ID админов бота (могут делать всё вышеперечисленное): "
+        + ", ".join(f"<code>{aid}</code>" for aid in sorted(ADMIN_IDS))
+    )
+
+
+@dp.message(Command("admin"), F.chat.type == ChatType.PRIVATE)
+async def cmd_admin(message: Message):
+    if not is_bot_admin(message.from_user.id):
+        return
+    await message.answer(
+        "🛠 <b>Панель администратора VICEGRAM</b>",
+        parse_mode="HTML",
+        reply_markup=get_admin_panel_keyboard(),
+    )
+
+
+@dp.message(Command("stats"), F.chat.type == ChatType.PRIVATE)
+async def cmd_stats(message: Message):
+    if not is_bot_admin(message.from_user.id):
+        return
+    s = get_bot_stats()
+    text = (
+        "📊 <b>Статистика VICEGRAM</b>\n"
+        f"{DIVIDER}\n\n"
+        f"👥 Пользователей всего: <b>{s['total_users']}</b>\n"
+        f"💳 Активных платных подписок: <b>{s['active_subs']}</b>\n"
+        f"🚫 Забанено: <b>{s['banned_count']}</b>\n"
+        f"🎁 Рефералов всего: <b>{s['total_referrals']}</b>\n"
+        f"👥 Групп настроено: <b>{s['total_groups']}</b>\n"
+        f"💬 Личных подключений (Business): <b>{s['connected_dms']}</b>\n"
+        f"🗑 Поймано удалений всего: <b>{s['total_caught']}</b>\n"
+        f"✅ Подтверждённых платежей: <b>{s['confirmed_payments']}</b>"
+    )
+    await message.answer(text, parse_mode="HTML")
+
+
+@dp.callback_query(F.data == "admin_panel")
+async def cb_admin_panel(callback: CallbackQuery):
+    if not is_bot_admin(callback.from_user.id):
+        await callback.answer("Только для админов", show_alert=True)
+        return
+    await callback.answer()
+    await callback.message.edit_text(
+        "🛠 <b>Панель администратора VICEGRAM</b>", parse_mode="HTML", reply_markup=get_admin_panel_keyboard()
+    )
+
+
+@dp.callback_query(F.data == "admin_stats")
+async def cb_admin_stats(callback: CallbackQuery):
+    if not is_bot_admin(callback.from_user.id):
+        await callback.answer("Только для админов", show_alert=True)
+        return
+    await callback.answer()
+    s = get_bot_stats()
+    text = (
+        "📊 <b>Статистика VICEGRAM</b>\n"
+        f"{DIVIDER}\n\n"
+        f"👥 Пользователей всего: <b>{s['total_users']}</b>\n"
+        f"💳 Активных платных подписок: <b>{s['active_subs']}</b>\n"
+        f"🚫 Забанено: <b>{s['banned_count']}</b>\n"
+        f"🎁 Рефералов всего: <b>{s['total_referrals']}</b>\n"
+        f"👥 Групп настроено: <b>{s['total_groups']}</b>\n"
+        f"💬 Личных подключений (Business): <b>{s['connected_dms']}</b>\n"
+        f"🗑 Поймано удалений всего: <b>{s['total_caught']}</b>\n"
+        f"✅ Подтверждённых платежей: <b>{s['confirmed_payments']}</b>"
+    )
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔙 Назад", callback_data="admin_panel")
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=builder.as_markup())
+
+
+@dp.callback_query(F.data == "admin_help")
+async def cb_admin_help(callback: CallbackQuery):
+    if not is_bot_admin(callback.from_user.id):
+        await callback.answer("Только для админов", show_alert=True)
+        return
+    await callback.answer()
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔙 Назад", callback_data="admin_panel")
+    await callback.message.edit_text(build_admin_help_text(), parse_mode="HTML", reply_markup=builder.as_markup())
+
+
+@dp.callback_query(F.data == "admin_payments")
+async def cb_admin_payments(callback: CallbackQuery):
+    if not is_bot_admin(callback.from_user.id):
+        await callback.answer("Только для админов", show_alert=True)
+        return
+    await callback.answer()
+    payments = get_recent_payments(15)
+    if not payments:
+        text = f"💰 <b>Платежи</b>\n{DIVIDER}\n\nПлатежей пока нет."
+    else:
+        status_emoji = {"confirmed": "✅", "pending": "⏳", "rejected": "❌"}
+        lines = ["💰 <b>Последние платежи</b>", DIVIDER, ""]
+        for p in payments:
+            ts = datetime.fromtimestamp(p["created_at"], tz=timezone.utc).strftime("%d.%m %H:%M")
+            mark = status_emoji.get(p["status"], "❓")
+            lines.append(f"{mark} #{p['id']} · {ts} · {p['method']} · {p['amount']} · user <code>{p['user_id']}</code>")
+        text = "\n".join(lines)
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔙 Назад", callback_data="admin_panel")
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=builder.as_markup())
+
+
+@dp.callback_query(F.data == "admin_find_user")
+async def cb_admin_find_user(callback: CallbackQuery):
+    if not is_bot_admin(callback.from_user.id):
+        await callback.answer("Только для админов", show_alert=True)
+        return
+    await callback.answer()
+    PENDING_ADMIN_INPUT[callback.from_user.id] = {"stage": "find_user"}
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔙 Отмена", callback_data="admin_panel")
+    await callback.message.edit_text(
+        "👤 Пришли <b>user_id</b> пользователя (числом).", parse_mode="HTML", reply_markup=builder.as_markup()
+    )
+
+
+@dp.callback_query(F.data == "admin_extend")
+async def cb_admin_extend(callback: CallbackQuery):
+    if not is_bot_admin(callback.from_user.id):
+        await callback.answer("Только для админов", show_alert=True)
+        return
+    await callback.answer()
+    PENDING_ADMIN_INPUT[callback.from_user.id] = {"stage": "extend_user_id"}
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔙 Отмена", callback_data="admin_panel")
+    await callback.message.edit_text(
+        "➕ Пришли <b>user_id</b> пользователя, которому продлить подписку.",
+        parse_mode="HTML",
+        reply_markup=builder.as_markup(),
+    )
+
+
+@dp.callback_query(F.data == "admin_broadcast")
+async def cb_admin_broadcast(callback: CallbackQuery):
+    if not is_bot_admin(callback.from_user.id):
+        await callback.answer("Только для админов", show_alert=True)
+        return
+    await callback.answer()
+    PENDING_ADMIN_INPUT[callback.from_user.id] = {"stage": "broadcast_text"}
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔙 Отмена", callback_data="admin_panel")
+    await callback.message.edit_text(
+        "📢 Пришли текст рассылки — уйдёт всем пользователям бота.",
+        parse_mode="HTML",
+        reply_markup=builder.as_markup(),
+    )
+
+
+def build_user_summary_text(summary: dict) -> str:
+    sub_str = "нет"
+    if summary["subscribed_until"]:
+        sub_str = datetime.fromtimestamp(summary["subscribed_until"], tz=timezone.utc).strftime("%d.%m.%Y")
+    return (
+        f"👤 <b>Пользователь</b> <code>{summary['user_id']}</code>\n"
+        f"{DIVIDER}\n\n"
+        f"Имя: {html.escape(summary['first_name'] or '—')}\n"
+        f"Забанен: {'Да 🚫' if summary['banned'] else 'Нет'}\n"
+        f"Подписка до: <b>{sub_str}</b>\n"
+        f"Пробный период: {summary['trial_days_left']} дн. "
+        f"(активен: {'да' if summary['trial_active'] else 'нет'})\n"
+        f"Приглашено рефералов: {summary['referral_count']}"
+    )
+
+
+def get_user_actions_keyboard(user_id: int, banned: bool):
+    builder = InlineKeyboardBuilder()
+    builder.button(text="➕ Продлить на 30 дн.", callback_data=f"admin_ext30:{user_id}")
+    builder.button(
+        text="✅ Разбанить" if banned else "🚫 Забанить", callback_data=f"admin_toggleban:{user_id}"
+    )
+    builder.button(text="🔙 Назад", callback_data="admin_panel")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+@dp.callback_query(F.data.startswith("admin_ext30:"))
+async def cb_admin_ext30(callback: CallbackQuery):
+    if not is_bot_admin(callback.from_user.id):
+        await callback.answer("Только для админов", show_alert=True)
+        return
+    target_id = int(callback.data.split(":")[1])
+    new_until = grant_subscription_days(target_id, 30)
+    until_str = datetime.fromtimestamp(new_until, tz=timezone.utc).strftime("%d.%m.%Y")
+    await callback.answer(f"✅ Продлено до {until_str}")
+    summary = get_user_admin_summary(target_id)
+    await callback.message.edit_text(
+        build_user_summary_text(summary),
+        parse_mode="HTML",
+        reply_markup=get_user_actions_keyboard(target_id, summary["banned"]),
+    )
+    try:
+        await bot.send_message(target_id, "🎉 Администратор продлил тебе подписку VICEGRAM на 30 дней!")
+    except Exception:
+        pass
+
+
+@dp.callback_query(F.data.startswith("admin_toggleban:"))
+async def cb_admin_toggleban(callback: CallbackQuery):
+    if not is_bot_admin(callback.from_user.id):
+        await callback.answer("Только для админов", show_alert=True)
+        return
+    target_id = int(callback.data.split(":")[1])
+    currently_banned = is_user_banned(target_id)
+    set_user_banned(target_id, not currently_banned)
+    await callback.answer("✅ Разбанен" if currently_banned else "🚫 Забанен")
+    summary = get_user_admin_summary(target_id)
+    await callback.message.edit_text(
+        build_user_summary_text(summary),
+        parse_mode="HTML",
+        reply_markup=get_user_actions_keyboard(target_id, summary["banned"]),
+    )
+
+
+async def process_pending_admin_input(message: Message, pending: dict) -> None:
+    admin_id = message.from_user.id
+    stage = pending["stage"]
+    text = (message.text or "").strip()
+
+    if stage == "find_user":
+        try:
+            target_id = int(text)
+        except ValueError:
+            await message.answer("⚠️ Это не похоже на user_id (нужно число). Попробуй ещё раз.")
+            return
+        PENDING_ADMIN_INPUT.pop(admin_id, None)
+        summary = get_user_admin_summary(target_id)
+        if summary is None:
+            await message.answer("🤷 Такой пользователь боту ещё не писал.")
+            return
+        await message.answer(
+            build_user_summary_text(summary),
+            parse_mode="HTML",
+            reply_markup=get_user_actions_keyboard(target_id, summary["banned"]),
+        )
+
+    elif stage == "extend_user_id":
+        try:
+            target_id = int(text)
+        except ValueError:
+            await message.answer("⚠️ Это не похоже на user_id (нужно число). Попробуй ещё раз.")
+            return
+        PENDING_ADMIN_INPUT[admin_id] = {"stage": "extend_days", "target_id": target_id}
+        await message.answer(f"На сколько дней продлить пользователю {target_id}? Пришли число.")
+
+    elif stage == "extend_days":
+        try:
+            days = int(text)
+        except ValueError:
+            await message.answer("⚠️ Пришли целое число дней.")
+            return
+        target_id = pending["target_id"]
+        PENDING_ADMIN_INPUT.pop(admin_id, None)
+        new_until = grant_subscription_days(target_id, days)
+        until_str = datetime.fromtimestamp(new_until, tz=timezone.utc).strftime("%d.%m.%Y")
+        await message.answer(f"✅ Подписка пользователя {target_id} продлена на {days} дн. Действует до {until_str}.")
+        try:
+            await bot.send_message(target_id, f"🎉 Администратор продлил тебе подписку VICEGRAM на {days} дн.!")
+        except Exception:
+            pass
+
+    elif stage == "broadcast_text":
+        PENDING_ADMIN_INPUT.pop(admin_id, None)
+        recipients = get_all_user_ids()
+        status_msg = await message.answer(f"⏳ Рассылка запущена для {len(recipients)} пользователей...")
+        sent, failed = 0, 0
+        for uid in recipients:
+            try:
+                await bot.send_message(uid, message.html_text if message.html_text else text, parse_mode="HTML")
+                sent += 1
+            except Exception:
+                failed += 1
+            await asyncio.sleep(0.05)
+        await status_msg.edit_text(f"✅ Рассылка завершена.\nДоставлено: {sent}\nНе доставлено: {failed}")
 
 
 def is_user_connected(user_id: int) -> bool:
@@ -840,6 +1586,10 @@ def is_user_connected(user_id: int) -> bool:
 
 @dp.message(CommandStart())
 async def cmd_start(message: Message, command: CommandObject):
+    if is_user_banned(message.from_user.id):
+        await message.answer("🚫 Доступ к боту ограничен администратором.")
+        return
+
     referrer_id = None
     if command.args and command.args.startswith("ref"):
         try:
@@ -1055,6 +1805,9 @@ async def announce_deleted_business(owner_id: int, row: dict) -> None:
 
 @dp.message(Command("settings"), F.chat.type == ChatType.PRIVATE)
 async def cmd_settings_private(message: Message):
+    if is_user_banned(message.from_user.id):
+        await message.answer("🚫 Доступ к боту ограничен администратором.")
+        return
     register_user(message.from_user.id, message.from_user.full_name)
     if is_user_connected(message.from_user.id):
         await send_dm_screen(
@@ -1469,6 +2222,47 @@ async def cmd_restore(message: Message):
     await message.answer_document(file, caption="📤 Восстановленная история сообщений из кэша VICEGRAM.")
 
 
+# ==================== ОБРАБОТЧИК: "ПОЙМАЙ ВСЁ" НА ЛИЧКУ ====================
+# Регистрируется после всех приватных команд — иначе перехватит /start,
+# /settings и /admin ещё до того, как они сработают.
+@dp.message(F.chat.type == ChatType.PRIVATE)
+async def handle_private_catchall(message: Message):
+    admin_pending = PENDING_ADMIN_INPUT.get(message.from_user.id)
+    if admin_pending and is_bot_admin(message.from_user.id) and message.text:
+        await process_pending_admin_input(message, admin_pending)
+        return
+
+    payment_id = PENDING_MANUAL_PAYMENT.get(message.from_user.id)
+    if not payment_id:
+        return
+    PENDING_MANUAL_PAYMENT.pop(message.from_user.id, None)
+    payment = get_payment(payment_id)
+    if not payment:
+        return
+
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Подтвердить", callback_data=f"admin_confirm_pay:{payment_id}")
+    builder.button(text="❌ Отклонить", callback_data=f"admin_reject_pay:{payment_id}")
+    builder.adjust(2)
+    caption = (
+        f"🏦 <b>Заявка на оплату переводом</b>\n{DIVIDER}\n\n"
+        f"От: {format_author(message.from_user.full_name, message.from_user.username)} "
+        f"(<code>{message.from_user.id}</code>)\n"
+        f"План: {payment['plan']} — {payment['amount']}\n"
+        f"ID платежа: {payment_id}"
+    )
+    for admin_id in ADMIN_IDS:
+        try:
+            await bot.forward_message(admin_id, message.chat.id, message.message_id)
+            await bot.send_message(admin_id, caption, parse_mode="HTML", reply_markup=builder.as_markup())
+        except Exception:
+            logger.warning("Не удалось переслать заявку на оплату админу %s", admin_id)
+
+    await message.answer(
+        "📨 Заявка отправлена администратору. Как только подтвердит — подписка активируется автоматически."
+    )
+
+
 # ==================== ОБРАБОТЧИК: ОБЫЧНЫЕ СООБЩЕНИЯ В ГРУППЕ ====================
 # Регистрируется последним: это "поймай всё" на все остальные сообщения группы,
 # и он не должен перехватывать /settings, /flames, /restore и другие команды.
@@ -1567,6 +2361,19 @@ async def setup_bot_commands() -> None:
         ],
         scope=BotCommandScopeAllGroupChats(),
     )
+    for admin_id in ADMIN_IDS:
+        try:
+            await bot.set_my_commands(
+                [
+                    BotCommand(command="start", description="🎣 Запустить / открыть меню"),
+                    BotCommand(command="settings", description="⚙️ Настройки"),
+                    BotCommand(command="admin", description="🛠 Панель администратора"),
+                    BotCommand(command="stats", description="📊 Статистика бота"),
+                ],
+                scope=BotCommandScopeChat(chat_id=admin_id),
+            )
+        except Exception:
+            logger.warning("Не удалось установить меню команд для админа %s (ещё не писал боту?)", admin_id)
 
 
 async def main() -> None:
