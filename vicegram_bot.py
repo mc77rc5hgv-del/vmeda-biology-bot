@@ -1519,9 +1519,31 @@ def get_all_user_ids() -> list:
     return [r["user_id"] for r in rows]
 
 
+USER_LIST_PAGE_SIZE = 10
+
+
+def get_user_list_page(page: int) -> tuple:
+    """Страница списка пользователей для рассылки, новые сверху.
+    Возвращает (строки, номер_страницы, всего_страниц, всего_пользователей)."""
+    conn = db_connect()
+    total = conn.execute("SELECT COUNT(*) c FROM users").fetchone()["c"]
+    total_pages = max(1, (total + USER_LIST_PAGE_SIZE - 1) // USER_LIST_PAGE_SIZE)
+    page = max(0, min(page, total_pages - 1))
+    rows = conn.execute(
+        """
+        SELECT user_id, first_name, username, banned, subscribed_until, created_at
+        FROM users ORDER BY created_at DESC LIMIT ? OFFSET ?
+        """,
+        (USER_LIST_PAGE_SIZE, page * USER_LIST_PAGE_SIZE),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows], page, total_pages, total
+
+
 def get_admin_panel_keyboard():
     builder = InlineKeyboardBuilder()
     builder.button(text="📊 Статистика", callback_data="admin_stats")
+    builder.button(text="👥 Список пользователей", callback_data="admin_userlist:0")
     builder.button(text="👤 Найти пользователя", callback_data="admin_find_user")
     builder.button(text="➕ Продлить подписку", callback_data="admin_extend")
     builder.button(text="📢 Рассылка", callback_data="admin_broadcast")
@@ -1535,6 +1557,9 @@ def build_admin_help_text() -> str:
     return (
         "ℹ️ <b>Как управлять подписками</b>\n"
         f"{DIVIDER}\n\n"
+        "👥 <b>Список пользователей</b> — все, кто запускал бота, постранично "
+        "(id, имя, username, дата, подписка/бан) — сюда же уходит рассылка, "
+        "никто не удаляется из списка со временем.\n\n"
         "👤 <b>Найти пользователя</b> — вводишь user_id <b>или @username</b>, "
         "видишь статус триала/подписки/бана, оттуда же можно продлить на "
         "30 дней или забанить.\n\n"
@@ -1634,6 +1659,57 @@ async def cb_admin_help(callback: CallbackQuery):
     builder = InlineKeyboardBuilder()
     builder.button(text="🔙 Назад", callback_data="admin_panel")
     await callback.message.edit_text(build_admin_help_text(), parse_mode="HTML", reply_markup=builder.as_markup())
+
+
+def build_user_list_text(rows: list, page: int, total_pages: int, total: int) -> str:
+    now = int(time.time())
+    lines = [
+        f"👥 <b>Пользователи бота</b> (всего: {total})",
+        DIVIDER,
+        f"Страница {page + 1} из {total_pages}",
+        "",
+    ]
+    if not rows:
+        lines.append("Пока никто не запускал бота.")
+    for r in rows:
+        joined = datetime.fromtimestamp(r["created_at"], tz=timezone.utc).strftime("%d.%m.%Y")
+        username_part = f" @{html.escape(r['username'])}" if r["username"] else ""
+        name = html.escape(r["first_name"] or "—")
+        sub_mark = " 💳" if r["subscribed_until"] and r["subscribed_until"] > now else ""
+        ban_mark = " 🚫" if r["banned"] else ""
+        lines.append(f"• <code>{r['user_id']}</code> — {name}{username_part}{sub_mark}{ban_mark} · с {joined}")
+    return "\n".join(lines)
+
+
+def get_user_list_keyboard(page: int, total_pages: int):
+    builder = InlineKeyboardBuilder()
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(text="◀️ Пред.", callback_data=f"admin_userlist:{page - 1}"))
+    if page < total_pages - 1:
+        nav.append(InlineKeyboardButton(text="След. ▶️", callback_data=f"admin_userlist:{page + 1}"))
+    if nav:
+        builder.row(*nav)
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="admin_panel"))
+    return builder.as_markup()
+
+
+@dp.callback_query(F.data.startswith("admin_userlist:"))
+async def cb_admin_userlist(callback: CallbackQuery):
+    if not is_bot_admin(callback.from_user.id):
+        await callback.answer("Только для админов", show_alert=True)
+        return
+    await callback.answer()
+    try:
+        page = int(callback.data.split(":", 1)[1])
+    except ValueError:
+        page = 0
+    rows, page, total_pages, total = get_user_list_page(page)
+    await callback.message.edit_text(
+        build_user_list_text(rows, page, total_pages, total),
+        parse_mode="HTML",
+        reply_markup=get_user_list_keyboard(page, total_pages),
+    )
 
 
 @dp.callback_query(F.data == "admin_payments")
