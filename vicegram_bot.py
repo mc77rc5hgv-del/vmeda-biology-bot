@@ -659,6 +659,13 @@ def update_payment_external_id(payment_id: int, external_id: str) -> None:
     conn.close()
 
 
+def get_total_user_count() -> int:
+    conn = db_connect()
+    count = conn.execute("SELECT COUNT(*) c FROM users").fetchone()["c"]
+    conn.close()
+    return count
+
+
 def get_recent_payments(limit: int = 10):
     conn = db_connect()
     rows = conn.execute(
@@ -2619,12 +2626,38 @@ async def setup_bot_commands() -> None:
             logger.warning("Не удалось установить меню команд для админа %s (ещё не писал боту?)", admin_id)
 
 
+PUBLIC_STATS_UPDATE_INTERVAL_SECONDS = 1800  # раз в 30 минут — счётчик не обязан быть секундным
+
+
+async def update_public_user_count() -> None:
+    """Публикует число пользователей в короткое описание бота — оно видно
+    в профиле бота в Telegram прямо под именем и подписью "бот" (тот же
+    экран, где юзернейм и кнопка "Добавить в группу")."""
+    count = get_total_user_count()
+    try:
+        await bot.set_my_short_description(
+            short_description=f"🎣 С ботом уже {count} пользователей"
+        )
+    except Exception:
+        logger.warning("Не удалось обновить короткое описание бота (счётчик пользователей)")
+
+
+async def public_user_count_updater() -> None:
+    while True:
+        try:
+            await update_public_user_count()
+        except Exception:
+            logger.exception("Ошибка в обновлении публичного счётчика пользователей")
+        await asyncio.sleep(PUBLIC_STATS_UPDATE_INTERVAL_SECONDS)
+
+
 async def main() -> None:
     init_db()
     logger.info("VICEGRAM запускается...")
     await setup_bot_commands()
     asyncio.create_task(start_health_server())
     asyncio.create_task(deleted_message_poller())
+    asyncio.create_task(public_user_count_updater())
     await dp.start_polling(bot)
 
 
