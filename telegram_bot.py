@@ -471,7 +471,7 @@ async def cmd_start(message: Message):
     if not await is_subscribed(user_id):
         builder = InlineKeyboardBuilder()
         builder.button(text="📢 Открыть канал Vmeda_examen", url="https://t.me/Vmeda_examen")
-        builder.button(text="🚀 Запустить Helperchat_bot", url="https://t.me/Helperchat_bot")
+        builder.button(text="🚀 Запустить Helperchat_bot", url="https://t.me/Helperchat_bot?start=vmeda")
         builder.adjust(1)
         await message.answer(
             "👋 <b>Добро пожаловать!</b>\n\n"
@@ -480,7 +480,7 @@ async def cmd_start(message: Message):
             f"{DIVIDER}\n"
             "Чтобы пользоваться ботом, выполни два условия:\n"
             "1️⃣ 🔒 Подпишись на канал — https://t.me/Vmeda_examen\n"
-            "2️⃣ 🚀 Запусти бота — https://t.me/Helperchat_bot\n\n"
+            "2️⃣ 🚀 Запусти бота — https://t.me/Helperchat_bot?start=vmeda\n\n"
             "После этого нажми /start ещё раз.",
             parse_mode="HTML",
             reply_markup=builder.as_markup()
