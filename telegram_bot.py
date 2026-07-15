@@ -464,6 +464,20 @@ def get_physics_question_keyboard(page: int):
     builder.row(InlineKeyboardButton(text="🔙 К страницам", callback_data="physics_test"))
     return builder.as_markup()
 
+def get_physics_answer_keyboard(q_num: str):
+    builder = InlineKeyboardBuilder()
+    n = int(q_num)
+    nav = []
+    if str(n - 1) in PHYSICS_QUESTIONS:
+        nav.append(InlineKeyboardButton(text="⬅️ Предыдущий вопрос", callback_data=f"physics_q:{n - 1}"))
+    if str(n + 1) in PHYSICS_QUESTIONS:
+        nav.append(InlineKeyboardButton(text="Следующий вопрос ➡️", callback_data=f"physics_q:{n + 1}"))
+    if nav:
+        builder.row(*nav)
+    page = (n - 1) // 50 + 1
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data=f"physics_page:{page}"))
+    return builder.as_markup()
+
 # ==================== ХИМИЯ ====================
 def get_chemistry_menu():
     builder = InlineKeyboardBuilder()
@@ -963,7 +977,8 @@ async def cb_physics_tickets(callback: CallbackQuery):
 @dp.callback_query(F.data == "physics_test")
 async def cb_physics_test(callback: CallbackQuery):
     await callback.answer()
-    await callback.message.edit_text(
+    await safe_edit_text(
+        callback.message,
         f"📝 <b>Тестовая часть — Физика</b>\n{DIVIDER}\n\nВыбери страницу:",
         parse_mode="HTML",
         reply_markup=get_physics_test_pages()
@@ -973,7 +988,8 @@ async def cb_physics_test(callback: CallbackQuery):
 async def cb_physics_page(callback: CallbackQuery):
     page = int(callback.data.split(":")[1])
     await callback.answer()
-    await callback.message.edit_text(
+    await safe_edit_text(
+        callback.message,
         f"📄 <b>Физика — Страница {page}</b>\n{DIVIDER}",
         parse_mode="HTML",
         reply_markup=get_physics_question_keyboard(page)
@@ -985,8 +1001,10 @@ async def cb_physics_question(callback: CallbackQuery):
     q_num = callback.data.split(":")[1]
     if q_num in PHYSICS_QUESTIONS:
         q = PHYSICS_QUESTIONS[q_num]
-        text = f"❓ <b>Вопрос {q_num}</b>\n{DIVIDER}\n\n{q.get('title', '')}\n\n{q.get('answer', '')}"
-        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_physics_test_pages())
+        header = f"❓ <b>Вопрос {q_num}</b>"
+        body = f"{header}\n{DIVIDER}\n\n<b>{q.get('title', '')}</b>\n\n{q.get('answer', '')}"
+        short_caption = f"{header}\n{DIVIDER}\n\n<b>{q.get('title', '')}</b>"
+        await send_answer(callback.message, body, short_caption, q, get_physics_answer_keyboard(q_num), edit=True)
     else:
         await callback.answer("Вопрос пока не добавлен в файл", show_alert=True)
 
