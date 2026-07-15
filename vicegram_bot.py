@@ -84,13 +84,69 @@ TRIAL_BONUS_DAYS_PER_REFERRAL = 2
 
 # ==================== ПЛАТНАЯ ПОДПИСКА ====================
 # Цены — заглушка по умолчанию, поправь под свои условия.
-SUBSCRIPTION_PLAN = {
-    "code": "pro_30",
-    "label": "VICEGRAM Pro — 30 дней",
-    "days": 30,
-    "stars": 150,          # цена в Telegram Stars
-    "usdt": 2.0,            # цена в USDT (через CryptoBot)
+SUBSCRIPTION_TIERS = {
+    "max": {
+        "name": "VICEGRAM MAX",
+        "tagline": "Абсолютно все функции, включая добавление бота в группы",
+        "group_access": True,
+    },
+    "pro": {
+        "name": "VICEGRAM PRO",
+        "tagline": "Все функции, кроме добавления бота в группы",
+        "group_access": False,
+    },
 }
+
+SUBSCRIPTION_DURATIONS = [
+    {"code": "month", "label": "1 месяц", "days": 30},
+    {"code": "half_year", "label": "6 месяцев", "days": 182},
+    {"code": "year", "label": "1 год", "days": 365},
+    {"code": "lifetime", "label": "Навсегда", "days": 36500},
+]
+
+# цена в рублях; звёзды — 1:1 к рублю (по просьбе); USDT — ориентировочно, поправь курс
+RUB_PER_USDT = 95
+SUBSCRIPTION_PRICES_RUB = {
+    ("max", "month"): 59,
+    ("max", "half_year"): 219,
+    ("max", "year"): 390,
+    ("max", "lifetime"): 599,
+    ("pro", "month"): 49,
+    ("pro", "half_year"): 199,
+    ("pro", "year"): 319,
+    ("pro", "lifetime"): 439,
+}
+
+YEAR_PLAN_JOKE = "🥙 Съесть один раз шаурму, или иметь подписку весь год — выбор очевиден"
+
+
+def get_plan(plan_code: str) -> dict:
+    """plan_code вида 'max_year' — разбирает на тариф+период и возвращает цены."""
+    tier_code, duration_code = plan_code.split("_", 1)
+    tier = SUBSCRIPTION_TIERS[tier_code]
+    duration = next(d for d in SUBSCRIPTION_DURATIONS if d["code"] == duration_code)
+    rub = SUBSCRIPTION_PRICES_RUB[(tier_code, duration_code)]
+    return {
+        "code": plan_code,
+        "tier_code": tier_code,
+        "duration_code": duration_code,
+        "label": f"{tier['name']} — {duration['label']}",
+        "tier_name": tier["name"],
+        "tier_tagline": tier["tagline"],
+        "group_access": tier["group_access"],
+        "duration_label": duration["label"],
+        "days": duration["days"],
+        "rub": rub,
+        "stars": rub,  # 1:1 к рублю
+        "usdt": round(rub / RUB_PER_USDT, 2),
+        "joke": YEAR_PLAN_JOKE if duration_code == "year" else "",
+    }
+
+
+def iter_plans(tier_code: str):
+    for duration in SUBSCRIPTION_DURATIONS:
+        yield get_plan(f"{tier_code}_{duration['code']}")
+
 
 CRYPTOBOT_API_TOKEN = os.getenv("VICEGRAM_CRYPTOBOT_TOKEN")
 CRYPTOBOT_API_URL = "https://pay.crypt.bot/api"
@@ -178,6 +234,7 @@ def init_db() -> None:
             first_name TEXT,
             trial_started_at INTEGER NOT NULL,
             subscribed_until INTEGER,
+            subscription_tier TEXT,
             last_expiry_notice_at INTEGER,
             banned INTEGER NOT NULL DEFAULT 0,
             created_at INTEGER NOT NULL
@@ -216,6 +273,8 @@ def init_db() -> None:
     user_columns = {row["name"] for row in conn.execute("PRAGMA table_info(users)")}
     if "banned" not in user_columns:
         conn.execute("ALTER TABLE users ADD COLUMN banned INTEGER NOT NULL DEFAULT 0")
+    if "subscription_tier" not in user_columns:
+        conn.execute("ALTER TABLE users ADD COLUMN subscription_tier TEXT")
     conn.commit()
     conn.close()
 
@@ -272,7 +331,7 @@ async def notify_chat_owner(chat_id: int, body: str, **kwargs) -> None:
     settings = get_settings(chat_id)
     owner_id = settings.get("owner_id")
     if owner_id:
-        if not await gate_by_trial(owner_id):
+        if not await gate_by_trial(owner_id, require_group_access=True):
             return
         try:
             await bot.send_message(owner_id, body, **kwargs)
@@ -384,35 +443,94 @@ async def maybe_notify_trial_expired(owner_id: int) -> None:
         logger.warning("Не удалось отправить уведомление об окончании триала %s", owner_id)
 
 
-async def gate_by_trial(owner_id: int) -> bool:
+async def maybe_notify_pro_group_upgrade(owner_id: int) -> None:
+    """Как maybe_notify_trial_expired, но для случая, когда у владельца
+    действует PRO (личные чаты), а не MAX — группам PRO не полагается."""
+    conn = db_connect()
+    row = conn.execute(
+        "SELECT last_expiry_notice_at FROM users WHERE user_id = ?", (owner_id,)
+    ).fetchone()
+    now = int(time.time())
+    if row and row["last_expiry_notice_at"] and now - row["last_expiry_notice_at"] < 86400:
+        conn.close()
+        return
+    conn.execute("UPDATE users SET last_expiry_notice_at = ? WHERE user_id = ?", (now, owner_id))
+    conn.commit()
+    conn.close()
+    try:
+        builder = InlineKeyboardBuilder()
+        builder.button(text="💳 Улучшить до MAX", callback_data="dm_subscribe")
+        await bot.send_message(
+            owner_id,
+            "🔒 <b>Это функция VICEGRAM MAX</b>\n"
+            f"{DIVIDER}\n\n"
+            "Твоя подписка PRO не включает работу в группах — только "
+            "личные чаты. Улучши до MAX, чтобы ловить удаления и здесь.",
+            parse_mode="HTML",
+            reply_markup=builder.as_markup(),
+        )
+    except Exception:
+        logger.warning("Не удалось отправить уведомление о PRO/MAX владельцу %s", owner_id)
+
+
+async def gate_by_trial(owner_id: int, require_group_access: bool = False) -> bool:
     """True — можно доставлять пойманное сообщение.
-    False — либо владелец забанен (молча), либо истёк триал (с уведомлением)."""
+    False — владелец забанен (молча), ничего не активно (уведомление про
+    триал), либо у него PRO, а нужен доступ к группам, то есть MAX
+    (уведомление с предложением апгрейда)."""
     if is_user_banned(owner_id):
         return False
-    if is_trial_active(owner_id):
-        return True
-    await maybe_notify_trial_expired(owner_id)
-    return False
+    tier = get_active_tier(owner_id)
+    if tier is None:
+        await maybe_notify_trial_expired(owner_id)
+        return False
+    if require_group_access and tier != "max":
+        await maybe_notify_pro_group_upgrade(owner_id)
+        return False
+    return True
 
 
 def get_referral_link(bot_username: str, user_id: int) -> str:
     return f"https://t.me/{bot_username}?start=ref{user_id}"
 
 
-def grant_subscription_days(user_id: int, days: int) -> int:
+def grant_subscription_days(user_id: int, days: int, tier: str = "max") -> int:
     """Продлевает подписку пользователя на N дней от текущего окончания
-    (или от текущего момента, если подписка уже истекла/не оформлена).
-    Возвращает новый timestamp окончания подписки."""
+    (или от текущего момента, если подписка уже истекла/не оформлена) и
+    выставляет тариф (по умолчанию max — так работают ручные продления
+    админом). Возвращает новый timestamp окончания подписки."""
     register_user(user_id, None)
     conn = db_connect()
     row = conn.execute("SELECT subscribed_until FROM users WHERE user_id = ?", (user_id,)).fetchone()
     now = int(time.time())
     base = row["subscribed_until"] if row and row["subscribed_until"] and row["subscribed_until"] > now else now
     new_until = base + days * 86400
-    conn.execute("UPDATE users SET subscribed_until = ? WHERE user_id = ?", (new_until, user_id))
+    conn.execute(
+        "UPDATE users SET subscribed_until = ?, subscription_tier = ? WHERE user_id = ?",
+        (new_until, tier, user_id),
+    )
     conn.commit()
     conn.close()
     return new_until
+
+
+def get_active_tier(user_id: int):
+    """'max' | 'pro' | None. Во время бесплатного пробного периода — 'max'
+    (полный доступ, как и раньше). None — вообще ничего не активно."""
+    info = get_trial_info(user_id)
+    if info is None:
+        return "max"  # ещё не встречались этому боту — не блокируем (как и раньше)
+    now = int(time.time())
+    if info.get("subscribed_until") and info["subscribed_until"] > now:
+        conn = db_connect()
+        row = conn.execute(
+            "SELECT subscription_tier FROM users WHERE user_id = ?", (user_id,)
+        ).fetchone()
+        conn.close()
+        return (row["subscription_tier"] if row and row["subscription_tier"] else "max")
+    if info["active"]:
+        return "max"  # ещё идёт бесплатный триал
+    return None
 
 
 def set_user_banned(user_id: int, banned: bool) -> None:
@@ -1015,27 +1133,27 @@ def get_referral_keyboard(bot_username: str, user_id: int):
     return builder.as_markup()
 
 
-# ==================== ПОДПИСКА: ЭКРАН ВЫБОРА СПОСОБА ОПЛАТЫ ====================
-def build_subscription_text() -> str:
-    plan = SUBSCRIPTION_PLAN
+# ==================== ПОДПИСКА: ВЫБОР ТАРИФА → СРОКА → СПОСОБА ОПЛАТЫ ====================
+def build_tier_selection_text() -> str:
+    max_from = min(p["rub"] for p in iter_plans("max"))
+    pro_from = min(p["rub"] for p in iter_plans("pro"))
     return (
         "💳 <b>Подписка VICEGRAM</b>\n"
         f"{DIVIDER}\n\n"
-        f"<b>{plan['label']}</b>\n"
-        f"Полный доступ ко всем функциям на {plan['days']} дней.\n\n"
-        f"⭐ {plan['stars']} Stars — оплата прямо в Telegram\n"
-        f"💎 {plan['usdt']} USDT — крипта через @CryptoBot\n"
-        "🏦 Перевод — по реквизитам, с подтверждением администратором\n\n"
-        "Выбери способ оплаты:"
+        f"🚀 <b>{SUBSCRIPTION_TIERS['max']['name']}</b>\n"
+        f"{SUBSCRIPTION_TIERS['max']['tagline']}\n"
+        f"от {max_from}₽\n\n"
+        f"⭐ <b>{SUBSCRIPTION_TIERS['pro']['name']}</b>\n"
+        f"{SUBSCRIPTION_TIERS['pro']['tagline']}\n"
+        f"от {pro_from}₽\n\n"
+        "Выбери тариф:"
     )
 
 
-def get_subscription_keyboard():
+def get_tier_selection_keyboard():
     builder = InlineKeyboardBuilder()
-    builder.button(text=f"⭐ Stars — {SUBSCRIPTION_PLAN['stars']}", callback_data="pay_stars")
-    if CRYPTOBOT_API_TOKEN:
-        builder.button(text=f"💎 Крипта — {SUBSCRIPTION_PLAN['usdt']} USDT", callback_data="pay_crypto")
-    builder.button(text="🏦 Перевод администратору", callback_data="pay_manual")
+    builder.button(text="🚀 VICEGRAM MAX", callback_data="sub_tier:max")
+    builder.button(text="⭐ VICEGRAM PRO", callback_data="sub_tier:pro")
     builder.button(text="🔙 Назад", callback_data="dm_home")
     builder.adjust(1)
     return builder.as_markup()
@@ -1045,19 +1163,94 @@ def get_subscription_keyboard():
 async def cb_dm_subscribe(callback: CallbackQuery):
     await callback.answer()
     register_user(callback.from_user.id, callback.from_user.full_name)
-    await edit_dm_screen(callback, build_subscription_text(), get_subscription_keyboard())
+    await edit_dm_screen(callback, build_tier_selection_text(), get_tier_selection_keyboard())
 
 
-@dp.callback_query(F.data == "pay_stars")
-async def cb_pay_stars(callback: CallbackQuery):
+def build_duration_selection_text(tier_code: str) -> str:
+    tier = SUBSCRIPTION_TIERS[tier_code]
+    lines = [f"💳 <b>{tier['name']}</b>", tier["tagline"], f"{DIVIDER}", ""]
+    for plan in iter_plans(tier_code):
+        line = f"• {plan['duration_label']} — {plan['rub']}₽"
+        if plan["joke"]:
+            line += f"\n  {plan['joke']}"
+        lines.append(line)
+    lines.append("")
+    lines.append("Цена в Stars — 1:1 к рублю. Выбери срок:")
+    return "\n".join(lines)
+
+
+def get_duration_selection_keyboard(tier_code: str):
+    builder = InlineKeyboardBuilder()
+    for plan in iter_plans(tier_code):
+        builder.button(text=f"{plan['duration_label']} — {plan['rub']}₽", callback_data=f"sub_plan:{plan['code']}")
+    builder.button(text="🔙 Назад", callback_data="dm_subscribe")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+@dp.callback_query(F.data.startswith("sub_tier:"))
+async def cb_sub_tier(callback: CallbackQuery):
+    tier_code = callback.data.split(":", 1)[1]
+    if tier_code not in SUBSCRIPTION_TIERS:
+        await callback.answer("Неизвестный тариф", show_alert=True)
+        return
     await callback.answer()
-    plan = SUBSCRIPTION_PLAN
+    await edit_dm_screen(
+        callback, build_duration_selection_text(tier_code), get_duration_selection_keyboard(tier_code)
+    )
+
+
+def build_payment_method_text(plan: dict) -> str:
+    joke_line = f"\n{plan['joke']}\n" if plan["joke"] else ""
+    return (
+        f"💳 <b>{plan['label']}</b>\n"
+        f"{DIVIDER}\n\n"
+        f"{plan['tier_tagline']}{joke_line}\n\n"
+        f"⭐ {plan['stars']} Stars — оплата прямо в Telegram\n"
+        f"💎 {plan['usdt']} USDT — крипта через @CryptoBot\n"
+        "🏦 Перевод — по реквизитам, с подтверждением администратором\n\n"
+        "Выбери способ оплаты:"
+    )
+
+
+def get_payment_method_keyboard(plan: dict):
+    builder = InlineKeyboardBuilder()
+    builder.button(text=f"⭐ Stars — {plan['stars']}", callback_data=f"pay_stars:{plan['code']}")
+    if CRYPTOBOT_API_TOKEN:
+        builder.button(text=f"💎 Крипта — {plan['usdt']} USDT", callback_data=f"pay_crypto:{plan['code']}")
+    builder.button(text="🏦 Перевод администратору", callback_data=f"pay_manual:{plan['code']}")
+    builder.button(text="🔙 Назад", callback_data=f"sub_tier:{plan['tier_code']}")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+@dp.callback_query(F.data.startswith("sub_plan:"))
+async def cb_sub_plan(callback: CallbackQuery):
+    plan_code = callback.data.split(":", 1)[1]
+    try:
+        plan = get_plan(plan_code)
+    except (KeyError, StopIteration, ValueError):
+        await callback.answer("Неизвестный план", show_alert=True)
+        return
+    await callback.answer()
+    await edit_dm_screen(callback, build_payment_method_text(plan), get_payment_method_keyboard(plan))
+
+
+@dp.callback_query(F.data.startswith("pay_stars:"))
+async def cb_pay_stars(callback: CallbackQuery):
+    plan_code = callback.data.split(":", 1)[1]
+    try:
+        plan = get_plan(plan_code)
+    except (KeyError, StopIteration, ValueError):
+        await callback.answer("Неизвестный план", show_alert=True)
+        return
+    await callback.answer()
     payment_id = record_payment(callback.from_user.id, "stars", plan["code"], f"{plan['stars']} XTR")
     try:
         await bot.send_invoice(
             chat_id=callback.from_user.id,
             title=plan["label"],
-            description=f"Подписка VICEGRAM на {plan['days']} дней",
+            description=f"Подписка {plan['label']} на {plan['days']} дней",
             payload=f"sub:{plan['code']}:{payment_id}",
             currency="XTR",
             prices=[LabeledPrice(label=plan["label"], amount=plan["stars"])],
@@ -1081,15 +1274,15 @@ async def handle_successful_payment(message: Message) -> None:
     _, plan_code, payment_id_str = parts
     try:
         payment_id = int(payment_id_str)
-    except ValueError:
+        plan = get_plan(plan_code)
+    except (ValueError, KeyError, StopIteration):
         return
     confirm_payment(payment_id)
-    plan = SUBSCRIPTION_PLAN if plan_code == SUBSCRIPTION_PLAN["code"] else SUBSCRIPTION_PLAN
-    new_until = grant_subscription_days(message.from_user.id, plan["days"])
+    new_until = grant_subscription_days(message.from_user.id, plan["days"], tier=plan["tier_code"])
     until_str = datetime.fromtimestamp(new_until, tz=timezone.utc).strftime("%d.%m.%Y")
     await message.answer(
         f"✅ <b>Оплата получена!</b>\n{DIVIDER}\n\n"
-        f"Подписка активна до <b>{until_str}</b>. Спасибо за поддержку VICEGRAM! 🎉",
+        f"{plan['tier_name']} активен до <b>{until_str}</b>. Спасибо за поддержку VICEGRAM! 🎉",
         parse_mode="HTML",
     )
 
@@ -1118,17 +1311,22 @@ async def cryptobot_get_invoice_status(invoice_id: int) -> str:
     return items[0]["status"] if items else "unknown"
 
 
-@dp.callback_query(F.data == "pay_crypto")
+@dp.callback_query(F.data.startswith("pay_crypto:"))
 async def cb_pay_crypto(callback: CallbackQuery):
+    plan_code = callback.data.split(":", 1)[1]
+    try:
+        plan = get_plan(plan_code)
+    except (KeyError, StopIteration, ValueError):
+        await callback.answer("Неизвестный план", show_alert=True)
+        return
     await callback.answer()
     if not CRYPTOBOT_API_TOKEN:
         await callback.message.answer("⚠️ Оплата криптой сейчас недоступна.")
         return
-    plan = SUBSCRIPTION_PLAN
     payment_id = record_payment(callback.from_user.id, "crypto", plan["code"], f"{plan['usdt']} USDT")
     try:
         invoice = await cryptobot_create_invoice(
-            plan["usdt"], "USDT", f"Подписка VICEGRAM — {plan['label']}", f"sub:{plan['code']}:{payment_id}"
+            plan["usdt"], "USDT", f"Подписка {plan['label']}", f"sub:{plan['code']}:{payment_id}"
         )
     except Exception:
         logger.exception("Не удалось создать счёт CryptoBot")
@@ -1138,7 +1336,7 @@ async def cb_pay_crypto(callback: CallbackQuery):
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text="💎 Оплатить", url=invoice["pay_url"]))
     builder.row(InlineKeyboardButton(text="✅ Я оплатил — проверить", callback_data=f"check_crypto:{payment_id}"))
-    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="dm_subscribe"))
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data=f"sub_plan:{plan['code']}"))
     await callback.message.answer(
         f"💎 <b>Оплата криптой</b>\n{DIVIDER}\n\n"
         f"Сумма: {plan['usdt']} USDT\n\n"
@@ -1164,12 +1362,17 @@ async def cb_check_crypto(callback: CallbackQuery):
         return
     status = await cryptobot_get_invoice_status(int(payment["external_id"]))
     if status == "paid":
+        try:
+            plan = get_plan(payment["plan"])
+        except (KeyError, StopIteration, ValueError):
+            await callback.answer("Неизвестный план платежа", show_alert=True)
+            return
         confirm_payment(payment_id)
-        new_until = grant_subscription_days(payment["user_id"], SUBSCRIPTION_PLAN["days"])
+        new_until = grant_subscription_days(payment["user_id"], plan["days"], tier=plan["tier_code"])
         until_str = datetime.fromtimestamp(new_until, tz=timezone.utc).strftime("%d.%m.%Y")
         await callback.answer("✅ Оплата подтверждена!", show_alert=True)
         await callback.message.answer(
-            f"✅ <b>Оплата получена!</b>\n{DIVIDER}\n\nПодписка активна до <b>{until_str}</b>. "
+            f"✅ <b>Оплата получена!</b>\n{DIVIDER}\n\n{plan['tier_name']} активен до <b>{until_str}</b>. "
             "Спасибо за поддержку VICEGRAM! 🎉",
             parse_mode="HTML",
         )
@@ -1182,16 +1385,22 @@ async def cb_check_crypto(callback: CallbackQuery):
 PENDING_MANUAL_PAYMENT: dict[int, int] = {}
 
 
-@dp.callback_query(F.data == "pay_manual")
+@dp.callback_query(F.data.startswith("pay_manual:"))
 async def cb_pay_manual(callback: CallbackQuery):
+    plan_code = callback.data.split(":", 1)[1]
+    try:
+        plan = get_plan(plan_code)
+    except (KeyError, StopIteration, ValueError):
+        await callback.answer("Неизвестный план", show_alert=True)
+        return
     await callback.answer()
-    plan = SUBSCRIPTION_PLAN
-    payment_id = record_payment(callback.from_user.id, "manual", plan["code"], plan["label"])
+    payment_id = record_payment(callback.from_user.id, "manual", plan["code"], f"{plan['rub']}₽")
     PENDING_MANUAL_PAYMENT[callback.from_user.id] = payment_id
     await callback.message.answer(
         f"🏦 <b>Оплата переводом</b>\n{DIVIDER}\n\n"
         f"{html.escape(MANUAL_PAYMENT_INFO)}\n\n"
-        f"Сумма: <b>{plan['label']}</b>\n\n"
+        f"Тариф: <b>{plan['label']}</b>\n"
+        f"Сумма: <b>{plan['rub']}₽</b>\n\n"
         "После перевода пришли сюда скриншот чека или просто напиши "
         "сообщение — я перешлю администратору на подтверждение.",
         parse_mode="HTML",
@@ -1208,8 +1417,13 @@ async def cb_admin_confirm_pay(callback: CallbackQuery):
     if not payment or payment["status"] == "confirmed":
         await callback.answer("Платёж не найден или уже подтверждён", show_alert=True)
         return
+    try:
+        plan = get_plan(payment["plan"])
+    except (KeyError, StopIteration, ValueError):
+        await callback.answer("Неизвестный план платежа", show_alert=True)
+        return
     confirm_payment(payment_id)
-    new_until = grant_subscription_days(payment["user_id"], SUBSCRIPTION_PLAN["days"])
+    new_until = grant_subscription_days(payment["user_id"], plan["days"], tier=plan["tier_code"])
     until_str = datetime.fromtimestamp(new_until, tz=timezone.utc).strftime("%d.%m.%Y")
     await callback.answer("✅ Подтверждено")
     try:
@@ -1220,7 +1434,7 @@ async def cb_admin_confirm_pay(callback: CallbackQuery):
     try:
         await bot.send_message(
             payment["user_id"],
-            f"✅ <b>Оплата получена!</b>\n{DIVIDER}\n\nПодписка активна до <b>{until_str}</b>. "
+            f"✅ <b>Оплата получена!</b>\n{DIVIDER}\n\n{plan['tier_name']} активен до <b>{until_str}</b>. "
             "Спасибо за поддержку VICEGRAM! 🎉",
             parse_mode="HTML",
         )
@@ -2030,7 +2244,7 @@ async def announce_deleted(row: dict) -> None:
     settings = get_settings(row["chat_id"])
     owner_id = settings.get("owner_id")
 
-    if owner_id and not await gate_by_trial(owner_id):
+    if owner_id and not await gate_by_trial(owner_id, require_group_access=True):
         return
 
     chat_label = ""
