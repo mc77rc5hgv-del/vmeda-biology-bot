@@ -116,7 +116,9 @@ def init_db() -> None:
             flames INTEGER NOT NULL DEFAULT 1,
             anti_scam INTEGER NOT NULL DEFAULT 1,
             custom_commands INTEGER NOT NULL DEFAULT 1,
-            lang TEXT NOT NULL DEFAULT 'ru'
+            lang TEXT NOT NULL DEFAULT 'ru',
+            owner_id INTEGER,
+            owner_name TEXT
         );
 
         CREATE TABLE IF NOT EXISTS messages (
@@ -165,6 +167,11 @@ def init_db() -> None:
         );
         """
     )
+    existing_columns = {row["name"] for row in conn.execute("PRAGMA table_info(settings)")}
+    if "owner_id" not in existing_columns:
+        conn.execute("ALTER TABLE settings ADD COLUMN owner_id INTEGER")
+    if "owner_name" not in existing_columns:
+        conn.execute("ALTER TABLE settings ADD COLUMN owner_name TEXT")
     conn.commit()
     conn.close()
 
@@ -198,6 +205,36 @@ def set_setting(chat_id: int, key: str, value) -> None:
     conn.execute(f"UPDATE settings SET {key} = ? WHERE chat_id = ?", (value, chat_id))
     conn.commit()
     conn.close()
+
+
+def set_owner(chat_id: int, user_id: int, user_name: str) -> None:
+    get_settings(chat_id)
+    conn = db_connect()
+    conn.execute(
+        "UPDATE settings SET owner_id = ?, owner_name = ? WHERE chat_id = ?",
+        (user_id, user_name, chat_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+async def notify_chat_owner(chat_id: int, body: str, **kwargs) -> None:
+    """Отправляет пойманное сообщение владельцу настроек группы в личку.
+    Если владелец ещё не назначен (никто не запускал /settings) или бот
+    не может ему написать (не нажимал /start в личке) — падаем обратно
+    в группу, чтобы уведомление не потерялось молча."""
+    settings = get_settings(chat_id)
+    owner_id = settings.get("owner_id")
+    if owner_id:
+        try:
+            await bot.send_message(owner_id, body, **kwargs)
+            return
+        except (TelegramForbiddenError, TelegramBadRequest):
+            logger.warning(
+                "Не удалось отправить уведомление владельцу %s (чат %s) — шлю в группу",
+                owner_id, chat_id,
+            )
+    await bot.send_message(chat_id, body, **kwargs)
 
 
 # ==================== ПЕРЕВОДЫ ====================
@@ -476,6 +513,8 @@ def get_settings_menu(chat_id: int):
         state = "✅" if settings[key] else "❌"
         builder.button(text=f"{state} {t(lang, key)}", callback_data=f"open:{key}")
     builder.button(text=t(lang, "lang"), callback_data="open:lang")
+    owner_name = settings.get("owner_name") or "никто"
+    builder.button(text=f"📩 Уведомления получает: {owner_name}", callback_data="claim_owner")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -525,9 +564,17 @@ async def cmd_settings(message: Message):
     if not await is_group_admin(message.chat.id, message.from_user.id):
         await message.answer("⛔ Настройки доступны только администраторам чата.")
         return
-    lang = get_settings(message.chat.id)["lang"]
+    settings = get_settings(message.chat.id)
+    lang = settings["lang"]
+    claim_note = ""
+    if not settings.get("owner_id"):
+        set_owner(message.chat.id, message.from_user.id, message.from_user.full_name)
+        claim_note = (
+            "\n\n📩 Пойманные удалённые и изменённые сообщения теперь будут "
+            "приходить тебе в личные сообщения с ботом (а не в этот чат)."
+        )
     await message.answer(
-        f"{t(lang, 'settings_title')}\n\n{t(lang, 'settings_body')}",
+        f"{t(lang, 'settings_title')}\n\n{t(lang, 'settings_body')}{claim_note}",
         parse_mode="HTML",
         reply_markup=get_settings_menu(message.chat.id),
     )
@@ -655,6 +702,22 @@ async def cb_set_lang(callback: CallbackQuery):
     )
 
 
+@dp.callback_query(F.data == "claim_owner")
+async def cb_claim_owner(callback: CallbackQuery):
+    if not await is_group_admin(callback.message.chat.id, callback.from_user.id):
+        await callback.answer("Только для админов", show_alert=True)
+        return
+    set_owner(callback.message.chat.id, callback.from_user.id, callback.from_user.full_name)
+    await callback.answer("✅ Теперь уведомления идут тебе в личку")
+    settings = get_settings(callback.message.chat.id)
+    lang = settings["lang"]
+    await callback.message.edit_text(
+        f"{t(lang, 'settings_title')}\n\n{t(lang, 'settings_body')}",
+        parse_mode="HTML",
+        reply_markup=get_settings_menu(callback.message.chat.id),
+    )
+
+
 @dp.callback_query(F.data.startswith("open:"))
 async def cb_open_toggle(callback: CallbackQuery):
     key = callback.data.split(":")[1]
@@ -741,18 +804,38 @@ async def message_still_exists(chat_id: int, message_id: int) -> bool:
 
 
 async def announce_deleted(row: dict) -> None:
-    lang = get_settings(row["chat_id"])["lang"]
-    author = user_mention(row["user_id"], row["user_name"]) if row["user_id"] else "неизвестный"
-    header = f"🗑 <b>Поймано удалённое сообщение!</b>\n{DIVIDER}\n\n👤 Автор: {author}"
-    if row["media_type"]:
-        caption = header if not row["text"] else f"{header}\n\n{row['text']}"
+    settings = get_settings(row["chat_id"])
+    owner_id = settings.get("owner_id")
+
+    chat_label = ""
+    if owner_id:
         try:
-            await repost_media(row["chat_id"], row["media_type"], row["file_id"], caption)
+            chat = await bot.get_chat(row["chat_id"])
+            chat_label = f"\n💬 Чат: {chat.title or row['chat_id']}"
         except Exception:
-            logger.exception("Не удалось переслать удалённое медиа")
-    else:
-        body = f"{header}\n\n💬 {row['text'] or '(пусто)'}"
-        await bot.send_message(row["chat_id"], body, parse_mode="HTML")
+            pass
+
+    author = user_mention(row["user_id"], row["user_name"]) if row["user_id"] else "неизвестный"
+    header = f"🗑 <b>Поймано удалённое сообщение!</b>\n{DIVIDER}\n\n👤 Автор: {author}{chat_label}"
+
+    async def _send(target: int) -> None:
+        if row["media_type"]:
+            caption = header if not row["text"] else f"{header}\n\n{row['text']}"
+            await repost_media(target, row["media_type"], row["file_id"], caption)
+        else:
+            body = f"{header}\n\n💬 {row['text'] or '(пусто)'}"
+            await bot.send_message(target, body, parse_mode="HTML")
+
+    target_chat_id = owner_id or row["chat_id"]
+    try:
+        await _send(target_chat_id)
+    except (TelegramForbiddenError, TelegramBadRequest):
+        if not owner_id:
+            raise
+        logger.warning(
+            "Не удалось отправить владельцу %s (чат %s) — шлю в группу", owner_id, row["chat_id"]
+        )
+        await _send(row["chat_id"])
 
 
 async def deleted_message_poller() -> None:
@@ -835,13 +918,14 @@ async def handle_edited_message(message: Message):
         author = user_mention(
             message.from_user.id, message.from_user.full_name
         ) if message.from_user else "неизвестный"
+        chat_label = f"\n💬 Чат: {message.chat.title}" if settings.get("owner_id") else ""
         body = (
             "📝 <b>Изменённое сообщение:</b>\n\n"
             f"💬 <b>Старый текст:</b>\n« {old['text']} »\n\n"
             f"📝 <b>Новый текст:</b>\n« {new_text} »\n\n"
-            f"Изменил(а): {author}"
+            f"Изменил(а): {author}{chat_label}"
         )
-        await bot.send_message(message.chat.id, body, parse_mode="HTML")
+        await notify_chat_owner(message.chat.id, body, parse_mode="HTML")
     update_cached_text(message.chat.id, message.message_id, new_text)
 
 
