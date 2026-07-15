@@ -5,8 +5,9 @@ import logging
 import random
 import re
 import os
+from datetime import date
 from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, FSInputFile
+from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, FSInputFile, Update
 from aiogram.filters import CommandStart, Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.enums import ChatMemberStatus
@@ -60,6 +61,7 @@ def load_stats() -> dict:
             data.setdefault("random_question_used", 0)
             data.setdefault("question_opened", {})
             data.setdefault("broadcast_count", 0)
+            data.setdefault("helperchat_promo_seen", {})
             return data
         except (json.JSONDecodeError, OSError):
             logger.exception("Не удалось прочитать %s, статистика будет создана заново", STATS_FILE)
@@ -70,6 +72,7 @@ def load_stats() -> dict:
         "random_question_used": 0,
         "question_opened": {},
         "broadcast_count": 0,
+        "helperchat_promo_seen": {},
     }
 
 def save_stats() -> None:
@@ -84,6 +87,44 @@ stats = load_stats()
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
+
+# ==================== ЕЖЕДНЕВНОЕ НАПОМИНАНИЕ ПРО HELPERCHAT_BOT ====================
+HELPERCHAT_URL = "https://t.me/Helperchat_bot?start=vmeda"
+
+def get_helperchat_promo_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🚀 Запустить Helperchat_bot", url=HELPERCHAT_URL)
+    return builder.as_markup()
+
+async def send_helperchat_promo_if_new_day(user_id: int) -> None:
+    today = date.today().isoformat()
+    seen = stats["helperchat_promo_seen"]
+    if seen.get(str(user_id)) == today:
+        return
+    seen[str(user_id)] = today
+    save_stats()
+    try:
+        await bot.send_message(
+            user_id,
+            "🚀 <b>Не забудь запустить нашего бота-помощника</b>\n\n"
+            "Он тоже пригодится для подготовки — жми и запускай в один тап:\n"
+            f"👉 {HELPERCHAT_URL}",
+            parse_mode="HTML",
+            reply_markup=get_helperchat_promo_keyboard()
+        )
+    except Exception:
+        logger.exception("Не удалось отправить напоминание про Helperchat_bot пользователю %s", user_id)
+
+@dp.update.outer_middleware()
+async def helperchat_promo_middleware(handler, event: Update, data):
+    user = None
+    if event.message:
+        user = event.message.from_user
+    elif event.callback_query:
+        user = event.callback_query.from_user
+    if user and not user.is_bot:
+        await send_helperchat_promo_if_new_day(user.id)
+    return await handler(event, data)
 
 # ==================== СКРЫТЫЕ БИЛЕТЫ (40-50) ====================
 HIDDEN_TICKET_RANGE = (40, 50)
@@ -471,17 +512,14 @@ async def cmd_start(message: Message):
     if not await is_subscribed(user_id):
         builder = InlineKeyboardBuilder()
         builder.button(text="📢 Открыть канал Vmeda_examen", url="https://t.me/Vmeda_examen")
-        builder.button(text="🚀 Запустить Helperchat_bot", url="https://t.me/Helperchat_bot?start=vmeda")
-        builder.adjust(1)
         await message.answer(
             "👋 <b>Добро пожаловать!</b>\n\n"
             "Этот бот поможет подготовиться к экзаменам ВМедА:\n"
             "🧬 биология · ⚛️ физика · 🧪 химия\n\n"
             f"{DIVIDER}\n"
-            "Чтобы пользоваться ботом, выполни два условия:\n"
-            "1️⃣ 🔒 Подпишись на канал — https://t.me/Vmeda_examen\n"
-            "2️⃣ 🚀 Запусти бота — https://t.me/Helperchat_bot?start=vmeda\n\n"
-            "После этого нажми /start ещё раз.",
+            "🔒 Чтобы пользоваться ботом, подпишись на канал:\n"
+            "👉 https://t.me/Vmeda_examen\n\n"
+            "После подписки нажми /start ещё раз.",
             parse_mode="HTML",
             reply_markup=builder.as_markup()
         )
