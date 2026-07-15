@@ -544,30 +544,130 @@ def get_lang_menu():
 
 
 # ==================== ОБРАБОТЧИКИ: СЕРВИСНЫЕ ====================
+def build_intro_text() -> str:
+    return (
+        "🎣 <b>VICEGRAM</b> — ловец пропавших сообщений\n\n"
+        "Бот, от которого ничего не скроется. Вот что я умею:\n\n"
+        "🗑 <b>Ловлю удалённые сообщения</b> — увидишь, что от тебя скрыли\n"
+        "📝 <b>Ловлю изменённые сообщения</b> — покажу старый и новый текст рядом\n"
+        "🎭 <b>Стикеры, файлы, гифки</b> — ловятся вместе с текстом, ничего не теряется\n"
+        "⏳ <b>Исчезающие фото и видео</b> — сохраняю копию даже после самоуничтожения\n"
+        "⚡ <b>Огоньки активности</b> — рейтинг самых активных в чате\n"
+        "✋ <b>Анти-скам</b> — чищу мошеннические сообщения на автомате\n"
+        "🤖 <b>Свои команды</b> — настрой ответы бота под конкретный чат\n"
+        "📤 <b>Восстановление истории</b> — выгрузка переписки одним кликом\n"
+        "🌐 <b>Два языка</b> — русский и английский\n\n"
+        f"{DIVIDER}\n"
+        "Работаю и в личных чатах, и в группах. Начнём с личных — "
+        "это займёт меньше минуты."
+    )
+
+
+def get_intro_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔌 Настроить бота", callback_data="dm_setup")
+    return builder.as_markup()
+
+
+def build_setup_instructions(username: str) -> str:
+    return (
+        "🔐 <b>Подключение личных чатов</b>\n"
+        f"{DIVIDER}\n\n"
+        "1️⃣ Открой Настройки Telegram → «Изменить»\n"
+        "2️⃣ Найди пункт «Автоматизация чатов»\n"
+        f"3️⃣ Впиши <code>@{username}</code> → «Добавить»\n"
+        "4️⃣ Выбери «Все личные чаты, кроме…» (или только нужные)\n\n"
+        "Готово! Как только подключишь — я сам напишу сюда с "
+        "подтверждением ✅"
+    )
+
+
+def get_setup_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="👥 А если нужны группы?", callback_data="dm_group_info")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def build_group_instructions() -> str:
+    return (
+        "👥 <b>Ловля в группах</b>\n"
+        f"{DIVIDER}\n\n"
+        "Группы технически не входят в «Автоматизацию чатов» — Telegram "
+        "не даёт её на них распространить, это отдельный механизм только "
+        "для личных переписок. Для групп есть свой привычный способ:\n\n"
+        "1️⃣ Добавь меня в нужную группу\n"
+        "2️⃣ Выдай права администратора (минимум — удаление сообщений и "
+        "чтение истории)\n"
+        "3️⃣ Напиши в группе /settings — там же настроишь всё: удалённые/"
+        "изменённые сообщения, анти-скам, огоньки, команды и язык"
+    )
+
+
+def get_group_info_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔙 Назад", callback_data="dm_setup")
+    return builder.as_markup()
+
+
+def build_features_menu_text() -> str:
+    return (
+        "🎉 <b>Готово, личные чаты подключены!</b>\n"
+        f"{DIVIDER}\n\n"
+        "Буду присылать сюда пойманные удалённые и изменённые сообщения, "
+        "включая исчезающие фото и видео.\n\n"
+        "Что ещё можно посмотреть:"
+    )
+
+
+def get_features_menu_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="📋 Все возможности", callback_data="dm_features")
+    builder.button(text="👥 Настроить в группе", callback_data="dm_group_info")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def is_user_connected(user_id: int) -> bool:
+    conn = db_connect()
+    row = conn.execute(
+        "SELECT 1 FROM business_connections WHERE owner_id = ? AND is_enabled = 1", (user_id,)
+    ).fetchone()
+    conn.close()
+    return row is not None
+
+
 @dp.message(CommandStart())
 async def cmd_start(message: Message):
+    if is_user_connected(message.from_user.id):
+        await message.answer(
+            build_features_menu_text(), parse_mode="HTML", reply_markup=get_features_menu_keyboard()
+        )
+        return
+    await message.answer(build_intro_text(), parse_mode="HTML", reply_markup=get_intro_keyboard())
+
+
+@dp.callback_query(F.data == "dm_setup")
+async def cb_dm_setup(callback: CallbackQuery):
+    await callback.answer()
     me = await bot.get_me()
-    await message.answer(
-        "🎣 <b>VICEGRAM</b>\n\n"
-        "Профессионально ловлю удалённые и изменённые сообщения, "
-        "стикеры, файлы и гифки — в группах и в личных чатах.\n\n"
-        f"{DIVIDER}\n"
-        "📢 <b>В группе:</b> добавь меня и выдай права администратора "
-        "(минимум — удаление сообщений и чтение истории), затем "
-        "напиши в группе /settings.\n\n"
-        "💬 <b>В личных чатах:</b> подключи меня через встроенную "
-        "функцию Telegram «Автоматизация чатов» — это делается в твоих "
-        "настройках, без пароля и кода:\n"
-        "1. Настройки → «Изменить»\n"
-        "2. «Автоматизация чатов»\n"
-        f"3. Впиши <b>@{me.username}</b> и нажми «Добавить»\n"
-        "4. Выбери, какие чаты мне доверить (все личные, кроме выбранных — "
-        "или только выбранные)\n\n"
-        "После подключения я сам пришлю подтверждение сюда, в этот диалог — "
-        "и с этого момента буду ловить в твоих личных чатах удалённые и "
-        "изменённые сообщения.",
-        parse_mode="HTML",
+    await callback.message.edit_text(
+        build_setup_instructions(me.username), parse_mode="HTML", reply_markup=get_setup_keyboard()
     )
+
+
+@dp.callback_query(F.data == "dm_group_info")
+async def cb_dm_group_info(callback: CallbackQuery):
+    await callback.answer()
+    await callback.message.edit_text(
+        build_group_instructions(), parse_mode="HTML", reply_markup=get_group_info_keyboard()
+    )
+
+
+@dp.callback_query(F.data == "dm_features")
+async def cb_dm_features(callback: CallbackQuery):
+    await callback.answer()
+    await callback.message.edit_text(build_intro_text(), parse_mode="HTML")
 
 
 @dp.message(Command("settings"), F.chat.type.in_({ChatType.GROUP, ChatType.SUPERGROUP}))
@@ -709,17 +809,12 @@ async def announce_deleted_business(owner_id: int, row: dict) -> None:
 
 @dp.message(Command("settings"), F.chat.type == ChatType.PRIVATE)
 async def cmd_settings_private(message: Message):
-    me = await bot.get_me()
-    await message.answer(
-        f"⚙️ <b>Настройки</b>\n{DIVIDER}\n\n"
-        "Настройки конкретной группы (удалённые/изменённые сообщения, "
-        "анти-скам, огоньки, команды) задаются командой /settings прямо "
-        "в этой группе.\n\n"
-        "Ловля личных сообщений подключается не здесь, а в самом Telegram:\n"
-        "Настройки → «Изменить» → «Автоматизация чатов» → впиши "
-        f"<b>@{me.username}</b> → «Добавить».",
-        parse_mode="HTML",
-    )
+    if is_user_connected(message.from_user.id):
+        await message.answer(
+            build_features_menu_text(), parse_mode="HTML", reply_markup=get_features_menu_keyboard()
+        )
+        return
+    await message.answer(build_intro_text(), parse_mode="HTML", reply_markup=get_intro_keyboard())
 
 
 @dp.business_connection()
@@ -731,10 +826,9 @@ async def handle_business_connection(connection: BusinessConnection):
     try:
         await bot.send_message(
             connection.user.id,
-            "✅ <b>Личные чаты подключены!</b>\n\n"
-            "Буду ловить в них удалённые и изменённые сообщения — "
-            "уведомления будут приходить сюда, в этот диалог.",
+            build_features_menu_text(),
             parse_mode="HTML",
+            reply_markup=get_features_menu_keyboard(),
         )
     except Exception:
         logger.exception("Не удалось отправить подтверждение подключения личных чатов")
