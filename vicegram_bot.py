@@ -22,6 +22,7 @@
 """
 
 import asyncio
+import html
 import logging
 import os
 import re
@@ -176,6 +177,8 @@ def get_settings(chat_id: int) -> dict:
 
 
 def set_setting(chat_id: int, key: str, value) -> None:
+    if key not in TOGGLE_KEYS and key != "lang":
+        raise ValueError(f"Недопустимый ключ настройки: {key!r}")
     get_settings(chat_id)  # гарантирует наличие строки
     conn = db_connect()
     conn.execute(f"UPDATE settings SET {key} = ? WHERE chat_id = ?", (value, chat_id))
@@ -288,7 +291,7 @@ def looks_like_scam(text: str) -> bool:
 
 # ==================== ПОМОЩНИКИ ====================
 def user_mention(user_id: int, name: str, username: str = None) -> str:
-    safe_name = (name or "пользователь").replace("<", "").replace(">", "")
+    safe_name = html.escape(name) if name else "пользователь"
     label = f'<a href="tg://user?id={user_id}">{safe_name}</a>'
     if username:
         label += f" (@{username})"
@@ -297,7 +300,7 @@ def user_mention(user_id: int, name: str, username: str = None) -> str:
 
 def format_author(name: str, username: str = None) -> str:
     """Как user_mention, но без кликабельной ссылки — для случаев без user_id."""
-    safe_name = (name or "неизвестный").replace("<", "").replace(">", "")
+    safe_name = html.escape(name) if name else "неизвестный"
     return f"{safe_name} (@{username})" if username else safe_name
 
 
@@ -783,15 +786,16 @@ def mark_business_message_deleted(owner_id: int, chat_id: int, message_id: int) 
 async def announce_deleted_business(owner_id: int, row: dict) -> None:
     author = format_author(row["user_name"], row["user_username"])
     header = f"🗑💌 <b>Поймано удалённое личное сообщение!</b>\n{DIVIDER}\n\n👤 От: {author}"
+    safe_text = html.escape(row["text"]) if row["text"] else row["text"]
     try:
         media_path = row["media_path"]
         if row["media_type"] and media_path and os.path.exists(media_path):
-            caption = header if not row["text"] else f"{header}\n\n{row['text']}"
+            caption = header if not safe_text else f"{header}\n\n{safe_text}"
             await repost_media(owner_id, row["media_type"], FSInputFile(media_path), caption)
         elif row["media_type"]:
             # локальной копии нет (например, БД пересоздана) — пробуем через file_id,
             # но для самоуничтожающихся медиа он может быть уже недействителен
-            caption = header if not row["text"] else f"{header}\n\n{row['text']}"
+            caption = header if not safe_text else f"{header}\n\n{safe_text}"
             try:
                 await repost_media(owner_id, row["media_type"], row["file_id"], caption)
             except TelegramBadRequest:
@@ -801,7 +805,7 @@ async def announce_deleted_business(owner_id: int, row: dict) -> None:
                     parse_mode="HTML",
                 )
         else:
-            body = f"{header}\n\n💬 {row['text'] or '(пусто)'}"
+            body = f"{header}\n\n💬 {safe_text or '(пусто)'}"
             await bot.send_message(owner_id, body, parse_mode="HTML")
     except Exception:
         logger.exception("Не удалось отправить оповещение об удалении личного сообщения")
@@ -856,8 +860,8 @@ async def handle_edited_business_message(message: Message):
         ) if message.from_user else "неизвестный"
         body = (
             "📝✏️ <b>Изменённое личное сообщение:</b>\n\n"
-            f"💬 <b>Старый текст:</b>\n« {old['text']} »\n\n"
-            f"✨ <b>Новый текст:</b>\n« {new_text} »\n\n"
+            f"💬 <b>Старый текст:</b>\n« {html.escape(old['text'])} »\n\n"
+            f"✨ <b>Новый текст:</b>\n« {html.escape(new_text)} »\n\n"
             f"👤 От: {author}"
         )
         try:
@@ -956,6 +960,9 @@ async def cb_toggle(callback: CallbackQuery):
         await callback.answer("Только для админов", show_alert=True)
         return
     _, key, value = callback.data.split(":")
+    if key not in TOGGLE_KEYS:
+        await callback.answer("Неизвестный раздел настроек", show_alert=True)
+        return
     set_setting(callback.message.chat.id, key, int(value))
     await callback.answer("✅ Сохранено")
     settings = get_settings(callback.message.chat.id)
@@ -991,7 +998,7 @@ async def cb_cmd_list(callback: CallbackQuery):
     else:
         lines = ["🤖 <b>Команды в чате:</b>", DIVIDER, ""]
         for c in commands:
-            lines.append(f"• <code>{c['trigger']}</code>")
+            lines.append(f"• <code>{html.escape(c['trigger'])}</code>")
         text = "\n".join(lines)
     builder = InlineKeyboardBuilder()
     builder.button(text="🔙 Назад", callback_data="open:custom_commands")
@@ -1026,7 +1033,8 @@ async def announce_deleted(row: dict) -> None:
     if owner_id:
         try:
             chat = await bot.get_chat(row["chat_id"])
-            chat_label = f"\n💬 Чат: {chat.title or row['chat_id']}"
+            chat_title = html.escape(chat.title) if chat.title else row["chat_id"]
+            chat_label = f"\n💬 Чат: {chat_title}"
         except Exception:
             pass
 
@@ -1035,13 +1043,14 @@ async def announce_deleted(row: dict) -> None:
         if row["user_id"] else "неизвестный"
     )
     header = f"🗑🔍 <b>Поймано удалённое сообщение!</b>\n{DIVIDER}\n\n👤 Автор: {author}{chat_label}"
+    safe_text = html.escape(row["text"]) if row["text"] else row["text"]
 
     async def _send(target: int) -> None:
         if row["media_type"]:
-            caption = header if not row["text"] else f"{header}\n\n{row['text']}"
+            caption = header if not safe_text else f"{header}\n\n{safe_text}"
             await repost_media(target, row["media_type"], row["file_id"], caption)
         else:
-            body = f"{header}\n\n💬 {row['text'] or '(пусто)'}"
+            body = f"{header}\n\n💬 {safe_text or '(пусто)'}"
             await bot.send_message(target, body, parse_mode="HTML")
 
     target_chat_id = owner_id or row["chat_id"]
@@ -1145,11 +1154,11 @@ async def handle_edited_message(message: Message):
         author = user_mention(
             message.from_user.id, message.from_user.full_name, message.from_user.username
         ) if message.from_user else "неизвестный"
-        chat_label = f"\n💬 Чат: {message.chat.title}" if settings.get("owner_id") else ""
+        chat_label = f"\n💬 Чат: {html.escape(message.chat.title)}" if settings.get("owner_id") and message.chat.title else ""
         body = (
             "📝✏️ <b>Изменённое сообщение:</b>\n\n"
-            f"💬 <b>Старый текст:</b>\n« {old['text']} »\n\n"
-            f"✨ <b>Новый текст:</b>\n« {new_text} »\n\n"
+            f"💬 <b>Старый текст:</b>\n« {html.escape(old['text'])} »\n\n"
+            f"✨ <b>Новый текст:</b>\n« {html.escape(new_text)} »\n\n"
             f"👤 Изменил(а): {author}{chat_label}"
         )
         await notify_chat_owner(message.chat.id, body, parse_mode="HTML")
