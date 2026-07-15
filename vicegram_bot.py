@@ -5,24 +5,23 @@
 считает "огоньки" активности, банит скам-сообщения и поддерживает
 кастомные команды в чатах.
 
-Важное техническое ограничение Bot API: Telegram не присылает боту
-событие "сообщение удалено" никогда, ни при каких правах, и вообще
-не даёт боту доступа к личным перепискам между двумя другими людьми.
-Поэтому реализованы два независимых механизма ловли:
+Механизмы ловли:
 
 - В группах (где бот состоит участником) — периодическая тихая проверка
   существования сообщения (copy_message в лог-чат с мгновенным удалением
-  копии), задержка до ~30 секунд.
-- В личных чатах — через MTProto-юзербот (Telethon), подключаемый самим
-  пользователем командой /connect: он вводит номер телефона и код прямо
-  в диалоге с ботом, после чего Telethon-сессия видит его личные диалоги
-  как реальный участник и ловит удаления/правки в реальном времени.
-  См. vicegram_userbot.py.
+  копии), задержка до ~30 секунд. Bot API не присылает боту событие
+  "сообщение удалено" в группах ни при каких правах, поэтому мгновенно
+  здесь поймать нельзя.
+- В личных чатах — через официальную функцию Telegram "Автоматизация
+  чатов" (Telegram Business): пользователь сам подключает бота в своих
+  настройках (Настройки → Изменить → Автоматизация чатов → username бота),
+  без пароля и кода. После подключения Telegram сам присылает боту
+  события business_message / edited_business_message /
+  deleted_business_messages — включая настоящее мгновенное событие
+  удаления с указанием чата, в отличие от групп.
 """
 
 import asyncio
-import base64
-import hashlib
 import logging
 import os
 import re
@@ -36,14 +35,13 @@ from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.filters import Command, CommandStart
 from aiogram.types import (
     BufferedInputFile,
+    BusinessConnection,
+    BusinessMessagesDeleted,
     CallbackQuery,
     InlineKeyboardButton,
     Message,
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from cryptography.fernet import Fernet
-
-from vicegram_userbot import UserbotManager
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -60,41 +58,10 @@ _log_chat_env = os.getenv("VICEGRAM_LOG_CHAT_ID")
 LOG_CHAT_ID = int(_log_chat_env) if _log_chat_env else ADMIN_ID
 
 DB_PATH = os.getenv("VICEGRAM_DB_PATH", "vicegram.db")
-MEDIA_CACHE_DIR = os.getenv("VICEGRAM_MEDIA_CACHE_DIR", "vicegram_media_cache")
 DIVIDER = "━━━━━━━━━━━━━━"
-
-# Личные чаты (MTProto): нужны api_id/api_hash одного приложения на
-# my.telegram.org, зарегистрированного оператором бота. Каждый пользователь
-# логинится под своим номером — api_id/api_hash при этом общие для всех.
-USERBOT_API_ID = os.getenv("VICEGRAM_API_ID")
-USERBOT_API_HASH = os.getenv("VICEGRAM_API_HASH")
-USERBOT_FEATURE_ENABLED = bool(USERBOT_API_ID and USERBOT_API_HASH)
-
-
-def _derive_fernet_key() -> bytes:
-    """Ключ шифрования session-строк. Можно задать явно через
-    VICEGRAM_ENCRYPTION_KEY (сгенерировать: Fernet.generate_key()),
-    иначе выводится из BOT_TOKEN — отдельный секрет не обязателен."""
-    env_key = os.getenv("VICEGRAM_ENCRYPTION_KEY")
-    if env_key:
-        return env_key.encode()
-    digest = hashlib.sha256(BOT_TOKEN.encode()).digest()
-    return base64.urlsafe_b64encode(digest)
-
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
-
-userbot_manager: UserbotManager | None = None
-if USERBOT_FEATURE_ENABLED:
-    userbot_manager = UserbotManager(
-        bot=bot,
-        db_path=DB_PATH,
-        api_id=int(USERBOT_API_ID),
-        api_hash=USERBOT_API_HASH,
-        fernet=Fernet(_derive_fernet_key()),
-        media_dir=MEDIA_CACHE_DIR,
-    )
 
 # ==================== БАЗА ДАННЫХ ====================
 def db_connect() -> sqlite3.Connection:
@@ -131,7 +98,6 @@ def init_db() -> None:
             text TEXT,
             media_type TEXT,
             file_id TEXT,
-            media_path TEXT,
             date INTEGER NOT NULL,
             deleted INTEGER NOT NULL DEFAULT 0,
             expired INTEGER NOT NULL DEFAULT 0,
@@ -142,11 +108,11 @@ def init_db() -> None:
         CREATE INDEX IF NOT EXISTS idx_messages_next_check
             ON messages (source, deleted, expired, next_check_at);
 
-        CREATE TABLE IF NOT EXISTS user_sessions (
-            user_id INTEGER PRIMARY KEY,
-            phone TEXT,
-            session_enc BLOB NOT NULL,
-            status TEXT NOT NULL DEFAULT 'connected',
+        CREATE TABLE IF NOT EXISTS business_connections (
+            business_connection_id TEXT PRIMARY KEY,
+            owner_id INTEGER NOT NULL,
+            owner_chat_id INTEGER NOT NULL,
+            is_enabled INTEGER NOT NULL DEFAULT 1,
             connected_at INTEGER NOT NULL
         );
 
@@ -545,6 +511,7 @@ def get_lang_menu():
 # ==================== ОБРАБОТЧИКИ: СЕРВИСНЫЕ ====================
 @dp.message(CommandStart())
 async def cmd_start(message: Message):
+    me = await bot.get_me()
     await message.answer(
         "🎣 <b>VICEGRAM</b>\n\n"
         "Профессионально ловлю удалённые и изменённые сообщения, "
@@ -553,8 +520,17 @@ async def cmd_start(message: Message):
         "📢 <b>В группе:</b> добавь меня и выдай права администратора "
         "(минимум — удаление сообщений и чтение истории), затем "
         "напиши в группе /settings.\n\n"
-        "💬 <b>В личных чатах:</b> напиши мне сюда /connect, чтобы "
-        "подключить ловлю удалений в твоих личных перепиcках.",
+        "💬 <b>В личных чатах:</b> подключи меня через встроенную "
+        "функцию Telegram «Автоматизация чатов» — это делается в твоих "
+        "настройках, без пароля и кода:\n"
+        "1. Настройки → «Изменить»\n"
+        "2. «Автоматизация чатов»\n"
+        f"3. Впиши <b>@{me.username}</b> и нажми «Добавить»\n"
+        "4. Выбери, какие чаты мне доверить (все личные, кроме выбранных — "
+        "или только выбранные)\n\n"
+        "После подключения я сам пришлю подтверждение сюда, в этот диалог — "
+        "и с этого момента буду ловить в твоих личных чатах удалённые и "
+        "изменённые сообщения.",
         parse_mode="HTML",
     )
 
@@ -580,90 +556,180 @@ async def cmd_settings(message: Message):
     )
 
 
-# ==================== ЛИЧНЫЕ ЧАТЫ: ПОДКЛЮЧЕНИЕ MTPROTO ====================
-def get_dm_menu(user_id: int):
-    builder = InlineKeyboardBuilder()
-    if not USERBOT_FEATURE_ENABLED:
-        builder.button(text="🔐 Личные чаты (не настроено на сервере)", callback_data="dm_noop")
-    elif userbot_manager.is_connected(user_id):
-        builder.button(text="🔌 Отключить личные чаты", callback_data="dm_disconnect")
-    else:
-        builder.button(text="🔐 Подключить личные чаты", callback_data="dm_connect")
-    builder.adjust(1)
-    return builder.as_markup()
+# ==================== ЛИЧНЫЕ ЧАТЫ: TELEGRAM BUSINESS (АВТОМАТИЗАЦИЯ ЧАТОВ) ====================
+def get_business_connection(business_connection_id: str):
+    conn = db_connect()
+    row = conn.execute(
+        "SELECT * FROM business_connections WHERE business_connection_id = ?",
+        (business_connection_id,),
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def upsert_business_connection(connection: BusinessConnection) -> None:
+    conn = db_connect()
+    conn.execute(
+        """
+        INSERT INTO business_connections
+            (business_connection_id, owner_id, owner_chat_id, is_enabled, connected_at)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(business_connection_id) DO UPDATE SET
+            is_enabled = excluded.is_enabled,
+            connected_at = excluded.connected_at
+        """,
+        (
+            connection.id,
+            connection.user.id,
+            connection.user_chat_id,
+            int(connection.is_enabled),
+            int(time.time()),
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def cache_business_message(owner_id: int, message: Message) -> None:
+    media_type, file_id = extract_media(message)
+    text = message.text or message.caption
+    now = int(time.time())
+    conn = db_connect()
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO messages
+            (source, owner_id, chat_id, message_id, user_id, user_name, text, media_type, file_id,
+             date, deleted, expired, check_count, next_check_at)
+        VALUES ('business', ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1, 0, 0)
+        """,
+        (
+            owner_id,
+            message.chat.id,
+            message.message_id,
+            message.from_user.id if message.from_user else None,
+            message.from_user.full_name if message.from_user else None,
+            text,
+            media_type,
+            file_id,
+            now,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_cached_business_message(owner_id: int, chat_id: int, message_id: int):
+    conn = db_connect()
+    row = conn.execute(
+        "SELECT * FROM messages WHERE source = 'business' AND owner_id = ? AND chat_id = ? AND message_id = ?",
+        (owner_id, chat_id, message_id),
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def mark_business_message_deleted(owner_id: int, chat_id: int, message_id: int) -> None:
+    conn = db_connect()
+    conn.execute(
+        "UPDATE messages SET deleted = 1 WHERE source = 'business' AND owner_id = ? AND chat_id = ? AND message_id = ?",
+        (owner_id, chat_id, message_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+async def announce_deleted_business(owner_id: int, row: dict) -> None:
+    author = row["user_name"] or "собеседник"
+    header = f"🗑 <b>Поймано удалённое личное сообщение!</b>\n{DIVIDER}\n\n👤 От: {author}"
+    try:
+        if row["media_type"]:
+            caption = header if not row["text"] else f"{header}\n\n{row['text']}"
+            await repost_media(owner_id, row["media_type"], row["file_id"], caption)
+        else:
+            body = f"{header}\n\n💬 {row['text'] or '(пусто)'}"
+            await bot.send_message(owner_id, body, parse_mode="HTML")
+    except Exception:
+        logger.exception("Не удалось отправить оповещение об удалении личного сообщения")
 
 
 @dp.message(Command("settings"), F.chat.type == ChatType.PRIVATE)
 async def cmd_settings_private(message: Message):
+    me = await bot.get_me()
     await message.answer(
         f"⚙️ <b>Настройки</b>\n{DIVIDER}\n\n"
         "Настройки конкретной группы (удалённые/изменённые сообщения, "
         "анти-скам, огоньки, команды) задаются командой /settings прямо "
         "в этой группе.\n\n"
-        "Здесь можно подключить ловлю удалённых и изменённых сообщений "
-        "в твоих личных перепиcках с другими людьми.",
+        "Ловля личных сообщений подключается не здесь, а в самом Telegram:\n"
+        "Настройки → «Изменить» → «Автоматизация чатов» → впиши "
+        f"<b>@{me.username}</b> → «Добавить».",
         parse_mode="HTML",
-        reply_markup=get_dm_menu(message.from_user.id),
     )
 
 
-async def start_connect_flow(target: Message, user_id: int) -> None:
-    if not USERBOT_FEATURE_ENABLED or userbot_manager is None:
-        await target.answer(
-            "⚠️ Ловля личных чатов не настроена на этом сервере — "
-            "оператору бота нужно задать переменные окружения VICEGRAM_API_ID "
-            "и VICEGRAM_API_HASH (получить на my.telegram.org)."
+@dp.business_connection()
+async def handle_business_connection(connection: BusinessConnection):
+    upsert_business_connection(connection)
+    if not connection.is_enabled:
+        logger.info("Бизнес-подключение %s отключено пользователем %s", connection.id, connection.user.id)
+        return
+    try:
+        await bot.send_message(
+            connection.user.id,
+            "✅ <b>Личные чаты подключены!</b>\n\n"
+            "Буду ловить в них удалённые и изменённые сообщения — "
+            "уведомления будут приходить сюда, в этот диалог.",
+            parse_mode="HTML",
         )
+    except Exception:
+        logger.exception("Не удалось отправить подтверждение подключения личных чатов")
+
+
+@dp.business_message()
+async def handle_business_message(message: Message):
+    connection = get_business_connection(message.business_connection_id)
+    if not connection or not connection["is_enabled"]:
         return
-    if userbot_manager.is_connected(user_id):
-        await target.answer("✅ Личные чаты уже подключены. Чтобы переподключить — сначала /disconnect.")
+    cache_business_message(connection["owner_id"], message)
+
+
+@dp.edited_business_message()
+async def handle_edited_business_message(message: Message):
+    connection = get_business_connection(message.business_connection_id)
+    if not connection or not connection["is_enabled"]:
         return
-    await userbot_manager.begin_login(user_id)
-    await target.answer(
-        "🔐 <b>Подключение личных чатов</b>\n"
-        f"{DIVIDER}\n\n"
-        "⚠️ Дальше я попрошу код подтверждения из Telegram — это стандартный "
-        "код входа в твой аккаунт. <b>Никогда никому его не пересылай</b>, "
-        "кроме как сюда, в этот диалог, и только для собственного аккаунта.\n\n"
-        "Напиши номер телефона в международном формате, например "
-        "<code>+79991234567</code>.",
-        parse_mode="HTML",
-    )
+    owner_id = connection["owner_id"]
+    old = get_cached_business_message(owner_id, message.chat.id, message.message_id)
+    new_text = message.text or message.caption or ""
+    if old and old["text"] and old["text"] != new_text:
+        author = user_mention(
+            message.from_user.id, message.from_user.full_name
+        ) if message.from_user else "неизвестный"
+        body = (
+            "📝 <b>Изменённое личное сообщение:</b>\n\n"
+            f"💬 <b>Старый текст:</b>\n« {old['text']} »\n\n"
+            f"📝 <b>Новый текст:</b>\n« {new_text} »\n\n"
+            f"От: {author}"
+        )
+        try:
+            await bot.send_message(owner_id, body, parse_mode="HTML")
+        except Exception:
+            logger.exception("Не удалось отправить оповещение об изменении личного сообщения")
+    cache_business_message(owner_id, message)
 
 
-async def do_disconnect(target: Message, user_id: int) -> None:
-    if not userbot_manager:
-        await target.answer("Личные чаты и так не подключены.")
+@dp.deleted_business_messages()
+async def handle_deleted_business_messages(deleted: BusinessMessagesDeleted):
+    connection = get_business_connection(deleted.business_connection_id)
+    if not connection or not connection["is_enabled"]:
         return
-    changed = await userbot_manager.disconnect_user(user_id)
-    await target.answer("🔌 Личные чаты отключены." if changed else "Личные чаты и так не были подключены.")
-
-
-@dp.message(Command("connect"), F.chat.type == ChatType.PRIVATE)
-async def cmd_connect(message: Message):
-    await start_connect_flow(message, message.from_user.id)
-
-
-@dp.message(Command("disconnect"), F.chat.type == ChatType.PRIVATE)
-async def cmd_disconnect(message: Message):
-    await do_disconnect(message, message.from_user.id)
-
-
-@dp.callback_query(F.data == "dm_connect")
-async def cb_dm_connect(callback: CallbackQuery):
-    await callback.answer()
-    await start_connect_flow(callback.message, callback.from_user.id)
-
-
-@dp.callback_query(F.data == "dm_disconnect")
-async def cb_dm_disconnect(callback: CallbackQuery):
-    await callback.answer()
-    await do_disconnect(callback.message, callback.from_user.id)
-
-
-@dp.callback_query(F.data == "dm_noop")
-async def cb_dm_noop(callback: CallbackQuery):
-    await callback.answer("Функция не настроена на этом сервере", show_alert=True)
+    owner_id = connection["owner_id"]
+    for message_id in deleted.message_ids:
+        row = get_cached_business_message(owner_id, deleted.chat.id, message_id)
+        if not row:
+            continue
+        mark_business_message_deleted(owner_id, deleted.chat.id, message_id)
+        await announce_deleted_business(owner_id, row)
 
 
 @dp.callback_query(F.data == "open:main")
@@ -1039,85 +1105,6 @@ async def process_pending_command_input(message: Message, pending: dict) -> None
         await message.answer(f"✅ Команда «{trigger}» добавлена.")
 
 
-# ==================== ЛИЧНЫЕ ЧАТЫ: ШАГИ ВХОДА (ТЕЛЕФОН/КОД/ПАРОЛЬ) ====================
-# Регистрируется последним среди приватных обработчиков: реагирует только
-# если у пользователя есть незавершённый вход, иначе не мешает командам.
-PHONE_RE = re.compile(r"^\+?\d{7,15}$")
-
-
-@dp.message(F.chat.type == ChatType.PRIVATE, F.text)
-async def handle_private_login_step(message: Message):
-    if message.text.startswith("/"):
-        return
-    if not userbot_manager or not userbot_manager.has_pending_login(message.from_user.id):
-        return
-
-    user_id = message.from_user.id
-    stage = userbot_manager.get_pending_stage(user_id)
-    text = message.text.strip()
-
-    if stage == "phone":
-        if not PHONE_RE.match(text):
-            await message.answer("⚠️ Это не похоже на номер телефона. Пример: +79991234567")
-            return
-        result = await userbot_manager.submit_phone(user_id, text)
-        if result == "code_sent":
-            await message.answer("📩 Код отправлен в Telegram на этот номер. Введи его сюда.")
-        elif result == "invalid_phone":
-            await message.answer("⚠️ Неверный номер телефона. Попробуй ещё раз.")
-        elif result.startswith("flood_wait"):
-            await message.answer(f"⏳ Telegram просит подождать {result.split(':')[1]} сек. Попробуй позже: /connect")
-            await userbot_manager.cancel_login(user_id)
-        else:
-            await message.answer("⚠️ Не получилось отправить код. Попробуй /connect ещё раз позже.")
-            await userbot_manager.cancel_login(user_id)
-        return
-
-    if stage == "code":
-        result = await userbot_manager.submit_code(user_id, text.replace(" ", ""))
-        try:
-            await message.delete()
-        except TelegramBadRequest:
-            pass
-        if result == "success":
-            await message.answer("✅ Личные чаты подключены! Буду ловить в них удалённые и изменённые сообщения.")
-        elif result == "need_password":
-            await message.answer("🔒 На аккаунте включена двухфакторная аутентификация. Введи пароль.")
-        elif result == "invalid_code":
-            await message.answer("⚠️ Неверный код. Попробуй ещё раз.")
-        elif result.startswith("flood_wait"):
-            await message.answer(f"⏳ Telegram просит подождать {result.split(':')[1]} сек. Попробуй позже: /connect")
-            await userbot_manager.cancel_login(user_id)
-        else:
-            await message.answer("⚠️ Ошибка входа. Попробуй /connect ещё раз позже.")
-            await userbot_manager.cancel_login(user_id)
-        return
-
-    if stage == "password":
-        result = await userbot_manager.submit_password(user_id, text)
-        try:
-            await message.delete()
-        except TelegramBadRequest:
-            pass
-        if result == "success":
-            await message.answer("✅ Личные чаты подключены! Буду ловить в них удалённые и изменённые сообщения.")
-        elif result.startswith("flood_wait"):
-            await message.answer(f"⏳ Telegram просит подождать {result.split(':')[1]} сек. Попробуй позже: /connect")
-            await userbot_manager.cancel_login(user_id)
-        else:
-            await message.answer("⚠️ Неверный пароль. Попробуй ещё раз, либо начни заново: /connect")
-        return
-
-
-async def userbot_cleanup_loop() -> None:
-    while True:
-        await asyncio.sleep(3600)
-        try:
-            await userbot_manager.cleanup_old_media()
-        except Exception:
-            logger.exception("Ошибка очистки кэша личных чатов")
-
-
 async def start_health_server() -> None:
     """Заглушка-HTTP-сервер для платформ вроде Render, которым нужен
     открытый порт с ответом на запрос (health check), иначе они считают
@@ -1144,15 +1131,6 @@ async def main() -> None:
     logger.info("VICEGRAM запускается...")
     asyncio.create_task(start_health_server())
     asyncio.create_task(deleted_message_poller())
-    if userbot_manager:
-        await userbot_manager.start_existing_sessions()
-        asyncio.create_task(userbot_cleanup_loop())
-        logger.info("Ловля личных чатов включена (VICEGRAM_API_ID/HASH заданы)")
-    else:
-        logger.info(
-            "Ловля личных чатов выключена — задай VICEGRAM_API_ID и VICEGRAM_API_HASH, "
-            "чтобы включить /connect"
-        )
     await dp.start_polling(bot)
 
 
