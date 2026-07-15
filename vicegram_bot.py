@@ -1987,6 +1987,31 @@ def upsert_business_connection(connection: BusinessConnection) -> None:
     conn.close()
 
 
+async def notify_unsavable_media(owner_id: int, message: Message, media_type: str) -> None:
+    """Медиа пришло, но скачать копию сразу не удалось — почти наверняка это
+    фото/видео «на один просмотр»: Telegram не отдаёт боту такие файлы, это
+    ограничение платформы, обойти его нечем. Хотя бы сообщаем владельцу,
+    что именно пропало, вместо тихого умолчания."""
+    if not await gate_by_trial(owner_id):
+        return
+    author = format_author(
+        message.from_user.full_name if message.from_user else None,
+        message.from_user.username if message.from_user else None,
+    )
+    kind = {"photo": "фото", "video": "видео", "video_note": "видеосообщение"}.get(media_type, "медиа")
+    try:
+        await bot.send_message(
+            owner_id,
+            f"⏳🔒 <b>Пришло {kind} «на один просмотр»</b>\n{DIVIDER}\n\n"
+            f"👤 От: {author}\n\n"
+            "Telegram не даёт боту скачать такие файлы — это защита приватности "
+            "на уровне платформы, её нельзя обойти в рамках Bot API.",
+            parse_mode="HTML",
+        )
+    except Exception:
+        logger.warning("Не удалось уведомить владельца %s о неперехваченном view-once медиа", owner_id)
+
+
 async def cache_business_message(owner_id: int, message: Message) -> None:
     media_type, file_id = extract_media(message)
     text = message.text or message.caption
@@ -1995,6 +2020,8 @@ async def cache_business_message(owner_id: int, message: Message) -> None:
     media_path = None
     if file_id:
         media_path = await download_media_copy(file_id, owner_id, message.chat.id, message.message_id)
+        if media_path is None:
+            await notify_unsavable_media(owner_id, message, media_type)
 
     conn = db_connect()
     conn.execute(
