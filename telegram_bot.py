@@ -16,7 +16,12 @@ from aiogram.dispatcher.event.bases import SkipHandler
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8469931783:AAFhj045ghZz4MBDBzfqP2Vs-SN4tucAngo")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+if not BOT_TOKEN:
+    raise RuntimeError(
+        "BOT_TOKEN is not set. Set it as an environment variable (e.g. Railway → Variables) — "
+        "never hardcode the token in source code."
+    )
 CHANNEL_ID = "@Vmeda_examen"
 ADMIN_ID = 1326779223
 STATS_DIR = os.getenv("STATS_DIR", ".")
