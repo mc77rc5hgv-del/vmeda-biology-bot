@@ -1034,10 +1034,31 @@ async def userbot_cleanup_loop() -> None:
             logger.exception("Ошибка очистки кэша личных чатов")
 
 
+async def start_health_server() -> None:
+    """Заглушка-HTTP-сервер для платформ вроде Render, которым нужен
+    открытый порт с ответом на запрос (health check), иначе они считают
+    сервис неживым и убивают его. Самому боту это не нужно — он работает
+    через long polling, а не через входящие HTTP-запросы."""
+    from aiohttp import web
+
+    async def health(request):
+        return web.Response(text="VICEGRAM is running")
+
+    app = web.Application()
+    app.router.add_get("/", health)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.getenv("PORT", "8080"))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    logger.info("Health-check HTTP сервер слушает порт %s", port)
+
+
 # ==================== ЗАПУСК ====================
 async def main() -> None:
     init_db()
     logger.info("VICEGRAM запускается...")
+    asyncio.create_task(start_health_server())
     asyncio.create_task(deleted_message_poller())
     if userbot_manager:
         await userbot_manager.start_existing_sessions()
