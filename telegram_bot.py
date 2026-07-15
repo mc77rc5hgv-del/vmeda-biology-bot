@@ -469,15 +469,21 @@ async def cmd_start(message: Message):
     save_stats()
 
     if not await is_subscribed(user_id):
+        builder = InlineKeyboardBuilder()
+        builder.button(text="📢 Открыть канал Vmeda_examen", url="https://t.me/Vmeda_examen")
+        builder.button(text="🚀 Запустить Helperchat_bot", url="https://t.me/Helperchat_bot")
+        builder.adjust(1)
         await message.answer(
             "👋 <b>Добро пожаловать!</b>\n\n"
             "Этот бот поможет подготовиться к экзаменам ВМедА:\n"
             "🧬 биология · ⚛️ физика · 🧪 химия\n\n"
             f"{DIVIDER}\n"
-            "🔒 Чтобы пользоваться ботом, подпишись на канал:\n"
-            "👉 https://t.me/Vmeda_examen\n\n"
-            "После подписки нажми /start ещё раз.",
-            parse_mode="HTML"
+            "Чтобы пользоваться ботом, выполни два условия:\n"
+            "1️⃣ 🔒 Подпишись на канал — https://t.me/Vmeda_examen\n"
+            "2️⃣ 🚀 Запусти бота — https://t.me/Helperchat_bot\n\n"
+            "После этого нажми /start ещё раз.",
+            parse_mode="HTML",
+            reply_markup=builder.as_markup()
         )
         return
 
