@@ -38,6 +38,7 @@ from aiogram.types import (
     BusinessConnection,
     BusinessMessagesDeleted,
     CallbackQuery,
+    FSInputFile,
     InlineKeyboardButton,
     Message,
 )
@@ -58,6 +59,8 @@ _log_chat_env = os.getenv("VICEGRAM_LOG_CHAT_ID")
 LOG_CHAT_ID = int(_log_chat_env) if _log_chat_env else ADMIN_ID
 
 DB_PATH = os.getenv("VICEGRAM_DB_PATH", "vicegram.db")
+MEDIA_CACHE_DIR = os.getenv("VICEGRAM_MEDIA_CACHE_DIR", "vicegram_media_cache")
+os.makedirs(MEDIA_CACHE_DIR, exist_ok=True)
 DIVIDER = "━━━━━━━━━━━━━━"
 
 bot = Bot(token=BOT_TOKEN)
@@ -95,9 +98,11 @@ def init_db() -> None:
             message_id INTEGER NOT NULL,
             user_id INTEGER,
             user_name TEXT,
+            user_username TEXT,
             text TEXT,
             media_type TEXT,
             file_id TEXT,
+            media_path TEXT,
             date INTEGER NOT NULL,
             deleted INTEGER NOT NULL DEFAULT 0,
             expired INTEGER NOT NULL DEFAULT 0,
@@ -138,6 +143,11 @@ def init_db() -> None:
         conn.execute("ALTER TABLE settings ADD COLUMN owner_id INTEGER")
     if "owner_name" not in existing_columns:
         conn.execute("ALTER TABLE settings ADD COLUMN owner_name TEXT")
+    message_columns = {row["name"] for row in conn.execute("PRAGMA table_info(messages)")}
+    if "user_username" not in message_columns:
+        conn.execute("ALTER TABLE messages ADD COLUMN user_username TEXT")
+    if "media_path" not in message_columns:
+        conn.execute("ALTER TABLE messages ADD COLUMN media_path TEXT")
     conn.commit()
     conn.close()
 
@@ -277,9 +287,18 @@ def looks_like_scam(text: str) -> bool:
 
 
 # ==================== ПОМОЩНИКИ ====================
-def user_mention(user_id: int, name: str) -> str:
+def user_mention(user_id: int, name: str, username: str = None) -> str:
     safe_name = (name or "пользователь").replace("<", "").replace(">", "")
-    return f'<a href="tg://user?id={user_id}">{safe_name}</a>'
+    label = f'<a href="tg://user?id={user_id}">{safe_name}</a>'
+    if username:
+        label += f" (@{username})"
+    return label
+
+
+def format_author(name: str, username: str = None) -> str:
+    """Как user_mention, но без кликабельной ссылки — для случаев без user_id."""
+    safe_name = (name or "неизвестный").replace("<", "").replace(">", "")
+    return f"{safe_name} (@{username})" if username else safe_name
 
 
 async def is_group_admin(chat_id: int, user_id: int) -> bool:
@@ -337,6 +356,21 @@ async def repost_media(chat_id: int, media_type: str, file_id: str, caption: str
         await bot.send_audio(chat_id, file_id, **kwargs)
 
 
+async def download_media_copy(file_id: str, owner_id: int, chat_id: int, message_id: int) -> str:
+    """Сразу скачивает копию медиа на диск. Нужно для личных чатов: если
+    фото/видео самоуничтожается после просмотра, Telegram может отозвать
+    доступ к file_id ещё до того, как придёт событие удаления — тогда
+    переслать поймать удаление уже будет нечем. Скачивание сразу при
+    получении подстраховывает от этого."""
+    try:
+        path = os.path.join(MEDIA_CACHE_DIR, f"{owner_id}_{chat_id}_{message_id}")
+        result = await bot.download(file_id, destination=path)
+        return path if result else None
+    except Exception:
+        logger.warning("Не удалось заранее скачать медиа %s", file_id)
+        return None
+
+
 # ==================== КЭШИРОВАНИЕ СООБЩЕНИЙ ====================
 BACKOFF_SCHEDULE = [30, 60, 120, 300, 900, 1800, 3600]  # секунды
 MAX_MESSAGE_AGE = 48 * 3600  # после этого возраста перестаём проверять
@@ -350,15 +384,16 @@ def cache_message(message: Message) -> None:
     conn.execute(
         """
         INSERT OR REPLACE INTO messages
-            (source, owner_id, chat_id, message_id, user_id, user_name, text, media_type, file_id,
-             date, deleted, expired, check_count, next_check_at)
-        VALUES ('group_bot', 0, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?)
+            (source, owner_id, chat_id, message_id, user_id, user_name, user_username, text,
+             media_type, file_id, date, deleted, expired, check_count, next_check_at)
+        VALUES ('group_bot', 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?)
         """,
         (
             message.chat.id,
             message.message_id,
             message.from_user.id if message.from_user else None,
             message.from_user.full_name if message.from_user else None,
+            message.from_user.username if message.from_user else None,
             text,
             media_type,
             file_id,
@@ -590,17 +625,22 @@ def upsert_business_connection(connection: BusinessConnection) -> None:
     conn.close()
 
 
-def cache_business_message(owner_id: int, message: Message) -> None:
+async def cache_business_message(owner_id: int, message: Message) -> None:
     media_type, file_id = extract_media(message)
     text = message.text or message.caption
     now = int(time.time())
+
+    media_path = None
+    if file_id:
+        media_path = await download_media_copy(file_id, owner_id, message.chat.id, message.message_id)
+
     conn = db_connect()
     conn.execute(
         """
         INSERT OR REPLACE INTO messages
-            (source, owner_id, chat_id, message_id, user_id, user_name, text, media_type, file_id,
-             date, deleted, expired, check_count, next_check_at)
-        VALUES ('business', ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1, 0, 0)
+            (source, owner_id, chat_id, message_id, user_id, user_name, user_username, text,
+             media_type, file_id, media_path, date, deleted, expired, check_count, next_check_at)
+        VALUES ('business', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1, 0, 0)
         """,
         (
             owner_id,
@@ -608,9 +648,11 @@ def cache_business_message(owner_id: int, message: Message) -> None:
             message.message_id,
             message.from_user.id if message.from_user else None,
             message.from_user.full_name if message.from_user else None,
+            message.from_user.username if message.from_user else None,
             text,
             media_type,
             file_id,
+            media_path,
             now,
         ),
     )
@@ -639,12 +681,25 @@ def mark_business_message_deleted(owner_id: int, chat_id: int, message_id: int) 
 
 
 async def announce_deleted_business(owner_id: int, row: dict) -> None:
-    author = row["user_name"] or "собеседник"
-    header = f"🗑 <b>Поймано удалённое личное сообщение!</b>\n{DIVIDER}\n\n👤 От: {author}"
+    author = format_author(row["user_name"], row["user_username"])
+    header = f"🗑💌 <b>Поймано удалённое личное сообщение!</b>\n{DIVIDER}\n\n👤 От: {author}"
     try:
-        if row["media_type"]:
+        media_path = row["media_path"]
+        if row["media_type"] and media_path and os.path.exists(media_path):
             caption = header if not row["text"] else f"{header}\n\n{row['text']}"
-            await repost_media(owner_id, row["media_type"], row["file_id"], caption)
+            await repost_media(owner_id, row["media_type"], FSInputFile(media_path), caption)
+        elif row["media_type"]:
+            # локальной копии нет (например, БД пересоздана) — пробуем через file_id,
+            # но для самоуничтожающихся медиа он может быть уже недействителен
+            caption = header if not row["text"] else f"{header}\n\n{row['text']}"
+            try:
+                await repost_media(owner_id, row["media_type"], row["file_id"], caption)
+            except TelegramBadRequest:
+                await bot.send_message(
+                    owner_id,
+                    f"{header}\n\n⚠️ Медиа было исчезающим и уже недоступно для пересылки.",
+                    parse_mode="HTML",
+                )
         else:
             body = f"{header}\n\n💬 {row['text'] or '(пусто)'}"
             await bot.send_message(owner_id, body, parse_mode="HTML")
@@ -690,7 +745,7 @@ async def handle_business_message(message: Message):
     connection = get_business_connection(message.business_connection_id)
     if not connection or not connection["is_enabled"]:
         return
-    cache_business_message(connection["owner_id"], message)
+    await cache_business_message(connection["owner_id"], message)
 
 
 @dp.edited_business_message()
@@ -703,19 +758,19 @@ async def handle_edited_business_message(message: Message):
     new_text = message.text or message.caption or ""
     if old and old["text"] and old["text"] != new_text:
         author = user_mention(
-            message.from_user.id, message.from_user.full_name
+            message.from_user.id, message.from_user.full_name, message.from_user.username
         ) if message.from_user else "неизвестный"
         body = (
-            "📝 <b>Изменённое личное сообщение:</b>\n\n"
+            "📝✏️ <b>Изменённое личное сообщение:</b>\n\n"
             f"💬 <b>Старый текст:</b>\n« {old['text']} »\n\n"
-            f"📝 <b>Новый текст:</b>\n« {new_text} »\n\n"
-            f"От: {author}"
+            f"✨ <b>Новый текст:</b>\n« {new_text} »\n\n"
+            f"👤 От: {author}"
         )
         try:
             await bot.send_message(owner_id, body, parse_mode="HTML")
         except Exception:
             logger.exception("Не удалось отправить оповещение об изменении личного сообщения")
-    cache_business_message(owner_id, message)
+    await cache_business_message(owner_id, message)
 
 
 @dp.deleted_business_messages()
@@ -881,8 +936,11 @@ async def announce_deleted(row: dict) -> None:
         except Exception:
             pass
 
-    author = user_mention(row["user_id"], row["user_name"]) if row["user_id"] else "неизвестный"
-    header = f"🗑 <b>Поймано удалённое сообщение!</b>\n{DIVIDER}\n\n👤 Автор: {author}{chat_label}"
+    author = (
+        user_mention(row["user_id"], row["user_name"], row["user_username"])
+        if row["user_id"] else "неизвестный"
+    )
+    header = f"🗑🔍 <b>Поймано удалённое сообщение!</b>\n{DIVIDER}\n\n👤 Автор: {author}{chat_label}"
 
     async def _send(target: int) -> None:
         if row["media_type"]:
@@ -958,12 +1016,21 @@ async def deleted_message_poller() -> None:
                     conn.close()
                 await asyncio.sleep(0.1)
 
-            # чистим совсем старые записи группового кэша (личный кэш чистит UserbotManager)
+            # чистим совсем старые записи кэша (7 дней) — и файлы медиа личных чатов
+            cutoff = now - 7 * 24 * 3600
             conn = db_connect()
-            conn.execute(
-                "DELETE FROM messages WHERE source = 'group_bot' AND date < ?",
-                (now - 7 * 24 * 3600,),
-            )
+            conn.execute("DELETE FROM messages WHERE source = 'group_bot' AND date < ?", (cutoff,))
+            old_media = conn.execute(
+                "SELECT media_path FROM messages WHERE source = 'business' AND date < ? AND media_path IS NOT NULL",
+                (cutoff,),
+            ).fetchall()
+            for old_row in old_media:
+                try:
+                    if old_row["media_path"] and os.path.exists(old_row["media_path"]):
+                        os.remove(old_row["media_path"])
+                except OSError:
+                    pass
+            conn.execute("DELETE FROM messages WHERE source = 'business' AND date < ?", (cutoff,))
             conn.commit()
             conn.close()
         except Exception:
@@ -982,14 +1049,14 @@ async def handle_edited_message(message: Message):
     new_text = message.text or message.caption or ""
     if old and old["text"] and old["text"] != new_text:
         author = user_mention(
-            message.from_user.id, message.from_user.full_name
+            message.from_user.id, message.from_user.full_name, message.from_user.username
         ) if message.from_user else "неизвестный"
         chat_label = f"\n💬 Чат: {message.chat.title}" if settings.get("owner_id") else ""
         body = (
-            "📝 <b>Изменённое сообщение:</b>\n\n"
+            "📝✏️ <b>Изменённое сообщение:</b>\n\n"
             f"💬 <b>Старый текст:</b>\n« {old['text']} »\n\n"
-            f"📝 <b>Новый текст:</b>\n« {new_text} »\n\n"
-            f"Изменил(а): {author}{chat_label}"
+            f"✨ <b>Новый текст:</b>\n« {new_text} »\n\n"
+            f"👤 Изменил(а): {author}{chat_label}"
         )
         await notify_chat_owner(message.chat.id, body, parse_mode="HTML")
     update_cached_text(message.chat.id, message.message_id, new_text)
@@ -1006,9 +1073,11 @@ async def cmd_flames(message: Message):
     if not leaderboard:
         await message.answer("⚡ Пока никто не поддерживает огонёк активности.")
         return
-    lines = ["⚡ <b>Огоньки чата — топ активности</b>", DIVIDER, ""]
+    medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+    lines = ["⚡🔥 <b>Огоньки чата — топ активности</b>", DIVIDER, ""]
     for i, entry in enumerate(leaderboard, 1):
-        lines.append(f"{i}. {entry['user_name']} — 🔥 {entry['streak']}")
+        mark = medals.get(i, f"{i}.")
+        lines.append(f"{mark} {entry['user_name']} — 🔥 {entry['streak']}")
     await message.answer("\n".join(lines), parse_mode="HTML")
 
 
@@ -1069,10 +1138,10 @@ async def handle_group_message(message: Message):
             await message.delete()
         except TelegramBadRequest:
             pass
-        author = user_mention(message.from_user.id, message.from_user.full_name)
+        author = user_mention(message.from_user.id, message.from_user.full_name, message.from_user.username)
         await bot.send_message(
             message.chat.id,
-            f"✋ <b>Анти-скам:</b> сообщение от {author} похоже на мошенничество и было удалено.",
+            f"✋🚫 <b>Анти-скам сработал!</b>\n{DIVIDER}\n\nСообщение от {author} похоже на мошенничество и было удалено.",
             parse_mode="HTML",
         )
         return
