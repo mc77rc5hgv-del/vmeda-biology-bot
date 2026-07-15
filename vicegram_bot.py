@@ -29,6 +29,7 @@ import re
 import sqlite3
 import time
 from datetime import datetime, timedelta, timezone
+from urllib.parse import quote
 
 import aiohttp
 
@@ -150,18 +151,30 @@ def iter_plans(tier_code: str):
 
 CRYPTOBOT_API_TOKEN = os.getenv("VICEGRAM_CRYPTOBOT_TOKEN")
 CRYPTOBOT_API_URL = "https://pay.crypt.bot/api"
-MANUAL_PAYMENT_INFO = os.getenv(
-    "VICEGRAM_MANUAL_PAYMENT_INFO",
-    "Уточни реквизиты у администратора бота.",
-)
+MANUAL_PAYMENT_USERNAME = os.getenv("VICEGRAM_MANUAL_PAYMENT_USERNAME", "vice_helper")
+
+
+def build_manual_payment_url(plan: dict) -> str:
+    """Ссылка на чат с админом с уже готовым текстом заявки — клиент сразу
+    попадает в переписку, не тратя время на скриншоты в самом боте."""
+    prefill = (
+        f"Здравствуйте! Хочу оформить подписку «{plan['label']}» — {plan['rub']}₽."
+    )
+    return f"https://t.me/{MANUAL_PAYMENT_USERNAME}?text={quote(prefill)}"
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
 # ==================== БАЗА ДАННЫХ ====================
 def db_connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=10)
     conn.row_factory = sqlite3.Row
+    # WAL — читатели больше не блокируются на писателе (иначе конкурентные
+    # апдейты от разных чатов периодически стопорили ответ бота на команды);
+    # busy_timeout — ждать освободившийся лок вместо мгновенного "database is locked".
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA busy_timeout=5000")
     return conn
 
 
@@ -204,6 +217,10 @@ def init_db() -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_messages_next_check
             ON messages (source, deleted, expired, next_check_at);
+        CREATE INDEX IF NOT EXISTS idx_messages_source_date
+            ON messages (source, date);
+        CREATE INDEX IF NOT EXISTS idx_messages_chat_date
+            ON messages (source, chat_id, date);
 
         CREATE TABLE IF NOT EXISTS business_connections (
             business_connection_id TEXT PRIMARY KEY,
@@ -232,6 +249,7 @@ def init_db() -> None:
         CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
             first_name TEXT,
+            username TEXT,
             trial_started_at INTEGER NOT NULL,
             subscribed_until INTEGER,
             subscription_tier TEXT,
@@ -239,6 +257,7 @@ def init_db() -> None:
             banned INTEGER NOT NULL DEFAULT 0,
             created_at INTEGER NOT NULL
         );
+        CREATE INDEX IF NOT EXISTS idx_users_username ON users (username);
 
         CREATE TABLE IF NOT EXISTS payments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -275,6 +294,9 @@ def init_db() -> None:
         conn.execute("ALTER TABLE users ADD COLUMN banned INTEGER NOT NULL DEFAULT 0")
     if "subscription_tier" not in user_columns:
         conn.execute("ALTER TABLE users ADD COLUMN subscription_tier TEXT")
+    if "username" not in user_columns:
+        conn.execute("ALTER TABLE users ADD COLUMN username TEXT")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_users_username ON users (username)")
     conn.commit()
     conn.close()
 
@@ -345,19 +367,21 @@ async def notify_chat_owner(chat_id: int, body: str, **kwargs) -> None:
 
 
 # ==================== ПРОБНЫЙ ПЕРИОД И РЕФЕРАЛЫ ====================
-def register_user(user_id: int, name: str, referrer_id: int = None) -> bool:
+def register_user(user_id: int, name: str, referrer_id: int = None, username: str = None) -> bool:
     """Регистрирует пользователя при первом обращении к боту (создаёт запись
     о начале пробного периода). Возвращает True, если пользователь новый.
     Если пришёл по реферальной ссылке — засчитывает реферала пригласившему
-    (только для новых пользователей и только если реферер существует)."""
+    (только для новых пользователей и только если реферер существует).
+    Если передан username — держит его свежим и для уже существующих
+    пользователей (нужно для поиска по @username в админке)."""
     conn = db_connect()
     row = conn.execute("SELECT 1 FROM users WHERE user_id = ?", (user_id,)).fetchone()
     is_new = row is None
     now = int(time.time())
     if is_new:
         conn.execute(
-            "INSERT INTO users (user_id, first_name, trial_started_at, created_at) VALUES (?, ?, ?, ?)",
-            (user_id, name, now, now),
+            "INSERT INTO users (user_id, first_name, username, trial_started_at, created_at) VALUES (?, ?, ?, ?, ?)",
+            (user_id, name, username, now, now),
         )
         if referrer_id and referrer_id != user_id:
             referrer_exists = conn.execute(
@@ -371,6 +395,8 @@ def register_user(user_id: int, name: str, referrer_id: int = None) -> bool:
                     )
                 except sqlite3.IntegrityError:
                     pass
+    elif username:
+        conn.execute("UPDATE users SET username = ? WHERE user_id = ?", (username, user_id))
     conn.commit()
     conn.close()
     return is_new
@@ -558,12 +584,35 @@ def get_user_admin_summary(user_id: int) -> dict:
     return {
         "user_id": user_id,
         "first_name": row["first_name"],
+        "username": row["username"],
         "banned": bool(row["banned"]),
         "subscribed_until": row["subscribed_until"],
         "trial_days_left": info.get("days_left"),
         "trial_active": info.get("active"),
         "referral_count": info.get("referral_count", 0),
     }
+
+
+def find_user_id_by_username(username: str) -> int:
+    """Регистронезависимый поиск user_id по @username (без @, ведущие/хвостовые
+    пробелы уже обрезаны вызывающей стороной). None, если не найден."""
+    conn = db_connect()
+    row = conn.execute(
+        "SELECT user_id FROM users WHERE username = ? COLLATE NOCASE", (username,)
+    ).fetchone()
+    conn.close()
+    return row["user_id"] if row else None
+
+
+def resolve_target_user_id(text: str):
+    """Разбирает ввод админа: число — это user_id как есть (даже если
+    пользователь ещё не писал боту — так можно выдать подписку заранее);
+    @username или username — ищет среди уже писавших боту. None — не разобрал."""
+    text = text.strip()
+    if text.lstrip("-").isdigit():
+        return int(text)
+    username = text.lstrip("@").strip()
+    return find_user_id_by_username(username) if username else None
 
 
 def record_payment(user_id: int, method: str, plan: str, amount: str, external_id: str = None) -> int:
@@ -1162,7 +1211,7 @@ def get_tier_selection_keyboard():
 @dp.callback_query(F.data == "dm_subscribe")
 async def cb_dm_subscribe(callback: CallbackQuery):
     await callback.answer()
-    register_user(callback.from_user.id, callback.from_user.full_name)
+    register_user(callback.from_user.id, callback.from_user.full_name, username=callback.from_user.username)
     await edit_dm_screen(callback, build_tier_selection_text(), get_tier_selection_keyboard())
 
 
@@ -1208,7 +1257,7 @@ def build_payment_method_text(plan: dict) -> str:
         f"{plan['tier_tagline']}{joke_line}\n\n"
         f"⭐ {plan['stars']} Stars — оплата прямо в Telegram\n"
         f"💎 {plan['usdt']} USDT — крипта через @CryptoBot\n"
-        "🏦 Перевод — по реквизитам, с подтверждением администратором\n\n"
+        "🏦 Перевод — переписка с администратором в отдельном чате\n\n"
         "Выбери способ оплаты:"
     )
 
@@ -1218,7 +1267,7 @@ def get_payment_method_keyboard(plan: dict):
     builder.button(text=f"⭐ Stars — {plan['stars']}", callback_data=f"pay_stars:{plan['code']}")
     if CRYPTOBOT_API_TOKEN:
         builder.button(text=f"💎 Крипта — {plan['usdt']} USDT", callback_data=f"pay_crypto:{plan['code']}")
-    builder.button(text="🏦 Перевод администратору", callback_data=f"pay_manual:{plan['code']}")
+    builder.button(text="🏦 Перевод администратору", url=build_manual_payment_url(plan))
     builder.button(text="🔙 Назад", callback_data=f"sub_tier:{plan['tier_code']}")
     builder.adjust(1)
     return builder.as_markup()
@@ -1380,31 +1429,11 @@ async def cb_check_crypto(callback: CallbackQuery):
         await callback.answer("Пока не вижу оплату. Попробуй ещё раз через минуту.", show_alert=True)
 
 
-# ==================== ОПЛАТА: РУЧНОЙ ПЕРЕВОД + ПОДТВЕРЖДЕНИЕ АДМИНОМ ====================
-# ключ — user_id, значение — id ожидающего подтверждения платежа
-PENDING_MANUAL_PAYMENT: dict[int, int] = {}
-
-
-@dp.callback_query(F.data.startswith("pay_manual:"))
-async def cb_pay_manual(callback: CallbackQuery):
-    plan_code = callback.data.split(":", 1)[1]
-    try:
-        plan = get_plan(plan_code)
-    except (KeyError, StopIteration, ValueError):
-        await callback.answer("Неизвестный план", show_alert=True)
-        return
-    await callback.answer()
-    payment_id = record_payment(callback.from_user.id, "manual", plan["code"], f"{plan['rub']}₽")
-    PENDING_MANUAL_PAYMENT[callback.from_user.id] = payment_id
-    await callback.message.answer(
-        f"🏦 <b>Оплата переводом</b>\n{DIVIDER}\n\n"
-        f"{html.escape(MANUAL_PAYMENT_INFO)}\n\n"
-        f"Тариф: <b>{plan['label']}</b>\n"
-        f"Сумма: <b>{plan['rub']}₽</b>\n\n"
-        "После перевода пришли сюда скриншот чека или просто напиши "
-        "сообщение — я перешлю администратору на подтверждение.",
-        parse_mode="HTML",
-    )
+# ==================== ОПЛАТА: РУЧНОЙ ПЕРЕВОД ====================
+# Кнопка "Перевод администратору" — прямая ссылка на чат с готовым текстом
+# заявки (см. build_manual_payment_url), без промежуточных экранов в самом
+# боте. Дальше клиент и админ договариваются в том чате напрямую, а админ
+# продлевает подписку вручную через /admin.
 
 
 @dp.callback_query(F.data.startswith("admin_confirm_pay:"))
@@ -1499,15 +1528,21 @@ def build_admin_help_text() -> str:
     return (
         "ℹ️ <b>Как управлять подписками</b>\n"
         f"{DIVIDER}\n\n"
-        "👤 <b>Найти пользователя</b> — вводишь user_id, видишь статус триала/"
-        "подписки/бана, оттуда же можно продлить на 30 дней или забанить.\n\n"
-        "➕ <b>Продлить подписку</b> — вводишь user_id и количество дней "
-        "вручную (любое число, не только 30) — прибавится к текущей "
-        "подписке, либо начнётся от сегодняшнего дня, если её не было.\n\n"
-        "🏦 <b>Ручные платежи</b> — когда пользователь выбирает оплату "
-        "переводом, его чек с кнопками «Подтвердить»/«Отклонить» приходит "
-        "сразу всем троим админам в личку — нажать может любой, кто "
-        "увидит первым, подписка продлевается автоматически.\n\n"
+        "👤 <b>Найти пользователя</b> — вводишь user_id <b>или @username</b>, "
+        "видишь статус триала/подписки/бана, оттуда же можно продлить на "
+        "30 дней или забанить.\n\n"
+        "➕ <b>Продлить подписку</b> — вводишь user_id (или @username) и "
+        "количество дней вручную (любое число, не только 30) — прибавится "
+        "к текущей подписке, либо начнётся от сегодняшнего дня, если её "
+        "не было.\n\n"
+        "🏦 <b>Ручные платежи</b> — кнопка «Перевод администратору» сразу "
+        "открывает клиенту чат с готовым текстом заявки (тариф и цена в "
+        "рублях), минуя бота. Договорившись об оплате там, продли клиенту "
+        "подписку вручную через «👤 Найти пользователя» → «➕ Продлить».\n\n"
+        "⭐💎 <b>Stars и крипта</b> — подтверждаются автоматически (Stars — "
+        "сразу, крипта — по кнопке «Я оплатил»), но если что-то пошло не "
+        "так, заявку всё равно можно подтвердить/отклонить вручную кнопкой "
+        "в разделе «💰 Платежи».\n\n"
         "📢 <b>Рассылка</b> — текст уйдёт всем, кто хоть раз писал "
         "боту /start (в личке или как владелец группы).\n\n"
         "🚫 <b>Бан</b> — забаненный не получает ответы бота нигде: ни в "
@@ -1601,18 +1636,23 @@ async def cb_admin_payments(callback: CallbackQuery):
         return
     await callback.answer()
     payments = get_recent_payments(15)
+    builder = InlineKeyboardBuilder()
     if not payments:
         text = f"💰 <b>Платежи</b>\n{DIVIDER}\n\nПлатежей пока нет."
     else:
         status_emoji = {"confirmed": "✅", "pending": "⏳", "rejected": "❌"}
-        lines = ["💰 <b>Последние платежи</b>", DIVIDER, ""]
+        lines = ["💰 <b>Последние платежи</b>", DIVIDER, "", "Stars и крипта подтверждаются автоматически — "
+                  "кнопки ниже нужны только для зависших ⏳ заявок:", ""]
         for p in payments:
             ts = datetime.fromtimestamp(p["created_at"], tz=timezone.utc).strftime("%d.%m %H:%M")
             mark = status_emoji.get(p["status"], "❓")
             lines.append(f"{mark} #{p['id']} · {ts} · {p['method']} · {p['amount']} · user <code>{p['user_id']}</code>")
+            if p["status"] == "pending":
+                builder.button(text=f"✅ #{p['id']}", callback_data=f"admin_confirm_pay:{p['id']}")
+                builder.button(text=f"❌ #{p['id']}", callback_data=f"admin_reject_pay:{p['id']}")
         text = "\n".join(lines)
-    builder = InlineKeyboardBuilder()
-    builder.button(text="🔙 Назад", callback_data="admin_panel")
+        builder.adjust(2)
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="admin_panel"))
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=builder.as_markup())
 
 
@@ -1626,7 +1666,9 @@ async def cb_admin_find_user(callback: CallbackQuery):
     builder = InlineKeyboardBuilder()
     builder.button(text="🔙 Отмена", callback_data="admin_panel")
     await callback.message.edit_text(
-        "👤 Пришли <b>user_id</b> пользователя (числом).", parse_mode="HTML", reply_markup=builder.as_markup()
+        "👤 Пришли <b>user_id</b> (числом) или <b>@username</b> пользователя.",
+        parse_mode="HTML",
+        reply_markup=builder.as_markup(),
     )
 
 
@@ -1640,7 +1682,7 @@ async def cb_admin_extend(callback: CallbackQuery):
     builder = InlineKeyboardBuilder()
     builder.button(text="🔙 Отмена", callback_data="admin_panel")
     await callback.message.edit_text(
-        "➕ Пришли <b>user_id</b> пользователя, которому продлить подписку.",
+        "➕ Пришли <b>user_id</b> или <b>@username</b> пользователя, которому продлить подписку.",
         parse_mode="HTML",
         reply_markup=builder.as_markup(),
     )
@@ -1666,10 +1708,12 @@ def build_user_summary_text(summary: dict) -> str:
     sub_str = "нет"
     if summary["subscribed_until"]:
         sub_str = datetime.fromtimestamp(summary["subscribed_until"], tz=timezone.utc).strftime("%d.%m.%Y")
+    username_line = f"@{html.escape(summary['username'])}" if summary.get("username") else "—"
     return (
         f"👤 <b>Пользователь</b> <code>{summary['user_id']}</code>\n"
         f"{DIVIDER}\n\n"
         f"Имя: {html.escape(summary['first_name'] or '—')}\n"
+        f"Username: {username_line}\n"
         f"Забанен: {'Да 🚫' if summary['banned'] else 'Нет'}\n"
         f"Подписка до: <b>{sub_str}</b>\n"
         f"Пробный период: {summary['trial_days_left']} дн. "
@@ -1733,10 +1777,12 @@ async def process_pending_admin_input(message: Message, pending: dict) -> None:
     text = (message.text or "").strip()
 
     if stage == "find_user":
-        try:
-            target_id = int(text)
-        except ValueError:
-            await message.answer("⚠️ Это не похоже на user_id (нужно число). Попробуй ещё раз.")
+        target_id = resolve_target_user_id(text)
+        if target_id is None:
+            await message.answer(
+                "⚠️ Не нашёл такого пользователя. Пришли user_id (числом) или "
+                "@username — но только если он уже писал боту раньше."
+            )
             return
         PENDING_ADMIN_INPUT.pop(admin_id, None)
         summary = get_user_admin_summary(target_id)
@@ -1750,10 +1796,12 @@ async def process_pending_admin_input(message: Message, pending: dict) -> None:
         )
 
     elif stage == "extend_user_id":
-        try:
-            target_id = int(text)
-        except ValueError:
-            await message.answer("⚠️ Это не похоже на user_id (нужно число). Попробуй ещё раз.")
+        target_id = resolve_target_user_id(text)
+        if target_id is None:
+            await message.answer(
+                "⚠️ Не нашёл такого пользователя. Пришли user_id (числом) или "
+                "@username — но только если он уже писал боту раньше."
+            )
             return
         PENDING_ADMIN_INPUT[admin_id] = {"stage": "extend_days", "target_id": target_id}
         await message.answer(f"На сколько дней продлить пользователю {target_id}? Пришли число.")
@@ -1810,7 +1858,7 @@ async def cmd_start(message: Message, command: CommandObject):
             referrer_id = int(command.args[3:])
         except ValueError:
             referrer_id = None
-    register_user(message.from_user.id, message.from_user.full_name, referrer_id)
+    register_user(message.from_user.id, message.from_user.full_name, referrer_id, message.from_user.username)
 
     if is_user_connected(message.from_user.id):
         await send_dm_screen(
@@ -1867,7 +1915,7 @@ async def cb_dm_features(callback: CallbackQuery):
 @dp.callback_query(F.data == "dm_referral")
 async def cb_dm_referral(callback: CallbackQuery):
     await callback.answer()
-    register_user(callback.from_user.id, callback.from_user.full_name)
+    register_user(callback.from_user.id, callback.from_user.full_name, username=callback.from_user.username)
     me = await bot.get_me()
     await edit_dm_screen(
         callback,
@@ -1886,7 +1934,7 @@ async def cmd_settings(message: Message):
     claim_note = ""
     if not settings.get("owner_id"):
         set_owner(message.chat.id, message.from_user.id, message.from_user.full_name)
-        register_user(message.from_user.id, message.from_user.full_name)
+        register_user(message.from_user.id, message.from_user.full_name, username=message.from_user.username)
         claim_note = (
             "\n\n📩 Пойманные удалённые и изменённые сообщения теперь будут "
             "приходить тебе в личные сообщения с ботом (а не в этот чат)."
@@ -2022,7 +2070,7 @@ async def cmd_settings_private(message: Message):
     if is_user_banned(message.from_user.id):
         await message.answer("🚫 Доступ к боту ограничен администратором.")
         return
-    register_user(message.from_user.id, message.from_user.full_name)
+    register_user(message.from_user.id, message.from_user.full_name, username=message.from_user.username)
     if is_user_connected(message.from_user.id):
         await send_dm_screen(
             message,
@@ -2036,7 +2084,7 @@ async def cmd_settings_private(message: Message):
 @dp.business_connection()
 async def handle_business_connection(connection: BusinessConnection):
     upsert_business_connection(connection)
-    register_user(connection.user.id, connection.user.full_name)
+    register_user(connection.user.id, connection.user.full_name, username=connection.user.username)
     if not connection.is_enabled:
         logger.info("Бизнес-подключение %s отключено пользователем %s", connection.id, connection.user.id)
         return
@@ -2141,7 +2189,7 @@ async def cb_claim_owner(callback: CallbackQuery):
         await callback.answer("Только для админов", show_alert=True)
         return
     set_owner(callback.message.chat.id, callback.from_user.id, callback.from_user.full_name)
-    register_user(callback.from_user.id, callback.from_user.full_name)
+    register_user(callback.from_user.id, callback.from_user.full_name, username=callback.from_user.username)
     await callback.answer("✅ Теперь уведомления идут тебе в личку")
     settings = get_settings(callback.message.chat.id)
     lang = settings["lang"]
@@ -2283,7 +2331,11 @@ async def announce_deleted(row: dict) -> None:
         await _send(row["chat_id"])
 
 
+CLEANUP_INTERVAL_SECONDS = 900  # чистка старого кэша — раз в 15 минут, не на каждом тике поллера
+
+
 async def deleted_message_poller() -> None:
+    last_cleanup_at = 0
     while True:
         try:
             now = int(time.time())
@@ -2337,23 +2389,27 @@ async def deleted_message_poller() -> None:
                     conn.close()
                 await asyncio.sleep(0.1)
 
-            # чистим совсем старые записи кэша (7 дней) — и файлы медиа личных чатов
-            cutoff = now - 7 * 24 * 3600
-            conn = db_connect()
-            conn.execute("DELETE FROM messages WHERE source = 'group_bot' AND date < ?", (cutoff,))
-            old_media = conn.execute(
-                "SELECT media_path FROM messages WHERE source = 'business' AND date < ? AND media_path IS NOT NULL",
-                (cutoff,),
-            ).fetchall()
-            for old_row in old_media:
-                try:
-                    if old_row["media_path"] and os.path.exists(old_row["media_path"]):
-                        os.remove(old_row["media_path"])
-                except OSError:
-                    pass
-            conn.execute("DELETE FROM messages WHERE source = 'business' AND date < ?", (cutoff,))
-            conn.commit()
-            conn.close()
+            # чистим совсем старые записи кэша (7 дней) — и файлы медиа личных чатов;
+            # не на каждом 20-секундном тике, иначе полное сканирование растущей
+            # таблицы messages регулярно подвешивает ответ бота на команды
+            if now - last_cleanup_at >= CLEANUP_INTERVAL_SECONDS:
+                last_cleanup_at = now
+                cutoff = now - 7 * 24 * 3600
+                conn = db_connect()
+                conn.execute("DELETE FROM messages WHERE source = 'group_bot' AND date < ?", (cutoff,))
+                old_media = conn.execute(
+                    "SELECT media_path FROM messages WHERE source = 'business' AND date < ? AND media_path IS NOT NULL",
+                    (cutoff,),
+                ).fetchall()
+                for old_row in old_media:
+                    try:
+                        if old_row["media_path"] and os.path.exists(old_row["media_path"]):
+                            os.remove(old_row["media_path"])
+                    except OSError:
+                        pass
+                conn.execute("DELETE FROM messages WHERE source = 'business' AND date < ?", (cutoff,))
+                conn.commit()
+                conn.close()
         except Exception:
             logger.exception("Ошибка в поллере удалённых сообщений")
         await asyncio.sleep(20)
@@ -2444,33 +2500,6 @@ async def handle_private_catchall(message: Message):
     admin_pending = PENDING_ADMIN_INPUT.get(message.from_user.id)
     if admin_pending and is_bot_admin(message.from_user.id) and message.text:
         await process_pending_admin_input(message, admin_pending)
-        return
-
-    payment_id = PENDING_MANUAL_PAYMENT.get(message.from_user.id)
-    if not payment_id:
-        return
-    PENDING_MANUAL_PAYMENT.pop(message.from_user.id, None)
-    payment = get_payment(payment_id)
-    if not payment:
-        return
-
-    builder = InlineKeyboardBuilder()
-    builder.button(text="✅ Подтвердить", callback_data=f"admin_confirm_pay:{payment_id}")
-    builder.button(text="❌ Отклонить", callback_data=f"admin_reject_pay:{payment_id}")
-    builder.adjust(2)
-    caption = (
-        f"🏦 <b>Заявка на оплату переводом</b>\n{DIVIDER}\n\n"
-        f"От: {format_author(message.from_user.full_name, message.from_user.username)} "
-        f"(<code>{message.from_user.id}</code>)\n"
-        f"План: {payment['plan']} — {payment['amount']}\n"
-        f"ID платежа: {payment_id}"
-    )
-    for admin_id in ADMIN_IDS:
-        try:
-            await bot.forward_message(admin_id, message.chat.id, message.message_id)
-            await bot.send_message(admin_id, caption, parse_mode="HTML", reply_markup=builder.as_markup())
-        except Exception:
-            logger.warning("Не удалось переслать заявку на оплату админу %s", admin_id)
 
     await message.answer(
         "📨 Заявка отправлена администратору. Как только подтвердит — подписка активируется автоматически."
