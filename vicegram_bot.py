@@ -35,6 +35,9 @@ from aiogram.enums import ChatMemberStatus, ChatType
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.types import (
+    BotCommand,
+    BotCommandScopeAllGroupChats,
+    BotCommandScopeAllPrivateChats,
     BufferedInputFile,
     BusinessConnection,
     BusinessMessagesDeleted,
@@ -65,6 +68,7 @@ os.makedirs(MEDIA_CACHE_DIR, exist_ok=True)
 DIVIDER = "━━━━━━━━━━━━━━"
 
 LOGO_PATH = os.path.join(os.path.dirname(__file__), "vicegram_assets", "logo.png")
+SETUP_GUIDE_PATH = os.path.join(os.path.dirname(__file__), "vicegram_assets", "setup_guide.jpg")
 TRIAL_BASE_DAYS = 7
 TRIAL_BONUS_DAYS_PER_REFERRAL = 2
 
@@ -702,25 +706,33 @@ def get_intro_keyboard():
     return builder.as_markup()
 
 
-async def send_dm_screen(message: Message, caption: str, reply_markup=None) -> None:
-    """Отправляет "экран" онбординга в личке — фото логотипа + подпись."""
+async def send_dm_screen(
+    message: Message, caption: str, reply_markup=None, photo_path: str = LOGO_PATH
+) -> None:
+    """Отправляет "экран" онбординга в личке — фото + подпись одним сообщением."""
     await message.answer_photo(
-        FSInputFile(LOGO_PATH), caption=caption, parse_mode="HTML", reply_markup=reply_markup
+        FSInputFile(photo_path), caption=caption, parse_mode="HTML", reply_markup=reply_markup
     )
 
 
-async def edit_dm_screen(callback: CallbackQuery, caption: str, reply_markup=None) -> None:
-    """Переключает "экран" онбординга на новый текст, сохраняя фото.
-    Если предыдущее сообщение почему-то было текстовым (старые чаты до
+async def edit_dm_screen(
+    callback: CallbackQuery, caption: str, reply_markup=None, photo_path: str = LOGO_PATH
+) -> None:
+    """Переключает "экран" онбординга на новый текст/фото через edit_media
+    (так можно менять и подпись, и саму картинку за один вызов). Если
+    предыдущее сообщение почему-то было текстовым (старые чаты до
     добавления фото) — просто пересоздаёт сообщение с фото."""
+    from aiogram.types import InputMediaPhoto
+
     try:
-        await callback.message.edit_caption(caption=caption, parse_mode="HTML", reply_markup=reply_markup)
+        media = InputMediaPhoto(media=FSInputFile(photo_path), caption=caption, parse_mode="HTML")
+        await callback.message.edit_media(media=media, reply_markup=reply_markup)
     except TelegramBadRequest:
         try:
             await callback.message.delete()
         except TelegramBadRequest:
             pass
-        await send_dm_screen(callback.message, caption, reply_markup)
+        await send_dm_screen(callback.message, caption, reply_markup, photo_path)
 
 
 def build_setup_instructions(username: str) -> str:
@@ -739,6 +751,7 @@ def build_setup_instructions(username: str) -> str:
 def get_setup_keyboard():
     builder = InlineKeyboardBuilder()
     builder.button(text="👥 А если нужны группы?", callback_data="dm_group_info")
+    builder.button(text="🔙 Назад", callback_data="dm_home")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -760,7 +773,7 @@ def build_group_instructions() -> str:
 
 def get_group_info_keyboard():
     builder = InlineKeyboardBuilder()
-    builder.button(text="🔙 Назад", callback_data="dm_setup")
+    builder.button(text="🔙 Назад", callback_data="dm_home")
     return builder.as_markup()
 
 
@@ -863,7 +876,10 @@ async def cb_dm_setup(callback: CallbackQuery):
     await callback.answer()
     me = await bot.get_me()
     await edit_dm_screen(
-        callback, build_setup_instructions(me.username), get_setup_keyboard()
+        callback,
+        build_setup_instructions(me.username),
+        get_setup_keyboard(),
+        photo_path=SETUP_GUIDE_PATH,
     )
 
 
@@ -876,7 +892,12 @@ async def cb_dm_group_info(callback: CallbackQuery):
 @dp.callback_query(F.data == "dm_features")
 async def cb_dm_features(callback: CallbackQuery):
     await callback.answer()
-    await edit_dm_screen(callback, build_intro_text(), get_intro_keyboard())
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔌 Настроить бота", callback_data="dm_setup")
+    builder.button(text="🎁 Пригласить друга (+2 дня)", callback_data="dm_referral")
+    builder.button(text="🔙 Назад", callback_data="dm_home")
+    builder.adjust(1)
+    await edit_dm_screen(callback, build_intro_text(), builder.as_markup())
 
 
 @dp.callback_query(F.data == "dm_referral")
@@ -1528,9 +1549,30 @@ async def start_health_server() -> None:
 
 
 # ==================== ЗАПУСК ====================
+async def setup_bot_commands() -> None:
+    """Настраивает нативное меню команд Telegram (кнопка "☰" рядом с полем
+    ввода) — это кнопки самого бота, а не инлайн-кнопки в сообщениях."""
+    await bot.set_my_commands(
+        [
+            BotCommand(command="start", description="🎣 Запустить / открыть меню"),
+            BotCommand(command="settings", description="⚙️ Настройки"),
+        ],
+        scope=BotCommandScopeAllPrivateChats(),
+    )
+    await bot.set_my_commands(
+        [
+            BotCommand(command="settings", description="⚙️ Настроить бота в этой группе"),
+            BotCommand(command="flames", description="⚡ Топ активности чата"),
+            BotCommand(command="restore", description="📤 Восстановить историю чата"),
+        ],
+        scope=BotCommandScopeAllGroupChats(),
+    )
+
+
 async def main() -> None:
     init_db()
     logger.info("VICEGRAM запускается...")
+    await setup_bot_commands()
     asyncio.create_task(start_health_server())
     asyncio.create_task(deleted_message_poller())
     await dp.start_polling(bot)
