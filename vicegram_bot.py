@@ -33,7 +33,7 @@ from datetime import datetime, timedelta, timezone
 from aiogram import Bot, Dispatcher, F
 from aiogram.enums import ChatMemberStatus, ChatType
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
-from aiogram.filters import Command, CommandStart
+from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.types import (
     BufferedInputFile,
     BusinessConnection,
@@ -63,6 +63,10 @@ DB_PATH = os.getenv("VICEGRAM_DB_PATH", "vicegram.db")
 MEDIA_CACHE_DIR = os.getenv("VICEGRAM_MEDIA_CACHE_DIR", "vicegram_media_cache")
 os.makedirs(MEDIA_CACHE_DIR, exist_ok=True)
 DIVIDER = "━━━━━━━━━━━━━━"
+
+LOGO_PATH = os.path.join(os.path.dirname(__file__), "vicegram_assets", "logo.png")
+TRIAL_BASE_DAYS = 7
+TRIAL_BONUS_DAYS_PER_REFERRAL = 2
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
@@ -137,6 +141,22 @@ def init_db() -> None:
             streak INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (chat_id, user_id)
         );
+
+        CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY,
+            first_name TEXT,
+            trial_started_at INTEGER NOT NULL,
+            subscribed_until INTEGER,
+            last_expiry_notice_at INTEGER,
+            created_at INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS referrals (
+            referrer_id INTEGER NOT NULL,
+            referred_id INTEGER NOT NULL UNIQUE,
+            created_at INTEGER NOT NULL,
+            PRIMARY KEY (referrer_id, referred_id)
+        );
         """
     )
     existing_columns = {row["name"] for row in conn.execute("PRAGMA table_info(settings)")}
@@ -205,6 +225,8 @@ async def notify_chat_owner(chat_id: int, body: str, **kwargs) -> None:
     settings = get_settings(chat_id)
     owner_id = settings.get("owner_id")
     if owner_id:
+        if not await gate_by_trial(owner_id):
+            return
         try:
             await bot.send_message(owner_id, body, **kwargs)
             return
@@ -214,6 +236,112 @@ async def notify_chat_owner(chat_id: int, body: str, **kwargs) -> None:
                 owner_id, chat_id,
             )
     await bot.send_message(chat_id, body, **kwargs)
+
+
+# ==================== ПРОБНЫЙ ПЕРИОД И РЕФЕРАЛЫ ====================
+def register_user(user_id: int, name: str, referrer_id: int = None) -> bool:
+    """Регистрирует пользователя при первом обращении к боту (создаёт запись
+    о начале пробного периода). Возвращает True, если пользователь новый.
+    Если пришёл по реферальной ссылке — засчитывает реферала пригласившему
+    (только для новых пользователей и только если реферер существует)."""
+    conn = db_connect()
+    row = conn.execute("SELECT 1 FROM users WHERE user_id = ?", (user_id,)).fetchone()
+    is_new = row is None
+    now = int(time.time())
+    if is_new:
+        conn.execute(
+            "INSERT INTO users (user_id, first_name, trial_started_at, created_at) VALUES (?, ?, ?, ?)",
+            (user_id, name, now, now),
+        )
+        if referrer_id and referrer_id != user_id:
+            referrer_exists = conn.execute(
+                "SELECT 1 FROM users WHERE user_id = ?", (referrer_id,)
+            ).fetchone()
+            if referrer_exists:
+                try:
+                    conn.execute(
+                        "INSERT INTO referrals (referrer_id, referred_id, created_at) VALUES (?, ?, ?)",
+                        (referrer_id, user_id, now),
+                    )
+                except sqlite3.IntegrityError:
+                    pass
+    conn.commit()
+    conn.close()
+    return is_new
+
+
+def get_trial_info(user_id: int) -> dict:
+    conn = db_connect()
+    row = conn.execute(
+        "SELECT trial_started_at, subscribed_until FROM users WHERE user_id = ?", (user_id,)
+    ).fetchone()
+    if row is None:
+        conn.close()
+        return None
+    referral_count = conn.execute(
+        "SELECT COUNT(*) c FROM referrals WHERE referrer_id = ?", (user_id,)
+    ).fetchone()["c"]
+    conn.close()
+    trial_days = TRIAL_BASE_DAYS + referral_count * TRIAL_BONUS_DAYS_PER_REFERRAL
+    trial_end = row["trial_started_at"] + trial_days * 86400
+    subscribed_until = row["subscribed_until"] or 0
+    active_until = max(trial_end, subscribed_until)
+    now = int(time.time())
+    return {
+        "referral_count": referral_count,
+        "trial_days": trial_days,
+        "trial_end": trial_end,
+        "subscribed_until": row["subscribed_until"],
+        "active": now < active_until,
+        "days_left": max(0, (active_until - now + 86399) // 86400),
+    }
+
+
+def is_trial_active(user_id: int) -> bool:
+    info = get_trial_info(user_id)
+    if info is None:
+        return True  # ещё не встречались этому боту — не блокируем
+    return info["active"]
+
+
+async def maybe_notify_trial_expired(owner_id: int) -> None:
+    """Шлёт напоминание об окончании пробного периода не чаще раза в сутки,
+    чтобы не спамить владельца при каждой пойманной попытке удаления."""
+    conn = db_connect()
+    row = conn.execute(
+        "SELECT last_expiry_notice_at FROM users WHERE user_id = ?", (owner_id,)
+    ).fetchone()
+    now = int(time.time())
+    if row and row["last_expiry_notice_at"] and now - row["last_expiry_notice_at"] < 86400:
+        conn.close()
+        return
+    conn.execute("UPDATE users SET last_expiry_notice_at = ? WHERE user_id = ?", (now, owner_id))
+    conn.commit()
+    conn.close()
+    try:
+        await bot.send_message(
+            owner_id,
+            "⏳ <b>Пробный период закончился</b>\n"
+            f"{DIVIDER}\n\n"
+            "Ловля удалённых и изменённых сообщений приостановлена.\n\n"
+            "🎁 Пригласи друга — получи +2 дня за каждого. Открой /start "
+            "и нажми «Пригласить друга».",
+            parse_mode="HTML",
+        )
+    except Exception:
+        logger.warning("Не удалось отправить уведомление об окончании триала %s", owner_id)
+
+
+async def gate_by_trial(owner_id: int) -> bool:
+    """True — можно доставлять пойманное сообщение. False — триал истёк."""
+    if is_trial_active(owner_id):
+        return True
+    await maybe_notify_trial_expired(owner_id)
+    return False
+
+
+def get_referral_link(bot_username: str, user_id: int) -> str:
+    return f"https://t.me/{bot_username}?start=ref{user_id}"
 
 
 # ==================== ПЕРЕВОДЫ ====================
@@ -569,7 +697,30 @@ def build_intro_text() -> str:
 def get_intro_keyboard():
     builder = InlineKeyboardBuilder()
     builder.button(text="🔌 Настроить бота", callback_data="dm_setup")
+    builder.button(text="🎁 Пригласить друга (+2 дня)", callback_data="dm_referral")
+    builder.adjust(1)
     return builder.as_markup()
+
+
+async def send_dm_screen(message: Message, caption: str, reply_markup=None) -> None:
+    """Отправляет "экран" онбординга в личке — фото логотипа + подпись."""
+    await message.answer_photo(
+        FSInputFile(LOGO_PATH), caption=caption, parse_mode="HTML", reply_markup=reply_markup
+    )
+
+
+async def edit_dm_screen(callback: CallbackQuery, caption: str, reply_markup=None) -> None:
+    """Переключает "экран" онбординга на новый текст, сохраняя фото.
+    Если предыдущее сообщение почему-то было текстовым (старые чаты до
+    добавления фото) — просто пересоздаёт сообщение с фото."""
+    try:
+        await callback.message.edit_caption(caption=caption, parse_mode="HTML", reply_markup=reply_markup)
+    except TelegramBadRequest:
+        try:
+            await callback.message.delete()
+        except TelegramBadRequest:
+            pass
+        await send_dm_screen(callback.message, caption, reply_markup)
 
 
 def build_setup_instructions(username: str) -> str:
@@ -613,12 +764,18 @@ def get_group_info_keyboard():
     return builder.as_markup()
 
 
-def build_features_menu_text() -> str:
+def build_features_menu_text(user_id: int = None) -> str:
+    trial_line = ""
+    if user_id is not None:
+        info = get_trial_info(user_id)
+        if info:
+            trial_line = f"\n\n⏳ Пробный период: <b>{info['days_left']} дн.</b> осталось"
     return (
         "🎉 <b>Готово, личные чаты подключены!</b>\n"
         f"{DIVIDER}\n\n"
         "Буду присылать сюда пойманные удалённые и изменённые сообщения, "
-        "включая исчезающие фото и видео.\n\n"
+        "включая исчезающие фото и видео."
+        f"{trial_line}\n\n"
         "Что ещё можно посмотреть:"
     )
 
@@ -627,7 +784,35 @@ def get_features_menu_keyboard():
     builder = InlineKeyboardBuilder()
     builder.button(text="📋 Все возможности", callback_data="dm_features")
     builder.button(text="👥 Настроить в группе", callback_data="dm_group_info")
+    builder.button(text="🎁 Пригласить друга (+2 дня)", callback_data="dm_referral")
     builder.adjust(1)
+    return builder.as_markup()
+
+
+def build_referral_text(bot_username: str, user_id: int) -> str:
+    info = get_trial_info(user_id) or {
+        "referral_count": 0,
+        "trial_days": TRIAL_BASE_DAYS,
+        "days_left": TRIAL_BASE_DAYS,
+    }
+    link = get_referral_link(bot_username, user_id)
+    return (
+        "🎁 <b>Реферальная программа</b>\n"
+        f"{DIVIDER}\n\n"
+        f"Бесплатный пробный период — {TRIAL_BASE_DAYS} дней. За каждого друга, "
+        f"который подключит VICEGRAM по твоей ссылке — +{TRIAL_BONUS_DAYS_PER_REFERRAL} дня.\n\n"
+        f"Твоя ссылка:\n<code>{link}</code>\n\n"
+        f"👥 Приглашено друзей: <b>{info['referral_count']}</b>\n"
+        f"⏳ Осталось дней: <b>{info['days_left']}</b>"
+    )
+
+
+def get_referral_keyboard(bot_username: str, user_id: int):
+    link = get_referral_link(bot_username, user_id)
+    share_url = f"https://t.me/share/url?url={link}&text=Ловит удалённые и изменённые сообщения в Telegram — попробуй VICEGRAM"
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="📤 Поделиться ссылкой", url=share_url))
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="dm_home"))
     return builder.as_markup()
 
 
@@ -641,36 +826,69 @@ def is_user_connected(user_id: int) -> bool:
 
 
 @dp.message(CommandStart())
-async def cmd_start(message: Message):
+async def cmd_start(message: Message, command: CommandObject):
+    referrer_id = None
+    if command.args and command.args.startswith("ref"):
+        try:
+            referrer_id = int(command.args[3:])
+        except ValueError:
+            referrer_id = None
+    register_user(message.from_user.id, message.from_user.full_name, referrer_id)
+
     if is_user_connected(message.from_user.id):
-        await message.answer(
-            build_features_menu_text(), parse_mode="HTML", reply_markup=get_features_menu_keyboard()
+        await send_dm_screen(
+            message,
+            build_features_menu_text(message.from_user.id),
+            get_features_menu_keyboard(),
         )
         return
-    await message.answer(build_intro_text(), parse_mode="HTML", reply_markup=get_intro_keyboard())
+    await send_dm_screen(message, build_intro_text(), get_intro_keyboard())
+
+
+@dp.callback_query(F.data == "dm_home")
+async def cb_dm_home(callback: CallbackQuery):
+    await callback.answer()
+    if is_user_connected(callback.from_user.id):
+        await edit_dm_screen(
+            callback,
+            build_features_menu_text(callback.from_user.id),
+            get_features_menu_keyboard(),
+        )
+    else:
+        await edit_dm_screen(callback, build_intro_text(), get_intro_keyboard())
 
 
 @dp.callback_query(F.data == "dm_setup")
 async def cb_dm_setup(callback: CallbackQuery):
     await callback.answer()
     me = await bot.get_me()
-    await callback.message.edit_text(
-        build_setup_instructions(me.username), parse_mode="HTML", reply_markup=get_setup_keyboard()
+    await edit_dm_screen(
+        callback, build_setup_instructions(me.username), get_setup_keyboard()
     )
 
 
 @dp.callback_query(F.data == "dm_group_info")
 async def cb_dm_group_info(callback: CallbackQuery):
     await callback.answer()
-    await callback.message.edit_text(
-        build_group_instructions(), parse_mode="HTML", reply_markup=get_group_info_keyboard()
-    )
+    await edit_dm_screen(callback, build_group_instructions(), get_group_info_keyboard())
 
 
 @dp.callback_query(F.data == "dm_features")
 async def cb_dm_features(callback: CallbackQuery):
     await callback.answer()
-    await callback.message.edit_text(build_intro_text(), parse_mode="HTML")
+    await edit_dm_screen(callback, build_intro_text(), get_intro_keyboard())
+
+
+@dp.callback_query(F.data == "dm_referral")
+async def cb_dm_referral(callback: CallbackQuery):
+    await callback.answer()
+    register_user(callback.from_user.id, callback.from_user.full_name)
+    me = await bot.get_me()
+    await edit_dm_screen(
+        callback,
+        build_referral_text(me.username, callback.from_user.id),
+        get_referral_keyboard(me.username, callback.from_user.id),
+    )
 
 
 @dp.message(Command("settings"), F.chat.type.in_({ChatType.GROUP, ChatType.SUPERGROUP}))
@@ -683,6 +901,7 @@ async def cmd_settings(message: Message):
     claim_note = ""
     if not settings.get("owner_id"):
         set_owner(message.chat.id, message.from_user.id, message.from_user.full_name)
+        register_user(message.from_user.id, message.from_user.full_name)
         claim_note = (
             "\n\n📩 Пойманные удалённые и изменённые сообщения теперь будут "
             "приходить тебе в личные сообщения с ботом (а не в этот чат)."
@@ -784,6 +1003,8 @@ def mark_business_message_deleted(owner_id: int, chat_id: int, message_id: int) 
 
 
 async def announce_deleted_business(owner_id: int, row: dict) -> None:
+    if not await gate_by_trial(owner_id):
+        return
     author = format_author(row["user_name"], row["user_username"])
     header = f"🗑💌 <b>Поймано удалённое личное сообщение!</b>\n{DIVIDER}\n\n👤 От: {author}"
     safe_text = html.escape(row["text"]) if row["text"] else row["text"]
@@ -813,24 +1034,29 @@ async def announce_deleted_business(owner_id: int, row: dict) -> None:
 
 @dp.message(Command("settings"), F.chat.type == ChatType.PRIVATE)
 async def cmd_settings_private(message: Message):
+    register_user(message.from_user.id, message.from_user.full_name)
     if is_user_connected(message.from_user.id):
-        await message.answer(
-            build_features_menu_text(), parse_mode="HTML", reply_markup=get_features_menu_keyboard()
+        await send_dm_screen(
+            message,
+            build_features_menu_text(message.from_user.id),
+            get_features_menu_keyboard(),
         )
         return
-    await message.answer(build_intro_text(), parse_mode="HTML", reply_markup=get_intro_keyboard())
+    await send_dm_screen(message, build_intro_text(), get_intro_keyboard())
 
 
 @dp.business_connection()
 async def handle_business_connection(connection: BusinessConnection):
     upsert_business_connection(connection)
+    register_user(connection.user.id, connection.user.full_name)
     if not connection.is_enabled:
         logger.info("Бизнес-подключение %s отключено пользователем %s", connection.id, connection.user.id)
         return
     try:
-        await bot.send_message(
+        await bot.send_photo(
             connection.user.id,
-            build_features_menu_text(),
+            FSInputFile(LOGO_PATH),
+            caption=build_features_menu_text(connection.user.id),
             parse_mode="HTML",
             reply_markup=get_features_menu_keyboard(),
         )
@@ -854,7 +1080,7 @@ async def handle_edited_business_message(message: Message):
     owner_id = connection["owner_id"]
     old = get_cached_business_message(owner_id, message.chat.id, message.message_id)
     new_text = message.text or message.caption or ""
-    if old and old["text"] and old["text"] != new_text:
+    if old and old["text"] and old["text"] != new_text and await gate_by_trial(owner_id):
         author = user_mention(
             message.from_user.id, message.from_user.full_name, message.from_user.username
         ) if message.from_user else "неизвестный"
@@ -927,6 +1153,7 @@ async def cb_claim_owner(callback: CallbackQuery):
         await callback.answer("Только для админов", show_alert=True)
         return
     set_owner(callback.message.chat.id, callback.from_user.id, callback.from_user.full_name)
+    register_user(callback.from_user.id, callback.from_user.full_name)
     await callback.answer("✅ Теперь уведомления идут тебе в личку")
     settings = get_settings(callback.message.chat.id)
     lang = settings["lang"]
@@ -1028,6 +1255,9 @@ async def message_still_exists(chat_id: int, message_id: int) -> bool:
 async def announce_deleted(row: dict) -> None:
     settings = get_settings(row["chat_id"])
     owner_id = settings.get("owner_id")
+
+    if owner_id and not await gate_by_trial(owner_id):
+        return
 
     chat_label = ""
     if owner_id:
