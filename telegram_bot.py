@@ -51,6 +51,9 @@ with open("chemistry_theory.json", "r", encoding="utf-8") as f:
 with open("chemistry_tasks.json", "r", encoding="utf-8") as f:
     CHEMISTRY_TASKS = json.load(f)["topics"]
 
+with open("physics_tasks.json", "r", encoding="utf-8") as f:
+    PHYSICS_TASKS = json.load(f)["topics"]
+
 # ==================== СТАТИСТИКА (СОХРАНЯЕТСЯ НА ДИСК) ====================
 def load_stats() -> dict:
     os.makedirs(STATS_DIR, exist_ok=True)
@@ -436,8 +439,54 @@ def get_physics_menu():
     builder = InlineKeyboardBuilder()
     builder.button(text="📝 Тестовая часть (186 вопросов)", callback_data="physics_test")
     builder.button(text="📘 Билеты", callback_data="physics_tickets")
+    builder.button(text="🧮 Задачи", callback_data="physics_tasks")
     builder.adjust(1)
     builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
+    return builder.as_markup()
+
+def get_physics_tasks_topics_keyboard():
+    builder = InlineKeyboardBuilder()
+    for num, topic in sorted(PHYSICS_TASKS.items(), key=lambda x: int(x[0])):
+        builder.button(text=f"📂 {topic['title']}", callback_data=f"phystask_topic:{num}")
+    builder.adjust(1)
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="menu_physics"))
+    return builder.as_markup()
+
+def get_physics_task_topic_keyboard(topic_num: str):
+    builder = InlineKeyboardBuilder()
+    builder.button(text="📐 Формулы и алгоритм", callback_data=f"phystask_formulas:{topic_num}")
+    builder.button(text="📋 Список задач", callback_data=f"phystask_list:{topic_num}")
+    builder.adjust(1)
+    builder.row(InlineKeyboardButton(text="🔙 К темам", callback_data="physics_tasks"))
+    return builder.as_markup()
+
+def get_physics_formulas_keyboard(topic_num: str):
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data=f"phystask_topic:{topic_num}"))
+    return builder.as_markup()
+
+def get_physics_task_list_keyboard(topic_num: str):
+    builder = InlineKeyboardBuilder()
+    topic = PHYSICS_TASKS[topic_num]
+    for task in topic["tasks"]:
+        builder.button(text=f"📝 Задача {task['num']}", callback_data=f"phystask_show:{topic_num}:{task['num']}")
+    builder.adjust(1)
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data=f"phystask_topic:{topic_num}"))
+    return builder.as_markup()
+
+def get_physics_task_detail_keyboard(topic_num: str, task_num: int):
+    builder = InlineKeyboardBuilder()
+    tasks = PHYSICS_TASKS[topic_num]["tasks"]
+    nums = [t["num"] for t in tasks]
+    idx = nums.index(task_num)
+    nav = []
+    if idx > 0:
+        nav.append(InlineKeyboardButton(text="⬅️ Предыдущая", callback_data=f"phystask_show:{topic_num}:{nums[idx-1]}"))
+    if idx < len(nums) - 1:
+        nav.append(InlineKeyboardButton(text="Следующая ➡️", callback_data=f"phystask_show:{topic_num}:{nums[idx+1]}"))
+    if nav:
+        builder.row(*nav)
+    builder.row(InlineKeyboardButton(text="🔙 К списку задач", callback_data=f"phystask_list:{topic_num}"))
     return builder.as_markup()
 
 def get_physics_test_pages():
@@ -1118,6 +1167,74 @@ async def cb_physics_question(callback: CallbackQuery):
         await send_answer(callback.message, body, short_caption, q, get_physics_answer_keyboard(q_num), edit=True)
     else:
         await callback.answer("Вопрос пока не добавлен в файл", show_alert=True)
+
+# ==================== ФИЗИКА - ЗАДАЧИ ====================
+@dp.callback_query(F.data == "physics_tasks")
+async def cb_physics_tasks(callback: CallbackQuery):
+    await callback.answer()
+    await safe_edit_text(
+        callback.message,
+        f"🧮 <b>Задачи по физике</b>\n{DIVIDER}\n\nВыбери тему:",
+        parse_mode="HTML",
+        reply_markup=get_physics_tasks_topics_keyboard()
+    )
+
+@dp.callback_query(F.data.startswith("phystask_topic:"))
+async def cb_phystask_topic(callback: CallbackQuery):
+    await callback.answer()
+    topic_num = callback.data.split(":")[1]
+    topic = PHYSICS_TASKS.get(topic_num)
+    if not topic:
+        await callback.answer("Тема не найдена", show_alert=True)
+        return
+    text = (
+        f"📂 <b>{topic['title']}</b>\n{DIVIDER}\n\n"
+        f"{topic.get('intro', '')}\n\n"
+        f"Всего типовых задач: {len(topic['tasks'])}"
+    )
+    await safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=get_physics_task_topic_keyboard(topic_num))
+
+@dp.callback_query(F.data.startswith("phystask_formulas:"))
+async def cb_phystask_formulas(callback: CallbackQuery):
+    await callback.answer()
+    topic_num = callback.data.split(":")[1]
+    topic = PHYSICS_TASKS.get(topic_num)
+    if not topic:
+        await callback.answer("Тема не найдена", show_alert=True)
+        return
+    text = f"📂 <b>{topic['title']}</b>\n{DIVIDER}\n\n{topic['formulas']}"
+    await safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=get_physics_formulas_keyboard(topic_num))
+
+@dp.callback_query(F.data.startswith("phystask_list:"))
+async def cb_phystask_list(callback: CallbackQuery):
+    await callback.answer()
+    topic_num = callback.data.split(":")[1]
+    topic = PHYSICS_TASKS.get(topic_num)
+    if not topic:
+        await callback.answer("Тема не найдена", show_alert=True)
+        return
+    text = f"📋 <b>{topic['title']} — список задач</b>\n{DIVIDER}\n\nВыбери задачу:"
+    await safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=get_physics_task_list_keyboard(topic_num))
+
+@dp.callback_query(F.data.startswith("phystask_show:"))
+async def cb_phystask_show(callback: CallbackQuery):
+    await callback.answer()
+    _, topic_num, task_num_s = callback.data.split(":")
+    task_num = int(task_num_s)
+    topic = PHYSICS_TASKS.get(topic_num)
+    if not topic:
+        await callback.answer("Тема не найдена", show_alert=True)
+        return
+    task = next((t for t in topic["tasks"] if t["num"] == task_num), None)
+    if not task:
+        await callback.answer("Задача не найдена", show_alert=True)
+        return
+    text = (
+        f"📝 <b>Задача №{task['num']}</b> — {task.get('title', '')}\n{DIVIDER}\n\n"
+        f"<b>Условие:</b>\n<i>{task['condition']}</i>\n\n"
+        f"<b>Решение:</b>\n{task['solution']}"
+    )
+    await safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=get_physics_task_detail_keyboard(topic_num, task_num))
 
 # ==================== ЗАПУСК ====================
 async def main():
