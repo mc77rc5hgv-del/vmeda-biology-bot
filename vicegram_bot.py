@@ -50,9 +50,6 @@ from aiogram.types import (
     CallbackQuery,
     FSInputFile,
     InlineKeyboardButton,
-    InlineQuery,
-    InlineQueryResultArticle,
-    InputTextMessageContent,
     KeyboardButton,
     LabeledPrice,
     Message,
@@ -160,13 +157,6 @@ def iter_plans(tier_code: str):
 CRYPTOBOT_API_TOKEN = os.getenv("VICEGRAM_CRYPTOBOT_TOKEN")
 CRYPTOBOT_API_URL = "https://pay.crypt.bot/api"
 MANUAL_PAYMENT_USERNAME = os.getenv("VICEGRAM_MANUAL_PAYMENT_USERNAME", "vice_helper")
-
-DEEPL_API_KEY = os.getenv("VICEGRAM_DEEPL_API_KEY")
-DEEPL_API_URL = (
-    "https://api-free.deepl.com/v2/translate"
-    if (DEEPL_API_KEY or "").endswith(":fx")
-    else "https://api.deepl.com/v2/translate"
-)
 
 
 def build_manual_payment_url(plan: dict) -> str:
@@ -1133,7 +1123,6 @@ def build_intro_text() -> str:
         "📝 <b>Активные заметки</b> — авто-ответ по фразе-триггеру в личном чате\n"
         "⏰ <b>Напоминания</b> — напомню в нужное время то, что задашь\n"
         "🧮 <b>Калькулятор</b> — команда /calc считает примеры прямо в чате\n"
-        "🌐 <b>Переводчик</b> — <code>@username_бота текст</code> в любом чате\n"
         "🌐 <b>Два языка интерфейса</b> — русский и английский\n\n"
         f"{DIVIDER}\n"
         "Работаю и в личных чатах, и в группах. Начнём с личных — "
@@ -1460,73 +1449,6 @@ async def cryptobot_get_invoice_status(invoice_id: int) -> str:
         return "unknown"
     items = result["result"]["items"]
     return items[0]["status"] if items else "unknown"
-
-
-# ==================== ПЕРЕВОДЧИК (ИНЛАЙН-РЕЖИМ, @Helperchat_bot текст) ====================
-async def deepl_translate(text: str, target_lang: str) -> str:
-    async with aiohttp.ClientSession() as session:
-        async with session.post(
-            DEEPL_API_URL,
-            data={"auth_key": DEEPL_API_KEY, "text": text, "target_lang": target_lang},
-        ) as resp:
-            result = await resp.json()
-    translations = result.get("translations")
-    if not translations:
-        raise RuntimeError(f"DeepL translate error: {result}")
-    return translations[0]["text"]
-
-
-@dp.inline_query()
-async def handle_inline_translate(inline_query: InlineQuery):
-    query_text = (inline_query.query or "").strip()
-    if not query_text:
-        await inline_query.answer([], cache_time=1)
-        return
-
-    register_user(inline_query.from_user.id, inline_query.from_user.full_name, username=inline_query.from_user.username)
-
-    if not DEEPL_API_KEY:
-        return  # переводчик не настроен (нет VICEGRAM_DEEPL_API_KEY) — молча ничего не отвечаем
-
-    if get_active_tier(inline_query.from_user.id) is None:
-        await inline_query.answer(
-            [
-                InlineQueryResultArticle(
-                    id="trial_expired",
-                    title="⏳ Пробный период VICEGRAM закончился",
-                    description="Оформи подписку в личке с ботом, чтобы пользоваться переводчиком",
-                    input_message_content=InputTextMessageContent(
-                        message_text="⏳ Пробный период VICEGRAM закончился — оформи подписку в личке с ботом."
-                    ),
-                )
-            ],
-            cache_time=1,
-            is_personal=True,
-        )
-        return
-
-    if len(query_text) > 2000:
-        query_text = query_text[:2000]
-
-    results = []
-    for lang_code, title, result_id in (
-        ("RU", "🇷🇺 Перевести на русский", "translate_ru"),
-        ("EN-US", "🇬🇧 Translate to English", "translate_en"),
-    ):
-        try:
-            translated = await deepl_translate(query_text, lang_code)
-        except Exception:
-            logger.warning("Ошибка перевода DeepL (%s)", lang_code)
-            continue
-        results.append(
-            InlineQueryResultArticle(
-                id=result_id,
-                title=title,
-                description=translated[:100],
-                input_message_content=InputTextMessageContent(message_text=translated),
-            )
-        )
-    await inline_query.answer(results, cache_time=1, is_personal=True)
 
 
 @dp.callback_query(F.data.startswith("pay_crypto:"))
@@ -2223,20 +2145,6 @@ FEATURE_INFO = {
             "просто пиши команду."
         ),
     },
-    "translate": {
-        "title": "🌐 Переводчик",
-        "text": (
-            "🌐 <b>Переводчик</b>\n"
-            f"{DIVIDER}\n\n"
-            "Работает в инлайн-режиме — набери в поле ввода <b>в любом чате</b> "
-            "Telegram (не обязательно в чате с ботом):\n\n"
-            "<code>@ИмяБота текст для перевода</code>\n\n"
-            "Появятся варианты «перевести на русский» и «translate to English» — "
-            "выбери нужный, он отправится вместо инлайн-запроса.\n\n"
-            "Если ничего не появляется — значит переводчик пока не настроен "
-            "администратором бота (нужен ключ DeepL и включённый Inline Mode)."
-        ),
-    },
 }
 
 
@@ -2253,7 +2161,6 @@ def get_features_hub_keyboard():
     builder.button(text="📝 Активные заметки", callback_data="notes_open")
     builder.button(text="⏰ Напоминания", callback_data="reminders_open")
     builder.button(text="🧮 Калькулятор", callback_data="feature_info:calc")
-    builder.button(text="🌐 Переводчик", callback_data="feature_info:translate")
     builder.button(text="🔙 Назад", callback_data="dm_home")
     builder.adjust(1)
     return builder.as_markup()
