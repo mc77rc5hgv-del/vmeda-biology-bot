@@ -1128,7 +1128,11 @@ def build_intro_text() -> str:
         "✋ <b>Анти-скам</b> — чищу мошеннические сообщения на автомате\n"
         "🤖 <b>Свои команды</b> — настрой ответы бота под конкретный чат\n"
         "📤 <b>Восстановление истории</b> — выгрузка переписки одним кликом\n"
-        "🌐 <b>Два языка</b> — русский и английский\n\n"
+        "📝 <b>Активные заметки</b> — авто-ответ по фразе-триггеру в личном чате\n"
+        "⏰ <b>Напоминания</b> — напомню в нужное время то, что задашь\n"
+        "🧮 <b>Калькулятор</b> — команда /calc считает примеры прямо в чате\n"
+        "🌐 <b>Переводчик</b> — <code>@username_бота текст</code> в любом чате\n"
+        "🌐 <b>Два языка интерфейса</b> — русский и английский\n\n"
         f"{DIVIDER}\n"
         "Работаю и в личных чатах, и в группах. Начнём с личных — "
         "это займёт меньше минуты."
@@ -1138,6 +1142,7 @@ def build_intro_text() -> str:
 def get_intro_keyboard():
     builder = InlineKeyboardBuilder()
     builder.button(text="🔌 Настроить бота", callback_data="dm_setup")
+    builder.button(text="⚙️ Функции: настройка и описание", callback_data="features_hub")
     builder.button(text="🎁 Пригласить друга (+2 дня)", callback_data="dm_referral")
     builder.button(text="💳 Оформить подписку", callback_data="dm_subscribe")
     builder.adjust(1)
@@ -1234,8 +1239,7 @@ def build_features_menu_text(user_id: int = None) -> str:
 def get_features_menu_keyboard():
     builder = InlineKeyboardBuilder()
     builder.button(text="📋 Все возможности", callback_data="dm_features")
-    builder.button(text="📝 Активные заметки", callback_data="notes_open")
-    builder.button(text="⏰ Напоминания", callback_data="reminders_open")
+    builder.button(text="⚙️ Функции: настройка и описание", callback_data="features_hub")
     builder.button(text="👥 Настроить в группе", callback_data="dm_group_info")
     builder.button(text="🎁 Пригласить друга (+2 дня)", callback_data="dm_referral")
     builder.button(text="💳 Оформить подписку", callback_data="dm_subscribe")
@@ -2188,10 +2192,82 @@ async def cb_dm_features(callback: CallbackQuery):
     await callback.answer()
     builder = InlineKeyboardBuilder()
     builder.button(text="🔌 Настроить бота", callback_data="dm_setup")
+    builder.button(text="⚙️ Функции: настройка и описание", callback_data="features_hub")
     builder.button(text="🎁 Пригласить друга (+2 дня)", callback_data="dm_referral")
     builder.button(text="🔙 Назад", callback_data="dm_home")
     builder.adjust(1)
     await edit_dm_screen(callback, build_intro_text(), builder.as_markup())
+
+
+# ==================== ХАБ: НАСТРОЙКА И ОПИСАНИЕ КАЖДОЙ ФУНКЦИИ ====================
+FEATURE_INFO = {
+    "calc": {
+        "title": "🧮 Калькулятор",
+        "text": (
+            "🧮 <b>Калькулятор</b>\n"
+            f"{DIVIDER}\n\n"
+            "Команда <code>/calc &lt;пример&gt;</code> — считает арифметику.\n\n"
+            "Работает:\n"
+            "• в личке с ботом — например, <code>/calc 2+2*2</code>\n"
+            "• прямо в подключённом личном чате — ответ придёт в тот же чат\n\n"
+            "Доступны: <code>+ - * / // % **</code> и скобки. Настраивать нечего — "
+            "просто пиши команду."
+        ),
+    },
+    "translate": {
+        "title": "🌐 Переводчик",
+        "text": (
+            "🌐 <b>Переводчик</b>\n"
+            f"{DIVIDER}\n\n"
+            "Работает в инлайн-режиме — набери в поле ввода <b>в любом чате</b> "
+            "Telegram (не обязательно в чате с ботом):\n\n"
+            "<code>@ИмяБота текст для перевода</code>\n\n"
+            "Появятся варианты «перевести на русский» и «translate to English» — "
+            "выбери нужный, он отправится вместо инлайн-запроса.\n\n"
+            "Если ничего не появляется — значит переводчик пока не настроен "
+            "администратором бота (нужен ключ DeepL и включённый Inline Mode)."
+        ),
+    },
+}
+
+
+def build_features_hub_text() -> str:
+    return (
+        "⚙️ <b>Функции VICEGRAM</b>\n"
+        f"{DIVIDER}\n\n"
+        "Выбери функцию — откроется её настройка или описание, как пользоваться."
+    )
+
+
+def get_features_hub_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="📝 Активные заметки", callback_data="notes_open")
+    builder.button(text="⏰ Напоминания", callback_data="reminders_open")
+    builder.button(text="🧮 Калькулятор", callback_data="feature_info:calc")
+    builder.button(text="🌐 Переводчик", callback_data="feature_info:translate")
+    builder.button(text="🔙 Назад", callback_data="dm_home")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+@dp.callback_query(F.data == "features_hub")
+async def cb_features_hub(callback: CallbackQuery):
+    await callback.answer()
+    register_user(callback.from_user.id, callback.from_user.full_name, username=callback.from_user.username)
+    await edit_dm_screen(callback, build_features_hub_text(), get_features_hub_keyboard())
+
+
+@dp.callback_query(F.data.startswith("feature_info:"))
+async def cb_feature_info(callback: CallbackQuery):
+    key = callback.data.split(":", 1)[1]
+    info = FEATURE_INFO.get(key)
+    if not info:
+        await callback.answer("Неизвестная функция", show_alert=True)
+        return
+    await callback.answer()
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔙 Назад", callback_data="features_hub")
+    await edit_dm_screen(callback, info["text"], builder.as_markup())
 
 
 @dp.callback_query(F.data == "dm_referral")
@@ -2231,7 +2307,7 @@ def get_notes_keyboard(notes: list):
     builder.button(text="➕ Добавить заметку", callback_data="notes_add")
     for n in notes:
         builder.button(text=f"🗑 {n['trigger']}", callback_data=f"notes_del:{n['trigger']}")
-    builder.button(text="🔙 Назад", callback_data="dm_home")
+    builder.button(text="🔙 Назад", callback_data="features_hub")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -2474,7 +2550,7 @@ def get_reminders_keyboard(reminders: list):
             r["remind_at"] - REMINDER_TZ_OFFSET_HOURS * 3600, tz=timezone.utc
         ).strftime("%d.%m %H:%M")
         builder.button(text=f"🗑 {when}", callback_data=f"reminders_del:{r['id']}")
-    builder.button(text="🔙 Назад", callback_data="dm_home")
+    builder.button(text="🔙 Назад", callback_data="features_hub")
     builder.adjust(1)
     return builder.as_markup()
 
