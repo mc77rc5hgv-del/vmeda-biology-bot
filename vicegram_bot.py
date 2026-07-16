@@ -88,7 +88,8 @@ DIVIDER = "━━━━━━━━━━━━━━"
 LOGO_PATH = os.path.join(os.path.dirname(__file__), "vicegram_assets", "logo.png")
 SETUP_GUIDE_PATH = os.path.join(os.path.dirname(__file__), "vicegram_assets", "setup_guide.jpg")
 TRIAL_BASE_DAYS = 7
-TRIAL_BONUS_DAYS_PER_REFERRAL = 2
+REFERRAL_MILESTONE_COUNT = 3  # столько друзей нужно пригласить за один бонус
+REFERRAL_MILESTONE_BONUS_DAYS = 30  # сам бонус — месяц
 
 # ==================== ПЛАТНАЯ ПОДПИСКА ====================
 # Цены — заглушка по умолчанию, поправь под свои условия.
@@ -448,7 +449,8 @@ def get_trial_info(user_id: int) -> dict:
         "SELECT COUNT(*) c FROM referrals WHERE referrer_id = ?", (user_id,)
     ).fetchone()["c"]
     conn.close()
-    trial_days = TRIAL_BASE_DAYS + referral_count * TRIAL_BONUS_DAYS_PER_REFERRAL
+    milestones_reached = referral_count // REFERRAL_MILESTONE_COUNT
+    trial_days = TRIAL_BASE_DAYS + milestones_reached * REFERRAL_MILESTONE_BONUS_DAYS
     trial_end = row["trial_started_at"] + trial_days * 86400
     subscribed_until = row["subscribed_until"] or 0
     active_until = max(trial_end, subscribed_until)
@@ -494,8 +496,8 @@ async def maybe_notify_trial_expired(owner_id: int) -> None:
             "⏳ <b>Пробный период закончился</b>\n"
             f"{DIVIDER}\n\n"
             "Ловля удалённых и изменённых сообщений приостановлена.\n\n"
-            "Пригласи друга (+2 дня за каждого) или оформи подписку, "
-            "чтобы продолжить.",
+            f"Пригласи {REFERRAL_MILESTONE_COUNT} друзей (месяц бесплатно) или "
+            "оформи подписку, чтобы продолжить.",
             parse_mode="HTML",
             reply_markup=builder.as_markup(),
         )
@@ -1143,7 +1145,7 @@ def get_intro_keyboard():
     builder = InlineKeyboardBuilder()
     builder.button(text="🔌 Настроить бота", callback_data="dm_setup")
     builder.button(text="⚙️ Функции: настройка и описание", callback_data="features_hub")
-    builder.button(text="🎁 Пригласить друга (+2 дня)", callback_data="dm_referral")
+    builder.button(text="🎁 Пригласить друзей (3 = месяц)", callback_data="dm_referral")
     builder.button(text="💳 Оформить подписку", callback_data="dm_subscribe")
     builder.adjust(1)
     return builder.as_markup()
@@ -1241,7 +1243,7 @@ def get_features_menu_keyboard():
     builder.button(text="📋 Все возможности", callback_data="dm_features")
     builder.button(text="⚙️ Функции: настройка и описание", callback_data="features_hub")
     builder.button(text="👥 Настроить в группе", callback_data="dm_group_info")
-    builder.button(text="🎁 Пригласить друга (+2 дня)", callback_data="dm_referral")
+    builder.button(text="🎁 Пригласить друзей (3 = месяц)", callback_data="dm_referral")
     builder.button(text="💳 Оформить подписку", callback_data="dm_subscribe")
     builder.adjust(1)
     return builder.as_markup()
@@ -1254,13 +1256,20 @@ def build_referral_text(bot_username: str, user_id: int) -> str:
         "days_left": TRIAL_BASE_DAYS,
     }
     link = get_referral_link(bot_username, user_id)
+    referral_count = info["referral_count"]
+    progress_in_cycle = referral_count % REFERRAL_MILESTONE_COUNT
+    friends_until_next = REFERRAL_MILESTONE_COUNT - progress_in_cycle
     return (
         "🎁 <b>Реферальная программа</b>\n"
         f"{DIVIDER}\n\n"
-        f"Бесплатный пробный период — {TRIAL_BASE_DAYS} дней. За каждого друга, "
-        f"который подключит VICEGRAM по твоей ссылке — +{TRIAL_BONUS_DAYS_PER_REFERRAL} дня.\n\n"
+        f"Бесплатный пробный период — {TRIAL_BASE_DAYS} дней. Пригласи "
+        f"<b>{REFERRAL_MILESTONE_COUNT} друзей</b> по своей ссылке — получи "
+        f"+{REFERRAL_MILESTONE_BONUS_DAYS} дней (целый месяц) бесплатно. Дальше — "
+        "снова за каждые следующие 3 друга.\n\n"
         f"Твоя ссылка:\n<code>{link}</code>\n\n"
-        f"👥 Приглашено друзей: <b>{info['referral_count']}</b>\n"
+        f"👥 Приглашено друзей: <b>{referral_count}</b> "
+        f"({progress_in_cycle}/{REFERRAL_MILESTONE_COUNT} до следующего месяца — "
+        f"осталось {friends_until_next})\n"
         f"⏳ Осталось дней: <b>{info['days_left']}</b>"
     )
 
@@ -2193,7 +2202,7 @@ async def cb_dm_features(callback: CallbackQuery):
     builder = InlineKeyboardBuilder()
     builder.button(text="🔌 Настроить бота", callback_data="dm_setup")
     builder.button(text="⚙️ Функции: настройка и описание", callback_data="features_hub")
-    builder.button(text="🎁 Пригласить друга (+2 дня)", callback_data="dm_referral")
+    builder.button(text="🎁 Пригласить друзей (3 = месяц)", callback_data="dm_referral")
     builder.button(text="🔙 Назад", callback_data="dm_home")
     builder.adjust(1)
     await edit_dm_screen(callback, build_intro_text(), builder.as_markup())
