@@ -21,9 +21,11 @@
   удаления с указанием чата, в отличие от групп.
 """
 
+import ast
 import asyncio
 import html
 import logging
+import operator
 import os
 import re
 import sqlite3
@@ -48,6 +50,9 @@ from aiogram.types import (
     CallbackQuery,
     FSInputFile,
     InlineKeyboardButton,
+    InlineQuery,
+    InlineQueryResultArticle,
+    InputTextMessageContent,
     KeyboardButton,
     LabeledPrice,
     Message,
@@ -154,6 +159,13 @@ def iter_plans(tier_code: str):
 CRYPTOBOT_API_TOKEN = os.getenv("VICEGRAM_CRYPTOBOT_TOKEN")
 CRYPTOBOT_API_URL = "https://pay.crypt.bot/api"
 MANUAL_PAYMENT_USERNAME = os.getenv("VICEGRAM_MANUAL_PAYMENT_USERNAME", "vice_helper")
+
+DEEPL_API_KEY = os.getenv("VICEGRAM_DEEPL_API_KEY")
+DEEPL_API_URL = (
+    "https://api-free.deepl.com/v2/translate"
+    if (DEEPL_API_KEY or "").endswith(":fx")
+    else "https://api.deepl.com/v2/translate"
+)
 
 
 def build_manual_payment_url(plan: dict) -> str:
@@ -279,6 +291,26 @@ def init_db() -> None:
             created_at INTEGER NOT NULL,
             PRIMARY KEY (referrer_id, referred_id)
         );
+
+        CREATE TABLE IF NOT EXISTS active_notes (
+            owner_id INTEGER NOT NULL,
+            trigger TEXT NOT NULL,
+            text TEXT,
+            media_type TEXT,
+            file_id TEXT,
+            created_at INTEGER NOT NULL,
+            PRIMARY KEY (owner_id, trigger)
+        );
+
+        CREATE TABLE IF NOT EXISTS reminders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            remind_at INTEGER NOT NULL,
+            text TEXT NOT NULL,
+            sent INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_reminders_due ON reminders (sent, remind_at);
         """
     )
     existing_columns = {row["name"] for row in conn.execute("PRAGMA table_info(settings)")}
@@ -996,6 +1028,52 @@ def find_custom_command(chat_id: int, text: str):
     return row["response"] if row else None
 
 
+# ==================== АКТИВНЫЕ ЗАМЕТКИ (ЛИЧНЫЕ ЧАТЫ) ====================
+def add_active_note(owner_id: int, trigger: str, text: str = None, media_type: str = None, file_id: str = None) -> None:
+    conn = db_connect()
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO active_notes (owner_id, trigger, text, media_type, file_id, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (owner_id, trigger.strip().lower(), text, media_type, file_id, int(time.time())),
+    )
+    conn.commit()
+    conn.close()
+
+
+def remove_active_note(owner_id: int, trigger: str) -> None:
+    conn = db_connect()
+    conn.execute(
+        "DELETE FROM active_notes WHERE owner_id = ? AND trigger = ?", (owner_id, trigger.strip().lower())
+    )
+    conn.commit()
+    conn.close()
+
+
+def list_active_notes(owner_id: int):
+    conn = db_connect()
+    rows = conn.execute(
+        "SELECT trigger, text, media_type FROM active_notes WHERE owner_id = ? ORDER BY trigger", (owner_id,)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def find_active_note(owner_id: int, text: str):
+    conn = db_connect()
+    row = conn.execute(
+        "SELECT * FROM active_notes WHERE owner_id = ? AND trigger = ?",
+        (owner_id, (text or "").strip().lower()),
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+# в памяти: ожидание ввода триггера/содержимого новой заметки, ключ owner_id
+PENDING_NOTE_INPUT: dict[int, dict] = {}
+
+
 # в памяти: ожидание ввода триггера/ответа для новой команды, ключ (chat_id, user_id)
 PENDING_COMMAND_INPUT: dict[tuple[int, int], dict] = {}
 
@@ -1156,6 +1234,8 @@ def build_features_menu_text(user_id: int = None) -> str:
 def get_features_menu_keyboard():
     builder = InlineKeyboardBuilder()
     builder.button(text="📋 Все возможности", callback_data="dm_features")
+    builder.button(text="📝 Активные заметки", callback_data="notes_open")
+    builder.button(text="⏰ Напоминания", callback_data="reminders_open")
     builder.button(text="👥 Настроить в группе", callback_data="dm_group_info")
     builder.button(text="🎁 Пригласить друга (+2 дня)", callback_data="dm_referral")
     builder.button(text="💳 Оформить подписку", callback_data="dm_subscribe")
@@ -1367,6 +1447,73 @@ async def cryptobot_get_invoice_status(invoice_id: int) -> str:
         return "unknown"
     items = result["result"]["items"]
     return items[0]["status"] if items else "unknown"
+
+
+# ==================== ПЕРЕВОДЧИК (ИНЛАЙН-РЕЖИМ, @Helperchat_bot текст) ====================
+async def deepl_translate(text: str, target_lang: str) -> str:
+    async with aiohttp.ClientSession() as session:
+        async with session.post(
+            DEEPL_API_URL,
+            data={"auth_key": DEEPL_API_KEY, "text": text, "target_lang": target_lang},
+        ) as resp:
+            result = await resp.json()
+    translations = result.get("translations")
+    if not translations:
+        raise RuntimeError(f"DeepL translate error: {result}")
+    return translations[0]["text"]
+
+
+@dp.inline_query()
+async def handle_inline_translate(inline_query: InlineQuery):
+    query_text = (inline_query.query or "").strip()
+    if not query_text:
+        await inline_query.answer([], cache_time=1)
+        return
+
+    register_user(inline_query.from_user.id, inline_query.from_user.full_name, username=inline_query.from_user.username)
+
+    if not DEEPL_API_KEY:
+        return  # переводчик не настроен (нет VICEGRAM_DEEPL_API_KEY) — молча ничего не отвечаем
+
+    if get_active_tier(inline_query.from_user.id) is None:
+        await inline_query.answer(
+            [
+                InlineQueryResultArticle(
+                    id="trial_expired",
+                    title="⏳ Пробный период VICEGRAM закончился",
+                    description="Оформи подписку в личке с ботом, чтобы пользоваться переводчиком",
+                    input_message_content=InputTextMessageContent(
+                        message_text="⏳ Пробный период VICEGRAM закончился — оформи подписку в личке с ботом."
+                    ),
+                )
+            ],
+            cache_time=1,
+            is_personal=True,
+        )
+        return
+
+    if len(query_text) > 2000:
+        query_text = query_text[:2000]
+
+    results = []
+    for lang_code, title, result_id in (
+        ("RU", "🇷🇺 Перевести на русский", "translate_ru"),
+        ("EN-US", "🇬🇧 Translate to English", "translate_en"),
+    ):
+        try:
+            translated = await deepl_translate(query_text, lang_code)
+        except Exception:
+            logger.warning("Ошибка перевода DeepL (%s)", lang_code)
+            continue
+        results.append(
+            InlineQueryResultArticle(
+                id=result_id,
+                title=title,
+                description=translated[:100],
+                input_message_content=InputTextMessageContent(message_text=translated),
+            )
+        )
+    await inline_query.answer(results, cache_time=1, is_personal=True)
 
 
 @dp.callback_query(F.data.startswith("pay_crypto:"))
@@ -2059,6 +2206,367 @@ async def cb_dm_referral(callback: CallbackQuery):
     )
 
 
+# ==================== АКТИВНЫЕ ЗАМЕТКИ: UI ====================
+def build_notes_text(notes: list) -> str:
+    lines = [
+        "📝 <b>Активные заметки</b>",
+        DIVIDER,
+        "",
+        "Задай фразу-триггер и содержимое (текст или фото). Когда в подключённом "
+        "личном чате кто-то напишет эту фразу — я сразу отправлю заметку в этот "
+        "же чат (Telegram подпишет её «via @бот», это не подмена личности).",
+        "",
+    ]
+    if not notes:
+        lines.append("Пока нет ни одной заметки.")
+    else:
+        for n in notes:
+            kind = "📷 фото" if n["media_type"] else html.escape((n["text"] or "")[:40])
+            lines.append(f"• <code>{html.escape(n['trigger'])}</code> → {kind}")
+    return "\n".join(lines)
+
+
+def get_notes_keyboard(notes: list):
+    builder = InlineKeyboardBuilder()
+    builder.button(text="➕ Добавить заметку", callback_data="notes_add")
+    for n in notes:
+        builder.button(text=f"🗑 {n['trigger']}", callback_data=f"notes_del:{n['trigger']}")
+    builder.button(text="🔙 Назад", callback_data="dm_home")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+@dp.callback_query(F.data == "notes_open")
+async def cb_notes_open(callback: CallbackQuery):
+    await callback.answer()
+    register_user(callback.from_user.id, callback.from_user.full_name, username=callback.from_user.username)
+    notes = list_active_notes(callback.from_user.id)
+    await edit_dm_screen(callback, build_notes_text(notes), get_notes_keyboard(notes))
+
+
+@dp.callback_query(F.data == "notes_add")
+async def cb_notes_add(callback: CallbackQuery):
+    await callback.answer()
+    PENDING_NOTE_INPUT[callback.from_user.id] = {"stage": "trigger"}
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔙 Отмена", callback_data="notes_open")
+    await callback.message.answer(
+        "✏️ Напиши фразу-триггер для новой заметки (например: <code>ПАРЫ</code>).",
+        parse_mode="HTML",
+        reply_markup=builder.as_markup(),
+    )
+
+
+@dp.callback_query(F.data.startswith("notes_del:"))
+async def cb_notes_del(callback: CallbackQuery):
+    trigger = callback.data.split(":", 1)[1]
+    remove_active_note(callback.from_user.id, trigger)
+    await callback.answer("🗑 Удалено")
+    notes = list_active_notes(callback.from_user.id)
+    await callback.message.edit_text(
+        build_notes_text(notes), parse_mode="HTML", reply_markup=get_notes_keyboard(notes)
+    )
+
+
+async def process_pending_note_input(message: Message, pending: dict) -> bool:
+    """True — сообщение обработано как часть настройки заметки, дальше идти не нужно."""
+    owner_id = message.from_user.id
+    stage = pending["stage"]
+
+    if stage == "trigger":
+        if not message.text:
+            await message.answer("⚠️ Пришли текстовую фразу-триггер.")
+            return True
+        PENDING_NOTE_INPUT[owner_id] = {"stage": "content", "trigger": message.text}
+        await message.answer("📎 Теперь пришли текст или фото — это будет содержимым заметки.")
+        return True
+
+    if stage == "content":
+        trigger = pending["trigger"]
+        if message.photo:
+            add_active_note(owner_id, trigger, text=message.caption, media_type="photo", file_id=message.photo[-1].file_id)
+        elif message.text:
+            add_active_note(owner_id, trigger, text=message.text)
+        else:
+            await message.answer("⚠️ Пришли текст или фото.")
+            return True
+        PENDING_NOTE_INPUT.pop(owner_id, None)
+        await message.answer(f"✅ Заметка «{html.escape(trigger)}» сохранена.", parse_mode="HTML")
+        notes = list_active_notes(owner_id)
+        await send_dm_screen(message, build_notes_text(notes), get_notes_keyboard(notes))
+        return True
+
+    return False
+
+
+async def maybe_reply_active_note(owner_id: int, message: Message) -> None:
+    text = message.text or message.caption
+    if not text:
+        return
+    note = find_active_note(owner_id, text)
+    if not note or not await gate_by_trial(owner_id):
+        return
+    try:
+        if note["media_type"] == "photo" and note["file_id"]:
+            await bot.send_photo(
+                chat_id=message.chat.id,
+                photo=note["file_id"],
+                caption=note["text"] or None,
+                business_connection_id=message.business_connection_id,
+            )
+        else:
+            await bot.send_message(
+                chat_id=message.chat.id,
+                text=note["text"] or "(пусто)",
+                business_connection_id=message.business_connection_id,
+            )
+    except Exception:
+        logger.warning("Не удалось отправить активную заметку владельца %s", owner_id)
+
+
+# ==================== НАПОМИНАНИЯ ====================
+# время без указания часового пояса трактуем как МСК по умолчанию — можно
+# переопределить, если аудитория бота в другом поясе
+REMINDER_TZ_OFFSET_HOURS = int(os.getenv("VICEGRAM_TZ_OFFSET_HOURS", "3"))
+
+
+def _reminder_local_now() -> datetime:
+    return (datetime.now(timezone.utc) + timedelta(hours=REMINDER_TZ_OFFSET_HOURS)).replace(tzinfo=None)
+
+
+def _reminder_local_to_ts(local_dt: datetime) -> int:
+    utc_dt = (local_dt - timedelta(hours=REMINDER_TZ_OFFSET_HOURS)).replace(tzinfo=timezone.utc)
+    return int(utc_dt.timestamp())
+
+
+def parse_reminder_datetime(text: str):
+    """Разбирает пользовательский ввод даты/времени напоминания (по МСК).
+    Понимает: "через N минут/часов/дней", "завтра/сегодня в ЧЧ:ММ",
+    "ДД.ММ[.ГГГГ] ЧЧ:ММ", просто "ЧЧ:ММ". None — не разобрал."""
+    text = text.strip().lower()
+    now_local = _reminder_local_now()
+
+    m = re.fullmatch(r"через\s+(\d+)\s*(минут[уы]?|мин\.?|час(?:а|ов)?|ч\.?|дн(?:я|ей)?|день)", text)
+    if m:
+        amount = int(m.group(1))
+        unit = m.group(2)
+        if amount <= 0 or amount > 100000:
+            return None
+        if unit.startswith(("минут", "мин")):
+            delta = timedelta(minutes=amount)
+        elif unit.startswith(("час", "ч")):
+            delta = timedelta(hours=amount)
+        else:
+            delta = timedelta(days=amount)
+        return _reminder_local_to_ts(now_local + delta)
+
+    m = re.fullmatch(r"(завтра|сегодня)\s+в\s+(\d{1,2}):(\d{2})", text)
+    if m:
+        day_word, hh, mm = m.groups()
+        if not (0 <= int(hh) <= 23 and 0 <= int(mm) <= 59):
+            return None
+        target = now_local.replace(hour=int(hh), minute=int(mm), second=0, microsecond=0)
+        if day_word == "завтра":
+            target += timedelta(days=1)
+        elif target <= now_local:
+            target += timedelta(days=1)
+        return _reminder_local_to_ts(target)
+
+    m = re.fullmatch(r"(\d{1,2})\.(\d{1,2})(?:\.(\d{4}))?\s+(\d{1,2}):(\d{2})", text)
+    if m:
+        day, month, year, hh, mm = m.groups()
+        year_val = int(year) if year else now_local.year
+        try:
+            target = datetime(year_val, int(month), int(day), int(hh), int(mm))
+        except ValueError:
+            return None
+        if not year and target <= now_local:
+            target = target.replace(year=year_val + 1)
+        return _reminder_local_to_ts(target)
+
+    m = re.fullmatch(r"(\d{1,2}):(\d{2})", text)
+    if m:
+        hh, mm = m.groups()
+        if not (0 <= int(hh) <= 23 and 0 <= int(mm) <= 59):
+            return None
+        target = now_local.replace(hour=int(hh), minute=int(mm), second=0, microsecond=0)
+        if target <= now_local:
+            target += timedelta(days=1)
+        return _reminder_local_to_ts(target)
+
+    return None
+
+
+def create_reminder(user_id: int, remind_at: int, text: str) -> int:
+    conn = db_connect()
+    cur = conn.execute(
+        "INSERT INTO reminders (user_id, remind_at, text, created_at) VALUES (?, ?, ?, ?)",
+        (user_id, remind_at, text, int(time.time())),
+    )
+    reminder_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return reminder_id
+
+
+def get_upcoming_reminders(user_id: int, limit: int = 10):
+    conn = db_connect()
+    rows = conn.execute(
+        "SELECT * FROM reminders WHERE user_id = ? AND sent = 0 ORDER BY remind_at ASC LIMIT ?",
+        (user_id, limit),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def delete_reminder(reminder_id: int, user_id: int) -> None:
+    conn = db_connect()
+    conn.execute("DELETE FROM reminders WHERE id = ? AND user_id = ?", (reminder_id, user_id))
+    conn.commit()
+    conn.close()
+
+
+def get_due_reminders(now: int, limit: int = 20):
+    conn = db_connect()
+    rows = conn.execute(
+        "SELECT * FROM reminders WHERE sent = 0 AND remind_at <= ? ORDER BY remind_at ASC LIMIT ?",
+        (now, limit),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def mark_reminder_sent(reminder_id: int) -> None:
+    conn = db_connect()
+    conn.execute("UPDATE reminders SET sent = 1 WHERE id = ?", (reminder_id,))
+    conn.commit()
+    conn.close()
+
+
+# в памяти: ожидание ввода даты/текста нового напоминания, ключ user_id
+PENDING_REMINDER_INPUT: dict[int, dict] = {}
+
+
+def build_reminders_text(reminders: list) -> str:
+    lines = [
+        "⏰ <b>Напоминания</b>",
+        DIVIDER,
+        "",
+        f"Время — по МСК (UTC+{REMINDER_TZ_OFFSET_HOURS}).",
+        "",
+    ]
+    if not reminders:
+        lines.append("Пока нет активных напоминаний.")
+    else:
+        for r in reminders:
+            when = datetime.fromtimestamp(
+                r["remind_at"] - REMINDER_TZ_OFFSET_HOURS * 3600, tz=timezone.utc
+            ).strftime("%d.%m %H:%M")
+            lines.append(f"• {when} — {html.escape(r['text'][:60])}")
+    return "\n".join(lines)
+
+
+def get_reminders_keyboard(reminders: list):
+    builder = InlineKeyboardBuilder()
+    builder.button(text="➕ Новое напоминание", callback_data="reminders_add")
+    for r in reminders:
+        when = datetime.fromtimestamp(
+            r["remind_at"] - REMINDER_TZ_OFFSET_HOURS * 3600, tz=timezone.utc
+        ).strftime("%d.%m %H:%M")
+        builder.button(text=f"🗑 {when}", callback_data=f"reminders_del:{r['id']}")
+    builder.button(text="🔙 Назад", callback_data="dm_home")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+@dp.callback_query(F.data == "reminders_open")
+async def cb_reminders_open(callback: CallbackQuery):
+    await callback.answer()
+    register_user(callback.from_user.id, callback.from_user.full_name, username=callback.from_user.username)
+    reminders = get_upcoming_reminders(callback.from_user.id)
+    await edit_dm_screen(callback, build_reminders_text(reminders), get_reminders_keyboard(reminders))
+
+
+@dp.callback_query(F.data == "reminders_add")
+async def cb_reminders_add(callback: CallbackQuery):
+    await callback.answer()
+    PENDING_REMINDER_INPUT[callback.from_user.id] = {"stage": "datetime"}
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔙 Отмена", callback_data="reminders_open")
+    await callback.message.answer(
+        "🕒 Когда напомнить? Напиши, например:\n"
+        "• <code>через 30 минут</code>\n"
+        "• <code>завтра в 9:00</code>\n"
+        "• <code>20.07 18:30</code>",
+        parse_mode="HTML",
+        reply_markup=builder.as_markup(),
+    )
+
+
+@dp.callback_query(F.data.startswith("reminders_del:"))
+async def cb_reminders_del(callback: CallbackQuery):
+    try:
+        reminder_id = int(callback.data.split(":", 1)[1])
+    except ValueError:
+        await callback.answer("Не найдено", show_alert=True)
+        return
+    delete_reminder(reminder_id, callback.from_user.id)
+    await callback.answer("🗑 Удалено")
+    reminders = get_upcoming_reminders(callback.from_user.id)
+    await callback.message.edit_text(
+        build_reminders_text(reminders), parse_mode="HTML", reply_markup=get_reminders_keyboard(reminders)
+    )
+
+
+async def process_pending_reminder_input(message: Message, pending: dict) -> None:
+    user_id = message.from_user.id
+    stage = pending["stage"]
+    text = (message.text or "").strip()
+
+    if stage == "datetime":
+        remind_at = parse_reminder_datetime(text)
+        if remind_at is None:
+            await message.answer(
+                "⚠️ Не понял дату/время. Примеры: «через 30 минут», «завтра в 9:00», «20.07 18:30»."
+            )
+            return
+        PENDING_REMINDER_INPUT[user_id] = {"stage": "text", "remind_at": remind_at}
+        await message.answer("✏️ Что напомнить?")
+        return
+
+    if stage == "text":
+        if not text:
+            await message.answer("⚠️ Пришли текст напоминания.")
+            return
+        remind_at = pending["remind_at"]
+        PENDING_REMINDER_INPUT.pop(user_id, None)
+        create_reminder(user_id, remind_at, text)
+        when = datetime.fromtimestamp(
+            remind_at - REMINDER_TZ_OFFSET_HOURS * 3600, tz=timezone.utc
+        ).strftime("%d.%m.%Y %H:%M")
+        await message.answer(f"✅ Напомню {when} (МСК): «{html.escape(text)}»", parse_mode="HTML")
+        reminders = get_upcoming_reminders(user_id)
+        await send_dm_screen(message, build_reminders_text(reminders), get_reminders_keyboard(reminders))
+
+
+REMINDER_POLL_INTERVAL_SECONDS = 30
+
+
+async def reminder_poller() -> None:
+    while True:
+        try:
+            now = int(time.time())
+            for r in get_due_reminders(now):
+                mark_reminder_sent(r["id"])
+                try:
+                    await bot.send_message(r["user_id"], f"⏰ <b>Напоминание:</b>\n\n{html.escape(r['text'])}", parse_mode="HTML")
+                except Exception:
+                    logger.warning("Не удалось отправить напоминание пользователю %s", r["user_id"])
+        except Exception:
+            logger.exception("Ошибка в поллере напоминаний")
+        await asyncio.sleep(REMINDER_POLL_INTERVAL_SECONDS)
+
+
 @dp.message(Command("settings"), F.chat.type.in_({ChatType.GROUP, ChatType.SUPERGROUP}))
 async def cmd_settings(message: Message):
     if not await is_group_admin(message.chat.id, message.from_user.id):
@@ -2267,7 +2775,12 @@ async def handle_business_message(message: Message):
     connection = get_business_connection(message.business_connection_id)
     if not connection or not connection["is_enabled"]:
         return
-    await cache_business_message(connection["owner_id"], message)
+    owner_id = connection["owner_id"]
+    await cache_business_message(owner_id, message)
+    if message.text and message.text.startswith("/calc"):
+        await reply_calc_in_business_chat(owner_id, message)
+    else:
+        await maybe_reply_active_note(owner_id, message)
 
 
 @dp.edited_business_message()
@@ -2654,6 +3167,88 @@ async def cmd_restore(message: Message):
     await message.answer_document(file, caption="📤 Восстановленная история сообщений из кэша VICEGRAM.")
 
 
+# ==================== КАЛЬКУЛЯТОР (/calc) ====================
+_CALC_BINOPS = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.FloorDiv: operator.floordiv,
+    ast.Mod: operator.mod,
+    ast.Pow: operator.pow,
+}
+_CALC_UNARYOPS = {ast.UAdd: operator.pos, ast.USub: operator.neg}
+_CALC_MAX_POWER_EXPONENT = 1000  # защита от чисел вроде 9**9**9
+
+
+def _calc_eval_node(node):
+    if isinstance(node, ast.Constant):
+        if isinstance(node.value, (int, float)) and not isinstance(node.value, bool):
+            return node.value
+        raise ValueError("Недопустимое значение")
+    if isinstance(node, ast.BinOp) and type(node.op) in _CALC_BINOPS:
+        left = _calc_eval_node(node.left)
+        right = _calc_eval_node(node.right)
+        if isinstance(node.op, ast.Pow) and abs(right) > _CALC_MAX_POWER_EXPONENT:
+            raise ValueError("Слишком большая степень")
+        return _CALC_BINOPS[type(node.op)](left, right)
+    if isinstance(node, ast.UnaryOp) and type(node.op) in _CALC_UNARYOPS:
+        return _CALC_UNARYOPS[type(node.op)](_calc_eval_node(node.operand))
+    raise ValueError("Недопустимое выражение")
+
+
+def safe_calc(expr: str) -> float:
+    """Считает арифметическое выражение через ast, без eval() — исключает
+    выполнение произвольного кода. Разрешено: + - * / // % ** и скобки."""
+    expr = expr.strip()
+    if not expr or len(expr) > 200:
+        raise ValueError("Пустое или слишком длинное выражение")
+    try:
+        tree = ast.parse(expr, mode="eval")
+    except SyntaxError:
+        raise ValueError("Не получилось разобрать выражение")
+    return _calc_eval_node(tree.body)
+
+
+def format_calc_result(expr: str) -> str:
+    try:
+        result = safe_calc(expr)
+    except ZeroDivisionError:
+        return "🧮 Ошибка: деление на ноль"
+    except (ValueError, OverflowError, TypeError):
+        return "🧮 Не получилось посчитать — проверь выражение (доступны + - * / // % **, скобки)."
+    if isinstance(result, float) and result.is_integer():
+        result = int(result)
+    return f"🧮 {html.escape(expr.strip())} = <b>{result}</b>"
+
+
+@dp.message(Command("calc"), F.chat.type == ChatType.PRIVATE)
+async def cmd_calc(message: Message, command: CommandObject):
+    if not command.args:
+        await message.answer(
+            "🧮 Напиши пример после команды, например: <code>/calc 2+2*2</code>", parse_mode="HTML"
+        )
+        return
+    await message.answer(format_calc_result(command.args), parse_mode="HTML")
+
+
+async def reply_calc_in_business_chat(owner_id: int, message: Message) -> None:
+    if not await gate_by_trial(owner_id):
+        return
+    expr = message.text[len("/calc"):].strip()
+    if not expr:
+        return
+    try:
+        await bot.send_message(
+            chat_id=message.chat.id,
+            text=format_calc_result(expr),
+            parse_mode="HTML",
+            business_connection_id=message.business_connection_id,
+        )
+    except Exception:
+        logger.warning("Не удалось отправить результат /calc владельцу %s", owner_id)
+
+
 # ==================== ОБРАБОТЧИК: "ПОЙМАЙ ВСЁ" НА ЛИЧКУ ====================
 # Регистрируется после всех приватных команд — иначе перехватит /start,
 # /settings и /admin ещё до того, как они сработают.
@@ -2662,10 +3257,17 @@ async def handle_private_catchall(message: Message):
     admin_pending = PENDING_ADMIN_INPUT.get(message.from_user.id)
     if admin_pending and is_bot_admin(message.from_user.id) and message.text:
         await process_pending_admin_input(message, admin_pending)
+        return
 
-    await message.answer(
-        "📨 Заявка отправлена администратору. Как только подтвердит — подписка активируется автоматически."
-    )
+    note_pending = PENDING_NOTE_INPUT.get(message.from_user.id)
+    if note_pending:
+        await process_pending_note_input(message, note_pending)
+        return
+
+    reminder_pending = PENDING_REMINDER_INPUT.get(message.from_user.id)
+    if reminder_pending:
+        await process_pending_reminder_input(message, reminder_pending)
+        return
 
 
 # ==================== ОБРАБОТЧИК: ОБЫЧНЫЕ СООБЩЕНИЯ В ГРУППЕ ====================
@@ -2755,6 +3357,7 @@ async def setup_bot_commands() -> None:
         [
             BotCommand(command="start", description="🎣 Запустить / открыть меню"),
             BotCommand(command="settings", description="⚙️ Настройки"),
+            BotCommand(command="calc", description="🧮 Посчитать пример"),
         ],
         scope=BotCommandScopeAllPrivateChats(),
     )
@@ -2813,6 +3416,7 @@ async def main() -> None:
     asyncio.create_task(start_health_server())
     asyncio.create_task(deleted_message_poller())
     asyncio.create_task(public_user_count_updater())
+    asyncio.create_task(reminder_poller())
     await dp.start_polling(bot)
 
 
