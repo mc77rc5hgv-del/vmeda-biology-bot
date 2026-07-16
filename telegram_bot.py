@@ -48,6 +48,9 @@ with open("chemistry_labs.json", "r", encoding="utf-8") as f:
 with open("chemistry_theory.json", "r", encoding="utf-8") as f:
     CHEMISTRY_THEORY = json.load(f)["topics"]
 
+with open("chemistry_tasks.json", "r", encoding="utf-8") as f:
+    CHEMISTRY_TASKS = json.load(f)["topics"]
+
 # ==================== СТАТИСТИКА (СОХРАНЯЕТСЯ НА ДИСК) ====================
 def load_stats() -> dict:
     os.makedirs(STATS_DIR, exist_ok=True)
@@ -514,6 +517,51 @@ def get_labs_keyboard():
     builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="menu_chemistry"))
     return builder.as_markup()
 
+def get_chemistry_tasks_topics_keyboard():
+    builder = InlineKeyboardBuilder()
+    for num, topic in sorted(CHEMISTRY_TASKS.items(), key=lambda x: int(x[0])):
+        builder.button(text=f"📂 {topic['title']}", callback_data=f"chemtask_topic:{num}")
+    builder.adjust(1)
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="menu_chemistry"))
+    return builder.as_markup()
+
+def get_chemistry_task_topic_keyboard(topic_num: str):
+    builder = InlineKeyboardBuilder()
+    builder.button(text="📐 Формулы и алгоритм", callback_data=f"chemtask_formulas:{topic_num}")
+    builder.button(text="📋 Список задач", callback_data=f"chemtask_list:{topic_num}")
+    builder.adjust(1)
+    builder.row(InlineKeyboardButton(text="🔙 К темам", callback_data="chemistry_tasks"))
+    return builder.as_markup()
+
+def get_chemistry_formulas_keyboard(topic_num: str):
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data=f"chemtask_topic:{topic_num}"))
+    return builder.as_markup()
+
+def get_chemistry_task_list_keyboard(topic_num: str):
+    builder = InlineKeyboardBuilder()
+    topic = CHEMISTRY_TASKS[topic_num]
+    for task in topic["tasks"]:
+        builder.button(text=f"📝 Задача {task['num']}", callback_data=f"chemtask_show:{topic_num}:{task['num']}")
+    builder.adjust(1)
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data=f"chemtask_topic:{topic_num}"))
+    return builder.as_markup()
+
+def get_chemistry_task_detail_keyboard(topic_num: str, task_num: int):
+    builder = InlineKeyboardBuilder()
+    tasks = CHEMISTRY_TASKS[topic_num]["tasks"]
+    nums = [t["num"] for t in tasks]
+    idx = nums.index(task_num)
+    nav = []
+    if idx > 0:
+        nav.append(InlineKeyboardButton(text="⬅️ Предыдущая", callback_data=f"chemtask_show:{topic_num}:{nums[idx-1]}"))
+    if idx < len(nums) - 1:
+        nav.append(InlineKeyboardButton(text="Следующая ➡️", callback_data=f"chemtask_show:{topic_num}:{nums[idx+1]}"))
+    if nav:
+        builder.row(*nav)
+    builder.row(InlineKeyboardButton(text="🔙 К списку задач", callback_data=f"chemtask_list:{topic_num}"))
+    return builder.as_markup()
+
 # ==================== ОБРАБОТЧИКИ ====================
 @dp.message(CommandStart())
 async def cmd_start(message: Message):
@@ -730,10 +778,73 @@ async def cb_theory_list(callback: CallbackQuery):
         reply_markup=get_chemistry_theory_list()
     )
 
-# ==================== ХИМИЯ - ЗАДАЧИ (пока заглушка) ====================
+# ==================== ХИМИЯ - ЗАДАЧИ ====================
 @dp.callback_query(F.data == "chemistry_tasks")
 async def cb_chemistry_tasks(callback: CallbackQuery):
-    await callback.answer("Раздел скоро появится", show_alert=True)
+    await callback.answer()
+    await safe_edit_text(
+        callback.message,
+        f"📝 <b>Задачи по химии</b>\n{DIVIDER}\n\nВыбери тему:",
+        parse_mode="HTML",
+        reply_markup=get_chemistry_tasks_topics_keyboard()
+    )
+
+@dp.callback_query(F.data.startswith("chemtask_topic:"))
+async def cb_chemtask_topic(callback: CallbackQuery):
+    await callback.answer()
+    topic_num = callback.data.split(":")[1]
+    topic = CHEMISTRY_TASKS.get(topic_num)
+    if not topic:
+        await callback.answer("Тема не найдена", show_alert=True)
+        return
+    text = (
+        f"📂 <b>{topic['title']}</b>\n{DIVIDER}\n\n"
+        f"{topic.get('intro', '')}\n\n"
+        f"Всего типовых задач: {len(topic['tasks'])}"
+    )
+    await safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=get_chemistry_task_topic_keyboard(topic_num))
+
+@dp.callback_query(F.data.startswith("chemtask_formulas:"))
+async def cb_chemtask_formulas(callback: CallbackQuery):
+    await callback.answer()
+    topic_num = callback.data.split(":")[1]
+    topic = CHEMISTRY_TASKS.get(topic_num)
+    if not topic:
+        await callback.answer("Тема не найдена", show_alert=True)
+        return
+    text = f"📂 <b>{topic['title']}</b>\n{DIVIDER}\n\n{topic['formulas']}"
+    await safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=get_chemistry_formulas_keyboard(topic_num))
+
+@dp.callback_query(F.data.startswith("chemtask_list:"))
+async def cb_chemtask_list(callback: CallbackQuery):
+    await callback.answer()
+    topic_num = callback.data.split(":")[1]
+    topic = CHEMISTRY_TASKS.get(topic_num)
+    if not topic:
+        await callback.answer("Тема не найдена", show_alert=True)
+        return
+    text = f"📋 <b>{topic['title']} — список задач</b>\n{DIVIDER}\n\nВыбери задачу:"
+    await safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=get_chemistry_task_list_keyboard(topic_num))
+
+@dp.callback_query(F.data.startswith("chemtask_show:"))
+async def cb_chemtask_show(callback: CallbackQuery):
+    await callback.answer()
+    _, topic_num, task_num_s = callback.data.split(":")
+    task_num = int(task_num_s)
+    topic = CHEMISTRY_TASKS.get(topic_num)
+    if not topic:
+        await callback.answer("Тема не найдена", show_alert=True)
+        return
+    task = next((t for t in topic["tasks"] if t["num"] == task_num), None)
+    if not task:
+        await callback.answer("Задача не найдена", show_alert=True)
+        return
+    text = (
+        f"📝 <b>Задача №{task['num']}</b> — {task.get('title', '')}\n{DIVIDER}\n\n"
+        f"<b>Условие:</b>\n<i>{task['condition']}</i>\n\n"
+        f"<b>Решение:</b>\n{task['solution']}"
+    )
+    await safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=get_chemistry_task_detail_keyboard(topic_num, task_num))
 
 # ==================== ХИМИЯ - ЛАБОРАТОРНЫЕ РАБОТЫ ====================
 @dp.callback_query(F.data == "chemistry_labs")
