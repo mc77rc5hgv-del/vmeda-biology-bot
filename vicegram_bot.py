@@ -48,8 +48,10 @@ from aiogram.types import (
     CallbackQuery,
     FSInputFile,
     InlineKeyboardButton,
+    KeyboardButton,
     LabeledPrice,
     Message,
+    ReplyKeyboardMarkup,
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -1929,6 +1931,37 @@ def is_user_connected(user_id: int) -> bool:
     return row is not None
 
 
+def get_quick_reply_keyboard():
+    """Постоянная клавиатура под полем ввода (в дополнение к инлайн-кнопкам
+    в самих сообщениях, не вместо них) — быстрый доступ к /start и настройке
+    без необходимости листать вверх к прошлым сообщениям."""
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="🎣 Старт"), KeyboardButton(text="🔌 Настроить бота")]],
+        resize_keyboard=True,
+    )
+
+
+async def send_main_menu_screen(message: Message) -> None:
+    if is_user_connected(message.from_user.id):
+        await send_dm_screen(
+            message,
+            build_features_menu_text(message.from_user.id),
+            get_features_menu_keyboard(),
+        )
+    else:
+        await send_dm_screen(message, build_intro_text(), get_intro_keyboard())
+
+
+async def send_setup_screen(message: Message) -> None:
+    me = await bot.get_me()
+    await send_dm_screen(
+        message,
+        build_setup_instructions(me.username),
+        get_setup_keyboard(),
+        photo_path=SETUP_GUIDE_PATH,
+    )
+
+
 @dp.message(CommandStart())
 async def cmd_start(message: Message, command: CommandObject):
     if is_user_banned(message.from_user.id):
@@ -1942,25 +1975,34 @@ async def cmd_start(message: Message, command: CommandObject):
         except ValueError:
             referrer_id = None
     register_user(message.from_user.id, message.from_user.full_name, referrer_id, message.from_user.username)
+    await message.answer(
+        "⌨️ Быстрые кнопки снизу — жми в любой момент, не обязательно листать вверх.",
+        reply_markup=get_quick_reply_keyboard(),
+    )
 
     if command.args == "setup":
-        me = await bot.get_me()
-        await send_dm_screen(
-            message,
-            build_setup_instructions(me.username),
-            get_setup_keyboard(),
-            photo_path=SETUP_GUIDE_PATH,
-        )
+        await send_setup_screen(message)
         return
 
-    if is_user_connected(message.from_user.id):
-        await send_dm_screen(
-            message,
-            build_features_menu_text(message.from_user.id),
-            get_features_menu_keyboard(),
-        )
+    await send_main_menu_screen(message)
+
+
+@dp.message(F.text == "🎣 Старт", F.chat.type == ChatType.PRIVATE)
+async def handle_quick_start(message: Message):
+    if is_user_banned(message.from_user.id):
+        await message.answer("🚫 Доступ к боту ограничен администратором.")
         return
-    await send_dm_screen(message, build_intro_text(), get_intro_keyboard())
+    register_user(message.from_user.id, message.from_user.full_name, username=message.from_user.username)
+    await send_main_menu_screen(message)
+
+
+@dp.message(F.text == "🔌 Настроить бота", F.chat.type == ChatType.PRIVATE)
+async def handle_quick_setup(message: Message):
+    if is_user_banned(message.from_user.id):
+        await message.answer("🚫 Доступ к боту ограничен администратором.")
+        return
+    register_user(message.from_user.id, message.from_user.full_name, username=message.from_user.username)
+    await send_setup_screen(message)
 
 
 @dp.callback_query(F.data == "dm_home")
