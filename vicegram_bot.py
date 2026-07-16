@@ -1943,6 +1943,16 @@ async def cmd_start(message: Message, command: CommandObject):
             referrer_id = None
     register_user(message.from_user.id, message.from_user.full_name, referrer_id, message.from_user.username)
 
+    if command.args == "setup":
+        me = await bot.get_me()
+        await send_dm_screen(
+            message,
+            build_setup_instructions(me.username),
+            get_setup_keyboard(),
+            photo_path=SETUP_GUIDE_PATH,
+        )
+        return
+
     if is_user_connected(message.from_user.id):
         await send_dm_screen(
             message,
