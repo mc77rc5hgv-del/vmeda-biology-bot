@@ -90,6 +90,7 @@ def load_stats() -> dict:
             data.setdefault("donations_stars_count", 0)
             data.setdefault("donor_stars", {})
             data.setdefault("donor_rubles", {})
+            data.setdefault("donor_hide_name", {})
             return data
         except (json.JSONDecodeError, OSError):
             logger.exception("Не удалось прочитать %s, статистика будет создана заново", STATS_FILE)
@@ -113,6 +114,7 @@ def load_stats() -> dict:
         "donations_stars_count": 0,
         "donor_stars": {},
         "donor_rubles": {},
+        "donor_hide_name": {},
     }
 
 # Один воркер сериализует записи на диск и не даёт им блокировать event loop бота.
@@ -498,8 +500,7 @@ async def referral_gate_middleware(handler, event: Update, data):
         return await handler(event, data)
     if event.callback_query and (
         (event.callback_query.data or "") in SUPPORT_GATE_EXEMPT_CALLBACKS
-        or (event.callback_query.data or "").startswith("donate_stars_amount:")
-        or (event.callback_query.data or "").startswith("donate_rubles_amount:")
+        or (event.callback_query.data or "").startswith(SUPPORT_GATE_EXEMPT_PREFIXES)
     ):
         return await handler(event, data)
 
@@ -562,7 +563,12 @@ HELPER_ACCOUNT_URL = "https://t.me/vmeda_helper"
 SUPPORT_GATE_EXEMPT_CALLBACKS = {
     "support_menu", "donate_stars_menu", "donate_stars_custom",
     "donate_rubles_menu", "donate_rubles_custom", "donors_leaderboard",
+    "toggle_donor_visibility",
 }
+SUPPORT_GATE_EXEMPT_PREFIXES = (
+    "donate_stars_amount:", "donate_rubles_amount:",
+    "donate_stars_confirm:", "donate_rubles_confirm:",
+)
 
 def get_support_text() -> str:
     return (
@@ -574,16 +580,21 @@ def get_support_text() -> str:
         "Можно звёздами Telegram или переводом в рублях — выбери, как удобнее 👇"
     )
 
-def get_support_keyboard():
+def get_support_keyboard(user_id: int):
+    hidden = stats.get("donor_hide_name", {}).get(str(user_id), False)
+    visibility_label = "🙋 Показывать меня в рейтинге" if hidden else "🙈 Скрыть меня в рейтинге"
     builder = InlineKeyboardBuilder()
     builder.button(text="⭐ Пожертвовать звёзды", callback_data="donate_stars_menu")
     builder.button(text="💵 Перевести рубли", callback_data="donate_rubles_menu")
     builder.button(text="🏆 Лучшие донатеры", callback_data="donors_leaderboard")
+    builder.button(text=visibility_label, callback_data="toggle_donor_visibility")
     builder.adjust(1)
     builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
     return builder.as_markup()
 
 def donor_display_name(uid_str: str) -> str:
+    if stats.get("donor_hide_name", {}).get(uid_str):
+        return "🙈 Аноним"
     username = stats["user_username"].get(uid_str)
     if username:
         return f"@{username}"
@@ -613,6 +624,30 @@ def get_donors_leaderboard_keyboard():
     builder.button(text="🔄 Обновить", callback_data="donors_leaderboard")
     builder.button(text="🔙 Назад", callback_data="support_menu")
     builder.adjust(1)
+    return builder.as_markup()
+
+def get_visibility_choice_text(amount: int, unit: str) -> str:
+    return (
+        f"👀 <b>Показывать тебя в рейтинге?</b>\n{DIVIDER}\n\n"
+        f"Сумма: <b>{amount}{unit}</b>\n\n"
+        "Можно пожертвовать открыто — твой ник появится в «🏆 Лучшие донатеры» — "
+        "или анонимно, тогда в рейтинге будет просто «Аноним»."
+    )
+
+def get_stars_visibility_keyboard(amount: int):
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🙋 Показывать мой ник", callback_data=f"donate_stars_confirm:{amount}:pub")
+    builder.button(text="🙈 Анонимно", callback_data=f"donate_stars_confirm:{amount}:anon")
+    builder.adjust(1)
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="donate_stars_menu"))
+    return builder.as_markup()
+
+def get_rubles_visibility_keyboard(amount: int):
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🙋 Показывать мой ник", callback_data=f"donate_rubles_confirm:{amount}:pub")
+    builder.button(text="🙈 Анонимно", callback_data=f"donate_rubles_confirm:{amount}:anon")
+    builder.adjust(1)
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="donate_rubles_menu"))
     return builder.as_markup()
 
 def get_stars_menu_text() -> str:
@@ -1776,7 +1811,16 @@ async def cb_referral_battle(callback: CallbackQuery):
 async def cb_support_menu(callback: CallbackQuery):
     await callback.answer()
     DONATION_PENDING.pop(callback.from_user.id, None)
-    await safe_edit_text(callback.message, get_support_text(), parse_mode="HTML", reply_markup=get_support_keyboard())
+    await safe_edit_text(callback.message, get_support_text(), parse_mode="HTML", reply_markup=get_support_keyboard(callback.from_user.id))
+
+@dp.callback_query(F.data == "toggle_donor_visibility")
+async def cb_toggle_donor_visibility(callback: CallbackQuery):
+    uid_str = str(callback.from_user.id)
+    hidden = not stats["donor_hide_name"].get(uid_str, False)
+    stats["donor_hide_name"][uid_str] = hidden
+    save_stats()
+    await callback.answer("Теперь ты анонимен в рейтинге" if hidden else "Теперь твой ник виден в рейтинге")
+    await safe_edit_text(callback.message, get_support_text(), parse_mode="HTML", reply_markup=get_support_keyboard(callback.from_user.id))
 
 @dp.callback_query(F.data == "donors_leaderboard")
 async def cb_donors_leaderboard(callback: CallbackQuery):
@@ -1798,7 +1842,20 @@ async def cb_donate_stars_menu(callback: CallbackQuery):
 async def cb_donate_stars_amount(callback: CallbackQuery):
     await callback.answer()
     amount = int(callback.data.split(":")[1])
-    await send_stars_invoice(callback.from_user.id, amount)
+    await safe_edit_text(
+        callback.message,
+        get_visibility_choice_text(amount, " ⭐"),
+        parse_mode="HTML",
+        reply_markup=get_stars_visibility_keyboard(amount)
+    )
+
+@dp.callback_query(F.data.startswith("donate_stars_confirm:"))
+async def cb_donate_stars_confirm(callback: CallbackQuery):
+    await callback.answer()
+    _, amount_s, visibility = callback.data.split(":")
+    stats["donor_hide_name"][str(callback.from_user.id)] = (visibility == "anon")
+    save_stats()
+    await send_stars_invoice(callback.from_user.id, int(amount_s))
 
 @dp.callback_query(F.data == "donate_stars_custom")
 async def cb_donate_stars_custom(callback: CallbackQuery):
@@ -1823,6 +1880,20 @@ async def cb_donate_rubles_menu(callback: CallbackQuery):
 async def cb_donate_rubles_amount(callback: CallbackQuery):
     await callback.answer()
     amount = int(callback.data.split(":")[1])
+    await safe_edit_text(
+        callback.message,
+        get_visibility_choice_text(amount, "₽"),
+        parse_mode="HTML",
+        reply_markup=get_rubles_visibility_keyboard(amount)
+    )
+
+@dp.callback_query(F.data.startswith("donate_rubles_confirm:"))
+async def cb_donate_rubles_confirm(callback: CallbackQuery):
+    await callback.answer()
+    _, amount_s, visibility = callback.data.split(":")
+    amount = int(amount_s)
+    stats["donor_hide_name"][str(callback.from_user.id)] = (visibility == "anon")
+    save_stats()
     await safe_edit_text(
         callback.message,
         get_rubles_donation_message_text(amount),
@@ -1893,17 +1964,20 @@ async def handle_donation_pending_amount(message: Message):
             await message.answer(f"⚠️ Введи число от {STARS_MIN} до {STARS_MAX}.")
             return
         del DONATION_PENDING[user_id]
-        await send_stars_invoice(message.chat.id, amount)
+        await message.answer(
+            get_visibility_choice_text(amount, " ⭐"),
+            parse_mode="HTML",
+            reply_markup=get_stars_visibility_keyboard(amount)
+        )
     else:
         if not (RUBLES_MIN <= amount <= RUBLES_MAX):
             await message.answer(f"⚠️ Введи число от {RUBLES_MIN} до {RUBLES_MAX}.")
             return
         del DONATION_PENDING[user_id]
         await message.answer(
-            get_rubles_donation_message_text(amount),
+            get_visibility_choice_text(amount, "₽"),
             parse_mode="HTML",
-            reply_markup=get_rubles_donation_keyboard(amount),
-            disable_web_page_preview=True,
+            reply_markup=get_rubles_visibility_keyboard(amount)
         )
 
 @dp.callback_query(F.data == "menu_physics")
