@@ -1357,7 +1357,35 @@ async def cmd_broadcast(message: Message):
 
 # ==================== АДМИН-ПАНЕЛЬ ====================
 ADMIN_PENDING: dict = {}  # admin_id -> {"action": ...}
+ADMIN_CHANNEL_POST_PREVIEW: dict = {}  # admin_id -> {"text": ..., "buttons": [(label, url), ...]}
 ADMIN_USERLIST_PAGE_SIZE = 25
+
+def parse_channel_post_buttons(raw: str):
+    """Разбирает построчный ввод "Текст | Ссылка" в список кнопок.
+    Возвращает None, если формат хотя бы одной строки некорректен."""
+    buttons = []
+    for line in raw.strip().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if "|" not in line:
+            return None
+        label, url = line.split("|", 1)
+        label = label.strip()
+        url = url.strip()
+        if not label or not url.startswith(("http://", "https://", "tg://")):
+            return None
+        buttons.append((label, url))
+    return buttons or None
+
+def build_channel_post_builder(buttons: list) -> InlineKeyboardBuilder:
+    builder = InlineKeyboardBuilder()
+    for label, url in buttons:
+        builder.row(InlineKeyboardButton(text=label, url=url))
+    return builder
+
+def build_channel_post_keyboard(buttons: list):
+    return build_channel_post_builder(buttons).as_markup() if buttons else None
 
 def get_admin_menu():
     builder = InlineKeyboardBuilder()
@@ -1369,6 +1397,7 @@ def get_admin_menu():
     builder.button(text="⚔️ Битва рефералов", callback_data="admin_battle_menu")
     builder.button(text="💰 Записать донат рублями", callback_data="admin_donation_prompt")
     builder.button(text="📣 Анонс раздела поддержки", callback_data="admin_announce_support_confirm")
+    builder.button(text="📤 Опубликовать пост в канал", callback_data="admin_channel_post_prompt")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -1679,6 +1708,66 @@ async def cb_admin_announce_support_go(callback: CallbackQuery):
         reply_markup=get_admin_back_keyboard()
     )
 
+@dp.callback_query(F.data == "admin_channel_post_prompt")
+async def cb_admin_channel_post_prompt(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer()
+    ADMIN_PENDING[callback.from_user.id] = {"action": "channel_post_text"}
+    await safe_edit_text(
+        callback.message,
+        f"📤 <b>Пост в канал {CHANNEL_ID}</b>\n{DIVIDER}\n\n"
+        "Пришли текст поста (можно с форматированием Telegram — жирный, курсив, ссылки и т.д. "
+        "— просто выдели текст и примени стиль перед отправкой).",
+        parse_mode="HTML",
+        reply_markup=get_admin_back_keyboard()
+    )
+
+@dp.callback_query(F.data == "admin_channel_post_go")
+async def cb_admin_channel_post_go(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    pending = ADMIN_CHANNEL_POST_PREVIEW.pop(callback.from_user.id, None)
+    if not pending:
+        await callback.answer("Черновик не найден, начни заново.", show_alert=True)
+        return
+    try:
+        await bot.send_message(
+            CHANNEL_ID,
+            pending["text"],
+            parse_mode="HTML",
+            reply_markup=build_channel_post_keyboard(pending["buttons"]),
+        )
+        await callback.answer("✅ Опубликовано!", show_alert=True)
+        await safe_edit_text(
+            callback.message,
+            f"✅ Пост опубликован в {CHANNEL_ID}.",
+            parse_mode="HTML",
+            reply_markup=get_admin_back_keyboard()
+        )
+    except Exception:
+        logger.exception("Не удалось опубликовать пост в канал %s", CHANNEL_ID)
+        await callback.answer()
+        await safe_edit_text(
+            callback.message,
+            "⚠️ <b>Не удалось опубликовать пост.</b>\n\n"
+            f"Скорее всего, бот не администратор канала {CHANNEL_ID} или у него нет права "
+            "«Публиковать сообщения». Добавь бота в администраторы канала с этим правом и попробуй снова.",
+            parse_mode="HTML",
+            reply_markup=get_admin_back_keyboard()
+        )
+
+@dp.callback_query(F.data == "admin_channel_post_cancel")
+async def cb_admin_channel_post_cancel(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    ADMIN_CHANNEL_POST_PREVIEW.pop(callback.from_user.id, None)
+    await callback.answer("Отменено")
+    await safe_edit_text(callback.message, "❌ Публикация отменена.", parse_mode="HTML", reply_markup=get_admin_back_keyboard())
+
 @dp.message(F.text)
 async def handle_admin_pending_action(message: Message):
     admin_id = message.from_user.id
@@ -1764,6 +1853,44 @@ async def handle_admin_pending_action(message: Message):
         except Exception:
             logger.exception("Не удалось отправить личное сообщение пользователю %s", target_id)
             await message.answer(f"⚠️ Не удалось отправить сообщение @{target_username} — возможно, он заблокировал бота.", parse_mode="HTML")
+        return
+
+    if action == "channel_post_text":
+        ADMIN_PENDING[admin_id] = {"action": "channel_post_buttons", "text": message.html_text}
+        await message.answer(
+            "🔘 <b>Кнопки под постом</b>\n\n"
+            "Пришли по одной кнопке на строке в формате:\n"
+            "<code>Текст кнопки | https://ссылка</code>\n\n"
+            "Можно несколько строк — будет несколько кнопок друг под другом.\n"
+            "Если кнопки не нужны — пришли «-».",
+            parse_mode="HTML"
+        )
+        return
+
+    if action == "channel_post_buttons":
+        raw = message.text or ""
+        if raw.strip() in ("-", "нет", "пропустить", "skip"):
+            buttons = []
+        else:
+            buttons = parse_channel_post_buttons(raw)
+            if buttons is None:
+                await message.answer(
+                    "⚠️ Не понял формат. Каждая строка: <code>Текст кнопки | https://ссылка</code>. "
+                    "Либо пришли «-», если кнопки не нужны.",
+                    parse_mode="HTML"
+                )
+                return
+        post_text = pending["text"]
+        del ADMIN_PENDING[admin_id]
+        ADMIN_CHANNEL_POST_PREVIEW[admin_id] = {"text": post_text, "buttons": buttons}
+        builder = build_channel_post_builder(buttons)
+        builder.row(InlineKeyboardButton(text="✅ Опубликовать в канал", callback_data="admin_channel_post_go"))
+        builder.row(InlineKeyboardButton(text="❌ Отмена", callback_data="admin_channel_post_cancel"))
+        await message.answer(
+            f"👀 <b>Предпросмотр поста для {CHANNEL_ID}:</b>\n{DIVIDER}\n\n{post_text}",
+            parse_mode="HTML",
+            reply_markup=builder.as_markup()
+        )
         return
 
 # ==================== МЕНЮ ====================
