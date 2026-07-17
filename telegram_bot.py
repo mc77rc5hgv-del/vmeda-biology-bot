@@ -247,6 +247,7 @@ def get_referral_leaderboard_text(user_id: int = None) -> str:
 # ==================== БИТВА РЕФЕРАЛОВ (ЛИМИТИРОВАННОЕ СОРЕВНОВАНИЕ) ====================
 BATTLE_DURATION_SECONDS = 24 * 60 * 60
 BATTLE_PRIZE_TEXT = 'подписку на ГОД в <a href="https://t.me/Helperchat_bot">Helperchat_bot</a>'
+BATTLE_CHANNEL_POSTING_NOTICE = "📢 <b>ПОСТИНГ В TELEGRAM-КАНАЛЫ РАЗРЕШЁН 🤝</b>"
 
 def is_battle_active() -> bool:
     battle = stats.get("referral_battle")
@@ -329,6 +330,8 @@ def get_battle_text(user_id: int) -> str:
     uid_str = str(user_id)
     lines = [
         f"⚔️ <b>Битва рефералов — идёт!</b>\n{DIVIDER}\n",
+        BATTLE_CHANNEL_POSTING_NOTICE,
+        "",
         f"⏳ Осталось: <b>{remaining}</b>",
         f"🎁 Топ-3 получат {BATTLE_PRIZE_TEXT}",
         f"🙋 Твой результат за битву: <b>{my_gained}</b>",
@@ -365,6 +368,7 @@ async def announce_battle_start() -> None:
         f"🏆 <b>Топ-3</b> по числу приглашённых за это время получат {BATTLE_PRIZE_TEXT}!\n\n"
         "Считаются только друзья, приглашённые с этого момента.\n"
         "Следи за живым рейтингом на кнопке «⚔️ Битва рефералов» в главном меню.\n\n"
+        f"{BATTLE_CHANNEL_POSTING_NOTICE}\n\n"
         "Погнали! 🚀"
     )
     await _broadcast(text, builder.as_markup())
@@ -1165,7 +1169,12 @@ def get_admin_battle_text() -> str:
         battle = stats["referral_battle"]
         remaining = format_time_left(battle["end_ts"] - time.time())
         leaderboard = get_battle_leaderboard()
-        lines = [f"⚔️ <b>Битва рефералов — идёт!</b>\n{DIVIDER}\n", f"⏳ Осталось: <b>{remaining}</b>\n"]
+        lines = [
+            f"⚔️ <b>Битва рефералов — идёт!</b>\n{DIVIDER}\n",
+            BATTLE_CHANNEL_POSTING_NOTICE,
+            "",
+            f"⏳ Осталось: <b>{remaining}</b>\n",
+        ]
         if leaderboard:
             for i, (uid, diff) in enumerate(leaderboard):
                 icon = RANK_MEDALS[i] if i < 3 else f"{i+1}."
