@@ -1053,13 +1053,24 @@ def list_active_notes(owner_id: int):
 
 
 def find_active_note(owner_id: int, text: str):
+    """Ищет заметку, чей триггер встречается ГДЕ-ТО в тексте сообщения (а не только
+    при полном совпадении) — это позволяет ловить шаблонные сообщения с переменной
+    частью (например, суммой), если в них есть неизменная фраза-триггер. Полное
+    совпадение по-прежнему находится: оно частный случай вхождения подстроки.
+    Если подходит несколько заметок, побеждает самый длинный (самый специфичный)
+    триггер."""
+    haystack = (text or "").strip().lower()
+    if not haystack:
+        return None
     conn = db_connect()
-    row = conn.execute(
-        "SELECT * FROM active_notes WHERE owner_id = ? AND trigger = ?",
-        (owner_id, (text or "").strip().lower()),
-    ).fetchone()
+    rows = conn.execute(
+        "SELECT * FROM active_notes WHERE owner_id = ?", (owner_id,)
+    ).fetchall()
     conn.close()
-    return dict(row) if row else None
+    candidates = [dict(r) for r in rows if r["trigger"] and r["trigger"] in haystack]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda n: len(n["trigger"]))
 
 
 # в памяти: ожидание ввода триггера/содержимого новой заметки, ключ owner_id
@@ -2205,8 +2216,12 @@ def build_notes_text(notes: list) -> str:
         DIVIDER,
         "",
         "Задай фразу-триггер и содержимое (текст или фото). Когда в подключённом "
-        "личном чате кто-то напишет эту фразу — я сразу отправлю заметку в этот "
-        "же чат (Telegram подпишет её «via @бот», это не подмена личности).",
+        "личном чате кто-то пришлёт сообщение, где ГДЕ-ТО ВСТРЕЧАЕТСЯ эта фраза "
+        "(не обязательно всё сообщение целиком — подходит и часть текста, например "
+        "заготовленный шаблон с переменной суммой), — я сразу отправлю заметку в "
+        "этот же чат (Telegram подпишет её «via @бот», это не подмена личности). "
+        "Если под сообщение подходит сразу несколько заметок — сработает та, у "
+        "которой триггер длиннее (точнее совпадает).",
         "",
     ]
     if not notes:
@@ -2243,7 +2258,10 @@ async def cb_notes_add(callback: CallbackQuery):
     builder = InlineKeyboardBuilder()
     builder.button(text="🔙 Отмена", callback_data="notes_open")
     await callback.message.answer(
-        "✏️ Напиши фразу-триггер для новой заметки (например: <code>ПАРЫ</code>).",
+        "✏️ Напиши фразу-триггер для новой заметки (например: <code>ПАРЫ</code>).\n\n"
+        "Сработает, если эта фраза встретится в любом месте входящего сообщения "
+        "(необязательно всё сообщение целиком) — подходит и для шаблонных сообщений "
+        "с переменной частью, например с суммой перевода.",
         parse_mode="HTML",
         reply_markup=builder.as_markup(),
     )
