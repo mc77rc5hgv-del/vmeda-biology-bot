@@ -25,7 +25,7 @@ if not BOT_TOKEN:
         "never hardcode the token in source code."
     )
 CHANNEL_ID = "@Vmeda_examen"
-ADMIN_IDS = {7928720775, 1326779223, 8601892147}
+ADMIN_IDS = {1326779223, 8601892147}
 STATS_DIR = os.getenv("STATS_DIR", ".")
 STATS_FILE = os.path.join(STATS_DIR, "stats.json")
 
