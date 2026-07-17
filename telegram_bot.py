@@ -7,12 +7,13 @@ import random
 import re
 import os
 import time
+import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import (
     Message, CallbackQuery, InlineKeyboardButton, FSInputFile, Update,
-    BotCommand, BotCommandScopeDefault, BotCommandScopeChat,
+    BotCommand, BotCommandScopeDefault, BotCommandScopeChat, LabeledPrice,
 )
 from aiogram.filters import CommandStart, Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -85,6 +86,8 @@ def load_stats() -> dict:
             data.setdefault("usernames", {})
             data.setdefault("manual_access_granted", [])
             data.setdefault("referral_battle", None)
+            data.setdefault("donations_stars_total", 0)
+            data.setdefault("donations_stars_count", 0)
             return data
         except (json.JSONDecodeError, OSError):
             logger.exception("Не удалось прочитать %s, статистика будет создана заново", STATS_FILE)
@@ -104,6 +107,8 @@ def load_stats() -> dict:
         "usernames": {},
         "manual_access_granted": [],
         "referral_battle": None,
+        "donations_stars_total": 0,
+        "donations_stars_count": 0,
     }
 
 # Один воркер сериализует записи на диск и не даёт им блокировать event loop бота.
@@ -482,6 +487,18 @@ async def referral_gate_middleware(handler, event: Update, data):
     if event.message and event.message.text and event.message.text.startswith("/"):
         return await handler(event, data)
 
+    # поддержку автора (пожертвования) не блокируем никому, даже без рефералов
+    if event.message and event.message.successful_payment:
+        return await handler(event, data)
+    if user.id in DONATION_PENDING:
+        return await handler(event, data)
+    if event.callback_query and (
+        (event.callback_query.data or "") in SUPPORT_GATE_EXEMPT_CALLBACKS
+        or (event.callback_query.data or "").startswith("donate_stars_amount:")
+        or (event.callback_query.data or "").startswith("donate_rubles_amount:")
+    ):
+        return await handler(event, data)
+
     if has_free_access(user.id):
         return await handler(event, data)
 
@@ -530,6 +547,96 @@ async def referral_gate_middleware(handler, event: Update, data):
             logger.exception("Не удалось отправить предупреждение о реферале пользователю %s", user.id)
 
     return await handler(event, data)
+
+# ==================== ПОДДЕРЖКА АВТОРА ====================
+DONATION_PENDING: dict[int, dict] = {}
+STARS_MIN, STARS_MAX = 1, 2500
+RUBLES_MIN, RUBLES_MAX = 10, 1_000_000
+STARS_PRESETS = [25, 50, 100, 250, 500]
+RUBLES_PRESETS = [100, 300, 500, 1000, 2000]
+HELPER_ACCOUNT_URL = "https://t.me/vmeda_helper"
+SUPPORT_GATE_EXEMPT_CALLBACKS = {
+    "support_menu", "donate_stars_menu", "donate_stars_custom",
+    "donate_rubles_menu", "donate_rubles_custom",
+}
+
+def get_support_text() -> str:
+    return (
+        f"😇💰 <b>Поддержка автора</b>\n{DIVIDER}\n\n"
+        "Бот полностью бесплатный, без рекламы и платных подписок.\n\n"
+        "На разработку и организацию бота (хостинг, домен, работа над контентом) "
+        "потрачено уже около <b>5000₽</b>, а получено с бота — <b>0₽</b>.\n\n"
+        "Если бот тебе помогает — буду очень благодарен любой поддержке! "
+        "Можно звёздами Telegram или переводом в рублях — выбери, как удобнее 👇"
+    )
+
+def get_support_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="⭐ Пожертвовать звёзды", callback_data="donate_stars_menu")
+    builder.button(text="💵 Перевести рубли", callback_data="donate_rubles_menu")
+    builder.adjust(1)
+    builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
+    return builder.as_markup()
+
+def get_stars_menu_text() -> str:
+    return (
+        f"⭐ <b>Пожертвовать звёзды</b>\n{DIVIDER}\n\n"
+        "Выбери количество звёзд Telegram, либо укажи своё:"
+    )
+
+def get_stars_menu_keyboard():
+    builder = InlineKeyboardBuilder()
+    for n in STARS_PRESETS:
+        builder.button(text=f"⭐ {n}", callback_data=f"donate_stars_amount:{n}")
+    builder.adjust(3)
+    builder.row(InlineKeyboardButton(text="✏️ Своя сумма", callback_data="donate_stars_custom"))
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="support_menu"))
+    return builder.as_markup()
+
+def get_rubles_menu_text() -> str:
+    return (
+        f"💵 <b>Перевести рубли</b>\n{DIVIDER}\n\n"
+        "Выбери сумму в рублях, либо укажи свою:"
+    )
+
+def get_rubles_menu_keyboard():
+    builder = InlineKeyboardBuilder()
+    for n in RUBLES_PRESETS:
+        builder.button(text=f"{n}₽", callback_data=f"donate_rubles_amount:{n}")
+    builder.adjust(3)
+    builder.row(InlineKeyboardButton(text="✏️ Своя сумма", callback_data="donate_rubles_custom"))
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="support_menu"))
+    return builder.as_markup()
+
+def get_rubles_donation_message_text(amount: int) -> str:
+    return (
+        f"💵 <b>Перевод {amount}₽</b>\n{DIVIDER}\n\n"
+        f'Нажми на кнопку ниже — откроется чат с <a href="{HELPER_ACCOUNT_URL}">@vmeda_helper</a>, '
+        "сообщение с суммой уже будет готово. Останется его отправить — и тебе пришлют реквизиты для перевода.\n\n"
+        "Спасибо огромное за поддержку! 🙏😇"
+    )
+
+def get_rubles_donation_keyboard(amount: int):
+    template = (
+        f"Привет! Хочу перевести {amount}₽ в поддержку бота VMEDA_examen_bot 🙏 "
+        "Подскажи, пожалуйста, реквизиты для перевода."
+    )
+    url = f"{HELPER_ACCOUNT_URL}?text={urllib.parse.quote(template)}"
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="💸 Пожертвовать рубли", url=url))
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="donate_rubles_menu"))
+    return builder.as_markup()
+
+async def send_stars_invoice(chat_id: int, stars: int) -> None:
+    await bot.send_invoice(
+        chat_id=chat_id,
+        title="Поддержка автора бота",
+        description=f"Спасибо за поддержку VMEDA_examen_bot! Пожертвование: {stars} ⭐",
+        payload=f"donate_stars_{stars}_{chat_id}_{int(time.time())}",
+        provider_token="",
+        currency="XTR",
+        prices=[LabeledPrice(label="Поддержка автора", amount=stars)],
+    )
 
 # ==================== СКРЫТЫЕ БИЛЕТЫ (40-50) ====================
 HIDDEN_TICKET_RANGE = (40, 50)
@@ -673,6 +780,7 @@ def get_main_menu():
     builder.button(text="🏆 Рейтинг", callback_data="referral_leaderboard")
     battle_label = "⚔️ Битва рефералов 🔥" if is_battle_active() else "⚔️ Битва рефералов"
     builder.button(text=battle_label, callback_data="referral_battle")
+    builder.button(text="😇 Поддержать автора 💰", callback_data="support_menu")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -1589,6 +1697,128 @@ async def cb_referral_battle(callback: CallbackQuery):
         reply_markup=get_battle_keyboard(),
         disable_web_page_preview=True,
     )
+
+@dp.callback_query(F.data == "support_menu")
+async def cb_support_menu(callback: CallbackQuery):
+    await callback.answer()
+    DONATION_PENDING.pop(callback.from_user.id, None)
+    await safe_edit_text(callback.message, get_support_text(), parse_mode="HTML", reply_markup=get_support_keyboard())
+
+@dp.callback_query(F.data == "donate_stars_menu")
+async def cb_donate_stars_menu(callback: CallbackQuery):
+    await callback.answer()
+    DONATION_PENDING.pop(callback.from_user.id, None)
+    await safe_edit_text(callback.message, get_stars_menu_text(), parse_mode="HTML", reply_markup=get_stars_menu_keyboard())
+
+@dp.callback_query(F.data.startswith("donate_stars_amount:"))
+async def cb_donate_stars_amount(callback: CallbackQuery):
+    await callback.answer()
+    amount = int(callback.data.split(":")[1])
+    await send_stars_invoice(callback.from_user.id, amount)
+
+@dp.callback_query(F.data == "donate_stars_custom")
+async def cb_donate_stars_custom(callback: CallbackQuery):
+    await callback.answer()
+    DONATION_PENDING[callback.from_user.id] = {"type": "stars"}
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="donate_stars_menu"))
+    await safe_edit_text(
+        callback.message,
+        f"✏️ <b>Своё количество звёзд</b>\n{DIVIDER}\n\nВведи число от {STARS_MIN} до {STARS_MAX}:",
+        parse_mode="HTML",
+        reply_markup=builder.as_markup()
+    )
+
+@dp.callback_query(F.data == "donate_rubles_menu")
+async def cb_donate_rubles_menu(callback: CallbackQuery):
+    await callback.answer()
+    DONATION_PENDING.pop(callback.from_user.id, None)
+    await safe_edit_text(callback.message, get_rubles_menu_text(), parse_mode="HTML", reply_markup=get_rubles_menu_keyboard())
+
+@dp.callback_query(F.data.startswith("donate_rubles_amount:"))
+async def cb_donate_rubles_amount(callback: CallbackQuery):
+    await callback.answer()
+    amount = int(callback.data.split(":")[1])
+    await safe_edit_text(
+        callback.message,
+        get_rubles_donation_message_text(amount),
+        parse_mode="HTML",
+        reply_markup=get_rubles_donation_keyboard(amount),
+        disable_web_page_preview=True,
+    )
+
+@dp.callback_query(F.data == "donate_rubles_custom")
+async def cb_donate_rubles_custom(callback: CallbackQuery):
+    await callback.answer()
+    DONATION_PENDING[callback.from_user.id] = {"type": "rubles"}
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="donate_rubles_menu"))
+    await safe_edit_text(
+        callback.message,
+        f"✏️ <b>Своя сумма в рублях</b>\n{DIVIDER}\n\nВведи сумму числом (от {RUBLES_MIN} до {RUBLES_MAX}):",
+        parse_mode="HTML",
+        reply_markup=builder.as_markup()
+    )
+
+@dp.pre_checkout_query()
+async def handle_pre_checkout(pre_checkout_query) -> None:
+    await pre_checkout_query.answer(ok=True)
+
+@dp.message(F.successful_payment)
+async def handle_successful_payment(message: Message):
+    payment = message.successful_payment
+    stars = payment.total_amount
+    stats["donations_stars_total"] += stars
+    stats["donations_stars_count"] += 1
+    save_stats()
+    await message.answer(
+        f"🎉 <b>Спасибо огромное за поддержку — {stars} ⭐!</b>\n\n"
+        "Это очень помогает развивать бота дальше 🙏😇",
+        parse_mode="HTML"
+    )
+    user = message.from_user
+    for admin_id in ADMIN_IDS:
+        try:
+            await bot.send_message(
+                admin_id,
+                f"⭐ <b>Новое пожертвование звёздами!</b>\n\n{stars} ⭐ от {user.full_name} (ID <code>{user.id}</code>)",
+                parse_mode="HTML"
+            )
+        except Exception:
+            logger.exception("Не удалось уведомить админа %s о пожертвовании", admin_id)
+
+@dp.message(F.text)
+async def handle_donation_pending_amount(message: Message):
+    user_id = message.from_user.id
+    if user_id not in DONATION_PENDING:
+        raise SkipHandler
+    if message.text.startswith("/"):
+        raise SkipHandler
+
+    pending = DONATION_PENDING[user_id]
+    raw = message.text.strip().replace(" ", "")
+    if not raw.isdigit():
+        await message.answer("⚠️ Введи, пожалуйста, просто число.")
+        return
+    amount = int(raw)
+
+    if pending["type"] == "stars":
+        if not (STARS_MIN <= amount <= STARS_MAX):
+            await message.answer(f"⚠️ Введи число от {STARS_MIN} до {STARS_MAX}.")
+            return
+        del DONATION_PENDING[user_id]
+        await send_stars_invoice(message.chat.id, amount)
+    else:
+        if not (RUBLES_MIN <= amount <= RUBLES_MAX):
+            await message.answer(f"⚠️ Введи число от {RUBLES_MIN} до {RUBLES_MAX}.")
+            return
+        del DONATION_PENDING[user_id]
+        await message.answer(
+            get_rubles_donation_message_text(amount),
+            parse_mode="HTML",
+            reply_markup=get_rubles_donation_keyboard(amount),
+            disable_web_page_preview=True,
+        )
 
 @dp.callback_query(F.data == "menu_physics")
 async def cb_menu_physics(callback: CallbackQuery):
