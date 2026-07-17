@@ -88,6 +88,8 @@ def load_stats() -> dict:
             data.setdefault("referral_battle", None)
             data.setdefault("donations_stars_total", 0)
             data.setdefault("donations_stars_count", 0)
+            data.setdefault("donor_stars", {})
+            data.setdefault("donor_rubles", {})
             return data
         except (json.JSONDecodeError, OSError):
             logger.exception("Не удалось прочитать %s, статистика будет создана заново", STATS_FILE)
@@ -109,6 +111,8 @@ def load_stats() -> dict:
         "referral_battle": None,
         "donations_stars_total": 0,
         "donations_stars_count": 0,
+        "donor_stars": {},
+        "donor_rubles": {},
     }
 
 # Один воркер сериализует записи на диск и не даёт им блокировать event loop бота.
@@ -557,7 +561,7 @@ RUBLES_PRESETS = [100, 300, 500, 1000, 2000]
 HELPER_ACCOUNT_URL = "https://t.me/vmeda_helper"
 SUPPORT_GATE_EXEMPT_CALLBACKS = {
     "support_menu", "donate_stars_menu", "donate_stars_custom",
-    "donate_rubles_menu", "donate_rubles_custom",
+    "donate_rubles_menu", "donate_rubles_custom", "donors_leaderboard",
 }
 
 def get_support_text() -> str:
@@ -574,8 +578,41 @@ def get_support_keyboard():
     builder = InlineKeyboardBuilder()
     builder.button(text="⭐ Пожертвовать звёзды", callback_data="donate_stars_menu")
     builder.button(text="💵 Перевести рубли", callback_data="donate_rubles_menu")
+    builder.button(text="🏆 Лучшие донатеры", callback_data="donors_leaderboard")
     builder.adjust(1)
     builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
+    return builder.as_markup()
+
+def donor_display_name(uid_str: str) -> str:
+    username = stats["user_username"].get(uid_str)
+    if username:
+        return f"@{username}"
+    return stats["user_names"].get(uid_str, f"Пользователь {uid_str}")
+
+def get_donors_leaderboard_text() -> str:
+    star_ranked = sorted(stats.get("donor_stars", {}).items(), key=lambda kv: kv[1], reverse=True)[:10]
+    ruble_ranked = sorted(stats.get("donor_rubles", {}).items(), key=lambda kv: kv[1], reverse=True)[:10]
+
+    lines = [f"🏆 <b>Лучшие донатеры</b>\n{DIVIDER}"]
+    if star_ranked:
+        lines.append("\n⭐ <b>По звёздам:</b>")
+        for i, (uid, total) in enumerate(star_ranked):
+            icon = RANK_MEDALS[i] if i < 3 else f"{i + 1}."
+            lines.append(f"{icon} {donor_display_name(uid)} — <b>{total}</b> ⭐")
+    if ruble_ranked:
+        lines.append("\n💵 <b>По рублям:</b>")
+        for i, (uid, total) in enumerate(ruble_ranked):
+            icon = RANK_MEDALS[i] if i < 3 else f"{i + 1}."
+            lines.append(f"{icon} {donor_display_name(uid)} — <b>{total}</b>₽")
+    if not star_ranked and not ruble_ranked:
+        lines.append("\nПока никто не пожертвовал — стань первым! 🙏")
+    return "\n".join(lines)
+
+def get_donors_leaderboard_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔄 Обновить", callback_data="donors_leaderboard")
+    builder.button(text="🔙 Назад", callback_data="support_menu")
+    builder.adjust(1)
     return builder.as_markup()
 
 def get_stars_menu_text() -> str:
@@ -1258,6 +1295,7 @@ def get_admin_menu():
     builder.button(text="🚫 Отозвать доступ по username", callback_data="admin_revoke_prompt")
     builder.button(text="✉️ Написать пользователю", callback_data="admin_dm_prompt")
     builder.button(text="⚔️ Битва рефералов", callback_data="admin_battle_menu")
+    builder.button(text="💰 Записать донат рублями", callback_data="admin_donation_prompt")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -1517,6 +1555,23 @@ async def cb_admin_dm_prompt(callback: CallbackQuery):
         reply_markup=get_admin_back_keyboard()
     )
 
+@dp.callback_query(F.data == "admin_donation_prompt")
+async def cb_admin_donation_prompt(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer()
+    ADMIN_PENDING[callback.from_user.id] = {"action": "record_donation_username"}
+    await safe_edit_text(
+        callback.message,
+        "💰 <b>Записать пожертвование рублями</b>\n\n"
+        "Переводы в рублях идут напрямую в чат с @vmeda_helper, бот их не видит — "
+        "запиши сюда вручную, чтобы человек попал в рейтинг донатеров.\n\n"
+        "Отправь username пользователя (с @ или без)",
+        parse_mode="HTML",
+        reply_markup=get_admin_back_keyboard()
+    )
+
 @dp.message(F.text)
 async def handle_admin_pending_action(message: Message):
     admin_id = message.from_user.id
@@ -1528,7 +1583,7 @@ async def handle_admin_pending_action(message: Message):
     pending = ADMIN_PENDING[admin_id]
     action = pending["action"]
 
-    if action in ("grant", "revoke", "dm_username"):
+    if action in ("grant", "revoke", "dm_username", "record_donation_username"):
         username, target_id = resolve_user_by_username(message.text)
         if not target_id:
             await message.answer(
@@ -1567,6 +1622,25 @@ async def handle_admin_pending_action(message: Message):
         elif action == "dm_username":
             ADMIN_PENDING[admin_id] = {"action": "dm_message", "target_id": target_id, "target_username": username}
             await message.answer(f"✅ Нашёл @{username} (ID {target_id}). Теперь отправь текст сообщения для него.", parse_mode="HTML")
+
+        elif action == "record_donation_username":
+            ADMIN_PENDING[admin_id] = {"action": "record_donation_amount", "target_id": target_id, "target_username": username}
+            await message.answer(f"✅ Нашёл @{username} (ID {target_id}). Теперь пришли сумму в рублях (целое число).", parse_mode="HTML")
+        return
+
+    if action == "record_donation_amount":
+        target_id = pending["target_id"]
+        target_username = pending["target_username"]
+        raw = message.text.strip().replace(" ", "")
+        if not raw.isdigit() or int(raw) <= 0:
+            await message.answer("⚠️ Введи, пожалуйста, положительное целое число рублей.")
+            return
+        amount = int(raw)
+        del ADMIN_PENDING[admin_id]
+        uid_str = str(target_id)
+        stats["donor_rubles"][uid_str] = stats["donor_rubles"].get(uid_str, 0) + amount
+        save_stats()
+        await message.answer(f"✅ Записано пожертвование {amount}₽ от @{target_username}.", parse_mode="HTML")
         return
 
     if action == "dm_message":
@@ -1704,6 +1778,16 @@ async def cb_support_menu(callback: CallbackQuery):
     DONATION_PENDING.pop(callback.from_user.id, None)
     await safe_edit_text(callback.message, get_support_text(), parse_mode="HTML", reply_markup=get_support_keyboard())
 
+@dp.callback_query(F.data == "donors_leaderboard")
+async def cb_donors_leaderboard(callback: CallbackQuery):
+    await callback.answer()
+    await safe_edit_text(
+        callback.message,
+        get_donors_leaderboard_text(),
+        parse_mode="HTML",
+        reply_markup=get_donors_leaderboard_keyboard()
+    )
+
 @dp.callback_query(F.data == "donate_stars_menu")
 async def cb_donate_stars_menu(callback: CallbackQuery):
     await callback.answer()
@@ -1770,6 +1854,8 @@ async def handle_successful_payment(message: Message):
     stars = payment.total_amount
     stats["donations_stars_total"] += stars
     stats["donations_stars_count"] += 1
+    uid_str = str(message.from_user.id)
+    stats["donor_stars"][uid_str] = stats["donor_stars"].get(uid_str, 0) + stars
     save_stats()
     await message.answer(
         f"🎉 <b>Спасибо огромное за поддержку — {stars} ⭐!</b>\n\n"
