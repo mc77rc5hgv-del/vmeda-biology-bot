@@ -95,6 +95,7 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
 # ==================== ЕЖЕДНЕВНОЕ НАПОМИНАНИЕ ПРО HELPERCHAT_BOT ====================
+HELPERCHAT_PROMO_ENABLED = False  # временно отключено по просьбе — включить обратно, поставив True
 HELPERCHAT_URL = "https://t.me/Helperchat_bot?start=vmeda"
 
 def get_helperchat_promo_keyboard():
@@ -128,7 +129,7 @@ async def helperchat_promo_middleware(handler, event: Update, data):
         user = event.message.from_user
     elif event.callback_query:
         user = event.callback_query.from_user
-    if user and not user.is_bot:
+    if HELPERCHAT_PROMO_ENABLED and user and not user.is_bot:
         await send_helperchat_promo_if_new_day(user.id)
     return await handler(event, data)
 
