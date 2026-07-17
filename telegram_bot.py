@@ -68,6 +68,10 @@ def load_stats() -> dict:
             data.setdefault("question_opened", {})
             data.setdefault("broadcast_count", 0)
             data.setdefault("helperchat_promo_seen", {})
+            data.setdefault("referrals", {})
+            data.setdefault("referred_by", {})
+            data.setdefault("referral_warnings", {})
+            data.setdefault("user_names", {})
             return data
         except (json.JSONDecodeError, OSError):
             logger.exception("Не удалось прочитать %s, статистика будет создана заново", STATS_FILE)
@@ -79,6 +83,10 @@ def load_stats() -> dict:
         "question_opened": {},
         "broadcast_count": 0,
         "helperchat_promo_seen": {},
+        "referrals": {},
+        "referred_by": {},
+        "referral_warnings": {},
+        "user_names": {},
     }
 
 def save_stats() -> None:
@@ -131,6 +139,136 @@ async def helperchat_promo_middleware(handler, event: Update, data):
         user = event.callback_query.from_user
     if HELPERCHAT_PROMO_ENABLED and user and not user.is_bot:
         await send_helperchat_promo_if_new_day(user.id)
+    return await handler(event, data)
+
+# ==================== РЕФЕРАЛЬНАЯ СИСТЕМА ====================
+BOT_USERNAME = "VMEDA_examen_bot"
+REFERRAL_WARNING_THRESHOLD = 3  # столько предупреждений даём, прежде чем закрыть доступ
+
+def get_referral_link(user_id: int) -> str:
+    return f"https://t.me/{BOT_USERNAME}?start=ref_{user_id}"
+
+def get_referral_count(user_id: int) -> int:
+    return len(stats["referrals"].get(str(user_id), []))
+
+def get_referral_status_text(user_id: int) -> str:
+    count = get_referral_count(user_id)
+    link = get_referral_link(user_id)
+    if count > 0:
+        return (
+            f"👥 <b>Твои приглашения</b>\n{DIVIDER}\n\n"
+            f"Приглашено друзей: <b>{count}</b>\n"
+            "Доступ ко всем разделам бота открыт. Спасибо! 🎉\n\n"
+            f"Твоя ссылка (можно приглашать ещё):\n{link}"
+        )
+    warn_count = stats["referral_warnings"].get(str(user_id), {}).get("count", 0)
+    remaining = max(REFERRAL_WARNING_THRESHOLD - warn_count, 0)
+    return (
+        f"👥 <b>Пригласи друга</b>\n{DIVIDER}\n\n"
+        "Отправь эту ссылку другу — как только он нажмёт /start, "
+        "у тебя откроется полный доступ ко всем разделам бота:\n\n"
+        f"{link}\n\n"
+        f"Осталось бесплатных заходов без реферала: <b>{remaining}</b>"
+    )
+
+def get_referral_leaderboard_text() -> str:
+    referrals = stats["referrals"]
+    names = stats["user_names"]
+    ranked = sorted(referrals.items(), key=lambda kv: len(kv[1]), reverse=True)
+    ranked = [(uid, refs) for uid, refs in ranked if len(refs) > 0][:10]
+    if not ranked:
+        return f"🏆 <b>Рейтинг приглашений</b>\n{DIVIDER}\n\nПока никто никого не пригласил — стань первым!"
+    medals = ["🥇", "🥈", "🥉"]
+    lines = [f"🏆 <b>Рейтинг приглашений</b>\n{DIVIDER}\n"]
+    for i, (uid, refs) in enumerate(ranked):
+        rank_icon = medals[i] if i < 3 else f"{i+1}."
+        name = names.get(uid, f"Пользователь {uid}")
+        lines.append(f"{rank_icon} {name} — <b>{len(refs)}</b>")
+    return "\n".join(lines)
+
+async def register_referral(referrer_id: int, referred_id: int) -> None:
+    if referrer_id == referred_id:
+        return
+    if str(referred_id) in stats["referred_by"]:
+        return  # у этого пользователя уже есть реферер, повторно не засчитываем
+    stats["referred_by"][str(referred_id)] = referrer_id
+    refs = stats["referrals"].setdefault(str(referrer_id), [])
+    if referred_id not in refs:
+        refs.append(referred_id)
+        save_stats()
+        try:
+            await bot.send_message(
+                referrer_id,
+                "🎉 <b>По твоей ссылке в бота зашёл новый пользователь!</b>\n\n"
+                f"Всего приглашено: <b>{len(refs)}</b>",
+                parse_mode="HTML"
+            )
+        except Exception:
+            logger.exception("Не удалось уведомить реферера %s", referrer_id)
+    else:
+        save_stats()
+
+@dp.update.outer_middleware()
+async def referral_gate_middleware(handler, event: Update, data):
+    user = None
+    if event.message:
+        user = event.message.from_user
+    elif event.callback_query:
+        user = event.callback_query.from_user
+    if not user or user.is_bot:
+        return await handler(event, data)
+
+    # команды (/start, /stats, /broadcast и т.д.) не блокируем — гейт касается только контента
+    if event.message and event.message.text and event.message.text.startswith("/"):
+        return await handler(event, data)
+
+    if is_admin(user.id) or get_referral_count(user.id) > 0:
+        return await handler(event, data)
+
+    user_id_str = str(user.id)
+    entry = stats["referral_warnings"].get(user_id_str, {"count": 0, "last_day": ""})
+
+    if entry["count"] >= REFERRAL_WARNING_THRESHOLD:
+        block_text = (
+            "🔒 <b>Доступ ограничен</b>\n\n"
+            "Чтобы продолжить пользоваться ботом бесплатно, пригласи одного друга — "
+            "это займёт меньше минуты.\n\n"
+            f"{get_referral_status_text(user.id)}\n\n"
+            "Как только друг нажмёт /start по этой ссылке, бот сразу станет доступен."
+        )
+        try:
+            if event.callback_query:
+                await event.callback_query.answer("Доступ ограничен — пригласи друга 👥", show_alert=True)
+                await event.callback_query.message.answer(block_text, parse_mode="HTML")
+            elif event.message:
+                await event.message.answer(block_text, parse_mode="HTML")
+        except Exception:
+            logger.exception("Не удалось отправить сообщение о блокировке пользователю %s", user.id)
+        return  # обработчик НЕ вызываем — доступ закрыт
+
+    today = date.today().isoformat()
+    if entry["last_day"] != today:
+        entry["count"] += 1
+        entry["last_day"] = today
+        stats["referral_warnings"][user_id_str] = entry
+        save_stats()
+        remaining = REFERRAL_WARNING_THRESHOLD - entry["count"]
+        warn_text = (
+            "⚠️ <b>Пригласи друга, чтобы не потерять доступ</b>\n\n"
+            f"{get_referral_status_text(user.id)}"
+            if remaining > 0 else
+            "⚠️ <b>Это последнее предупреждение</b>\n\n"
+            "В следующий раз доступ будет закрыт, пока не пригласишь друга.\n\n"
+            f"{get_referral_status_text(user.id)}"
+        )
+        try:
+            if event.callback_query:
+                await event.callback_query.message.answer(warn_text, parse_mode="HTML")
+            elif event.message:
+                await event.message.answer(warn_text, parse_mode="HTML")
+        except Exception:
+            logger.exception("Не удалось отправить предупреждение о реферале пользователю %s", user.id)
+
     return await handler(event, data)
 
 # ==================== СКРЫТЫЕ БИЛЕТЫ (40-50) ====================
@@ -271,7 +409,14 @@ def get_main_menu():
     builder.button(text="🧬 Биология", callback_data="menu_biology")
     builder.button(text="⚛️ Физика", callback_data="menu_physics")
     builder.button(text="🧪 Химия", callback_data="menu_chemistry")
+    builder.button(text="👥 Пригласить друзей", callback_data="referral_info")
+    builder.button(text="🏆 Рейтинг", callback_data="referral_leaderboard")
     builder.adjust(1)
+    return builder.as_markup()
+
+def get_referral_back_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
     return builder.as_markup()
 
 def get_biology_menu():
@@ -619,7 +764,14 @@ async def cmd_start(message: Message):
     is_new_user = user_id not in stats["total_users"]
     stats["total_users"].add(user_id)
     stats["start_count"] += 1
+    stats["user_names"][str(user_id)] = message.from_user.full_name or f"Пользователь {user_id}"
     save_stats()
+
+    payload = message.text.split(maxsplit=1)
+    if len(payload) > 1 and payload[1].startswith("ref_"):
+        referrer_id_str = payload[1][len("ref_"):]
+        if referrer_id_str.isdigit():
+            await register_referral(int(referrer_id_str), user_id)
 
     if not await is_subscribed(user_id):
         builder = InlineKeyboardBuilder()
@@ -778,6 +930,26 @@ async def cb_back_to_main(callback: CallbackQuery):
         "🏠 <b>Главное меню</b>\n\nВыбери предмет для подготовки:",
         parse_mode="HTML",
         reply_markup=get_main_menu()
+    )
+
+@dp.callback_query(F.data == "referral_info")
+async def cb_referral_info(callback: CallbackQuery):
+    await callback.answer()
+    await safe_edit_text(
+        callback.message,
+        get_referral_status_text(callback.from_user.id),
+        parse_mode="HTML",
+        reply_markup=get_referral_back_keyboard()
+    )
+
+@dp.callback_query(F.data == "referral_leaderboard")
+async def cb_referral_leaderboard(callback: CallbackQuery):
+    await callback.answer()
+    await safe_edit_text(
+        callback.message,
+        get_referral_leaderboard_text(),
+        parse_mode="HTML",
+        reply_markup=get_referral_back_keyboard()
     )
 
 @dp.callback_query(F.data == "menu_physics")
