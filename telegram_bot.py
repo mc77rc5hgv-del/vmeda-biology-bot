@@ -1241,6 +1241,14 @@ def get_chemistry_task_detail_keyboard(topic_num: str, task_num: int):
     builder.row(InlineKeyboardButton(text="🔙 К списку задач", callback_data=f"chemtask_list:{topic_num}"))
     return builder.as_markup()
 
+# ==================== ГЛУБОКИЕ ССЫЛКИ (t.me/BOT?start=...) ====================
+SECTION_DEEPLINKS = {
+    "physics_tasks": (
+        f"🧮 <b>Задачи по физике</b>\n{DIVIDER}\n\nВыбери тему:",
+        get_physics_tasks_topics_keyboard,
+    ),
+}
+
 # ==================== ОБРАБОТЧИКИ ====================
 @dp.message(CommandStart())
 async def cmd_start(message: Message):
@@ -1251,10 +1259,14 @@ async def cmd_start(message: Message):
     save_stats()
 
     payload = message.text.split(maxsplit=1)
-    if len(payload) > 1 and payload[1].startswith("ref_"):
-        referrer_id_str = payload[1][len("ref_"):]
-        if referrer_id_str.isdigit():
-            await register_referral(int(referrer_id_str), user_id)
+    deep_link_key = None
+    if len(payload) > 1:
+        if payload[1].startswith("ref_"):
+            referrer_id_str = payload[1][len("ref_"):]
+            if referrer_id_str.isdigit():
+                await register_referral(int(referrer_id_str), user_id)
+        else:
+            deep_link_key = payload[1]
 
     if not await is_subscribed(user_id):
         builder = InlineKeyboardBuilder()
@@ -1270,6 +1282,11 @@ async def cmd_start(message: Message):
             parse_mode="HTML",
             reply_markup=builder.as_markup()
         )
+        return
+
+    if deep_link_key in SECTION_DEEPLINKS:
+        text, keyboard_func = SECTION_DEEPLINKS[deep_link_key]
+        await message.answer(text, parse_mode="HTML", reply_markup=keyboard_func())
         return
 
     greeting = "🎉 <b>С возвращением!</b>" if not is_new_user else "👋 <b>Привет!</b>"
