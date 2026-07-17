@@ -5,6 +5,7 @@ import logging
 import random
 import re
 import os
+import time
 from datetime import date
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, FSInputFile, Update
@@ -150,6 +151,7 @@ async def helperchat_promo_middleware(handler, event: Update, data):
 # ==================== РЕФЕРАЛЬНАЯ СИСТЕМА ====================
 BOT_USERNAME = "VMEDA_examen_bot"
 REFERRAL_WARNING_THRESHOLD = 3  # столько предупреждений даём, прежде чем закрыть доступ
+REFERRAL_WARNING_COOLDOWN_SECONDS = 4 * 60 * 60  # не чаще одного предупреждения раз в 4 часа
 
 def get_referral_link(user_id: int) -> str:
     return f"https://t.me/{BOT_USERNAME}?start=ref_{user_id}"
@@ -260,19 +262,19 @@ async def referral_gate_middleware(handler, event: Update, data):
         return await handler(event, data)
 
     user_id_str = str(user.id)
-    entry = stats["referral_warnings"].get(user_id_str, {"count": 0, "last_day": ""})
+    entry = stats["referral_warnings"].get(user_id_str, {"count": 0, "last_warn_at": 0})
 
     if entry["count"] >= REFERRAL_WARNING_THRESHOLD:
         block_text = (
-            "🔒 <b>Доступ ограничен</b>\n\n"
-            "Чтобы продолжить пользоваться ботом бесплатно, пригласи одного друга — "
-            "это займёт меньше минуты.\n\n"
+            "🚨❗️ <b>ДОСТУП ЗАКРЫТ!</b> ❗️🚨\n\n"
+            "Чтобы продолжить пользоваться ботом бесплатно — <b>пригласи ОДНОГО друга</b>! "
+            "Это займёт меньше минуты! ⏱️\n\n"
             f"{get_referral_status_text(user.id)}\n\n"
-            "Как только друг нажмёт /start по этой ссылке, бот сразу станет доступен."
+            "⚡️ Как только друг нажмёт /start по этой ссылке — бот <b>сразу</b> станет доступен!"
         )
         try:
             if event.callback_query:
-                await event.callback_query.answer("Доступ ограничен — пригласи друга 👥", show_alert=True)
+                await event.callback_query.answer("🚨 Доступ закрыт — пригласи друга! ‼️", show_alert=True)
                 await event.callback_query.message.answer(block_text, parse_mode="HTML")
             elif event.message:
                 await event.message.answer(block_text, parse_mode="HTML")
@@ -280,19 +282,19 @@ async def referral_gate_middleware(handler, event: Update, data):
             logger.exception("Не удалось отправить сообщение о блокировке пользователю %s", user.id)
         return  # обработчик НЕ вызываем — доступ закрыт
 
-    today = date.today().isoformat()
-    if entry["last_day"] != today:
+    now = time.time()
+    if now - entry.get("last_warn_at", 0) >= REFERRAL_WARNING_COOLDOWN_SECONDS:
         entry["count"] += 1
-        entry["last_day"] = today
+        entry["last_warn_at"] = now
         stats["referral_warnings"][user_id_str] = entry
         save_stats()
         remaining = REFERRAL_WARNING_THRESHOLD - entry["count"]
         warn_text = (
-            "⚠️ <b>Пригласи друга, чтобы не потерять доступ</b>\n\n"
+            "⚠️❗️ <b>ВНИМАНИЕ! Пригласи друга!</b> ❗️⚠️\n\n"
             f"{get_referral_status_text(user.id)}"
             if remaining > 0 else
-            "⚠️ <b>Это последнее предупреждение</b>\n\n"
-            "В следующий раз доступ будет закрыт, пока не пригласишь друга.\n\n"
+            "🚨‼️ <b>ПОСЛЕДНЕЕ ПРЕДУПРЕЖДЕНИЕ!</b> ‼️🚨\n\n"
+            "В следующий раз доступ будет <b>полностью закрыт</b>, пока не пригласишь друга!\n\n"
             f"{get_referral_status_text(user.id)}"
         )
         try:
