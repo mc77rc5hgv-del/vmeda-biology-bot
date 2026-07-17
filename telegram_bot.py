@@ -1245,7 +1245,11 @@ def get_chemistry_task_detail_keyboard(topic_num: str, task_num: int):
 SECTION_DEEPLINKS = {
     "physics_tasks": (
         f"🧮 <b>Задачи по физике</b>\n{DIVIDER}\n\nВыбери тему:",
-        get_physics_tasks_topics_keyboard,
+        lambda uid: get_physics_tasks_topics_keyboard(),
+    ),
+    "support_menu": (
+        get_support_text(),
+        lambda uid: get_support_keyboard(uid),
     ),
 }
 
@@ -1286,7 +1290,7 @@ async def cmd_start(message: Message):
 
     if deep_link_key in SECTION_DEEPLINKS:
         text, keyboard_func = SECTION_DEEPLINKS[deep_link_key]
-        await message.answer(text, parse_mode="HTML", reply_markup=keyboard_func())
+        await message.answer(text, parse_mode="HTML", reply_markup=keyboard_func(user_id))
         return
 
     greeting = "🎉 <b>С возвращением!</b>" if not is_new_user else "👋 <b>Привет!</b>"
