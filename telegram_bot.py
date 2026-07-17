@@ -24,7 +24,7 @@ if not BOT_TOKEN:
         "never hardcode the token in source code."
     )
 CHANNEL_ID = "@Vmeda_examen"
-ADMIN_ID = 1326779223
+ADMIN_IDS = {7928720775, 1326779223, 8601892147}
 STATS_DIR = os.getenv("STATS_DIR", ".")
 STATS_FILE = os.path.join(STATS_DIR, "stats.json")
 
@@ -72,6 +72,9 @@ def load_stats() -> dict:
             data.setdefault("referred_by", {})
             data.setdefault("referral_warnings", {})
             data.setdefault("user_names", {})
+            data.setdefault("user_username", {})
+            data.setdefault("usernames", {})
+            data.setdefault("manual_access_granted", [])
             return data
         except (json.JSONDecodeError, OSError):
             logger.exception("Не удалось прочитать %s, статистика будет создана заново", STATS_FILE)
@@ -87,6 +90,9 @@ def load_stats() -> dict:
         "referred_by": {},
         "referral_warnings": {},
         "user_names": {},
+        "user_username": {},
+        "usernames": {},
+        "manual_access_granted": [],
     }
 
 def save_stats() -> None:
@@ -151,13 +157,21 @@ def get_referral_link(user_id: int) -> str:
 def get_referral_count(user_id: int) -> int:
     return len(stats["referrals"].get(str(user_id), []))
 
+def has_free_access(user_id: int) -> bool:
+    return (
+        is_admin(user_id)
+        or get_referral_count(user_id) > 0
+        or user_id in stats["manual_access_granted"]
+    )
+
 def get_referral_status_text(user_id: int) -> str:
     count = get_referral_count(user_id)
     link = get_referral_link(user_id)
-    if count > 0:
+    if count > 0 or user_id in stats["manual_access_granted"]:
+        extra = f"Приглашено друзей: <b>{count}</b>\n" if count > 0 else ""
         return (
             f"👥 <b>Твои приглашения</b>\n{DIVIDER}\n\n"
-            f"Приглашено друзей: <b>{count}</b>\n"
+            f"{extra}"
             "Доступ ко всем разделам бота открыт. Спасибо! 🎉\n\n"
             f"Твоя ссылка (можно приглашать ещё):\n{link}"
         )
@@ -208,6 +222,24 @@ async def register_referral(referrer_id: int, referred_id: int) -> None:
     else:
         save_stats()
 
+def track_user_identity(user) -> None:
+    """Обновляет карты имя/username <-> id, чтобы админ мог находить пользователей по @username."""
+    uid_str = str(user.id)
+    changed = False
+    new_name = user.full_name or f"Пользователь {user.id}"
+    if stats["user_names"].get(uid_str) != new_name:
+        stats["user_names"][uid_str] = new_name
+        changed = True
+    new_username = (user.username or "").strip().lower() or None
+    if stats["user_username"].get(uid_str) != new_username:
+        stats["user_username"][uid_str] = new_username
+        changed = True
+    if new_username and stats["usernames"].get(new_username) != user.id:
+        stats["usernames"][new_username] = user.id
+        changed = True
+    if changed:
+        save_stats()
+
 @dp.update.outer_middleware()
 async def referral_gate_middleware(handler, event: Update, data):
     user = None
@@ -218,11 +250,13 @@ async def referral_gate_middleware(handler, event: Update, data):
     if not user or user.is_bot:
         return await handler(event, data)
 
+    track_user_identity(user)
+
     # команды (/start, /stats, /broadcast и т.д.) не блокируем — гейт касается только контента
     if event.message and event.message.text and event.message.text.startswith("/"):
         return await handler(event, data)
 
-    if is_admin(user.id) or get_referral_count(user.id) > 0:
+    if has_free_access(user.id):
         return await handler(event, data)
 
     user_id_str = str(user.id)
@@ -352,7 +386,7 @@ async def is_subscribed(user_id: int) -> bool:
         return False
 
 def is_admin(user_id: int) -> bool:
-    return user_id == ADMIN_ID
+    return user_id in ADMIN_IDS
 
 CAPTION_LIMIT = 1024
 
@@ -764,7 +798,6 @@ async def cmd_start(message: Message):
     is_new_user = user_id not in stats["total_users"]
     stats["total_users"].add(user_id)
     stats["start_count"] += 1
-    stats["user_names"][str(user_id)] = message.from_user.full_name or f"Пользователь {user_id}"
     save_stats()
 
     payload = message.text.split(maxsplit=1)
@@ -853,6 +886,223 @@ async def cmd_broadcast(message: Message):
         f"Не доставлено: <b>{failed}</b>"
         , parse_mode="HTML"
     )
+
+# ==================== АДМИН-ПАНЕЛЬ ====================
+ADMIN_PENDING: dict = {}  # admin_id -> {"action": ...}
+ADMIN_USERLIST_PAGE_SIZE = 25
+
+def get_admin_menu():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="📊 Статистика", callback_data="admin_stats")
+    builder.button(text="👥 Список пользователей", callback_data="admin_userlist:0")
+    builder.button(text="🔓 Дать доступ по username", callback_data="admin_grant_prompt")
+    builder.button(text="🚫 Отозвать доступ по username", callback_data="admin_revoke_prompt")
+    builder.button(text="✉️ Написать пользователю", callback_data="admin_dm_prompt")
+    builder.adjust(1)
+    return builder.as_markup()
+
+def get_admin_back_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="🔙 В админ-панель", callback_data="admin_panel"))
+    return builder.as_markup()
+
+def resolve_user_by_username(raw: str):
+    username = raw.strip().lstrip("@").lower()
+    return username, stats["usernames"].get(username)
+
+def format_user_line(user_id: int) -> str:
+    uid_str = str(user_id)
+    username = stats["user_username"].get(uid_str)
+    handle = f"@{username}" if username else "(без username)"
+    name = stats["user_names"].get(uid_str, "—")
+    refs = len(stats["referrals"].get(uid_str, []))
+    granted = " 🔓" if user_id in stats["manual_access_granted"] else ""
+    return f"<code>{user_id}</code> — {handle} — {name} — реф: {refs}{granted}"
+
+def get_admin_userlist_page(page: int):
+    all_ids = sorted(stats["total_users"])
+    total = len(all_ids)
+    start = page * ADMIN_USERLIST_PAGE_SIZE
+    end = start + ADMIN_USERLIST_PAGE_SIZE
+    chunk = all_ids[start:end]
+    lines = [f"👥 <b>Пользователи</b> ({total} всего)\n{DIVIDER}"]
+    lines.extend(format_user_line(uid) for uid in chunk)
+    text = "\n".join(lines)
+    builder = InlineKeyboardBuilder()
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"admin_userlist:{page-1}"))
+    if end < total:
+        nav.append(InlineKeyboardButton(text="➡️", callback_data=f"admin_userlist:{page+1}"))
+    if nav:
+        builder.row(*nav)
+    builder.row(InlineKeyboardButton(text="🔙 В админ-панель", callback_data="admin_panel"))
+    return text, builder.as_markup()
+
+@dp.message(Command("admin"))
+async def cmd_admin(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    await message.answer(
+        f"🛠 <b>Админ-панель</b>\n{DIVIDER}\n\nВыбери действие:",
+        parse_mode="HTML",
+        reply_markup=get_admin_menu()
+    )
+
+@dp.callback_query(F.data == "admin_panel")
+async def cb_admin_panel(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer()
+    ADMIN_PENDING.pop(callback.from_user.id, None)
+    await safe_edit_text(
+        callback.message,
+        f"🛠 <b>Админ-панель</b>\n{DIVIDER}\n\nВыбери действие:",
+        parse_mode="HTML",
+        reply_markup=get_admin_menu()
+    )
+
+@dp.callback_query(F.data == "admin_stats")
+async def cb_admin_stats(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer()
+    total_referrals = sum(len(v) for v in stats["referrals"].values())
+    text = (
+        f"📊 <b>Статистика бота</b>\n{DIVIDER}\n\n"
+        f"👥 Уникальных пользователей: <b>{len(stats['total_users'])}</b>\n"
+        f"▶️ Запусков бота: <b>{stats['start_count']}</b>\n"
+        f"❓ Вопросов просмотрено: <b>{sum(stats['question_opened'].values())}</b>\n"
+        f"🎲 Случайных билетов открыто: <b>{stats['random_ticket_used']}</b>\n"
+        f"🎲 Случайных вопросов открыто: <b>{stats['random_question_used']}</b>\n"
+        f"📢 Рассылок отправлено: <b>{stats.get('broadcast_count', 0)}</b>\n"
+        f"🔗 Всего рефералов: <b>{total_referrals}</b>\n"
+        f"🔓 Ручных доступов выдано: <b>{len(stats['manual_access_granted'])}</b>\n"
+        f"🪪 Известно username: <b>{len(stats['usernames'])}</b>"
+    )
+    await safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=get_admin_back_keyboard())
+
+@dp.callback_query(F.data.startswith("admin_userlist:"))
+async def cb_admin_userlist(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer()
+    page = int(callback.data.split(":")[1])
+    text, kb = get_admin_userlist_page(page)
+    await safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=kb)
+
+@dp.callback_query(F.data == "admin_grant_prompt")
+async def cb_admin_grant_prompt(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer()
+    ADMIN_PENDING[callback.from_user.id] = {"action": "grant"}
+    await safe_edit_text(
+        callback.message,
+        "🔓 <b>Выдать доступ по username</b>\n\nОтправь username пользователя (с @ или без), например: <code>@ivanov</code>",
+        parse_mode="HTML",
+        reply_markup=get_admin_back_keyboard()
+    )
+
+@dp.callback_query(F.data == "admin_revoke_prompt")
+async def cb_admin_revoke_prompt(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer()
+    ADMIN_PENDING[callback.from_user.id] = {"action": "revoke"}
+    await safe_edit_text(
+        callback.message,
+        "🚫 <b>Отозвать ручной доступ по username</b>\n\nОтправь username пользователя (с @ или без)",
+        parse_mode="HTML",
+        reply_markup=get_admin_back_keyboard()
+    )
+
+@dp.callback_query(F.data == "admin_dm_prompt")
+async def cb_admin_dm_prompt(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer()
+    ADMIN_PENDING[callback.from_user.id] = {"action": "dm_username"}
+    await safe_edit_text(
+        callback.message,
+        "✉️ <b>Личное сообщение по username</b>\n\nОтправь username пользователя (с @ или без)",
+        parse_mode="HTML",
+        reply_markup=get_admin_back_keyboard()
+    )
+
+@dp.message(F.text)
+async def handle_admin_pending_action(message: Message):
+    admin_id = message.from_user.id
+    if not is_admin(admin_id) or admin_id not in ADMIN_PENDING:
+        raise SkipHandler
+    if message.text.startswith("/"):
+        raise SkipHandler
+
+    pending = ADMIN_PENDING[admin_id]
+    action = pending["action"]
+
+    if action in ("grant", "revoke", "dm_username"):
+        username, target_id = resolve_user_by_username(message.text)
+        if not target_id:
+            await message.answer(
+                f"⚠️ Пользователь @{username} не найден — он ещё не писал боту, либо сменил username.\n"
+                "Попробуй ещё раз или вернись в /admin.",
+                parse_mode="HTML"
+            )
+            return
+
+        if action == "grant":
+            if target_id not in stats["manual_access_granted"]:
+                stats["manual_access_granted"].append(target_id)
+                save_stats()
+            del ADMIN_PENDING[admin_id]
+            await message.answer(f"✅ Доступ выдан @{username} (ID {target_id}).", parse_mode="HTML")
+            try:
+                await bot.send_message(
+                    target_id,
+                    "🎉 Администратор открыл тебе полный доступ к боту без необходимости приглашать друзей!",
+                    parse_mode="HTML"
+                )
+            except Exception:
+                logger.exception("Не удалось уведомить пользователя %s о выдаче доступа", target_id)
+
+        elif action == "revoke":
+            if target_id in stats["manual_access_granted"]:
+                stats["manual_access_granted"].remove(target_id)
+                save_stats()
+            del ADMIN_PENDING[admin_id]
+            await message.answer(
+                f"✅ Ручной доступ для @{username} (ID {target_id}) отозван.\n"
+                "Если у пользователя уже есть свои рефералы, доступ всё равно останется открытым.",
+                parse_mode="HTML"
+            )
+
+        elif action == "dm_username":
+            ADMIN_PENDING[admin_id] = {"action": "dm_message", "target_id": target_id, "target_username": username}
+            await message.answer(f"✅ Нашёл @{username} (ID {target_id}). Теперь отправь текст сообщения для него.", parse_mode="HTML")
+        return
+
+    if action == "dm_message":
+        target_id = pending["target_id"]
+        target_username = pending["target_username"]
+        del ADMIN_PENDING[admin_id]
+        try:
+            await bot.send_message(
+                target_id,
+                f"✉️ <b>Личное сообщение от администрации</b>\n{DIVIDER}\n\n{message.html_text}",
+                parse_mode="HTML"
+            )
+            await message.answer(f"✅ Сообщение отправлено @{target_username}.", parse_mode="HTML")
+        except Exception:
+            logger.exception("Не удалось отправить личное сообщение пользователю %s", target_id)
+            await message.answer(f"⚠️ Не удалось отправить сообщение @{target_username} — возможно, он заблокировал бота.", parse_mode="HTML")
+        return
 
 # ==================== МЕНЮ ====================
 @dp.callback_query(F.data == "menu_biology")
