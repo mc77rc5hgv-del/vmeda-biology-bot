@@ -10,7 +10,10 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, FSInputFile, Update
+from aiogram.types import (
+    Message, CallbackQuery, InlineKeyboardButton, FSInputFile, Update,
+    BotCommand, BotCommandScopeDefault, BotCommandScopeChat,
+)
 from aiogram.filters import CommandStart, Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.enums import ChatMemberStatus
@@ -81,6 +84,7 @@ def load_stats() -> dict:
             data.setdefault("user_username", {})
             data.setdefault("usernames", {})
             data.setdefault("manual_access_granted", [])
+            data.setdefault("referral_battle", None)
             return data
         except (json.JSONDecodeError, OSError):
             logger.exception("Не удалось прочитать %s, статистика будет создана заново", STATS_FILE)
@@ -99,6 +103,7 @@ def load_stats() -> dict:
         "user_username": {},
         "usernames": {},
         "manual_access_granted": [],
+        "referral_battle": None,
     }
 
 # Один воркер сериализует записи на диск и не даёт им блокировать event loop бота.
@@ -205,20 +210,217 @@ def get_referral_status_text(user_id: int) -> str:
         f"Осталось бесплатных заходов без реферала: <b>{remaining}</b>"
     )
 
-def get_referral_leaderboard_text() -> str:
+RANK_MEDALS = ["🥇", "🥈", "🥉"]
+
+def get_referral_leaderboard_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔄 Обновить", callback_data="referral_leaderboard")
+    builder.button(text="🔙 Назад в меню", callback_data="back_to_main")
+    builder.adjust(1)
+    return builder.as_markup()
+
+def get_referral_leaderboard_text(user_id: int = None) -> str:
     referrals = stats["referrals"]
     names = stats["user_names"]
     ranked = sorted(referrals.items(), key=lambda kv: len(kv[1]), reverse=True)
-    ranked = [(uid, refs) for uid, refs in ranked if len(refs) > 0][:10]
+    ranked = [(uid, refs) for uid, refs in ranked if len(refs) > 0]
     if not ranked:
         return f"🏆 <b>Рейтинг приглашений</b>\n{DIVIDER}\n\nПока никто никого не пригласил — стань первым!"
-    medals = ["🥇", "🥈", "🥉"]
+    top = ranked[:10]
     lines = [f"🏆 <b>Рейтинг приглашений</b>\n{DIVIDER}\n"]
-    for i, (uid, refs) in enumerate(ranked):
-        rank_icon = medals[i] if i < 3 else f"{i+1}."
+    uid_str = str(user_id) if user_id is not None else None
+    for i, (uid, refs) in enumerate(top):
+        rank_icon = RANK_MEDALS[i] if i < 3 else f"{i+1}."
         name = names.get(uid, f"Пользователь {uid}")
-        lines.append(f"{rank_icon} {name} — <b>{len(refs)}</b>")
+        you = " 👈 ты" if uid == uid_str else ""
+        lines.append(f"{rank_icon} {name} — <b>{len(refs)}</b>{you}")
+    if uid_str and uid_str not in dict(top):
+        pos = next((i for i, (uid, _) in enumerate(ranked) if uid == uid_str), None)
+        if pos is not None:
+            lines.append("…")
+            name = names.get(uid_str, "Ты")
+            lines.append(f"{pos + 1}. {name} — <b>{len(referrals[uid_str])}</b> 👈 ты")
+    lines.append("")
+    lines.append(f"👤 Всего участников: <b>{len(ranked)}</b>")
     return "\n".join(lines)
+
+# ==================== БИТВА РЕФЕРАЛОВ (ЛИМИТИРОВАННОЕ СОРЕВНОВАНИЕ) ====================
+BATTLE_DURATION_SECONDS = 24 * 60 * 60
+BATTLE_PRIZE_TEXT = 'подписку на ГОД в <a href="https://t.me/Helperchat_bot">Helperchat_bot</a>'
+
+def is_battle_active() -> bool:
+    battle = stats.get("referral_battle")
+    return bool(battle and battle.get("active") and time.time() < battle.get("end_ts", 0))
+
+def get_battle_gained(user_id: int) -> int:
+    battle = stats.get("referral_battle")
+    if not battle:
+        return 0
+    uid_str = str(user_id)
+    current = len(stats["referrals"].get(uid_str, []))
+    start = battle.get("snapshot", {}).get(uid_str, 0)
+    return max(current - start, 0)
+
+def get_battle_leaderboard(limit: int = 10):
+    battle = stats.get("referral_battle")
+    if not battle:
+        return []
+    snapshot = battle.get("snapshot", {})
+    gained = []
+    for uid_str, refs in stats["referrals"].items():
+        diff = len(refs) - snapshot.get(uid_str, 0)
+        if diff > 0:
+            gained.append((uid_str, diff))
+    gained.sort(key=lambda kv: kv[1], reverse=True)
+    return gained[:limit]
+
+def format_time_left(seconds: float) -> str:
+    seconds = max(int(seconds), 0)
+    h, rem = divmod(seconds, 3600)
+    m = rem // 60
+    return f"{h}ч {m}мин"
+
+def start_referral_battle() -> None:
+    now = time.time()
+    snapshot = {uid: len(refs) for uid, refs in stats["referrals"].items()}
+    stats["referral_battle"] = {
+        "active": True,
+        "start_ts": now,
+        "end_ts": now + BATTLE_DURATION_SECONDS,
+        "snapshot": snapshot,
+        "results": None,
+    }
+    save_stats()
+
+def get_battle_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔄 Обновить", callback_data="referral_battle")
+    builder.button(text="👥 Пригласить друзей", callback_data="referral_info")
+    builder.button(text="🔙 Назад в меню", callback_data="back_to_main")
+    builder.adjust(1)
+    return builder.as_markup()
+
+def get_battle_text(user_id: int) -> str:
+    if not is_battle_active():
+        battle = stats.get("referral_battle")
+        if battle and battle.get("results"):
+            medals_lines = []
+            for i, (uid_str, diff) in enumerate(battle["results"]):
+                name = stats["user_names"].get(uid_str, f"Пользователь {uid_str}")
+                icon = RANK_MEDALS[i] if i < 3 else f"{i+1}."
+                medals_lines.append(f"{icon} {name} — <b>{diff}</b>")
+            results_block = "\n".join(medals_lines)
+            return (
+                f"⚔️ <b>Битва рефералов</b>\n{DIVIDER}\n\n"
+                "Сейчас битва не идёт. Результаты последней битвы:\n\n"
+                f"{results_block}\n\n"
+                "Следи за объявлениями — как только стартует новая битва, "
+                f"у тебя будет 24 часа, чтобы побороться за {BATTLE_PRIZE_TEXT}!"
+            )
+        return (
+            f"⚔️ <b>Битва рефералов</b>\n{DIVIDER}\n\n"
+            "Сейчас битва не идёт. Следи за объявлениями — как только стартует новая, "
+            f"у тебя будет 24 часа, чтобы побороться за {BATTLE_PRIZE_TEXT}!"
+        )
+    battle = stats["referral_battle"]
+    remaining = format_time_left(battle["end_ts"] - time.time())
+    my_gained = get_battle_gained(user_id)
+    leaderboard = get_battle_leaderboard()
+    uid_str = str(user_id)
+    lines = [
+        f"⚔️ <b>Битва рефералов — идёт!</b>\n{DIVIDER}\n",
+        f"⏳ Осталось: <b>{remaining}</b>",
+        f"🎁 Топ-3 получат {BATTLE_PRIZE_TEXT}",
+        f"🙋 Твой результат за битву: <b>{my_gained}</b>",
+        "",
+    ]
+    if leaderboard:
+        lines.append("<b>Текущий рейтинг битвы:</b>")
+        for i, (uid, diff) in enumerate(leaderboard):
+            icon = RANK_MEDALS[i] if i < 3 else f"{i+1}."
+            name = stats["user_names"].get(uid, f"Пользователь {uid}")
+            you = " 👈 ты" if uid == uid_str else ""
+            lines.append(f"{icon} {name} — <b>{diff}</b>{you}")
+    else:
+        lines.append("Пока никто не пригласил друзей в рамках битвы — стань первым!")
+    lines.append("")
+    lines.append(f"Твоя ссылка:\n{get_referral_link(user_id)}")
+    return "\n".join(lines)
+
+async def _broadcast(text: str, keyboard=None) -> None:
+    for user_id in list(stats["total_users"]):
+        try:
+            await bot.send_message(user_id, text, parse_mode="HTML", reply_markup=keyboard, disable_web_page_preview=True)
+        except Exception:
+            logger.exception("Не удалось отправить рассылку пользователю %s", user_id)
+        await asyncio.sleep(0.05)
+
+async def announce_battle_start() -> None:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="⚔️ Битва рефералов", callback_data="referral_battle")
+    text = (
+        "⚔️🔥 <b>СТАРТУЕТ БИТВА РЕФЕРАЛОВ!</b> 🔥⚔️\n"
+        f"{DIVIDER}\n\n"
+        "У тебя есть <b>24 часа</b>, чтобы пригласить в бота как можно больше друзей!\n\n"
+        f"🏆 <b>Топ-3</b> по числу приглашённых за это время получат {BATTLE_PRIZE_TEXT}!\n\n"
+        "Считаются только друзья, приглашённые с этого момента.\n"
+        "Следи за живым рейтингом на кнопке «⚔️ Битва рефералов» в главном меню.\n\n"
+        "Погнали! 🚀"
+    )
+    await _broadcast(text, builder.as_markup())
+
+async def resolve_referral_battle() -> None:
+    battle = stats.get("referral_battle")
+    if not battle or not battle.get("active"):
+        return
+    battle["active"] = False
+    top3 = get_battle_leaderboard(limit=3)
+    battle["results"] = top3
+    save_stats()
+
+    if top3:
+        lines = [f"🏁 <b>Битва рефералов завершена!</b>\n{DIVIDER}\n", "Победители:"]
+        for i, (uid_str, diff) in enumerate(top3):
+            name = stats["user_names"].get(uid_str, f"Пользователь {uid_str}")
+            lines.append(f"{RANK_MEDALS[i]} {name} — <b>{diff}</b> приглашённых")
+        lines.append("")
+        lines.append(f"🎁 Приз: {BATTLE_PRIZE_TEXT}")
+        lines.append("Администратор свяжется с победителями лично 🤝")
+        result_text = "\n".join(lines)
+    else:
+        result_text = (
+            f"🏁 <b>Битва рефералов завершена!</b>\n{DIVIDER}\n\n"
+            "За время битвы никто не пригласил новых друзей — приз не разыгран в этот раз."
+        )
+    await _broadcast(result_text)
+
+    if top3:
+        admin_lines = ["🏁 <b>Битва рефералов завершена.</b> Победители (для выдачи приза):"]
+        for i, (uid_str, diff) in enumerate(top3):
+            username = stats["user_username"].get(uid_str)
+            handle = f"@{username}" if username else "(нет username)"
+            admin_lines.append(f"{RANK_MEDALS[i]} ID <code>{uid_str}</code> {handle} — {diff} рефералов")
+        admin_text = "\n".join(admin_lines)
+        for admin_id in ADMIN_IDS:
+            try:
+                await bot.send_message(admin_id, admin_text, parse_mode="HTML")
+            except Exception:
+                logger.exception("Не удалось уведомить админа %s об итогах битвы", admin_id)
+
+async def _battle_timer(end_ts: float) -> None:
+    await asyncio.sleep(max(end_ts - time.time(), 0))
+    battle = stats.get("referral_battle")
+    if battle and battle.get("active") and time.time() >= battle.get("end_ts", 0):
+        await resolve_referral_battle()
+
+def resume_battle_timer_if_needed() -> None:
+    battle = stats.get("referral_battle")
+    if not battle or not battle.get("active"):
+        return
+    if time.time() >= battle.get("end_ts", 0):
+        asyncio.create_task(resolve_referral_battle())
+    else:
+        asyncio.create_task(_battle_timer(battle["end_ts"]))
 
 async def register_referral(referrer_id: int, referred_id: int) -> None:
     if referrer_id == referred_id:
@@ -465,6 +667,8 @@ def get_main_menu():
     builder.button(text="🧪 Химия", callback_data="menu_chemistry")
     builder.button(text="👥 Пригласить друзей", callback_data="referral_info")
     builder.button(text="🏆 Рейтинг", callback_data="referral_leaderboard")
+    battle_label = "⚔️ Битва рефералов 🔥" if is_battle_active() else "⚔️ Битва рефералов"
+    builder.button(text=battle_label, callback_data="referral_battle")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -941,8 +1145,42 @@ def get_admin_menu():
     builder.button(text="🔓 Дать доступ по username", callback_data="admin_grant_prompt")
     builder.button(text="🚫 Отозвать доступ по username", callback_data="admin_revoke_prompt")
     builder.button(text="✉️ Написать пользователю", callback_data="admin_dm_prompt")
+    builder.button(text="⚔️ Битва рефералов", callback_data="admin_battle_menu")
     builder.adjust(1)
     return builder.as_markup()
+
+def get_admin_battle_keyboard():
+    builder = InlineKeyboardBuilder()
+    if is_battle_active():
+        builder.button(text="🔄 Обновить", callback_data="admin_battle_menu")
+        builder.button(text="🛑 Завершить досрочно", callback_data="admin_battle_end_confirm")
+    else:
+        builder.button(text="🚀 Начать битву рефералов (24ч)", callback_data="admin_battle_start_confirm")
+    builder.button(text="🔙 В админ-панель", callback_data="admin_panel")
+    builder.adjust(1)
+    return builder.as_markup()
+
+def get_admin_battle_text() -> str:
+    if is_battle_active():
+        battle = stats["referral_battle"]
+        remaining = format_time_left(battle["end_ts"] - time.time())
+        leaderboard = get_battle_leaderboard()
+        lines = [f"⚔️ <b>Битва рефералов — идёт!</b>\n{DIVIDER}\n", f"⏳ Осталось: <b>{remaining}</b>\n"]
+        if leaderboard:
+            for i, (uid, diff) in enumerate(leaderboard):
+                icon = RANK_MEDALS[i] if i < 3 else f"{i+1}."
+                name = stats["user_names"].get(uid, f"Пользователь {uid}")
+                lines.append(f"{icon} {name} — <b>{diff}</b>")
+        else:
+            lines.append("Пока никто не пригласил друзей в рамках битвы.")
+        return "\n".join(lines)
+    return (
+        f"⚔️ <b>Битва рефералов</b>\n{DIVIDER}\n\n"
+        "Сейчас битва не идёт.\n\n"
+        "Запусти битву на 24 часа — топ-3 пользователя по числу приглашённых друзей за это время "
+        f"получат {BATTLE_PRIZE_TEXT}.\n\n"
+        "Всем пользователям бота придёт рассылка с объявлением о старте и правилах."
+    )
 
 def get_admin_back_keyboard():
     builder = InlineKeyboardBuilder()
@@ -1004,6 +1242,89 @@ async def cb_admin_panel(callback: CallbackQuery):
         f"🛠 <b>Админ-панель</b>\n{DIVIDER}\n\nВыбери действие:",
         parse_mode="HTML",
         reply_markup=get_admin_menu()
+    )
+
+@dp.callback_query(F.data == "admin_battle_menu")
+async def cb_admin_battle_menu(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer()
+    await safe_edit_text(
+        callback.message,
+        get_admin_battle_text(),
+        parse_mode="HTML",
+        reply_markup=get_admin_battle_keyboard()
+    )
+
+@dp.callback_query(F.data == "admin_battle_start_confirm")
+async def cb_admin_battle_start_confirm(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer()
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Да, начать битву на 24ч", callback_data="admin_battle_start_go")
+    builder.button(text="❌ Отмена", callback_data="admin_battle_menu")
+    builder.adjust(1)
+    await safe_edit_text(
+        callback.message,
+        "⚔️ <b>Подтверди запуск битвы рефералов</b>\n\n"
+        "Битва продлится 24 часа, топ-3 по числу новых приглашённых получат "
+        f"{BATTLE_PRIZE_TEXT}.\n\nВсем пользователям придёт рассылка с объявлением.",
+        parse_mode="HTML",
+        reply_markup=builder.as_markup()
+    )
+
+@dp.callback_query(F.data == "admin_battle_start_go")
+async def cb_admin_battle_start_go(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    if is_battle_active():
+        await callback.answer("Битва уже идёт", show_alert=True)
+        return
+    await callback.answer("🚀 Битва запущена!", show_alert=True)
+    start_referral_battle()
+    asyncio.create_task(_battle_timer(stats["referral_battle"]["end_ts"]))
+    asyncio.create_task(announce_battle_start())
+    await safe_edit_text(
+        callback.message,
+        get_admin_battle_text(),
+        parse_mode="HTML",
+        reply_markup=get_admin_battle_keyboard()
+    )
+
+@dp.callback_query(F.data == "admin_battle_end_confirm")
+async def cb_admin_battle_end_confirm(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer()
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Да, завершить битву", callback_data="admin_battle_end_go")
+    builder.button(text="❌ Отмена", callback_data="admin_battle_menu")
+    builder.adjust(1)
+    await safe_edit_text(
+        callback.message,
+        "🛑 <b>Завершить битву досрочно?</b>\n\nПобедители будут определены по текущему рейтингу, "
+        "всем пользователям придёт рассылка с итогами.",
+        parse_mode="HTML",
+        reply_markup=builder.as_markup()
+    )
+
+@dp.callback_query(F.data == "admin_battle_end_go")
+async def cb_admin_battle_end_go(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer("Битва завершена")
+    await resolve_referral_battle()
+    await safe_edit_text(
+        callback.message,
+        get_admin_battle_text(),
+        parse_mode="HTML",
+        reply_markup=get_admin_battle_keyboard()
     )
 
 @dp.callback_query(F.data == "admin_stats")
@@ -1244,9 +1565,20 @@ async def cb_referral_leaderboard(callback: CallbackQuery):
     await callback.answer()
     await safe_edit_text(
         callback.message,
-        get_referral_leaderboard_text(),
+        get_referral_leaderboard_text(callback.from_user.id),
         parse_mode="HTML",
-        reply_markup=get_referral_back_keyboard()
+        reply_markup=get_referral_leaderboard_keyboard()
+    )
+
+@dp.callback_query(F.data == "referral_battle")
+async def cb_referral_battle(callback: CallbackQuery):
+    await callback.answer()
+    await safe_edit_text(
+        callback.message,
+        get_battle_text(callback.from_user.id),
+        parse_mode="HTML",
+        reply_markup=get_battle_keyboard(),
+        disable_web_page_preview=True,
     )
 
 @dp.callback_query(F.data == "menu_physics")
@@ -1756,9 +2088,28 @@ async def cb_phystask_show(callback: CallbackQuery):
     await safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=get_physics_task_detail_keyboard(topic_num, task_num))
 
 # ==================== ЗАПУСК ====================
+async def setup_bot_commands() -> None:
+    default_commands = [
+        BotCommand(command="start", description="Начать работу с ботом"),
+        BotCommand(command="random", description="Получить случайный билет"),
+        BotCommand(command="help", description="Помощь и инструкция"),
+    ]
+    await bot.set_my_commands(default_commands, scope=BotCommandScopeDefault())
+
+    admin_commands = default_commands + [
+        BotCommand(command="admin", description="Админ-панель"),
+    ]
+    for admin_id in ADMIN_IDS:
+        try:
+            await bot.set_my_commands(admin_commands, scope=BotCommandScopeChat(chat_id=admin_id))
+        except Exception:
+            logger.exception("Не удалось установить админ-команды для %s", admin_id)
+
 async def main():
     logger.info("Бот запускается...")
     logger.info("Загружена статистика: %d пользователей", len(stats["total_users"]))
+    await setup_bot_commands()
+    resume_battle_timer_if_needed()
     try:
         await dp.start_polling(bot)
     finally:
