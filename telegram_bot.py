@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import html
 import json
 import logging
@@ -6,6 +7,7 @@ import random
 import re
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, FSInputFile, Update
@@ -99,13 +101,26 @@ def load_stats() -> dict:
         "manual_access_granted": [],
     }
 
-def save_stats() -> None:
-    data = dict(stats)
-    data["total_users"] = list(stats["total_users"])
+# Один воркер сериализует записи на диск и не даёт им блокировать event loop бота.
+_stats_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="stats-writer")
+
+def _write_stats_file(data: dict) -> None:
     tmp_path = f"{STATS_FILE}.tmp"
     with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
     os.replace(tmp_path, STATS_FILE)
+
+def _log_stats_write_result(future) -> None:
+    exc = future.exception()
+    if exc is not None:
+        logger.error("Не удалось сохранить статистику: %s", exc)
+
+def save_stats() -> None:
+    # Снимок делаем сразу (deepcopy — быстро), сама запись на диск уходит в отдельный поток.
+    data = copy.deepcopy(stats)
+    data["total_users"] = list(data["total_users"])
+    future = _stats_executor.submit(_write_stats_file, data)
+    future.add_done_callback(_log_stats_write_result)
 
 stats = load_stats()
 
@@ -512,7 +527,7 @@ async def render_quiz_question(message, user_id: int):
         f"🎯 <b>Опрос — вопрос {session['index'] + 1}/{total}</b>\n{DIVIDER}\n\n"
         f"<b>{q['title']}</b>"
     )
-    await message.edit_text(text, parse_mode="HTML", reply_markup=get_quiz_question_keyboard())
+    await safe_edit_text(message, text, parse_mode="HTML", reply_markup=get_quiz_question_keyboard())
 
 async def render_quiz_answer(message, user_id: int):
     session = QUIZ_SESSIONS[user_id]
@@ -527,7 +542,8 @@ async def render_quiz_answer(message, user_id: int):
 async def render_quiz_summary(message, user_id: int, aborted: bool = False):
     session = QUIZ_SESSIONS.pop(user_id, None)
     if not session:
-        await message.edit_text(
+        await safe_edit_text(
+            message,
             f"🧬 <b>Биология</b>\n{DIVIDER}\n\nВыбери формат подготовки:",
             parse_mode="HTML",
             reply_markup=get_biology_menu()
@@ -541,7 +557,7 @@ async def render_quiz_summary(message, user_id: int, aborted: bool = False):
         f"✅ Знаю: <b>{session['know']}</b>\n"
         f"❌ Не знаю: <b>{session['dont_know']}</b>"
     )
-    await message.edit_text(text, parse_mode="HTML", reply_markup=get_quiz_summary_keyboard())
+    await safe_edit_text(message, text, parse_mode="HTML", reply_markup=get_quiz_summary_keyboard())
 
 def get_ticket_keyboard():
     builder = InlineKeyboardBuilder()
@@ -905,12 +921,13 @@ async def cmd_broadcast(message: Message):
     stats["broadcast_count"] = stats.get("broadcast_count", 0) + 1
     save_stats()
 
-    await status.edit_text(
+    await safe_edit_text(
+        status,
         "✅ <b>Рассылка завершена</b>\n"
         f"{DIVIDER}\n"
         f"Доставлено: <b>{sent}</b>\n"
-        f"Не доставлено: <b>{failed}</b>"
-        , parse_mode="HTML"
+        f"Не доставлено: <b>{failed}</b>",
+        parse_mode="HTML"
     )
 
 # ==================== АДМИН-ПАНЕЛЬ ====================
@@ -1134,7 +1151,8 @@ async def handle_admin_pending_action(message: Message):
 @dp.callback_query(F.data == "menu_biology")
 async def cb_menu_biology(callback: CallbackQuery):
     await callback.answer()
-    await callback.message.edit_text(
+    await safe_edit_text(
+        callback.message,
         f"🧬 <b>Биология</b>\n{DIVIDER}\n\nВыбери формат подготовки:",
         parse_mode="HTML",
         reply_markup=get_biology_menu()
@@ -1184,7 +1202,8 @@ async def cb_quiz_stop(callback: CallbackQuery):
 @dp.callback_query(F.data == "menu_tickets")
 async def cb_menu_tickets(callback: CallbackQuery):
     await callback.answer()
-    await callback.message.edit_text(
+    await safe_edit_text(
+        callback.message,
         f"📘 <b>Билеты — Биология</b>\n{DIVIDER}\n\nВыбери билет:",
         parse_mode="HTML",
         reply_markup=get_ticket_keyboard()
@@ -1193,7 +1212,8 @@ async def cb_menu_tickets(callback: CallbackQuery):
 @dp.callback_query(F.data == "menu_questions")
 async def cb_menu_questions(callback: CallbackQuery):
     await callback.answer()
-    await callback.message.edit_text(
+    await safe_edit_text(
+        callback.message,
         f"📝 <b>Вопросы — Биология</b>\n{DIVIDER}\n\nВыбери страницу:",
         parse_mode="HTML",
         reply_markup=get_questions_main_menu()
@@ -1202,7 +1222,8 @@ async def cb_menu_questions(callback: CallbackQuery):
 @dp.callback_query(F.data == "back_to_main")
 async def cb_back_to_main(callback: CallbackQuery):
     await callback.answer()
-    await callback.message.edit_text(
+    await safe_edit_text(
+        callback.message,
         "🏠 <b>Главное меню</b>\n\nВыбери предмет для подготовки:",
         parse_mode="HTML",
         reply_markup=get_main_menu()
@@ -1231,7 +1252,8 @@ async def cb_referral_leaderboard(callback: CallbackQuery):
 @dp.callback_query(F.data == "menu_physics")
 async def cb_menu_physics(callback: CallbackQuery):
     await callback.answer()
-    await callback.message.edit_text(
+    await safe_edit_text(
+        callback.message,
         f"⚛️ <b>Физика</b>\n{DIVIDER}\n\nВыбери раздел:",
         parse_mode="HTML",
         reply_markup=get_physics_menu()
@@ -1240,7 +1262,8 @@ async def cb_menu_physics(callback: CallbackQuery):
 @dp.callback_query(F.data == "menu_chemistry")
 async def cb_menu_chemistry(callback: CallbackQuery):
     await callback.answer()
-    await callback.message.edit_text(
+    await safe_edit_text(
+        callback.message,
         f"🧪 <b>Химия</b>\n{DIVIDER}\n\nВыбери раздел:",
         parse_mode="HTML",
         reply_markup=get_chemistry_menu()
@@ -1250,7 +1273,8 @@ async def cb_menu_chemistry(callback: CallbackQuery):
 @dp.callback_query(F.data == "chemistry_theory")
 async def cb_chemistry_theory(callback: CallbackQuery):
     await callback.answer()
-    await callback.message.edit_text(
+    await safe_edit_text(
+        callback.message,
         f"📚 <b>Теория по химии</b>\n{DIVIDER}\n\nВыбери тему:",
         parse_mode="HTML",
         reply_markup=get_chemistry_theory_list()
@@ -1265,12 +1289,13 @@ async def cb_show_theory_topic(callback: CallbackQuery):
         await callback.answer("Тема не найдена", show_alert=True)
         return
     text = f"📖 <b>{topic['title']}</b>\n{DIVIDER}\n\n{topic['content']}"
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_theory_navigation(num))
+    await safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=get_theory_navigation(num))
 
 @dp.callback_query(F.data == "chemistry_theory_list")
 async def cb_theory_list(callback: CallbackQuery):
     await callback.answer()
-    await callback.message.edit_text(
+    await safe_edit_text(
+        callback.message,
         f"📚 <b>Теория по химии</b>\n{DIVIDER}\n\nВыбери тему:",
         parse_mode="HTML",
         reply_markup=get_chemistry_theory_list()
@@ -1348,7 +1373,8 @@ async def cb_chemtask_show(callback: CallbackQuery):
 @dp.callback_query(F.data == "chemistry_labs")
 async def cb_chemistry_labs(callback: CallbackQuery):
     await callback.answer()
-    await callback.message.edit_text(
+    await safe_edit_text(
+        callback.message,
         f"🧪 <b>Лабораторные работы по химии</b>\n{DIVIDER}\n\nВыбери лабораторную работу:",
         parse_mode="HTML",
         reply_markup=get_labs_keyboard()
@@ -1375,7 +1401,7 @@ async def cb_show_lab(callback: CallbackQuery):
         builder.button(text="📐 Расчёты", callback_data=f"lab_calc:{lab_num}")
     builder.button(text="🔙 Назад к лабам", callback_data="chemistry_labs")
     builder.adjust(1)
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=builder.as_markup())
+    await safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=builder.as_markup())
 
 @dp.callback_query(F.data.startswith("lab_exp:"))
 async def cb_lab_experiments(callback: CallbackQuery):
@@ -1390,7 +1416,7 @@ async def cb_lab_experiments(callback: CallbackQuery):
         text += f"<b>{exp.get('name', '')}</b>\n{exp.get('description', '')}\n\n"
     builder = InlineKeyboardBuilder()
     builder.button(text="🔙 Назад", callback_data=f"lab:{lab_num}")
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=builder.as_markup())
+    await safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=builder.as_markup())
 
 @dp.callback_query(F.data.startswith("lab_calc:"))
 async def cb_lab_calculations(callback: CallbackQuery):
@@ -1403,7 +1429,7 @@ async def cb_lab_calculations(callback: CallbackQuery):
     text = f"📐 <b>Расчёты — Лабораторная работа {lab_num}</b>\n{DIVIDER}\n\n{lab['calculations']}"
     builder = InlineKeyboardBuilder()
     builder.button(text="🔙 Назад", callback_data=f"lab:{lab_num}")
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=builder.as_markup())
+    await safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=builder.as_markup())
 
 # ==================== БИОЛОГИЯ — БИЛЕТЫ ====================
 @dp.callback_query(F.data == "random_ticket")
@@ -1438,7 +1464,7 @@ async def show_ticket(message, ticket: dict):
         lines.append("")
     lines.append("👇 Нажми на номер вопроса, чтобы увидеть ответ:")
     text = "\n".join(lines)
-    await message.edit_text(text, parse_mode="HTML", reply_markup=get_ticket_questions_keyboard(str(ticket_num)))
+    await safe_edit_text(message, text, parse_mode="HTML", reply_markup=get_ticket_questions_keyboard(str(ticket_num)))
 
 @dp.callback_query(F.data.startswith("ticket_q:"))
 async def cb_ticket_question(callback: CallbackQuery):
@@ -1733,7 +1759,10 @@ async def cb_phystask_show(callback: CallbackQuery):
 async def main():
     logger.info("Бот запускается...")
     logger.info("Загружена статистика: %d пользователей", len(stats["total_users"]))
-    await dp.start_polling(bot)
+    try:
+        await dp.start_polling(bot)
+    finally:
+        _stats_executor.shutdown(wait=True)
 
 if __name__ == "__main__":
     asyncio.run(main())
