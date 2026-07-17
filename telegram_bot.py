@@ -592,6 +592,26 @@ def get_support_keyboard(user_id: int):
     builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
     return builder.as_markup()
 
+def get_support_announcement_text() -> str:
+    return (
+        f"📣 <b>Новое в боте — раздел «Поддержка автора»!</b>\n{DIVIDER}\n\n"
+        "Бот бесплатный, без рекламы и подписок — но на разработку и хостинг уже "
+        "потрачено около <b>5000₽</b>, а получено с бота — <b>0₽</b>.\n\n"
+        "Теперь его можно поддержать:\n"
+        "⭐ звёздами Telegram — сумму выбираешь сам\n"
+        "💵 переводом в рублях — тоже любая сумма, реквизиты пришлют в чате с "
+        '<a href="https://t.me/vmeda_helper">@vmeda_helper</a>\n\n'
+        "А ещё есть рейтинг «🏆 Лучшие донатеры» — топ по звёздам и топ по рублям! "
+        "Можно засветить свой ник или остаться анонимом — выбираешь сам.\n\n"
+        "Заходи в «😇 Поддержать автора 💰» в главном меню, жертвуй любую сумму — "
+        "и попади в топ! 🙏"
+    )
+
+def get_support_announcement_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="😇 Поддержать автора 💰", callback_data="support_menu")
+    return builder.as_markup()
+
 def donor_display_name(uid_str: str) -> str:
     if stats.get("donor_hide_name", {}).get(uid_str):
         return "🙈 Аноним"
@@ -1331,6 +1351,7 @@ def get_admin_menu():
     builder.button(text="✉️ Написать пользователю", callback_data="admin_dm_prompt")
     builder.button(text="⚔️ Битва рефералов", callback_data="admin_battle_menu")
     builder.button(text="💰 Записать донат рублями", callback_data="admin_donation_prompt")
+    builder.button(text="📣 Анонс раздела поддержки", callback_data="admin_announce_support_confirm")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -1603,6 +1624,40 @@ async def cb_admin_donation_prompt(callback: CallbackQuery):
         "Переводы в рублях идут напрямую в чат с @vmeda_helper, бот их не видит — "
         "запиши сюда вручную, чтобы человек попал в рейтинг донатеров.\n\n"
         "Отправь username пользователя (с @ или без)",
+        parse_mode="HTML",
+        reply_markup=get_admin_back_keyboard()
+    )
+
+@dp.callback_query(F.data == "admin_announce_support_confirm")
+async def cb_admin_announce_support_confirm(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer()
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Отправить всем", callback_data="admin_announce_support_go")
+    builder.button(text="❌ Отмена", callback_data="admin_panel")
+    builder.adjust(1)
+    preview = (
+        f"👀 <b>Предпросмотр анонса</b>\n{DIVIDER}\n\n"
+        f"{get_support_announcement_text()}\n\n{DIVIDER}\n"
+        f"Отправить это всем {len(stats['total_users'])} пользователям?"
+    )
+    await safe_edit_text(callback.message, preview, parse_mode="HTML", reply_markup=builder.as_markup())
+
+@dp.callback_query(F.data == "admin_announce_support_go")
+async def cb_admin_announce_support_go(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer("📣 Рассылка запущена!", show_alert=True)
+    recipients = len(stats["total_users"])
+    stats["broadcast_count"] = stats.get("broadcast_count", 0) + 1
+    save_stats()
+    await _broadcast(get_support_announcement_text(), get_support_announcement_keyboard())
+    await safe_edit_text(
+        callback.message,
+        f"✅ Анонс раздела поддержки отправлен (попытка охватить {recipients} пользователей).",
         parse_mode="HTML",
         reply_markup=get_admin_back_keyboard()
     )
