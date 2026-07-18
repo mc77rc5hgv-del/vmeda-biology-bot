@@ -28,12 +28,15 @@ import logging
 import operator
 import os
 import re
+import shutil
 import sqlite3
+import tempfile
 import time
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
 import aiohttp
+from pypdf import PdfReader, PdfWriter
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.enums import ChatMemberStatus, ChatType
@@ -1674,6 +1677,11 @@ def build_admin_help_text() -> str:
         "боту /start (в личке или как владелец группы).\n\n"
         "🚫 <b>Бан</b> — забаненный не получает ответы бота нигде: ни в "
         "группах, ни в личке, ни в подключённых бизнес-чатах.\n\n"
+        "📄 <b>PDF-инструменты</b> — не кнопка, а просто пришли боту PDF-файл "
+        "в личку: предложит «Сжать» (без потери качества — картинки внутри "
+        "не трогаются, поэтому экономия скромная, но честная) или «Обрезать "
+        "по страницам» (например <code>1-145</code>). Ограничение Telegram "
+        "Bot API — файлы больше 20 МБ бот скачать не сможет.\n\n"
         "ID админов бота (могут делать всё вышеперечисленное): "
         + ", ".join(f"<code>{aid}</code>" for aid in sorted(ADMIN_IDS))
     )
@@ -3259,6 +3267,171 @@ async def reply_calc_in_business_chat(owner_id: int, message: Message) -> None:
         logger.warning("Не удалось отправить результат /calc владельцу %s", owner_id)
 
 
+# ==================== PDF-ИНСТРУМЕНТЫ (ТОЛЬКО ДЛЯ АДМИНОВ) ====================
+# в памяти: файл последнего присланного админом PDF, ключ — user_id админа
+PENDING_PDF_INPUT: dict[int, dict] = {}
+
+
+def pdf_compress_lossless(input_path: str, output_path: str) -> None:
+    """Пересжимает потоки содержимого без потери качества — картинки внутри
+    PDF не трогаются и не перекодируются, экономия обычно скромная, но
+    честная (в отличие от сжатия через понижение качества картинок)."""
+    reader = PdfReader(input_path)
+    writer = PdfWriter()
+    for page in reader.pages:
+        page.compress_content_streams()
+        writer.add_page(page)
+    writer.compress_identical_objects()
+    with open(output_path, "wb") as f:
+        writer.write(f)
+
+
+def parse_page_ranges(text: str, max_pages: int):
+    """Разбирает '1-145' или '1-10,20-30' (1-индексация, включительно) в
+    список (start, end). None — не разобрал или диапазон некорректен."""
+    text = text.strip()
+    if not text:
+        return None
+    ranges = []
+    for part in (p.strip() for p in text.split(",")):
+        if not part:
+            continue
+        m = re.fullmatch(r"(\d+)\s*-\s*(\d+)", part)
+        if m:
+            start, end = int(m.group(1)), int(m.group(2))
+        elif part.isdigit():
+            start = end = int(part)
+        else:
+            return None
+        if start < 1 or end < 1 or start > end or start > max_pages:
+            return None
+        ranges.append((start, min(end, max_pages)))
+    return ranges or None
+
+
+def pdf_trim_pages(input_path: str, output_path: str, page_ranges: list) -> int:
+    reader = PdfReader(input_path)
+    writer = PdfWriter()
+    kept = 0
+    for start, end in page_ranges:
+        for i in range(start - 1, end):
+            writer.add_page(reader.pages[i])
+            kept += 1
+    with open(output_path, "wb") as f:
+        writer.write(f)
+    return kept
+
+
+def get_pdf_actions_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🗜 Сжать (без потери качества)", callback_data="pdf_compress")
+    builder.button(text="✂️ Обрезать по страницам", callback_data="pdf_trim_ask")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+@dp.message(F.document, F.chat.type == ChatType.PRIVATE, F.from_user.id.in_(ADMIN_IDS))
+async def handle_admin_pdf_upload(message: Message):
+    doc = message.document
+    is_pdf = doc.mime_type == "application/pdf" or (doc.file_name or "").lower().endswith(".pdf")
+    if not is_pdf:
+        return
+    PENDING_PDF_INPUT[message.from_user.id] = {
+        "stage": "choose_action",
+        "file_id": doc.file_id,
+        "file_name": doc.file_name or "file.pdf",
+    }
+    await message.answer(
+        f"📄 Получен PDF: <code>{html.escape(doc.file_name or 'file.pdf')}</code>\n\nЧто сделать?",
+        parse_mode="HTML",
+        reply_markup=get_pdf_actions_keyboard(),
+    )
+
+
+@dp.callback_query(F.data == "pdf_compress")
+async def cb_pdf_compress(callback: CallbackQuery):
+    if not is_bot_admin(callback.from_user.id):
+        await callback.answer("Только для админов", show_alert=True)
+        return
+    pending = PENDING_PDF_INPUT.get(callback.from_user.id)
+    if not pending:
+        await callback.answer("Файл не найден, пришли PDF заново", show_alert=True)
+        return
+    await callback.answer()
+    await callback.message.edit_text("🗜 Сжимаю...")
+    tmp_dir = tempfile.mkdtemp(prefix="vg_pdf_")
+    try:
+        src_path = os.path.join(tmp_dir, "input.pdf")
+        await bot.download(pending["file_id"], destination=src_path)
+        orig_size = os.path.getsize(src_path)
+        out_path = os.path.join(tmp_dir, "compressed.pdf")
+        pdf_compress_lossless(src_path, out_path)
+        new_size = os.path.getsize(out_path)
+        base_name = os.path.splitext(pending["file_name"])[0]
+        await bot.send_document(
+            callback.from_user.id,
+            FSInputFile(out_path, filename=f"{base_name}_compressed.pdf"),
+            caption=f"🗜 Готово: {orig_size // 1024} КБ → {new_size // 1024} КБ",
+        )
+    except Exception:
+        logger.exception("Ошибка сжатия PDF")
+        await bot.send_message(callback.from_user.id, "⚠️ Не получилось сжать файл.")
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        PENDING_PDF_INPUT.pop(callback.from_user.id, None)
+
+
+@dp.callback_query(F.data == "pdf_trim_ask")
+async def cb_pdf_trim_ask(callback: CallbackQuery):
+    if not is_bot_admin(callback.from_user.id):
+        await callback.answer("Только для админов", show_alert=True)
+        return
+    pending = PENDING_PDF_INPUT.get(callback.from_user.id)
+    if not pending:
+        await callback.answer("Файл не найден, пришли PDF заново", show_alert=True)
+        return
+    pending["stage"] = "await_range"
+    await callback.answer()
+    await callback.message.edit_text(
+        "✂️ Какие страницы оставить? Например: <code>1-145</code> или <code>1-10,20-30</code>",
+        parse_mode="HTML",
+    )
+
+
+async def process_pending_pdf_input(message: Message, pending: dict) -> None:
+    if pending.get("stage") != "await_range" or not message.text:
+        return
+    admin_id = message.from_user.id
+    tmp_dir = tempfile.mkdtemp(prefix="vg_pdf_")
+    try:
+        src_path = os.path.join(tmp_dir, "input.pdf")
+        await bot.download(pending["file_id"], destination=src_path)
+        total_pages = len(PdfReader(src_path).pages)
+        ranges = parse_page_ranges(message.text, total_pages)
+        if not ranges:
+            await message.answer(
+                f"⚠️ Не понял диапазон (всего страниц в файле: {total_pages}). "
+                "Пример: <code>1-145</code>",
+                parse_mode="HTML",
+            )
+            return
+        out_path = os.path.join(tmp_dir, "trimmed.pdf")
+        kept = pdf_trim_pages(src_path, out_path, ranges)
+        base_name = os.path.splitext(pending["file_name"])[0]
+        await bot.send_document(
+            admin_id,
+            FSInputFile(out_path, filename=f"{base_name}_trimmed.pdf"),
+            caption=f"✂️ Готово: оставлено {kept} из {total_pages} стр.",
+        )
+        PENDING_PDF_INPUT.pop(admin_id, None)
+    except Exception:
+        logger.exception("Ошибка обрезки PDF")
+        await message.answer("⚠️ Не получилось обработать файл.")
+        PENDING_PDF_INPUT.pop(admin_id, None)
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
 # ==================== ОБРАБОТЧИК: "ПОЙМАЙ ВСЁ" НА ЛИЧКУ ====================
 # Регистрируется после всех приватных команд — иначе перехватит /start,
 # /settings и /admin ещё до того, как они сработают.
@@ -3277,6 +3450,11 @@ async def handle_private_catchall(message: Message):
     reminder_pending = PENDING_REMINDER_INPUT.get(message.from_user.id)
     if reminder_pending:
         await process_pending_reminder_input(message, reminder_pending)
+        return
+
+    pdf_pending = PENDING_PDF_INPUT.get(message.from_user.id)
+    if pdf_pending and is_bot_admin(message.from_user.id) and message.text:
+        await process_pending_pdf_input(message, pdf_pending)
         return
 
 
