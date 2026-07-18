@@ -187,6 +187,7 @@ async def helperchat_promo_middleware(handler, event: Update, data):
 
 # ==================== РЕФЕРАЛЬНАЯ СИСТЕМА ====================
 BOT_USERNAME = "VMEDA_examen_bot"
+REFERRAL_FULL_ACCESS_THRESHOLD = 2  # столько рефералов нужно, чтобы открыть доступ навсегда
 REFERRAL_WARNING_THRESHOLD = 3  # столько предупреждений даём, прежде чем закрыть доступ
 REFERRAL_WARNING_COOLDOWN_SECONDS = 4 * 60 * 60  # не чаще одного предупреждения раз в 4 часа
 
@@ -199,29 +200,43 @@ def get_referral_count(user_id: int) -> int:
 def has_free_access(user_id: int) -> bool:
     return (
         is_admin(user_id)
-        or get_referral_count(user_id) > 0
+        or get_referral_count(user_id) >= REFERRAL_FULL_ACCESS_THRESHOLD
         or user_id in stats["manual_access_granted"]
     )
 
 def get_referral_status_text(user_id: int) -> str:
     count = get_referral_count(user_id)
     link = get_referral_link(user_id)
-    if count > 0 or user_id in stats["manual_access_granted"]:
+    if count >= REFERRAL_FULL_ACCESS_THRESHOLD or user_id in stats["manual_access_granted"]:
         extra = f"Приглашено друзей: <b>{count}</b>\n" if count > 0 else ""
         return (
             f"👥 <b>Твои приглашения</b>\n{DIVIDER}\n\n"
             f"{extra}"
             "Доступ ко всем разделам бота открыт. Спасибо! 🎉\n\n"
+            "⚔️ А ещё сейчас можно побороться за призы в <b>битве рефералов</b> — "
+            "приглашай друзей дальше и попади в топ-3!\n\n"
             f"Твоя ссылка (можно приглашать ещё):\n{link}"
         )
     warn_count = stats["referral_warnings"].get(str(user_id), {}).get("count", 0)
-    remaining = max(REFERRAL_WARNING_THRESHOLD - warn_count, 0)
+    remaining_free = max(REFERRAL_WARNING_THRESHOLD - warn_count, 0)
+    remaining_refs = max(REFERRAL_FULL_ACCESS_THRESHOLD - count, 0)
+    if remaining_refs <= 1:
+        invite_line = (
+            "Отправь эту ссылку ещё одному другу — как только он нажмёт /start, "
+            "у тебя откроется полный доступ ко всем разделам бота:"
+        )
+    else:
+        friends_word = "двум друзьям" if remaining_refs == 2 else f"{remaining_refs} друзьям"
+        invite_line = (
+            f"Отправь эту ссылку ещё {friends_word} — как только они нажмут /start, "
+            "у тебя откроется полный доступ ко всем разделам бота:"
+        )
     return (
-        f"👥 <b>Пригласи друга</b>\n{DIVIDER}\n\n"
-        "Отправь эту ссылку другу — как только он нажмёт /start, "
-        "у тебя откроется полный доступ ко всем разделам бота:\n\n"
+        f"👥 <b>Пригласи друзей</b>\n{DIVIDER}\n\n"
+        f"{invite_line}\n\n"
         f"{link}\n\n"
-        f"Осталось бесплатных заходов без реферала: <b>{remaining}</b>"
+        f"Приглашено друзей: <b>{count}</b> из {REFERRAL_FULL_ACCESS_THRESHOLD}\n"
+        f"Осталось бесплатных заходов без рефералов: <b>{remaining_free}</b>"
     )
 
 RANK_MEDALS = ["🥇", "🥈", "🥉"]
@@ -531,14 +546,14 @@ async def referral_gate_middleware(handler, event: Update, data):
     if entry["count"] >= REFERRAL_WARNING_THRESHOLD:
         block_text = (
             "🚨❗️ <b>ДОСТУП ЗАКРЫТ!</b> ❗️🚨\n\n"
-            "Чтобы продолжить пользоваться ботом бесплатно — <b>пригласи ОДНОГО друга</b>! "
+            "Чтобы продолжить пользоваться ботом бесплатно — <b>пригласи друзей</b>! "
             "Это займёт меньше минуты! ⏱️\n\n"
             f"{get_referral_status_text(user.id)}\n\n"
-            "⚡️ Как только друг нажмёт /start по этой ссылке — бот <b>сразу</b> станет доступен!"
+            "⚡️ Как только твои друзья нажмут /start по этой ссылке — бот <b>сразу</b> станет доступен!"
         )
         try:
             if event.callback_query:
-                await event.callback_query.answer("🚨 Доступ закрыт — пригласи друга! ‼️", show_alert=True)
+                await event.callback_query.answer("🚨 Доступ закрыт — пригласи друзей! ‼️", show_alert=True)
                 await event.callback_query.message.answer(block_text, parse_mode="HTML")
             elif event.message:
                 await event.message.answer(block_text, parse_mode="HTML")
@@ -554,11 +569,11 @@ async def referral_gate_middleware(handler, event: Update, data):
         save_stats()
         remaining = REFERRAL_WARNING_THRESHOLD - entry["count"]
         warn_text = (
-            "⚠️❗️ <b>ВНИМАНИЕ! Пригласи друга!</b> ❗️⚠️\n\n"
+            "⚠️❗️ <b>ВНИМАНИЕ! Пригласи друзей!</b> ❗️⚠️\n\n"
             f"{get_referral_status_text(user.id)}"
             if remaining > 0 else
             "🚨‼️ <b>ПОСЛЕДНЕЕ ПРЕДУПРЕЖДЕНИЕ!</b> ‼️🚨\n\n"
-            "В следующий раз доступ будет <b>полностью закрыт</b>, пока не пригласишь друга!\n\n"
+            "В следующий раз доступ будет <b>полностью закрыт</b>, пока не пригласишь друзей!\n\n"
             f"{get_referral_status_text(user.id)}"
         )
         try:
@@ -899,6 +914,13 @@ def get_main_menu(user_id: int = None):
 def get_referral_back_keyboard():
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
+    return builder.as_markup()
+
+def get_referral_full_access_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="⚔️ Битва рефералов", callback_data="referral_battle")
+    builder.button(text="🔙 Назад в меню", callback_data="back_to_main")
+    builder.adjust(1)
     return builder.as_markup()
 
 def get_biology_menu():
@@ -2014,11 +2036,13 @@ async def cb_back_to_main(callback: CallbackQuery):
 @dp.callback_query(F.data == "referral_info")
 async def cb_referral_info(callback: CallbackQuery):
     await callback.answer()
+    user_id = callback.from_user.id
+    keyboard = get_referral_full_access_keyboard() if has_free_access(user_id) else get_referral_back_keyboard()
     await safe_edit_text(
         callback.message,
-        get_referral_status_text(callback.from_user.id),
+        get_referral_status_text(user_id),
         parse_mode="HTML",
-        reply_markup=get_referral_back_keyboard()
+        reply_markup=keyboard
     )
 
 @dp.callback_query(F.data == "referral_leaderboard")
