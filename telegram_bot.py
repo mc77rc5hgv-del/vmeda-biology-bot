@@ -2735,14 +2735,98 @@ def get_anatomy_osteology_keyboard():
 
 def get_anatomy_topic_keyboard(topic_key: str):
     builder = InlineKeyboardBuilder()
-    builder.button(text="📖 Материал", callback_data=f"anatomy_material:{topic_key}:0")
-    builder.button(text="🎴 Флэш-карточки", callback_data=f"anatomy_flash_start:{topic_key}")
-    builder.button(text="🔗 Сопоставление", callback_data=f"anatomy_match_start:{topic_key}")
-    builder.button(text="🧠 Мнемоники", callback_data=f"anatomy_mnemonics:{topic_key}:0")
+    builder.button(text="🦴 Кости черепа (по каждой кости)", callback_data=f"anatomy_bones:{topic_key}")
+    builder.button(text="📖 Весь материал подряд", callback_data=f"anatomy_material:{topic_key}:0")
+    builder.button(text="🎴 Флэш-карточки (все)", callback_data=f"anatomy_flash_start:{topic_key}")
+    builder.button(text="🔗 Сопоставление (все)", callback_data=f"anatomy_match_start:{topic_key}")
+    builder.button(text="🧠 Мнемоники (все)", callback_data=f"anatomy_mnemonics:{topic_key}:0")
     builder.button(text="🖼 Найди на картинке", callback_data=f"anatomy_picture:{topic_key}")
     builder.adjust(1)
     builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="anatomy_osteology"))
     return builder.as_markup()
+
+# ---- Кости черепа (подразделы по каждой кости) ----
+def get_anatomy_bones_keyboard(topic_key: str):
+    topic = get_anatomy_topic_data(topic_key)
+    builder = InlineKeyboardBuilder()
+    for bone in topic.get("bones_list", []):
+        builder.button(text=f"🦴 {bone['title']}", callback_data=f"anatomy_bone_hub:{topic_key}:{bone['id']}")
+    builder.adjust(1)
+    builder.row(InlineKeyboardButton(text="🔙 К разделу", callback_data=f"anatomy_topic:{topic_key}"))
+    return builder.as_markup()
+
+def get_bone_title(topic_key: str, bone_id: str) -> str:
+    topic = get_anatomy_topic_data(topic_key)
+    for bone in topic.get("bones_list", []):
+        if bone["id"] == bone_id:
+            return bone["title"]
+    return bone_id
+
+def get_bone_material_list(topic_key: str, bone_id: str) -> list:
+    topic = get_anatomy_topic_data(topic_key)
+    material_ids = topic.get("bone_material_ids", {}).get(bone_id, [bone_id])
+    by_id = {m["id"]: m for m in topic["material"]}
+    return [by_id[mid] for mid in material_ids if mid in by_id]
+
+def get_bone_flashcards(topic_key: str, bone_id: str) -> list:
+    topic = get_anatomy_topic_data(topic_key)
+    return [fc for fc in topic["flashcards"] if fc.get("bone") == bone_id]
+
+def get_bone_pairs(topic_key: str, bone_id: str) -> list:
+    topic = get_anatomy_topic_data(topic_key)
+    pairs = []
+    for s in topic["matching_sets"]:
+        pairs.extend(p for p in s["pairs"] if p.get("bone") == bone_id)
+    return pairs
+
+def get_bone_mnemonics(topic_key: str, bone_id: str) -> list:
+    topic = get_anatomy_topic_data(topic_key)
+    return [mn for mn in topic["mnemonics"] if mn.get("bone") == bone_id]
+
+def get_anatomy_bone_hub_keyboard(topic_key: str, bone_id: str):
+    builder = InlineKeyboardBuilder()
+    builder.button(text="📖 Материал", callback_data=f"anatomy_bone_material:{topic_key}:{bone_id}:0")
+    builder.button(text="🖼 Фото и схемы", callback_data=f"anatomy_bone_images:{topic_key}:{bone_id}")
+    builder.button(text="🎴 Флэш-карточки", callback_data=f"anatomy_bone_flash_start:{topic_key}:{bone_id}")
+    builder.button(text="🔗 Сопоставление", callback_data=f"anatomy_bone_match_start:{topic_key}:{bone_id}")
+    builder.button(text="🧠 Мнемоники", callback_data=f"anatomy_bone_mnemonics:{topic_key}:{bone_id}:0")
+    builder.adjust(1)
+    builder.row(InlineKeyboardButton(text="🔙 К списку костей", callback_data=f"anatomy_bones:{topic_key}"))
+    return builder.as_markup()
+
+def get_anatomy_bone_hub_text(topic_key: str, bone_id: str) -> str:
+    title = get_bone_title(topic_key, bone_id)
+    n_material = len(get_bone_material_list(topic_key, bone_id))
+    n_flash = len(get_bone_flashcards(topic_key, bone_id))
+    n_pairs = len(get_bone_pairs(topic_key, bone_id))
+    n_mnemo = len(get_bone_mnemonics(topic_key, bone_id))
+    return (
+        f"🦴 <b>{title}</b>\n{DIVIDER}\n\n"
+        f"📖 Материал: {n_material} стр.\n"
+        f"🖼 Фото и схемы: скоро\n"
+        f"🎴 Флэш-карточек: {n_flash}\n"
+        f"🔗 Пар для сопоставления: {n_pairs}\n"
+        f"🧠 Мнемоник: {n_mnemo}\n\n"
+        "Выбери формат подготовки:"
+    )
+
+def get_bone_material_keyboard(topic_key: str, bone_id: str, idx: int):
+    pages = get_bone_material_list(topic_key, bone_id)
+    builder = InlineKeyboardBuilder()
+    nav = []
+    if idx > 0:
+        nav.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"anatomy_bone_material:{topic_key}:{bone_id}:{idx-1}"))
+    if idx < len(pages) - 1:
+        nav.append(InlineKeyboardButton(text="Вперёд ➡️", callback_data=f"anatomy_bone_material:{topic_key}:{bone_id}:{idx+1}"))
+    if nav:
+        builder.row(*nav)
+    builder.row(InlineKeyboardButton(text="🔙 К кости", callback_data=f"anatomy_bone_hub:{topic_key}:{bone_id}"))
+    return builder.as_markup()
+
+def get_bone_material_text(topic_key: str, bone_id: str, idx: int) -> str:
+    pages = get_bone_material_list(topic_key, bone_id)
+    m = pages[idx]
+    return f"📖 <b>{m['title']}</b>\n{DIVIDER}\n\n{m['content']}\n\n{DIVIDER}\n{idx + 1}/{len(pages)}"
 
 # ---- Материал ----
 def get_anatomy_material_keyboard(topic_key: str, idx: int):
@@ -2776,12 +2860,16 @@ def get_anatomy_material_list_keyboard(topic_key: str):
     return builder.as_markup()
 
 # ---- Флэш-карточки ----
-def start_anatomy_flash_session(user_id: int, topic_key: str):
+def start_anatomy_flash_session(user_id: int, topic_key: str, bone_id: str = None):
     topic = get_anatomy_topic_data(topic_key)
-    pool = list(range(len(topic["flashcards"])))
+    if bone_id:
+        pool = [i for i, fc in enumerate(topic["flashcards"]) if fc.get("bone") == bone_id]
+    else:
+        pool = list(range(len(topic["flashcards"])))
     size = min(ANATOMY_FLASH_SESSION_SIZE, len(pool))
     ANATOMY_FLASH_SESSIONS[user_id] = {
         "topic_key": topic_key,
+        "bone_id": bone_id,
         "cards": random.sample(pool, size),
         "index": 0,
         "know": 0,
@@ -2803,10 +2891,14 @@ def get_anatomy_flash_answer_keyboard():
     builder.row(InlineKeyboardButton(text="🛑 Закончить", callback_data="anatomy_flash_stop"))
     return builder.as_markup()
 
-def get_anatomy_flash_summary_keyboard(topic_key: str):
+def get_anatomy_flash_summary_keyboard(topic_key: str, bone_id: str = None):
     builder = InlineKeyboardBuilder()
-    builder.button(text="🔁 Пройти ещё раз", callback_data=f"anatomy_flash_start:{topic_key}")
-    builder.button(text="🔙 К разделу", callback_data=f"anatomy_topic:{topic_key}")
+    if bone_id:
+        builder.button(text="🔁 Пройти ещё раз", callback_data=f"anatomy_bone_flash_start:{topic_key}:{bone_id}")
+        builder.button(text="🔙 К кости", callback_data=f"anatomy_bone_hub:{topic_key}:{bone_id}")
+    else:
+        builder.button(text="🔁 Пройти ещё раз", callback_data=f"anatomy_flash_start:{topic_key}")
+        builder.button(text="🔙 К разделу", callback_data=f"anatomy_topic:{topic_key}")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -2834,29 +2926,34 @@ async def render_anatomy_flash_summary(message, user_id: int, aborted: bool = Fa
     if not session:
         return
     topic_key = session["topic_key"]
+    bone_id = session.get("bone_id")
     answered = session["know"] + session["dont_know"]
     title = "🛑 <b>Прервано</b>" if aborted else "🏁 <b>Карточки пройдены!</b>"
     text = (
         f"{title}\n{DIVIDER}\n\n"
         f"Отвечено: <b>{answered}</b>\n✅ Знаю: <b>{session['know']}</b>\n❌ Не знаю: <b>{session['dont_know']}</b>"
     )
-    await safe_edit_text(message, text, parse_mode="HTML", reply_markup=get_anatomy_flash_summary_keyboard(topic_key))
+    await safe_edit_text(message, text, parse_mode="HTML", reply_markup=get_anatomy_flash_summary_keyboard(topic_key, bone_id))
 
 # ---- Сопоставление (матчинг как тест с вариантами) ----
-def get_anatomy_all_pairs(topic_key: str):
+def get_anatomy_all_pairs(topic_key: str, bone_id: str = None):
     topic = get_anatomy_topic_data(topic_key)
     pairs = []
     for s in topic["matching_sets"]:
         pairs.extend(s["pairs"])
+    if bone_id:
+        pairs = [p for p in pairs if p.get("bone") == bone_id]
     return pairs
 
-def start_anatomy_match_session(user_id: int, topic_key: str):
+def start_anatomy_match_session(user_id: int, topic_key: str, bone_id: str = None):
     all_pairs = get_anatomy_all_pairs(topic_key)
-    size = min(ANATOMY_MATCH_SESSION_SIZE, len(all_pairs))
+    queue_pairs = get_anatomy_all_pairs(topic_key, bone_id) if bone_id else all_pairs
+    size = min(ANATOMY_MATCH_SESSION_SIZE, len(queue_pairs))
     ANATOMY_MATCH_SESSIONS[user_id] = {
         "topic_key": topic_key,
+        "bone_id": bone_id,
         "all_pairs": all_pairs,
-        "queue": random.sample(all_pairs, size),
+        "queue": random.sample(queue_pairs, size),
         "index": 0,
         "correct": 0,
         "wrong": 0,
@@ -2874,8 +2971,9 @@ def get_anatomy_match_keyboard(options: list):
 
 async def render_anatomy_match_question(message, user_id: int):
     session = ANATOMY_MATCH_SESSIONS[user_id]
-    term, correct_def = session["queue"][session["index"]]
-    distractor_pool = [d for t, d in session["all_pairs"] if d != correct_def]
+    pair = session["queue"][session["index"]]
+    term, correct_def = pair["term"], pair["definition"]
+    distractor_pool = [p["definition"] for p in session["all_pairs"] if p["definition"] != correct_def]
     distractors = random.sample(distractor_pool, min(3, len(distractor_pool)))
     options = distractors + [correct_def]
     random.shuffle(options)
@@ -2896,6 +2994,7 @@ async def render_anatomy_match_summary(message, user_id: int, aborted: bool = Fa
     if not session:
         return
     topic_key = session["topic_key"]
+    bone_id = session.get("bone_id")
     answered = session["correct"] + session["wrong"]
     title = "🛑 <b>Прервано</b>" if aborted else "🏁 <b>Сопоставление завершено!</b>"
     text = (
@@ -2903,8 +3002,12 @@ async def render_anatomy_match_summary(message, user_id: int, aborted: bool = Fa
         f"Отвечено: <b>{answered}</b>\n✅ Верно: <b>{session['correct']}</b>\n❌ Неверно: <b>{session['wrong']}</b>"
     )
     builder = InlineKeyboardBuilder()
-    builder.button(text="🔁 Пройти ещё раз", callback_data=f"anatomy_match_start:{topic_key}")
-    builder.button(text="🔙 К разделу", callback_data=f"anatomy_topic:{topic_key}")
+    if bone_id:
+        builder.button(text="🔁 Пройти ещё раз", callback_data=f"anatomy_bone_match_start:{topic_key}:{bone_id}")
+        builder.button(text="🔙 К кости", callback_data=f"anatomy_bone_hub:{topic_key}:{bone_id}")
+    else:
+        builder.button(text="🔁 Пройти ещё раз", callback_data=f"anatomy_match_start:{topic_key}")
+        builder.button(text="🔙 К разделу", callback_data=f"anatomy_topic:{topic_key}")
     builder.adjust(1)
     await safe_edit_text(message, text, parse_mode="HTML", reply_markup=builder.as_markup())
 
@@ -2926,6 +3029,24 @@ def get_anatomy_mnemonics_keyboard(topic_key: str, idx: int):
 def get_anatomy_mnemonic_text(topic_key: str, idx: int) -> str:
     topic = get_anatomy_topic_data(topic_key)
     mnemonics = topic["mnemonics"]
+    mn = mnemonics[idx]
+    return f"🧠 <b>{mn['title']}</b>\n{DIVIDER}\n\n{mn['text']}\n\n{DIVIDER}\n{idx + 1}/{len(mnemonics)}"
+
+def get_bone_mnemonics_keyboard(topic_key: str, bone_id: str, idx: int):
+    mnemonics = get_bone_mnemonics(topic_key, bone_id)
+    builder = InlineKeyboardBuilder()
+    nav = []
+    if idx > 0:
+        nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"anatomy_bone_mnemonics:{topic_key}:{bone_id}:{idx-1}"))
+    if idx < len(mnemonics) - 1:
+        nav.append(InlineKeyboardButton(text="➡️", callback_data=f"anatomy_bone_mnemonics:{topic_key}:{bone_id}:{idx+1}"))
+    if nav:
+        builder.row(*nav)
+    builder.row(InlineKeyboardButton(text="🔙 К кости", callback_data=f"anatomy_bone_hub:{topic_key}:{bone_id}"))
+    return builder.as_markup()
+
+def get_bone_mnemonic_text(topic_key: str, bone_id: str, idx: int) -> str:
+    mnemonics = get_bone_mnemonics(topic_key, bone_id)
     mn = mnemonics[idx]
     return f"🧠 <b>{mn['title']}</b>\n{DIVIDER}\n\n{mn['text']}\n\n{DIVIDER}\n{idx + 1}/{len(mnemonics)}"
 
@@ -2976,6 +3097,126 @@ async def cb_anatomy_topic(callback: CallbackQuery):
         "Выбери формат подготовки:"
     )
     await safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=get_anatomy_topic_keyboard(topic_key))
+
+@dp.callback_query(F.data.startswith("anatomy_bones:"))
+async def cb_anatomy_bones(callback: CallbackQuery):
+    if not anatomy_access_ok(callback.from_user.id):
+        await callback.answer("Раздел пока в разработке", show_alert=True)
+        return
+    topic_key = callback.data.split(":")[1]
+    topic = get_anatomy_topic_data(topic_key)
+    if not topic:
+        await callback.answer("Тема не найдена", show_alert=True)
+        return
+    await callback.answer()
+    await safe_edit_text(
+        callback.message,
+        f"🦴 <b>{topic['title']} — по костям</b>\n{DIVIDER}\n\nВыбери кость:",
+        parse_mode="HTML",
+        reply_markup=get_anatomy_bones_keyboard(topic_key)
+    )
+
+@dp.callback_query(F.data.startswith("anatomy_bone_hub:"))
+async def cb_anatomy_bone_hub(callback: CallbackQuery):
+    if not anatomy_access_ok(callback.from_user.id):
+        await callback.answer("Раздел пока в разработке", show_alert=True)
+        return
+    _, topic_key, bone_id = callback.data.split(":")
+    topic = get_anatomy_topic_data(topic_key)
+    if not topic:
+        await callback.answer("Тема не найдена", show_alert=True)
+        return
+    await callback.answer()
+    await safe_edit_text(
+        callback.message,
+        get_anatomy_bone_hub_text(topic_key, bone_id),
+        parse_mode="HTML",
+        reply_markup=get_anatomy_bone_hub_keyboard(topic_key, bone_id)
+    )
+
+@dp.callback_query(F.data.startswith("anatomy_bone_material:"))
+async def cb_anatomy_bone_material(callback: CallbackQuery):
+    if not anatomy_access_ok(callback.from_user.id):
+        await callback.answer("Раздел пока в разработке", show_alert=True)
+        return
+    _, topic_key, bone_id, idx_s = callback.data.split(":")
+    idx = int(idx_s)
+    pages = get_bone_material_list(topic_key, bone_id)
+    if not pages or not (0 <= idx < len(pages)):
+        await callback.answer("Материал не найден", show_alert=True)
+        return
+    await callback.answer()
+    await safe_edit_text(
+        callback.message,
+        get_bone_material_text(topic_key, bone_id, idx),
+        parse_mode="HTML",
+        reply_markup=get_bone_material_keyboard(topic_key, bone_id, idx)
+    )
+
+@dp.callback_query(F.data.startswith("anatomy_bone_images:"))
+async def cb_anatomy_bone_images(callback: CallbackQuery):
+    if not anatomy_access_ok(callback.from_user.id):
+        await callback.answer("Раздел пока в разработке", show_alert=True)
+        return
+    await callback.answer()
+    _, topic_key, bone_id = callback.data.split(":")
+    title = get_bone_title(topic_key, bone_id)
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="🔙 К кости", callback_data=f"anatomy_bone_hub:{topic_key}:{bone_id}"))
+    await safe_edit_text(
+        callback.message,
+        f"🖼 <b>{title} — фото и схемы</b>\n{DIVIDER}\n\n"
+        "🚧 Скоро здесь появятся фото и схемы из атласов Неттера и Гайворонского.",
+        parse_mode="HTML",
+        reply_markup=builder.as_markup()
+    )
+
+@dp.callback_query(F.data.startswith("anatomy_bone_flash_start:"))
+async def cb_anatomy_bone_flash_start(callback: CallbackQuery):
+    if not anatomy_access_ok(callback.from_user.id):
+        await callback.answer("Раздел пока в разработке", show_alert=True)
+        return
+    _, topic_key, bone_id = callback.data.split(":")
+    topic = get_anatomy_topic_data(topic_key)
+    if not topic or not get_bone_flashcards(topic_key, bone_id):
+        await callback.answer("Карточки для этой кости ещё не добавлены", show_alert=True)
+        return
+    await callback.answer()
+    start_anatomy_flash_session(callback.from_user.id, topic_key, bone_id=bone_id)
+    await render_anatomy_flash_question(callback.message, callback.from_user.id)
+
+@dp.callback_query(F.data.startswith("anatomy_bone_match_start:"))
+async def cb_anatomy_bone_match_start(callback: CallbackQuery):
+    if not anatomy_access_ok(callback.from_user.id):
+        await callback.answer("Раздел пока в разработке", show_alert=True)
+        return
+    _, topic_key, bone_id = callback.data.split(":")
+    topic = get_anatomy_topic_data(topic_key)
+    if not topic or not get_bone_pairs(topic_key, bone_id):
+        await callback.answer("Пары для этой кости ещё не добавлены", show_alert=True)
+        return
+    await callback.answer()
+    start_anatomy_match_session(callback.from_user.id, topic_key, bone_id=bone_id)
+    await render_anatomy_match_question(callback.message, callback.from_user.id)
+
+@dp.callback_query(F.data.startswith("anatomy_bone_mnemonics:"))
+async def cb_anatomy_bone_mnemonics(callback: CallbackQuery):
+    if not anatomy_access_ok(callback.from_user.id):
+        await callback.answer("Раздел пока в разработке", show_alert=True)
+        return
+    _, topic_key, bone_id, idx_s = callback.data.split(":")
+    idx = int(idx_s)
+    mnemonics = get_bone_mnemonics(topic_key, bone_id)
+    if not mnemonics or not (0 <= idx < len(mnemonics)):
+        await callback.answer("Мнемоники для этой кости ещё не добавлены", show_alert=True)
+        return
+    await callback.answer()
+    await safe_edit_text(
+        callback.message,
+        get_bone_mnemonic_text(topic_key, bone_id, idx),
+        parse_mode="HTML",
+        reply_markup=get_bone_mnemonics_keyboard(topic_key, bone_id, idx)
+    )
 
 @dp.callback_query(F.data.startswith("anatomy_material_list:"))
 async def cb_anatomy_material_list(callback: CallbackQuery):
