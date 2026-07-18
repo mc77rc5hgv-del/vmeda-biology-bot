@@ -510,6 +510,34 @@ def track_user_identity(user) -> None:
     if changed:
         save_stats()
 
+# Без нужного числа рефералов закрыты только 3 раздела — Биология, Физика, Химия.
+# Всё остальное (админка, рефералы, битва, поддержка автора, анатомия) доступно всегда.
+GATED_CALLBACKS = {
+    # Биология
+    "menu_biology", "menu_tickets", "menu_questions",
+    "quiz_start", "quiz_show_answer", "quiz_know", "quiz_dont_know", "quiz_stop",
+    "random_ticket", "question_random", "question_by_number", "question_search",
+    # Физика
+    "menu_physics", "physics_tickets", "physics_theory_tickets", "physics_test_tickets",
+    "physics_test", "physics_tasks",
+    # Химия
+    "menu_chemistry", "chemistry_theory", "chemistry_theory_list",
+    "chemistry_tasks", "chemistry_labs",
+}
+GATED_PREFIXES = (
+    # Биология
+    "ticket:", "ticket_q:", "qpage:", "q:",
+    # Физика
+    "phys_test_ticket:", "physics_page:", "physics_q:",
+    "phystask_topic:", "phystask_formulas:", "phystask_list:", "phystask_show:",
+    # Химия
+    "chem_theory:", "chemtask_topic:", "chemtask_formulas:", "chemtask_list:", "chemtask_show:",
+    "lab:", "lab_exp:", "lab_calc:",
+)
+
+def is_gated_callback(data: str) -> bool:
+    return data in GATED_CALLBACKS or data.startswith(GATED_PREFIXES)
+
 @dp.update.outer_middleware()
 async def referral_gate_middleware(handler, event: Update, data):
     user = None
@@ -531,10 +559,10 @@ async def referral_gate_middleware(handler, event: Update, data):
         return await handler(event, data)
     if user.id in DONATION_PENDING:
         return await handler(event, data)
-    if event.callback_query and (
-        (event.callback_query.data or "") in SUPPORT_GATE_EXEMPT_CALLBACKS
-        or (event.callback_query.data or "").startswith(SUPPORT_GATE_EXEMPT_PREFIXES)
-    ):
+
+    # гейт касается только разделов Биология/Физика/Химия — остальные кнопки
+    # (админка, рефералы, битва, поддержка автора, анатомия) доступны всегда
+    if event.callback_query and not is_gated_callback(event.callback_query.data or ""):
         return await handler(event, data)
 
     if has_free_access(user.id):
@@ -593,15 +621,6 @@ RUBLES_MIN, RUBLES_MAX = 10, 1_000_000
 STARS_PRESETS = [25, 50, 100, 250, 500]
 RUBLES_PRESETS = [100, 300, 500, 1000, 2000]
 HELPER_ACCOUNT_URL = "https://t.me/vmeda_helper"
-SUPPORT_GATE_EXEMPT_CALLBACKS = {
-    "support_menu", "donate_stars_menu", "donate_stars_custom",
-    "donate_rubles_menu", "donate_rubles_custom", "donors_leaderboard",
-    "toggle_donor_visibility",
-}
-SUPPORT_GATE_EXEMPT_PREFIXES = (
-    "donate_stars_amount:", "donate_rubles_amount:",
-    "donate_stars_confirm:", "donate_rubles_confirm:",
-)
 
 def get_support_text() -> str:
     return (
