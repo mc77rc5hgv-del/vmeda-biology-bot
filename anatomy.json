@@ -645,6 +645,10 @@
         "picture_quiz": [],
         "bones_list": [
           {
+            "id": "general",
+            "title": "Общий обзор черепа"
+          },
+          {
             "id": "frontal",
             "title": "Лобная кость"
           },
@@ -703,6 +707,10 @@
           {
             "id": "hyoid_bone",
             "title": "Подъязычная кость"
+          },
+          {
+            "id": "whole_skull",
+            "title": "Череп в целом (ямки, глазница, полость носа)"
           }
         ],
         "bone_material_ids": {
@@ -751,7 +759,9 @@
           ],
           "hyoid_bone": [
             "hyoid_bone"
-          ]
+          ],
+          "general": [],
+          "whole_skull": []
         },
         "bone_images": {
           "frontal": [
@@ -759,6 +769,11 @@
               "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/9/9f/Frontal_bone_lateral3.png/500px-Frontal_bone_lateral3.png",
               "caption": "Лобная кость — вид сбоку (выделена на черепе)",
               "credit": "Anatomography / BodyParts3D (DBCLS), Wikimedia Commons — CC BY-SA 2.1 Japan"
+            },
+            {
+              "path": "skull/frontal/pdf02-14.jpg",
+              "caption": "Лобная кость, os frontale",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
             }
           ],
           "parietal": [
@@ -771,6 +786,16 @@
               "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/2/21/Gray132.png/500px-Gray132.png",
               "caption": "Теменная кость — классическая схема (Gray's Anatomy)",
               "credit": "Gray's Anatomy, 1918 (Henry Vandyke Carter) — общественное достояние"
+            },
+            {
+              "path": "skull/parietal/pdf02-12.jpg",
+              "caption": "Теменная кость, os parietale",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/parietal/pdf02-13.jpg",
+              "caption": "Теменная кость — борозда менингеальной артерии",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
             }
           ],
           "occipital": [
@@ -783,6 +808,21 @@
               "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/8/88/Gray129.png/500px-Gray129.png",
               "caption": "Затылочная кость — классическая схема (Gray's Anatomy)",
               "credit": "Gray's Anatomy, 1918 (Henry Vandyke Carter) — общественное достояние"
+            },
+            {
+              "path": "skull/occipital/pdf02-09.jpg",
+              "caption": "Затылочная кость, os occipitale",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/occipital/pdf02-10.jpg",
+              "caption": "Затылочная кость — внутренний рельеф",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/occipital/pdf02-11.jpg",
+              "caption": "Затылочная кость — foramen magnum, каналы",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
             }
           ],
           "sphenoid": [
@@ -795,6 +835,31 @@
               "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/d/d3/Gray148.png/330px-Gray148.png",
               "caption": "Клиновидная кость — классическая схема (Gray's Anatomy)",
               "credit": "Gray's Anatomy, 1918 (Henry Vandyke Carter) — общественное достояние"
+            },
+            {
+              "path": "skull/sphenoid/pdf02-17.jpg",
+              "caption": "Клиновидная кость, os sphenoidale",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/sphenoid/pdf02-18.jpg",
+              "caption": "Клиновидная кость — нёбный/крыловидный вид",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/sphenoid/pdf02-19.jpg",
+              "caption": "Клиновидная кость — глазничный вид",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/sphenoid/pdf02-20.jpg",
+              "caption": "Клиновидная кость — содержимое турецкого седла",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/sphenoid/pdf02-21.jpg",
+              "caption": "Клиновидная кость — внутренний вид",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
             }
           ],
           "ethmoid": [
@@ -807,6 +872,16 @@
               "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/f/f5/Gray150.png/250px-Gray150.png",
               "caption": "Решётчатая кость — классическая схема 2 (Gray's Anatomy)",
               "credit": "Gray's Anatomy, 1918 (Henry Vandyke Carter) — общественное достояние"
+            },
+            {
+              "path": "skull/ethmoid/pdf02-15.jpg",
+              "caption": "Решётчатая кость, os ethmoidale",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/ethmoid/pdf02-16.jpg",
+              "caption": "Решётчатая кость — носовые раковины",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
             }
           ],
           "temporal": [
@@ -819,6 +894,76 @@
               "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3a/Gray142.png/500px-Gray142.png",
               "caption": "Височная кость — классическая схема (Gray's Anatomy)",
               "credit": "Gray's Anatomy, 1918 (Henry Vandyke Carter) — общественное достояние"
+            },
+            {
+              "path": "skull/temporal/pdf03-02.jpg",
+              "caption": "Височная кость, os temporale — части",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/temporal/pdf03-03.jpg",
+              "caption": "Височная кость — 3D вид",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/temporal/pdf03-04.jpg",
+              "caption": "Височная кость — базальный и внутренний вид",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/temporal/pdf03-05.jpg",
+              "caption": "Распил височной кости",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/temporal/pdf03-06.jpg",
+              "caption": "Височная кость — распил",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/temporal/pdf03-07.jpg",
+              "caption": "Каналы височной кости",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/temporal/pdf03-08.jpg",
+              "caption": "Сонный канал, canalis caroticus",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/temporal/pdf03-09.jpg",
+              "caption": "Мышечно-трубный канал, canalis musculotubarius",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/temporal/pdf03-10.jpg",
+              "caption": "Канал лицевого нерва",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/temporal/pdf03-11.jpg",
+              "caption": "Канал лицевого нерва — вид сверху",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/temporal/pdf03-12.jpg",
+              "caption": "Барабанный каналец, canaliculus tympanicus",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/temporal/pdf03-13.jpg",
+              "caption": "Сосцевидный каналец, canaliculus mastoideus",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/temporal/pdf03-14.jpg",
+              "caption": "Каналы височной кости — сводная схема",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/temporal/pdf03-15.jpg",
+              "caption": "Каналы, связанные с внутренним ухом",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
             }
           ],
           "mandible": [
@@ -831,6 +976,26 @@
               "url": "https://upload.wikimedia.org/wikipedia/commons/a/a3/Gray177.png",
               "caption": "Нижняя челюсть — вид изнутри (Gray's Anatomy)",
               "credit": "Gray's Anatomy, 1918 (Henry Vandyke Carter) — общественное достояние"
+            },
+            {
+              "path": "skull/mandible/pdf03-19.jpg",
+              "caption": "Нижняя челюсть, mandibula",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/mandible/pdf03-20.jpg",
+              "caption": "Нижняя челюсть — вид снизу/сзади",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/mandible/pdf03-21.jpg",
+              "caption": "Нижняя челюсть — канал нижней челюсти",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/mandible/pdf03-22.jpg",
+              "caption": "Возрастные изменения нижней челюсти",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
             }
           ],
           "maxilla": [
@@ -843,6 +1008,16 @@
               "url": "https://upload.wikimedia.org/wikipedia/commons/d/db/Gray161.png",
               "caption": "Верхняя челюсть — классическая схема (Gray's Anatomy)",
               "credit": "Gray's Anatomy, 1918 (Henry Vandyke Carter) — общественное достояние"
+            },
+            {
+              "path": "skull/maxilla/pdf03-23.jpg",
+              "caption": "Верхняя челюсть, maxilla",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/maxilla/pdf03-24.jpg",
+              "caption": "Верхняя челюсть — внутренний вид",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
             }
           ],
           "palatine": [
@@ -855,6 +1030,11 @@
               "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/b/b5/Gray168.png/500px-Gray168.png",
               "caption": "Нёбная кость — классическая схема 2 (Gray's Anatomy)",
               "credit": "Gray's Anatomy, 1918 (Henry Vandyke Carter) — общественное достояние"
+            },
+            {
+              "path": "skull/palatine/pdf03-25.jpg",
+              "caption": "Нёбная кость, os palatinum",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
             }
           ],
           "lacrimal": [
@@ -862,6 +1042,11 @@
               "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c6/Lacrimal_bone_-_lateral_view6.png/500px-Lacrimal_bone_-_lateral_view6.png",
               "caption": "Слёзная кость — вид сбоку (выделена на черепе)",
               "credit": "Anatomography / BodyParts3D (DBCLS), Wikimedia Commons — CC BY-SA 2.1 Japan"
+            },
+            {
+              "path": "skull/lacrimal/pdf03-27.jpg",
+              "caption": "Компактные кости лицевого черепа — слёзная и носовая кости",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
             }
           ],
           "nasal_bone": [
@@ -874,6 +1059,11 @@
               "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/e/e9/Gray153.png/500px-Gray153.png",
               "caption": "Носовая кость — классическая схема (Gray's Anatomy)",
               "credit": "Gray's Anatomy, 1918 (Henry Vandyke Carter) — общественное достояние"
+            },
+            {
+              "path": "skull/nasal_bone/pdf03-27.jpg",
+              "caption": "Компактные кости лицевого черепа — слёзная и носовая кости",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
             }
           ],
           "inferior_concha": [
@@ -886,6 +1076,11 @@
               "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/4/42/Gray171.png/500px-Gray171.png",
               "caption": "Нижняя носовая раковина — классическая схема 2 (Gray's Anatomy)",
               "credit": "Gray's Anatomy, 1918 (Henry Vandyke Carter) — общественное достояние"
+            },
+            {
+              "path": "skull/inferior_concha/pdf03-26.jpg",
+              "caption": "Компактные кости лицевого черепа — нижняя носовая раковина и сошник",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
             }
           ],
           "zygomatic_bone": [
@@ -898,6 +1093,11 @@
               "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/d/d9/Gray165.png/500px-Gray165.png",
               "caption": "Скуловая кость — классическая схема (Gray's Anatomy)",
               "credit": "Gray's Anatomy, 1918 (Henry Vandyke Carter) — общественное достояние"
+            },
+            {
+              "path": "skull/zygomatic_bone/pdf03-28.jpg",
+              "caption": "Компактные кости лицевого черепа — скуловая кость",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
             }
           ],
           "vomer_bone": [
@@ -910,6 +1110,11 @@
               "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/8/83/Gray173.png/500px-Gray173.png",
               "caption": "Сошник — классическая схема (Gray's Anatomy)",
               "credit": "Gray's Anatomy, 1918 (Henry Vandyke Carter) — общественное достояние"
+            },
+            {
+              "path": "skull/vomer_bone/pdf03-26.jpg",
+              "caption": "Компактные кости лицевого черепа — нижняя носовая раковина и сошник",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
             }
           ],
           "hyoid_bone": [
@@ -922,11 +1127,556 @@
               "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/1/1f/Gray186.png/500px-Gray186.png",
               "caption": "Подъязычная кость — классическая схема (Gray's Anatomy)",
               "credit": "Gray's Anatomy, 1918 (Henry Vandyke Carter) — общественное достояние"
+            },
+            {
+              "path": "skull/hyoid_bone/pdf03-29.jpg",
+              "caption": "Подъязычная кость, os hyoideum",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            }
+          ],
+          "general": [
+            {
+              "path": "skull/general/pdf02-01.jpg",
+              "caption": "Череп — общий обзор",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/general/pdf02-02.jpg",
+              "caption": "Классификация костей по расположению",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/general/pdf02-03.jpg",
+              "caption": "Череп, cranium",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/general/pdf03-01.jpg",
+              "caption": "Височная кость и кости лицевого черепа — обзор",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/general/pdf03-16.jpg",
+              "caption": "Классификация костей по расположению",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/general/pdf03-17.jpg",
+              "caption": "Классификация костей черепа по строению",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/general/pdf03-18.jpg",
+              "caption": "Альвеолярные образования челюстей",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/general/pdf04-01.jpg",
+              "caption": "Череп в целом — обзор",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/general/pdf04-02.jpg",
+              "caption": "Кости черепа по развитию",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/general/pdf04-03.jpg",
+              "caption": "Cranium — лицевой и мозговой отделы",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            }
+          ],
+          "whole_skull": [
+            {
+              "path": "skull/whole_skull/pdf02-04.jpg",
+              "caption": "Мозговой череп, neurocranium",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/whole_skull/pdf02-05.jpg",
+              "caption": "Классификация костей черепа по строению",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/whole_skull/pdf02-06.jpg",
+              "caption": "Крыша черепа, calvaria",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/whole_skull/pdf02-07.jpg",
+              "caption": "Диплоические и эмиссарные вены",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/whole_skull/pdf02-08.jpg",
+              "caption": "Ямочки грануляций, foveolae granulares",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/whole_skull/pdf04-04.jpg",
+              "caption": "Fossa temporalis",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/whole_skull/pdf04-05.jpg",
+              "caption": "Fossa infratemporalis",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/whole_skull/pdf04-06.jpg",
+              "caption": "Fossa pterygopalatina",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/whole_skull/pdf04-07.jpg",
+              "caption": "Basis cranii",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/whole_skull/pdf04-08.jpg",
+              "caption": "Fossa cranii anterior",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/whole_skull/pdf04-09.jpg",
+              "caption": "Fossa cranii media",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/whole_skull/pdf04-10.jpg",
+              "caption": "Fossa cranii posterior",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/whole_skull/pdf04-11.jpg",
+              "caption": "Palatum osseum",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/whole_skull/pdf04-12.jpg",
+              "caption": "Cavitas nasi osseum",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/whole_skull/pdf04-13.jpg",
+              "caption": "Cavitas nasi osseum — латеральная стенка",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/whole_skull/pdf04-14.jpg",
+              "caption": "Cavitas nasi osseum — латеральная стенка",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/whole_skull/pdf04-15.jpg",
+              "caption": "Cavitas nasi osseum — сосуды и нервы",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/whole_skull/pdf04-16.jpg",
+              "caption": "Sinus paranasales",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/whole_skull/pdf04-17.jpg",
+              "caption": "Orbita",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "skull/whole_skull/pdf04-18.jpg",
+              "caption": "Фронтальный распил черепа",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
             }
           ]
         },
         "menu_title": "💀 Череп",
         "icon": "💀"
+      },
+      "trunk_bones": {
+        "title": "Кости туловища",
+        "icon": "🦴",
+        "menu_title": "🦴 Кости туловища",
+        "material": [],
+        "flashcards": [],
+        "matching_sets": [],
+        "mnemonics": [],
+        "picture_quiz": [],
+        "bones_list": [
+          {
+            "id": "general",
+            "title": "Общие сведения"
+          },
+          {
+            "id": "columna_vertebralis",
+            "title": "Позвоночный столб"
+          },
+          {
+            "id": "vertebra_general",
+            "title": "Позвонок — общее строение"
+          },
+          {
+            "id": "cervical_vertebra",
+            "title": "Шейные позвонки"
+          },
+          {
+            "id": "atlas_axis",
+            "title": "Атлант и осевой позвонок"
+          },
+          {
+            "id": "thoracic_vertebra",
+            "title": "Грудные позвонки"
+          },
+          {
+            "id": "lumbar_vertebra",
+            "title": "Поясничные позвонки"
+          },
+          {
+            "id": "sacrum_coccyx",
+            "title": "Крестец и копчик"
+          },
+          {
+            "id": "ribs",
+            "title": "Рёбра и грудная клетка"
+          },
+          {
+            "id": "sternum",
+            "title": "Грудина"
+          }
+        ],
+        "bone_material_ids": {
+          "general": [],
+          "columna_vertebralis": [],
+          "vertebra_general": [],
+          "cervical_vertebra": [],
+          "atlas_axis": [],
+          "thoracic_vertebra": [],
+          "lumbar_vertebra": [],
+          "sacrum_coccyx": [],
+          "ribs": [],
+          "sternum": []
+        },
+        "bone_images": {
+          "general": [
+            {
+              "path": "trunk_bones/general/pdf01-01.jpg",
+              "caption": "Кости туловища — общий обзор",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "trunk_bones/general/pdf01-02.jpg",
+              "caption": "Плоскости тела",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "trunk_bones/general/pdf01-03.jpg",
+              "caption": "Плоскости тела",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "trunk_bones/general/pdf01-04.jpg",
+              "caption": "Кость, os — общее определение",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "trunk_bones/general/pdf01-05.jpg",
+              "caption": "Строение костной ткани",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "trunk_bones/general/pdf01-06.jpg",
+              "caption": "Классификация костей туловища и конечностей",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "trunk_bones/general/pdf01-07.jpg",
+              "caption": "Классификация костей по расположению",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            }
+          ],
+          "columna_vertebralis": [
+            {
+              "path": "trunk_bones/columna_vertebralis/pdf01-08.jpg",
+              "caption": "Позвоночный столб, columna vertebralis",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "trunk_bones/columna_vertebralis/pdf01-21.jpg",
+              "caption": "Позвоночный столб — изгибы",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            }
+          ],
+          "vertebra_general": [
+            {
+              "path": "trunk_bones/vertebra_general/pdf01-09.jpg",
+              "caption": "Свободные позвонки — сравнение",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "trunk_bones/vertebra_general/pdf01-10.jpg",
+              "caption": "Позвонок, vertebra — общее строение",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "trunk_bones/vertebra_general/pdf01-11.jpg",
+              "caption": "Положение суставных отростков позвонков",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "trunk_bones/vertebra_general/pdf01-19.jpg",
+              "caption": "Рёберные элементы и добавочные рёбра",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            }
+          ],
+          "cervical_vertebra": [
+            {
+              "path": "trunk_bones/cervical_vertebra/pdf01-12.jpg",
+              "caption": "Шейные позвонки, vertebrae cervicales",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "trunk_bones/cervical_vertebra/pdf01-13.jpg",
+              "caption": "Шейные позвонки, vertebrae cervicales",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            }
+          ],
+          "atlas_axis": [
+            {
+              "path": "trunk_bones/atlas_axis/pdf01-14.jpg",
+              "caption": "Атипичные позвонки — атлант и осевой",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "trunk_bones/atlas_axis/pdf01-15.jpg",
+              "caption": "Атлант, atlas",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "trunk_bones/atlas_axis/pdf01-16.jpg",
+              "caption": "Осевой позвонок, axis",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            }
+          ],
+          "thoracic_vertebra": [
+            {
+              "path": "trunk_bones/thoracic_vertebra/pdf01-17.jpg",
+              "caption": "Грудные позвонки, vertebrae thoracicae",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            }
+          ],
+          "lumbar_vertebra": [
+            {
+              "path": "trunk_bones/lumbar_vertebra/pdf01-18.jpg",
+              "caption": "Поясничные позвонки, vertebrae lumbales",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            }
+          ],
+          "sacrum_coccyx": [
+            {
+              "path": "trunk_bones/sacrum_coccyx/pdf01-20.jpg",
+              "caption": "Сросшиеся позвонки — крестец и копчик",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            }
+          ],
+          "ribs": [
+            {
+              "path": "trunk_bones/ribs/pdf01-22.jpg",
+              "caption": "Грудная клетка, thorax",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "trunk_bones/ribs/pdf01-23.jpg",
+              "caption": "Рёбра, costae — классификация",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "trunk_bones/ribs/pdf01-24.jpg",
+              "caption": "Рёбра, costae — части",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "trunk_bones/ribs/pdf01-25.jpg",
+              "caption": "Соотношение строения рёбер и позвонков",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "trunk_bones/ribs/pdf01-26.jpg",
+              "caption": "I ребро, costa prima",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            }
+          ],
+          "sternum": [
+            {
+              "path": "trunk_bones/sternum/pdf01-27.jpg",
+              "caption": "Грудина, sternum",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            }
+          ]
+        }
+      },
+      "upper_limb_bones": {
+        "title": "Кости верхней конечности",
+        "icon": "💪",
+        "menu_title": "💪 Кости верхней конечности",
+        "material": [],
+        "flashcards": [],
+        "matching_sets": [],
+        "mnemonics": [],
+        "picture_quiz": [],
+        "bones_list": [
+          {
+            "id": "general",
+            "title": "Общие сведения"
+          },
+          {
+            "id": "scapula",
+            "title": "Лопатка"
+          },
+          {
+            "id": "clavicle",
+            "title": "Ключица"
+          },
+          {
+            "id": "humerus",
+            "title": "Плечевая кость"
+          },
+          {
+            "id": "ulna",
+            "title": "Локтевая кость"
+          },
+          {
+            "id": "radius",
+            "title": "Лучевая кость"
+          },
+          {
+            "id": "hand_bones",
+            "title": "Кости кисти"
+          }
+        ],
+        "bone_material_ids": {
+          "general": [],
+          "scapula": [],
+          "clavicle": [],
+          "humerus": [],
+          "ulna": [],
+          "radius": [],
+          "hand_bones": []
+        },
+        "bone_images": {
+          "general": [
+            {
+              "path": "upper_limb_bones/general/pdf05-01.jpg",
+              "caption": "Кости верхней конечности — обзор",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "upper_limb_bones/general/pdf05-02.jpg",
+              "caption": "Классификация костей по расположению",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "upper_limb_bones/general/pdf05-03.jpg",
+              "caption": "Плоскости и термины положения",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "upper_limb_bones/general/pdf05-04.jpg",
+              "caption": "Верхняя конечность — классификация отделов",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            }
+          ],
+          "scapula": [
+            {
+              "path": "upper_limb_bones/scapula/pdf05-05.jpg",
+              "caption": "Лопатка, scapula",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            }
+          ],
+          "clavicle": [
+            {
+              "path": "upper_limb_bones/clavicle/pdf05-06.jpg",
+              "caption": "Ключица, clavicula",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            }
+          ],
+          "humerus": [
+            {
+              "path": "upper_limb_bones/humerus/pdf05-07.jpg",
+              "caption": "Плечевая кость, humerus",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "upper_limb_bones/humerus/pdf05-11.jpg",
+              "caption": "Плечевая кость и кости предплечья — локтевой сустав",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            }
+          ],
+          "ulna": [
+            {
+              "path": "upper_limb_bones/ulna/pdf05-08.jpg",
+              "caption": "Локтевая кость, ulna",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "upper_limb_bones/ulna/pdf05-10.jpg",
+              "caption": "Кости предплечья, ossa antebrachii",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "upper_limb_bones/ulna/pdf05-11.jpg",
+              "caption": "Плечевая кость и кости предплечья — локтевой сустав",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            }
+          ],
+          "radius": [
+            {
+              "path": "upper_limb_bones/radius/pdf05-09.jpg",
+              "caption": "Лучевая кость, radius",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "upper_limb_bones/radius/pdf05-10.jpg",
+              "caption": "Кости предплечья, ossa antebrachii",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "upper_limb_bones/radius/pdf05-11.jpg",
+              "caption": "Плечевая кость и кости предплечья — локтевой сустав",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            }
+          ],
+          "hand_bones": [
+            {
+              "path": "upper_limb_bones/hand_bones/pdf05-12.jpg",
+              "caption": "Кости кисти, ossa manus",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "upper_limb_bones/hand_bones/pdf05-13.jpg",
+              "caption": "Ossa carpi — обзор",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "upper_limb_bones/hand_bones/pdf05-14.jpg",
+              "caption": "Ossa carpi — проксимальный ряд",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "upper_limb_bones/hand_bones/pdf05-15.jpg",
+              "caption": "Ossa carpi — дистальный ряд",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "upper_limb_bones/hand_bones/pdf05-16.jpg",
+              "caption": "Кости пясти, ossa metacarpi",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "upper_limb_bones/hand_bones/pdf05-17.jpg",
+              "caption": "Фаланги пальцев кисти",
+              "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            }
+          ]
+        }
       }
     },
     "menu_title": "🦴 Остеология (кости)"

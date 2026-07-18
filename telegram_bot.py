@@ -37,6 +37,7 @@ STATS_FILE = os.path.join(STATS_DIR, "stats.json")
 
 DIVIDER = "━━━━━━━━━━━━━━"
 IMAGES_DIR = "images"
+ANATOMY_IMAGES_DIR = os.path.join(IMAGES_DIR, "anatomy")
 
 # ==================== ЗАГРУЗКА ДАННЫХ ====================
 with open("tickets.json", "r", encoding="utf-8") as f:
@@ -2911,8 +2912,9 @@ async def render_bone_image(callback: CallbackQuery, topic_key: str, bone_id: st
         f"Источник: {img['credit']}\n\n{idx + 1}/{len(images)}"
     )
     keyboard = get_bone_image_keyboard(topic_key, bone_id, idx, len(images))
+    photo = img["url"] if "url" in img else FSInputFile(os.path.join(ANATOMY_IMAGES_DIR, img["path"]))
     await callback.message.delete()
-    await callback.message.answer_photo(img["url"], caption=caption, reply_markup=keyboard)
+    await callback.message.answer_photo(photo, caption=caption, reply_markup=keyboard)
 
 def get_bone_material_keyboard(topic_key: str, bone_id: str, idx: int):
     pages = get_bone_material_list(topic_key, bone_id)
