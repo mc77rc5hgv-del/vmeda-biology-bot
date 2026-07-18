@@ -2783,10 +2783,14 @@ def get_bone_mnemonics(topic_key: str, bone_id: str) -> list:
     topic = get_anatomy_topic_data(topic_key)
     return [mn for mn in topic["mnemonics"] if mn.get("bone") == bone_id]
 
+def get_bone_images(topic_key: str, bone_id: str) -> list:
+    topic = get_anatomy_topic_data(topic_key)
+    return topic.get("bone_images", {}).get(bone_id, [])
+
 def get_anatomy_bone_hub_keyboard(topic_key: str, bone_id: str):
     builder = InlineKeyboardBuilder()
     builder.button(text="📖 Материал", callback_data=f"anatomy_bone_material:{topic_key}:{bone_id}:0")
-    builder.button(text="🖼 Фото и схемы", callback_data=f"anatomy_bone_images:{topic_key}:{bone_id}")
+    builder.button(text="🖼 Фото и схемы", callback_data=f"anatomy_bone_img:{topic_key}:{bone_id}:0")
     builder.button(text="🎴 Флэш-карточки", callback_data=f"anatomy_bone_flash_start:{topic_key}:{bone_id}")
     builder.button(text="🔗 Сопоставление", callback_data=f"anatomy_bone_match_start:{topic_key}:{bone_id}")
     builder.button(text="🧠 Мнемоники", callback_data=f"anatomy_bone_mnemonics:{topic_key}:{bone_id}:0")
@@ -2797,18 +2801,43 @@ def get_anatomy_bone_hub_keyboard(topic_key: str, bone_id: str):
 def get_anatomy_bone_hub_text(topic_key: str, bone_id: str) -> str:
     title = get_bone_title(topic_key, bone_id)
     n_material = len(get_bone_material_list(topic_key, bone_id))
+    n_images = len(get_bone_images(topic_key, bone_id))
     n_flash = len(get_bone_flashcards(topic_key, bone_id))
     n_pairs = len(get_bone_pairs(topic_key, bone_id))
     n_mnemo = len(get_bone_mnemonics(topic_key, bone_id))
     return (
         f"🦴 <b>{title}</b>\n{DIVIDER}\n\n"
         f"📖 Материал: {n_material} стр.\n"
-        f"🖼 Фото и схемы: скоро\n"
+        f"🖼 Фото и схем: {n_images}\n"
         f"🎴 Флэш-карточек: {n_flash}\n"
         f"🔗 Пар для сопоставления: {n_pairs}\n"
         f"🧠 Мнемоник: {n_mnemo}\n\n"
         "Выбери формат подготовки:"
     )
+
+def get_bone_image_keyboard(topic_key: str, bone_id: str, idx: int, total: int):
+    builder = InlineKeyboardBuilder()
+    nav = []
+    if idx > 0:
+        nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"anatomy_bone_img:{topic_key}:{bone_id}:{idx-1}"))
+    if idx < total - 1:
+        nav.append(InlineKeyboardButton(text="➡️", callback_data=f"anatomy_bone_img:{topic_key}:{bone_id}:{idx+1}"))
+    if nav:
+        builder.row(*nav)
+    builder.row(InlineKeyboardButton(text="🔙 К кости", callback_data=f"anatomy_bone_hub:{topic_key}:{bone_id}"))
+    return builder.as_markup()
+
+async def render_bone_image(callback: CallbackQuery, topic_key: str, bone_id: str, idx: int):
+    images = get_bone_images(topic_key, bone_id)
+    title = get_bone_title(topic_key, bone_id)
+    img = images[idx]
+    caption = (
+        f"🖼 {title}\n\n{img['caption']}\n\n"
+        f"Источник: {img['credit']}\n\n{idx + 1}/{len(images)}"
+    )
+    keyboard = get_bone_image_keyboard(topic_key, bone_id, idx, len(images))
+    await callback.message.delete()
+    await callback.message.answer_photo(img["url"], caption=caption, reply_markup=keyboard)
 
 def get_bone_material_keyboard(topic_key: str, bone_id: str, idx: int):
     pages = get_bone_material_list(topic_key, bone_id)
@@ -3153,23 +3182,19 @@ async def cb_anatomy_bone_material(callback: CallbackQuery):
         reply_markup=get_bone_material_keyboard(topic_key, bone_id, idx)
     )
 
-@dp.callback_query(F.data.startswith("anatomy_bone_images:"))
-async def cb_anatomy_bone_images(callback: CallbackQuery):
+@dp.callback_query(F.data.startswith("anatomy_bone_img:"))
+async def cb_anatomy_bone_img(callback: CallbackQuery):
     if not anatomy_access_ok(callback.from_user.id):
         await callback.answer("Раздел пока в разработке", show_alert=True)
         return
+    _, topic_key, bone_id, idx_s = callback.data.split(":")
+    idx = int(idx_s)
+    images = get_bone_images(topic_key, bone_id)
+    if not images or not (0 <= idx < len(images)):
+        await callback.answer("Фото для этой кости пока нет", show_alert=True)
+        return
     await callback.answer()
-    _, topic_key, bone_id = callback.data.split(":")
-    title = get_bone_title(topic_key, bone_id)
-    builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="🔙 К кости", callback_data=f"anatomy_bone_hub:{topic_key}:{bone_id}"))
-    await safe_edit_text(
-        callback.message,
-        f"🖼 <b>{title} — фото и схемы</b>\n{DIVIDER}\n\n"
-        "🚧 Скоро здесь появятся фото и схемы из атласов Неттера и Гайворонского.",
-        parse_mode="HTML",
-        reply_markup=builder.as_markup()
-    )
+    await render_bone_image(callback, topic_key, bone_id, idx)
 
 @dp.callback_query(F.data.startswith("anatomy_bone_flash_start:"))
 async def cb_anatomy_bone_flash_start(callback: CallbackQuery):
