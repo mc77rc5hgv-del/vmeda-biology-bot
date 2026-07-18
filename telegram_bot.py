@@ -2777,30 +2777,47 @@ def anatomy_access_ok(user_id: int) -> bool:
     return ANATOMY_PUBLIC or is_admin(user_id)
 
 def get_anatomy_topic_data(topic_key: str):
-    return ANATOMY.get("osteology", {}).get("topics", {}).get(topic_key)
+    for section in ANATOMY.values():
+        topic = section.get("topics", {}).get(topic_key)
+        if topic:
+            return topic
+    return None
+
+def get_topic_section_key(topic_key: str) -> str:
+    for section_key, section in ANATOMY.items():
+        if topic_key in section.get("topics", {}):
+            return section_key
+    return next(iter(ANATOMY), "osteology")
 
 def get_anatomy_menu_keyboard():
     builder = InlineKeyboardBuilder()
-    builder.button(text="🦴 Остеология", callback_data="anatomy_osteology")
+    for section_key, section in ANATOMY.items():
+        builder.button(text=section.get("menu_title", section["title"]), callback_data=f"anatomy_section:{section_key}")
+    builder.adjust(1)
     builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
     return builder.as_markup()
 
-def get_anatomy_osteology_keyboard():
+def get_anatomy_section_keyboard(section_key: str):
+    section = ANATOMY.get(section_key, {})
     builder = InlineKeyboardBuilder()
-    builder.button(text="💀 Череп", callback_data="anatomy_topic:skull")
+    for topic_key, topic in section.get("topics", {}).items():
+        builder.button(text=topic.get("menu_title", topic["title"]), callback_data=f"anatomy_topic:{topic_key}")
+    builder.adjust(1)
     builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="anatomy_menu"))
     return builder.as_markup()
 
 def get_anatomy_topic_keyboard(topic_key: str):
+    topic = get_anatomy_topic_data(topic_key)
     builder = InlineKeyboardBuilder()
-    builder.button(text="🦴 Кости черепа (по каждой кости)", callback_data=f"anatomy_bones:{topic_key}")
+    if topic and topic.get("bones_list"):
+        builder.button(text="🦴 Кости черепа (по каждой кости)", callback_data=f"anatomy_bones:{topic_key}")
     builder.button(text="📖 Весь материал подряд", callback_data=f"anatomy_material:{topic_key}:0")
     builder.button(text="🎴 Флэш-карточки (все)", callback_data=f"anatomy_flash_start:{topic_key}")
     builder.button(text="🔗 Сопоставление (все)", callback_data=f"anatomy_match_start:{topic_key}")
     builder.button(text="🧠 Мнемоники (все)", callback_data=f"anatomy_mnemonics:{topic_key}:0")
     builder.button(text="🖼 Найди на картинке", callback_data=f"anatomy_picture:{topic_key}")
     builder.adjust(1)
-    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="anatomy_osteology"))
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data=f"anatomy_section:{get_topic_section_key(topic_key)}"))
     return builder.as_markup()
 
 # ---- Кости черепа (подразделы по каждой кости) ----
@@ -3151,17 +3168,22 @@ async def cb_anatomy_menu(callback: CallbackQuery):
         reply_markup=get_anatomy_menu_keyboard()
     )
 
-@dp.callback_query(F.data == "anatomy_osteology")
-async def cb_anatomy_osteology(callback: CallbackQuery):
+@dp.callback_query(F.data.startswith("anatomy_section:"))
+async def cb_anatomy_section(callback: CallbackQuery):
     if not anatomy_access_ok(callback.from_user.id):
         await callback.answer("Раздел пока в разработке", show_alert=True)
+        return
+    section_key = callback.data.split(":")[1]
+    section = ANATOMY.get(section_key)
+    if not section:
+        await callback.answer("Раздел не найден", show_alert=True)
         return
     await callback.answer()
     await safe_edit_text(
         callback.message,
-        f"🦴 <b>Остеология</b>\n{DIVIDER}\n\nВыбери тему:",
+        f"🦴 <b>{section['title']}</b>\n{DIVIDER}\n\nВыбери тему:",
         parse_mode="HTML",
-        reply_markup=get_anatomy_osteology_keyboard()
+        reply_markup=get_anatomy_section_keyboard(section_key)
     )
 
 @dp.callback_query(F.data.startswith("anatomy_topic:"))
@@ -3175,8 +3197,9 @@ async def cb_anatomy_topic(callback: CallbackQuery):
         await callback.answer("Тема не найдена", show_alert=True)
         return
     await callback.answer()
+    icon = topic.get("icon", "📚")
     text = (
-        f"💀 <b>{topic['title']}</b>\n{DIVIDER}\n\n"
+        f"{icon} <b>{topic['title']}</b>\n{DIVIDER}\n\n"
         f"📖 Материал: {len(topic['material'])} тем\n"
         f"🎴 Флэш-карточек: {len(topic['flashcards'])}\n"
         f"🔗 Пар для сопоставления: {sum(len(s['pairs']) for s in topic['matching_sets'])}\n"
