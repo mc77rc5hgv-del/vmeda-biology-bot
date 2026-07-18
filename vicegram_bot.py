@@ -3271,6 +3271,20 @@ async def reply_calc_in_business_chat(owner_id: int, message: Message) -> None:
 # в памяти: файл последнего присланного админом PDF, ключ — user_id админа
 PENDING_PDF_INPUT: dict[int, dict] = {}
 
+# Telegram Bot API не отдаёт боту (getFile) файлы крупнее 20 МБ — жёсткое
+# ограничение платформы, обойти нельзя без своего Local Bot API Server.
+PDF_MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024
+
+
+def pdf_download_error_text(exc: Exception) -> str:
+    if isinstance(exc, TelegramBadRequest) and "file is too big" in str(exc).lower():
+        return (
+            "⚠️ Файл слишком большой — Telegram Bot API не даёт боту скачать "
+            f"файлы крупнее {PDF_MAX_DOWNLOAD_BYTES // (1024 * 1024)} МБ. "
+            "Это ограничение платформы, а не бота."
+        )
+    return "⚠️ Не получилось обработать файл."
+
 
 def pdf_compress_lossless(input_path: str, output_path: str) -> None:
     """Пересжимает потоки содержимого без потери качества — картинки внутри
@@ -3336,6 +3350,15 @@ async def handle_admin_pdf_upload(message: Message):
     is_pdf = doc.mime_type == "application/pdf" or (doc.file_name or "").lower().endswith(".pdf")
     if not is_pdf:
         return
+    if doc.file_size and doc.file_size > PDF_MAX_DOWNLOAD_BYTES:
+        size_mb = doc.file_size / (1024 * 1024)
+        await message.answer(
+            f"⚠️ Файл «{html.escape(doc.file_name or 'file.pdf')}» весит "
+            f"{size_mb:.1f} МБ — Telegram Bot API не даёт боту скачивать "
+            f"файлы крупнее {PDF_MAX_DOWNLOAD_BYTES // (1024 * 1024)} МБ. "
+            "Это ограничение платформы, обработать такой файл ботом не получится."
+        )
+        return
     PENDING_PDF_INPUT[message.from_user.id] = {
         "stage": "choose_action",
         "file_id": doc.file_id,
@@ -3373,9 +3396,9 @@ async def cb_pdf_compress(callback: CallbackQuery):
             FSInputFile(out_path, filename=f"{base_name}_compressed.pdf"),
             caption=f"🗜 Готово: {orig_size // 1024} КБ → {new_size // 1024} КБ",
         )
-    except Exception:
+    except Exception as exc:
         logger.exception("Ошибка сжатия PDF")
-        await bot.send_message(callback.from_user.id, "⚠️ Не получилось сжать файл.")
+        await bot.send_message(callback.from_user.id, pdf_download_error_text(exc))
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
         PENDING_PDF_INPUT.pop(callback.from_user.id, None)
@@ -3424,9 +3447,9 @@ async def process_pending_pdf_input(message: Message, pending: dict) -> None:
             caption=f"✂️ Готово: оставлено {kept} из {total_pages} стр.",
         )
         PENDING_PDF_INPUT.pop(admin_id, None)
-    except Exception:
+    except Exception as exc:
         logger.exception("Ошибка обрезки PDF")
-        await message.answer("⚠️ Не получилось обработать файл.")
+        await message.answer(pdf_download_error_text(exc))
         PENDING_PDF_INPUT.pop(admin_id, None)
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
