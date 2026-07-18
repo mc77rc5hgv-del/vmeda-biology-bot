@@ -1293,6 +1293,18 @@ async def cmd_start(message: Message):
         await message.answer(text, parse_mode="HTML", reply_markup=keyboard_func(user_id))
         return
 
+    if deep_link_key and deep_link_key.startswith("q_"):
+        q_num = deep_link_key[len("q_"):]
+        if q_num in QUESTIONS:
+            stats["question_opened"][q_num] = stats["question_opened"].get(q_num, 0) + 1
+            save_stats()
+            q = QUESTIONS[q_num]
+            header = f"❓ <b>Вопрос {q_num}</b>"
+            body = f"{header}\n{DIVIDER}\n\n<b>{q['title']}</b>\n\n{q['answer']}"
+            short_caption = f"{header}\n{DIVIDER}\n\n<b>{q['title']}</b>"
+            await send_answer(message, body, short_caption, q, get_question_answer_keyboard(q_num), edit=False)
+            return
+
     greeting = "🎉 <b>С возвращением!</b>" if not is_new_user else "👋 <b>Привет!</b>"
     await message.answer(
         f"{greeting}\n\nВыбери предмет для подготовки:",
