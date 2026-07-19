@@ -1156,9 +1156,15 @@ def get_main_menu(user_id: int = None):
     else:
         anatomy_label = "🦴 Анатомия (в разработке)"
     builder.button(text=anatomy_label, callback_data="anatomy_menu")
-    if HISTOLOGY_PUBLIC or (user_id is not None and is_admin(user_id)) or sub_histology:
-        label = "🔬 Гистология" + ("" if HISTOLOGY_PUBLIC else (" 💎" if sub_histology else " (админ)"))
-        builder.button(text=label, callback_data="histology_menu")
+    if HISTOLOGY_PUBLIC:
+        histology_label = "🔬 Гистология"
+    elif user_id is not None and is_admin(user_id):
+        histology_label = "🔬 Гистология (админ)"
+    elif sub_histology:
+        histology_label = "🔬 Гистология 💎"
+    else:
+        histology_label = "🔬 Гистология (по подписке)"
+    builder.button(text=histology_label, callback_data="histology_menu")
     builder.button(text="👥 Пригласить друзей", callback_data="referral_info")
     builder.button(text="🏆 Рейтинг", callback_data="referral_leaderboard")
     battle_label = "⚔️ Битва рефералов 🔥" if is_battle_active() else "⚔️ Битва рефералов"
@@ -4141,6 +4147,24 @@ def get_histology_specimen(diag_key: str, spec_id: str):
             return spec
     return None
 
+def get_histology_locked_text() -> str:
+    return (
+        f"🔬 <b>Гистология</b>\n{DIVIDER}\n\n"
+        "✅ Раздел уже полностью готов и проработан: все микрофотографии и "
+        "протоколы-описания взяты именно с препаратов академии, а содержание "
+        "сверено с преподавателями.\n\n"
+        "Доступен по подписке от <b>239₽ / 239⭐</b> (тариф «Навсегда — Биология, "
+        "Физика, Химия») и выше — во всех тарифах с этой цены и дороже Гистология уже включена.\n\n"
+        "После оплаты раздел открывается сразу."
+    )
+
+def get_histology_locked_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="💎 Оформить подписку", callback_data="subscription_menu")
+    builder.button(text="🔙 Назад в меню", callback_data="back_to_main")
+    builder.adjust(1)
+    return builder.as_markup()
+
 def get_histology_menu_keyboard():
     builder = InlineKeyboardBuilder()
     for diag_key, diag in HISTOLOGY.items():
@@ -4217,7 +4241,13 @@ async def render_histology_image(callback: CallbackQuery, diag_key: str, spec_id
 @dp.callback_query(F.data == "histology_menu")
 async def cb_histology_menu(callback: CallbackQuery):
     if not histology_access_ok(callback.from_user.id):
-        await callback.answer("Раздел пока в разработке", show_alert=True)
+        await callback.answer()
+        await safe_edit_text(
+            callback.message,
+            get_histology_locked_text(),
+            parse_mode="HTML",
+            reply_markup=get_histology_locked_keyboard()
+        )
         return
     await callback.answer()
     await safe_edit_text(
@@ -4230,7 +4260,7 @@ async def cb_histology_menu(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("histology_topic:"))
 async def cb_histology_topic(callback: CallbackQuery):
     if not histology_access_ok(callback.from_user.id):
-        await callback.answer("Раздел пока в разработке", show_alert=True)
+        await callback.answer("🔬 Гистология доступна по подписке от 239₽/239⭐ и выше 💎", show_alert=True)
         return
     diag_key = callback.data.split(":")[1]
     if diag_key not in HISTOLOGY:
@@ -4247,7 +4277,7 @@ async def cb_histology_topic(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("histology_specimen:"))
 async def cb_histology_specimen(callback: CallbackQuery):
     if not histology_access_ok(callback.from_user.id):
-        await callback.answer("Раздел пока в разработке", show_alert=True)
+        await callback.answer("🔬 Гистология доступна по подписке от 239₽/239⭐ и выше 💎", show_alert=True)
         return
     _, diag_key, spec_id = callback.data.split(":")
     spec = get_histology_specimen(diag_key, spec_id)
@@ -4265,7 +4295,7 @@ async def cb_histology_specimen(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("histology_img:"))
 async def cb_histology_img(callback: CallbackQuery):
     if not histology_access_ok(callback.from_user.id):
-        await callback.answer("Раздел пока в разработке", show_alert=True)
+        await callback.answer("🔬 Гистология доступна по подписке от 239₽/239⭐ и выше 💎", show_alert=True)
         return
     _, diag_key, spec_id, idx_s = callback.data.split(":")
     idx = int(idx_s)
@@ -4373,7 +4403,7 @@ async def render_histology_guess_summary(user_id: int, aborted: bool = False):
 @dp.callback_query(F.data.startswith("histology_guess_start:"))
 async def cb_histology_guess_start(callback: CallbackQuery):
     if not histology_access_ok(callback.from_user.id):
-        await callback.answer("Раздел пока в разработке", show_alert=True)
+        await callback.answer("🔬 Гистология доступна по подписке от 239₽/239⭐ и выше 💎", show_alert=True)
         return
     scope = callback.data.split(":", 1)[1]
     user_id = callback.from_user.id
