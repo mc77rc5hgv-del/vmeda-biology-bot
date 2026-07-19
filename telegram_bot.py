@@ -362,7 +362,7 @@ def get_referral_status_text(user_id: int) -> str:
             f"{extra}"
             "Доступ ко всем разделам бота открыт. Спасибо! 🎉\n\n"
             "⚔️ А ещё сейчас можно побороться за призы в <b>битве рефералов</b> — "
-            "приглашай друзей дальше и попади в топ-3!\n\n"
+            "приглашай друзей дальше и попади в топ-5!\n\n"
             f"Твоя ссылка (можно приглашать ещё):\n{link}"
         )
     if has_temp_access(user_id):
@@ -435,32 +435,51 @@ def get_referral_leaderboard_text(user_id: int = None) -> str:
 
 # ==================== БИТВА РЕФЕРАЛОВ (ЛИМИТИРОВАННОЕ СОРЕВНОВАНИЕ) ====================
 BATTLE_DURATION_SECONDS = 24 * 60 * 60
+BATTLE_PLACE_COUNT = 5
+BATTLE_PLACE_ICONS = ["🥇", "🥈", "🥉", "🏅", "🎖"]
+
+# 1-3 место разыгрываются только среди тех, кто пригласил от этого числа друзей за битву.
+# 4-5 место — без минимума, отдаются следующим по рейтингу.
+BATTLE_TOP3_MIN_REFERRALS = 30
+
 BATTLE_PRIZE_LABELS = [
     'полный и <b>вечный</b> доступ к <a href="https://t.me/VMEDA_examen_bot">VMEDA_examen_bot</a> '
-    '+ подписка на <b>год</b> в <a href="https://t.me/Helperchat_bot">Helperchat_bot</a>',
+    'и <b>вечный</b> доступ к <a href="https://t.me/Helperchat_bot">Helperchat_bot</a>',
     'полный доступ к <a href="https://t.me/VMEDA_examen_bot">VMEDA_examen_bot</a> на <b>год</b> '
-    '+ подписка на <b>год</b> в <a href="https://t.me/Helperchat_bot">Helperchat_bot</a>',
-    'полный доступ к <a href="https://t.me/VMEDA_examen_bot">VMEDA_examen_bot</a> на <b>год</b>',
+    'и доступ на <b>год</b> к <a href="https://t.me/Helperchat_bot">Helperchat_bot</a>',
+    'полный доступ к <a href="https://t.me/VMEDA_examen_bot">VMEDA_examen_bot</a> на <b>год</b> '
+    'и доступ на <b>год</b> к <a href="https://t.me/Helperchat_bot">Helperchat_bot</a>',
+    'Химия, Физика, Биология и ранний доступ к Гистологии <b>навсегда</b> в '
+    '<a href="https://t.me/VMEDA_examen_bot">VMEDA_examen_bot</a> + доступ к '
+    '<a href="https://t.me/Helperchat_bot">Helperchat_bot</a>',
+    'Химия, Физика, Биология и ранний доступ к Гистологии <b>навсегда</b> в '
+    '<a href="https://t.me/VMEDA_examen_bot">VMEDA_examen_bot</a> + доступ к '
+    '<a href="https://t.me/Helperchat_bot">Helperchat_bot</a>',
 ]
 BATTLE_CHANNEL_POSTING_NOTICE = "📢 <b>ПОСТИНГ В TELEGRAM-КАНАЛЫ РАЗРЕШЁН 🤝</b>"
 
-# Цена подписки в Helperchat_bot (используется и для «год», и для «навсегда» — другой цены нет).
-HELPERCHAT_SUBSCRIPTION_PRICE = 1999
-
-# Денежная оценка приза за место — используется, чтобы показать победителю, сколько он сэкономил.
-# 1 место = «6 лет» подписки VMEDA_examen_bot (ближайший эквивалент «вечного» доступа) + Helperchat_bot.
-# 2 место = «Год» подписки VMEDA_examen_bot + Helperchat_bot. 3 место = только «Год» подписки VMEDA_examen_bot.
-BATTLE_PRIZE_VALUES_RUB = [
-    SUBSCRIPTION_TIERS[4]["price_rub"] + HELPERCHAT_SUBSCRIPTION_PRICE,
-    SUBSCRIPTION_TIERS[3]["price_rub"] + HELPERCHAT_SUBSCRIPTION_PRICE,
-    SUBSCRIPTION_TIERS[3]["price_rub"],
-]
+# Денежная оценка приза за место (задана вручную, не выводится из цен тарифов подписки).
+BATTLE_PRIZE_VALUES_RUB = [4500, 2300, 2300, 1599, 1599]
 
 def format_rub(amount: int) -> str:
     return f"{amount:,}".replace(",", " ")
 
+def format_battle_savings_line(place_index: int) -> str:
+    return f"💰🔥 Экономия: <b>~{format_rub(BATTLE_PRIZE_VALUES_RUB[place_index])}₽</b> 🔥💰"
+
+def battle_place_icon(i: int) -> str:
+    return BATTLE_PLACE_ICONS[i] if i < len(BATTLE_PLACE_ICONS) else f"{i + 1}."
+
 def format_battle_prizes_block() -> str:
-    return "\n".join(f"{RANK_MEDALS[i]} <b>{i + 1} место</b> — {BATTLE_PRIZE_LABELS[i]}" for i in range(3))
+    lines = [
+        f"{BATTLE_PLACE_ICONS[i]} <b>{i + 1} место</b> — {BATTLE_PRIZE_LABELS[i]}\n{format_battle_savings_line(i)}"
+        for i in range(BATTLE_PLACE_COUNT)
+    ]
+    lines.append(
+        f"\n🔒 1-3 место — только для тех, кто пригласит от <b>{BATTLE_TOP3_MIN_REFERRALS}</b> друзей за битву. "
+        "4-5 место — без минимума, по числу приглашений."
+    )
+    return "\n".join(lines)
 
 def is_battle_active() -> bool:
     battle = stats.get("referral_battle")
@@ -475,7 +494,7 @@ def get_battle_gained(user_id: int) -> int:
     start = battle.get("snapshot", {}).get(uid_str, 0)
     return max(current - start, 0)
 
-def get_battle_leaderboard(limit: int = 10):
+def get_battle_leaderboard(limit: int | None = 10):
     battle = stats.get("referral_battle")
     if not battle:
         return []
@@ -486,7 +505,25 @@ def get_battle_leaderboard(limit: int = 10):
         if diff > 0:
             gained.append((uid_str, diff))
     gained.sort(key=lambda kv: kv[1], reverse=True)
-    return gained[:limit]
+    return gained if limit is None else gained[:limit]
+
+def resolve_battle_winners() -> list:
+    """5 призовых мест. 1-3 место — только для участников с BATTLE_TOP3_MIN_REFERRALS+
+    рефералами за битву. 4-5 место — без минимума, отдаются следующим по рейтингу.
+    Возвращает список из BATTLE_PLACE_COUNT элементов: (uid_str, diff) или None, если
+    место не разыграно."""
+    full = get_battle_leaderboard(limit=None)
+    winners = [None] * BATTLE_PLACE_COUNT
+    used_uids = set()
+    qualifying = [e for e in full if e[1] >= BATTLE_TOP3_MIN_REFERRALS]
+    for i in range(3):
+        if i < len(qualifying):
+            winners[i] = qualifying[i]
+            used_uids.add(qualifying[i][0])
+    remaining = [e for e in full if e[0] not in used_uids]
+    for i, entry in enumerate(remaining[:2]):
+        winners[3 + i] = entry
+    return winners
 
 def format_time_left(seconds: float) -> str:
     seconds = max(int(seconds), 0)
@@ -517,12 +554,15 @@ def get_battle_keyboard():
 def get_battle_text(user_id: int) -> str:
     if not is_battle_active():
         battle = stats.get("referral_battle")
-        if battle and battle.get("results"):
+        results = battle.get("results") if battle else None
+        if results and any(w is not None for w in results):
             medals_lines = []
-            for i, (uid_str, diff) in enumerate(battle["results"]):
+            for i, w in enumerate(results):
+                if w is None:
+                    continue
+                uid_str, diff = w
                 name = stats["user_names"].get(uid_str, f"Пользователь {uid_str}")
-                icon = RANK_MEDALS[i] if i < 3 else f"{i+1}."
-                medals_lines.append(f"{icon} {name} — <b>{diff}</b>")
+                medals_lines.append(f"{battle_place_icon(i)} {i + 1} место — {name} — <b>{diff}</b>")
             results_block = "\n".join(medals_lines)
             return (
                 f"⚔️ <b>Битва рефералов</b>\n{DIVIDER}\n\n"
@@ -548,7 +588,7 @@ def get_battle_text(user_id: int) -> str:
         BATTLE_CHANNEL_POSTING_NOTICE,
         "",
         f"⏳ Осталось: <b>{remaining}</b>",
-        "🎁 Призы для топ-3:",
+        "🎁 Призы для топ-5:",
         format_battle_prizes_block(),
         "",
         f"🙋 Твой результат за битву: <b>{my_gained}</b>",
@@ -557,10 +597,9 @@ def get_battle_text(user_id: int) -> str:
     if leaderboard:
         lines.append("<b>Текущий рейтинг битвы:</b>")
         for i, (uid, diff) in enumerate(leaderboard):
-            icon = RANK_MEDALS[i] if i < 3 else f"{i+1}."
             name = stats["user_names"].get(uid, f"Пользователь {uid}")
             you = " 👈 ты" if uid == uid_str else ""
-            lines.append(f"{icon} {name} — <b>{diff}</b>{you}")
+            lines.append(f"{battle_place_icon(i)} {name} — <b>{diff}</b>{you}")
     else:
         lines.append("Пока никто не пригласил друзей в рамках битвы — стань первым!")
     lines.append("")
@@ -585,7 +624,7 @@ async def announce_battle_start() -> None:
         "⚔️🔥 <b>СТАРТУЕТ БИТВА РЕФЕРАЛОВ!</b> 🔥⚔️\n"
         f"{DIVIDER}\n\n"
         "У тебя есть <b>24 часа</b>, чтобы пригласить в бота как можно больше друзей "
-        "и забрать один из трёх эксклюзивных призов:\n\n"
+        "и забрать один из пяти эксклюзивных призов:\n\n"
         f"{format_battle_prizes_block()}\n\n"
         f"{DIVIDER}\n\n"
         "Считаются только друзья, приглашённые с этого момента.\n"
@@ -603,16 +642,15 @@ def get_battle_remind_broadcast_text() -> str:
         "⚔️🔥 <b>БИТВА РЕФЕРАЛОВ ПРОДОЛЖАЕТСЯ!</b> 🔥⚔️\n",
         f"{DIVIDER}\n",
         f"⏳ Осталось: <b>{remaining}</b>\n",
-        "🎁 Призы для топ-3:",
+        "🎁 Призы для топ-5:",
         format_battle_prizes_block(),
         "",
     ]
     if leaderboard:
         lines.append("<b>Текущий рейтинг битвы:</b>")
         for i, (uid, diff) in enumerate(leaderboard):
-            icon = RANK_MEDALS[i] if i < 3 else f"{i+1}."
             name = stats["user_names"].get(uid, f"Пользователь {uid}")
-            lines.append(f"{icon} {name} — <b>{diff}</b>")
+            lines.append(f"{battle_place_icon(i)} {name} — <b>{diff}</b>")
         lines.append("")
     lines.append("Успей попасть в топ — жми «👥 Пригласить друзей» в главном меню и забирай свою ссылку!")
     return "\n".join(lines)
@@ -632,19 +670,25 @@ def get_access_restored_broadcast_text() -> str:
         "👥 Открыть доступ насовсем можно в любой момент — кнопка «Пригласить друзей» в главном меню."
     )
 
-def get_battle_results_announcement_text(top3: list) -> str:
-    if not top3:
+def get_battle_results_announcement_text(winners: list) -> str:
+    awarded = [(i, w) for i, w in enumerate(winners) if w is not None]
+    if not awarded:
         return (
             f"🏁 <b>Битва рефералов завершена!</b>\n{DIVIDER}\n\n"
             "За время битвы никто не пригласил новых друзей — приз не разыгран в этот раз."
         )
     lines = [f"🏁 <b>Битва рефералов завершена!</b>\n{DIVIDER}\n", "Победители:"]
-    for i, (uid_str, diff) in enumerate(top3):
+    for i, (uid_str, diff) in awarded:
         name = stats["user_names"].get(uid_str, f"Пользователь {uid_str}")
-        lines.append(f"{RANK_MEDALS[i]} {name} — <b>{diff}</b> приглашённых")
+        lines.append(f"{BATTLE_PLACE_ICONS[i]} <b>{i + 1} место</b> — {name} — <b>{diff}</b> приглашённых")
         lines.append(f"🎁 {BATTLE_PRIZE_LABELS[i]}")
-        lines.append(f"💸 Сэкономил(а) на подписках: ~<b>{format_rub(BATTLE_PRIZE_VALUES_RUB[i])}₽</b>")
+        lines.append(format_battle_savings_line(i))
         lines.append("")
+    if any(winners[i] is None for i in range(3)):
+        lines.append(
+            f"⚠️ Часть мест в топ-3 не разыграна — не набралось участников от "
+            f"{BATTLE_TOP3_MIN_REFERRALS} приглашённых.\n"
+        )
     lines.append("Администратор свяжется с победителями лично 🤝")
     return "\n".join(lines)
 
@@ -653,19 +697,20 @@ async def resolve_referral_battle() -> None:
     if not battle or not battle.get("active"):
         return
     battle["active"] = False
-    top3 = get_battle_leaderboard(limit=3)
-    battle["results"] = top3
+    winners = resolve_battle_winners()
+    battle["results"] = winners
     save_stats()
 
-    result_text = get_battle_results_announcement_text(top3)
+    result_text = get_battle_results_announcement_text(winners)
     await _broadcast(result_text)
 
-    if top3:
+    awarded = [(i, w) for i, w in enumerate(winners) if w is not None]
+    if awarded:
         admin_lines = ["🏁 <b>Битва рефералов завершена.</b> Победители (для выдачи приза):"]
-        for i, (uid_str, diff) in enumerate(top3):
+        for i, (uid_str, diff) in awarded:
             username = stats["user_username"].get(uid_str)
             handle = f"@{username}" if username else "(нет username)"
-            admin_lines.append(f"{RANK_MEDALS[i]} ID <code>{uid_str}</code> {handle} — {diff} рефералов")
+            admin_lines.append(f"{BATTLE_PLACE_ICONS[i]} {i + 1} место — ID <code>{uid_str}</code> {handle} — {diff} рефералов")
         admin_text = "\n".join(admin_lines)
         for admin_id in ADMIN_IDS:
             try:
@@ -1773,16 +1818,15 @@ def get_admin_battle_text() -> str:
         ]
         if leaderboard:
             for i, (uid, diff) in enumerate(leaderboard):
-                icon = RANK_MEDALS[i] if i < 3 else f"{i+1}."
                 name = stats["user_names"].get(uid, f"Пользователь {uid}")
-                lines.append(f"{icon} {name} — <b>{diff}</b>")
+                lines.append(f"{battle_place_icon(i)} {name} — <b>{diff}</b>")
         else:
             lines.append("Пока никто не пригласил друзей в рамках битвы.")
         return "\n".join(lines)
     return (
         f"⚔️ <b>Битва рефералов</b>\n{DIVIDER}\n\n"
         "Сейчас битва не идёт.\n\n"
-        "Запусти битву на 24 часа — топ-3 пользователя по числу приглашённых друзей за это время "
+        "Запусти битву на 24 часа — топ-5 пользователей по числу приглашённых друзей за это время "
         f"получат призы:\n\n{format_battle_prizes_block()}\n\n"
         "Всем пользователям бота придёт рассылка с объявлением о старте и правилах."
     )
@@ -1896,7 +1940,7 @@ async def cb_admin_battle_start_confirm(callback: CallbackQuery):
     await safe_edit_text(
         callback.message,
         "⚔️ <b>Подтверди запуск битвы рефералов</b>\n\n"
-        "Битва продлится 24 часа, топ-3 по числу новых приглашённых получат призы:\n\n"
+        "Битва продлится 24 часа, топ-5 по числу новых приглашённых получат призы:\n\n"
         f"{format_battle_prizes_block()}\n\nВсем пользователям придёт рассылка с объявлением.",
         parse_mode="HTML",
         reply_markup=builder.as_markup()
