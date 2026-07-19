@@ -257,6 +257,7 @@ SUBSCRIPTION_TIERS = {
         "price_rub": 899,
         "price_stars": 899,
         "emoji": "🚀",
+        "badge": "🔥 РЕКОМЕНДОВАНО 🔥",
         "benefits": [
             "Доступ вообще ко всем разделам бота на целый год",
             "Плюс Анатомия и уже полностью готовая Гистология (препараты с академии, "
@@ -2786,6 +2787,8 @@ def get_subscription_menu_text(user_id: int) -> str:
         "и ограничений. Выбери вариант:\n"
     )
     for tier_id, cfg in SUBSCRIPTION_TIERS.items():
+        if cfg.get("badge"):
+            lines.append(f"<b>{cfg['badge']}</b>")
         lines.append(f"{cfg['emoji']} <b>{cfg['title']}</b> — {cfg['price_rub']}₽ / {cfg['price_stars']} ⭐")
         for b in cfg["benefits"]:
             lines.append(f"• {b}")
@@ -2799,8 +2802,9 @@ def get_subscription_menu_text(user_id: int) -> str:
 def get_subscription_menu_keyboard():
     builder = InlineKeyboardBuilder()
     for tier_id, cfg in SUBSCRIPTION_TIERS.items():
+        badge = f"{cfg['badge']} — " if cfg.get("badge") else ""
         builder.button(
-            text=f"{cfg['emoji']} {cfg['short']} — {cfg['price_rub']}₽/{cfg['price_stars']}⭐",
+            text=f"{badge}{cfg['emoji']} {cfg['short']} — {cfg['price_rub']}₽/{cfg['price_stars']}⭐",
             callback_data=f"sub_tier:{tier_id}"
         )
     builder.adjust(1)
@@ -2809,7 +2813,10 @@ def get_subscription_menu_keyboard():
 
 def get_sub_tier_text(tier_id: int) -> str:
     cfg = SUBSCRIPTION_TIERS[tier_id]
-    lines = [f"{cfg['emoji']} <b>{cfg['title']}</b>\n{DIVIDER}\n"]
+    lines = [f"{cfg['emoji']} <b>{cfg['title']}</b>"]
+    if cfg.get("badge"):
+        lines.append(f"<b>{cfg['badge']}</b>")
+    lines.append(f"{DIVIDER}\n")
     for b in cfg["benefits"]:
         lines.append(f"• {b}")
     lines.append(f"\nЦена: <b>{cfg['price_rub']}₽</b> или <b>{cfg['price_stars']} ⭐</b>")
