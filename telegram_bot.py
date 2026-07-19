@@ -3670,6 +3670,7 @@ def get_histology_menu_keyboard():
     builder = InlineKeyboardBuilder()
     for diag_key, diag in HISTOLOGY.items():
         builder.button(text=diag.get("menu_title", diag["title"]), callback_data=f"histology_topic:{diag_key}")
+    builder.button(text="🎯 Угадай препарат (все разделы)", callback_data="histology_guess_start:all")
     builder.adjust(1)
     builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
     return builder.as_markup()
@@ -3689,6 +3690,7 @@ def get_histology_topic_text(diag_key: str) -> str:
 def get_histology_topic_keyboard(diag_key: str):
     diag = HISTOLOGY[diag_key]
     builder = InlineKeyboardBuilder()
+    builder.button(text="🎯 Угадай препарат", callback_data=f"histology_guess_start:{diag_key}")
     for spec in diag["specimens"]:
         builder.button(text=f"№{spec['number']}. {spec['title']}", callback_data=f"histology_specimen:{diag_key}:{spec['id']}")
     builder.adjust(1)
@@ -3799,6 +3801,141 @@ async def cb_histology_img(callback: CallbackQuery):
         return
     await callback.answer()
     await render_histology_image(callback, diag_key, spec_id, idx)
+
+# ---- Угадай препарат ----
+HISTOLOGY_GUESS_SESSION_SIZE = 10
+HISTOLOGY_GUESS_SESSIONS: dict[int, dict] = {}
+
+def get_histology_guess_pool(scope: str):
+    if scope == "all":
+        return [(diag_key, spec["id"]) for diag_key, diag in HISTOLOGY.items() for spec in diag["specimens"]]
+    diag = HISTOLOGY.get(scope)
+    if not diag:
+        return []
+    return [(scope, spec["id"]) for spec in diag["specimens"]]
+
+def start_histology_guess_session(user_id: int, scope: str) -> bool:
+    pool = get_histology_guess_pool(scope)
+    if not pool:
+        return False
+    size = min(HISTOLOGY_GUESS_SESSION_SIZE, len(pool))
+    HISTOLOGY_GUESS_SESSIONS[user_id] = {
+        "scope": scope,
+        "items": random.sample(pool, size),
+        "index": 0,
+        "know": 0,
+        "dont_know": 0,
+    }
+    return True
+
+def get_histology_guess_question_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🙈 Показать ответ", callback_data="histology_guess_show_answer")
+    builder.button(text="🛑 Закончить", callback_data="histology_guess_stop")
+    builder.adjust(1)
+    return builder.as_markup()
+
+def get_histology_guess_answer_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Угадал(а)", callback_data="histology_guess_know")
+    builder.button(text="❌ Не угадал(а)", callback_data="histology_guess_dont_know")
+    builder.adjust(2)
+    builder.row(InlineKeyboardButton(text="🛑 Закончить", callback_data="histology_guess_stop"))
+    return builder.as_markup()
+
+def get_histology_guess_summary_keyboard(scope: str):
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔁 Пройти ещё раз", callback_data=f"histology_guess_start:{scope}")
+    if scope == "all":
+        builder.button(text="🔙 К разделу", callback_data="histology_menu")
+    else:
+        builder.button(text="🔙 К разделу", callback_data=f"histology_topic:{scope}")
+    builder.adjust(1)
+    return builder.as_markup()
+
+async def render_histology_guess_question(callback: CallbackQuery, user_id: int):
+    session = HISTOLOGY_GUESS_SESSIONS[user_id]
+    total = len(session["items"])
+    diag_key, spec_id = session["items"][session["index"]]
+    spec = get_histology_specimen(diag_key, spec_id)
+    caption = f"🎯 Угадай препарат — {session['index'] + 1}/{total}\n\nЧто это за препарат?"
+    photo = FSInputFile(os.path.join(HISTOLOGY_IMAGES_DIR, spec["images"][0]))
+    await callback.message.delete()
+    sent = await callback.message.answer_photo(photo, caption=caption, reply_markup=get_histology_guess_question_keyboard())
+    session["msg"] = sent
+
+async def render_histology_guess_answer(user_id: int):
+    session = HISTOLOGY_GUESS_SESSIONS[user_id]
+    total = len(session["items"])
+    diag_key, spec_id = session["items"][session["index"]]
+    spec = get_histology_specimen(diag_key, spec_id)
+    lines = [f"🎯 Угадай препарат — {session['index'] + 1}/{total}", "", f"№{spec['number']}. {spec['title']}"]
+    if spec.get("stain"):
+        lines.append(f"Окраска: {spec['stain']}")
+    if spec.get("magnification"):
+        lines.append(f"Увеличение: {spec['magnification']}")
+    lines.append("")
+    lines.append("Ты угадал(а)?")
+    await session["msg"].edit_caption(caption="\n".join(lines), reply_markup=get_histology_guess_answer_keyboard())
+
+async def render_histology_guess_summary(user_id: int, aborted: bool = False):
+    session = HISTOLOGY_GUESS_SESSIONS.pop(user_id, None)
+    if not session:
+        return
+    scope = session["scope"]
+    answered = session["know"] + session["dont_know"]
+    title = "🛑 Прервано" if aborted else "🏁 Препараты закончились!"
+    caption = (
+        f"{title}\n\n"
+        f"Отвечено: {answered}\n✅ Угадано: {session['know']}\n❌ Не угадано: {session['dont_know']}"
+    )
+    await session["msg"].edit_caption(caption=caption, reply_markup=get_histology_guess_summary_keyboard(scope))
+
+@dp.callback_query(F.data.startswith("histology_guess_start:"))
+async def cb_histology_guess_start(callback: CallbackQuery):
+    if not histology_access_ok(callback.from_user.id):
+        await callback.answer("Раздел пока в разработке", show_alert=True)
+        return
+    scope = callback.data.split(":", 1)[1]
+    user_id = callback.from_user.id
+    if not start_histology_guess_session(user_id, scope):
+        await callback.answer("Препаратов пока нет", show_alert=True)
+        return
+    await callback.answer()
+    await render_histology_guess_question(callback, user_id)
+
+@dp.callback_query(F.data == "histology_guess_show_answer")
+async def cb_histology_guess_show_answer(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    if user_id not in HISTOLOGY_GUESS_SESSIONS:
+        await callback.answer("Сессия истекла, начни заново", show_alert=True)
+        return
+    await callback.answer()
+    await render_histology_guess_answer(user_id)
+
+@dp.callback_query(F.data.in_({"histology_guess_know", "histology_guess_dont_know"}))
+async def cb_histology_guess_answer(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    session = HISTOLOGY_GUESS_SESSIONS.get(user_id)
+    if not session:
+        await callback.answer("Сессия истекла, начни заново", show_alert=True)
+        return
+    await callback.answer()
+    if callback.data == "histology_guess_know":
+        session["know"] += 1
+    else:
+        session["dont_know"] += 1
+    session["index"] += 1
+    if session["index"] >= len(session["items"]):
+        await render_histology_guess_summary(user_id)
+    else:
+        await render_histology_guess_question(callback, user_id)
+
+@dp.callback_query(F.data == "histology_guess_stop")
+async def cb_histology_guess_stop(callback: CallbackQuery):
+    await callback.answer()
+    if callback.from_user.id in HISTOLOGY_GUESS_SESSIONS:
+        await render_histology_guess_summary(callback.from_user.id, aborted=True)
 
 # ==================== ЗАПУСК ====================
 async def setup_bot_commands() -> None:
