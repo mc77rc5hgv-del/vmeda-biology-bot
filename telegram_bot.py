@@ -3807,12 +3807,16 @@ HISTOLOGY_GUESS_SESSION_SIZE = 10
 HISTOLOGY_GUESS_SESSIONS: dict[int, dict] = {}
 
 def get_histology_guess_pool(scope: str):
+    # only specimens with a verified label-free "guess_image" are eligible --
+    # many source slides bake the answer or structure labels into every available
+    # photo, so those specimens are deliberately left out of this mode.
     if scope == "all":
-        return [(diag_key, spec["id"]) for diag_key, diag in HISTOLOGY.items() for spec in diag["specimens"]]
+        return [(diag_key, spec["id"]) for diag_key, diag in HISTOLOGY.items()
+                 for spec in diag["specimens"] if spec.get("guess_image")]
     diag = HISTOLOGY.get(scope)
     if not diag:
         return []
-    return [(scope, spec["id"]) for spec in diag["specimens"]]
+    return [(scope, spec["id"]) for spec in diag["specimens"] if spec.get("guess_image")]
 
 def start_histology_guess_session(user_id: int, scope: str) -> bool:
     pool = get_histology_guess_pool(scope)
@@ -3859,7 +3863,7 @@ async def render_histology_guess_question(callback: CallbackQuery, user_id: int)
     diag_key, spec_id = session["items"][session["index"]]
     spec = get_histology_specimen(diag_key, spec_id)
     caption = f"🎯 Угадай препарат — {session['index'] + 1}/{total}\n\nЧто это за препарат?"
-    photo = FSInputFile(os.path.join(HISTOLOGY_IMAGES_DIR, spec["images"][0]))
+    photo = FSInputFile(os.path.join(HISTOLOGY_IMAGES_DIR, spec["guess_image"]))
     await callback.message.delete()
     sent = await callback.message.answer_photo(photo, caption=caption, reply_markup=get_histology_guess_question_keyboard())
     session["msg"] = sent
