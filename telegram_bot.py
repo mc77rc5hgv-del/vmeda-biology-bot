@@ -1147,9 +1147,15 @@ def get_main_menu(user_id: int = None):
     builder.button(text="🧪 Химия", callback_data="menu_chemistry")
     sub_all = user_id is not None and has_subscription_scope_all(user_id)
     sub_histology = user_id is not None and has_subscription_histology_access(user_id)
-    if ANATOMY_PUBLIC or (user_id is not None and is_admin(user_id)) or sub_all:
-        label = "🦴 Анатомия" + ("" if ANATOMY_PUBLIC else (" 💎" if sub_all else " (админ)"))
-        builder.button(text=label, callback_data="anatomy_menu")
+    if ANATOMY_PUBLIC:
+        anatomy_label = "🦴 Анатомия"
+    elif user_id is not None and is_admin(user_id):
+        anatomy_label = "🦴 Анатомия (админ)"
+    elif sub_all:
+        anatomy_label = "🦴 Анатомия 💎"
+    else:
+        anatomy_label = "🦴 Анатомия (в разработке)"
+    builder.button(text=anatomy_label, callback_data="anatomy_menu")
     if HISTOLOGY_PUBLIC or (user_id is not None and is_admin(user_id)) or sub_histology:
         label = "🔬 Гистология" + ("" if HISTOLOGY_PUBLIC else (" 💎" if sub_histology else " (админ)"))
         builder.button(text=label, callback_data="histology_menu")
@@ -3402,6 +3408,23 @@ def get_topic_section_key(topic_key: str) -> str:
             return section_key
     return next(iter(ANATOMY), "osteology")
 
+def get_anatomy_locked_text() -> str:
+    return (
+        f"🦴 <b>Анатомия</b>\n{DIVIDER}\n\n"
+        "🚧 Раздел ещё в разработке — сейчас идёт работа над материалом.\n\n"
+        "Уже сейчас можно получить ранний доступ по подписке «🚀 Год — все экзамены» "
+        "(899₽ / 899⭐) или «👑 6 лет — все экзамены» (2499₽ / 2499⭐) — подписчики этих "
+        "тарифов откроют раздел раньше всех, как только он будет готов.\n\n"
+        "А пока доступны Биология, Физика, Химия и полностью готовая Гистология."
+    )
+
+def get_anatomy_locked_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="💎 Оформить подписку", callback_data="subscription_menu")
+    builder.button(text="🔙 Назад в меню", callback_data="back_to_main")
+    builder.adjust(1)
+    return builder.as_markup()
+
 def get_anatomy_menu_keyboard():
     builder = InlineKeyboardBuilder()
     for section_key, section in ANATOMY.items():
@@ -3772,7 +3795,13 @@ def get_bone_mnemonic_text(topic_key: str, bone_id: str, idx: int) -> str:
 @dp.callback_query(F.data == "anatomy_menu")
 async def cb_anatomy_menu(callback: CallbackQuery):
     if not anatomy_access_ok(callback.from_user.id):
-        await callback.answer("Раздел пока в разработке", show_alert=True)
+        await callback.answer()
+        await safe_edit_text(
+            callback.message,
+            get_anatomy_locked_text(),
+            parse_mode="HTML",
+            reply_markup=get_anatomy_locked_keyboard()
+        )
         return
     await callback.answer()
     await safe_edit_text(
@@ -3785,7 +3814,7 @@ async def cb_anatomy_menu(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("anatomy_section:"))
 async def cb_anatomy_section(callback: CallbackQuery):
     if not anatomy_access_ok(callback.from_user.id):
-        await callback.answer("Раздел пока в разработке", show_alert=True)
+        await callback.answer("🦴 Анатомия ещё в разработке. Доступна по подписке «Год» (899₽/899⭐) или «6 лет» (2499₽/2499⭐) 💎", show_alert=True)
         return
     section_key = callback.data.split(":")[1]
     section = ANATOMY.get(section_key)
@@ -3803,7 +3832,7 @@ async def cb_anatomy_section(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("anatomy_topic:"))
 async def cb_anatomy_topic(callback: CallbackQuery):
     if not anatomy_access_ok(callback.from_user.id):
-        await callback.answer("Раздел пока в разработке", show_alert=True)
+        await callback.answer("🦴 Анатомия ещё в разработке. Доступна по подписке «Год» (899₽/899⭐) или «6 лет» (2499₽/2499⭐) 💎", show_alert=True)
         return
     topic_key = callback.data.split(":")[1]
     topic = get_anatomy_topic_data(topic_key)
@@ -3825,7 +3854,7 @@ async def cb_anatomy_topic(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("anatomy_bones:"))
 async def cb_anatomy_bones(callback: CallbackQuery):
     if not anatomy_access_ok(callback.from_user.id):
-        await callback.answer("Раздел пока в разработке", show_alert=True)
+        await callback.answer("🦴 Анатомия ещё в разработке. Доступна по подписке «Год» (899₽/899⭐) или «6 лет» (2499₽/2499⭐) 💎", show_alert=True)
         return
     topic_key = callback.data.split(":")[1]
     topic = get_anatomy_topic_data(topic_key)
@@ -3843,7 +3872,7 @@ async def cb_anatomy_bones(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("anatomy_bone_hub:"))
 async def cb_anatomy_bone_hub(callback: CallbackQuery):
     if not anatomy_access_ok(callback.from_user.id):
-        await callback.answer("Раздел пока в разработке", show_alert=True)
+        await callback.answer("🦴 Анатомия ещё в разработке. Доступна по подписке «Год» (899₽/899⭐) или «6 лет» (2499₽/2499⭐) 💎", show_alert=True)
         return
     _, topic_key, bone_id = callback.data.split(":")
     topic = get_anatomy_topic_data(topic_key)
@@ -3861,7 +3890,7 @@ async def cb_anatomy_bone_hub(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("anatomy_bone_material:"))
 async def cb_anatomy_bone_material(callback: CallbackQuery):
     if not anatomy_access_ok(callback.from_user.id):
-        await callback.answer("Раздел пока в разработке", show_alert=True)
+        await callback.answer("🦴 Анатомия ещё в разработке. Доступна по подписке «Год» (899₽/899⭐) или «6 лет» (2499₽/2499⭐) 💎", show_alert=True)
         return
     _, topic_key, bone_id, idx_s = callback.data.split(":")
     idx = int(idx_s)
@@ -3880,7 +3909,7 @@ async def cb_anatomy_bone_material(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("anatomy_bone_img:"))
 async def cb_anatomy_bone_img(callback: CallbackQuery):
     if not anatomy_access_ok(callback.from_user.id):
-        await callback.answer("Раздел пока в разработке", show_alert=True)
+        await callback.answer("🦴 Анатомия ещё в разработке. Доступна по подписке «Год» (899₽/899⭐) или «6 лет» (2499₽/2499⭐) 💎", show_alert=True)
         return
     _, topic_key, bone_id, idx_s = callback.data.split(":")
     idx = int(idx_s)
@@ -3894,7 +3923,7 @@ async def cb_anatomy_bone_img(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("anatomy_bone_flash_start:"))
 async def cb_anatomy_bone_flash_start(callback: CallbackQuery):
     if not anatomy_access_ok(callback.from_user.id):
-        await callback.answer("Раздел пока в разработке", show_alert=True)
+        await callback.answer("🦴 Анатомия ещё в разработке. Доступна по подписке «Год» (899₽/899⭐) или «6 лет» (2499₽/2499⭐) 💎", show_alert=True)
         return
     _, topic_key, bone_id = callback.data.split(":")
     topic = get_anatomy_topic_data(topic_key)
@@ -3908,7 +3937,7 @@ async def cb_anatomy_bone_flash_start(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("anatomy_bone_match_start:"))
 async def cb_anatomy_bone_match_start(callback: CallbackQuery):
     if not anatomy_access_ok(callback.from_user.id):
-        await callback.answer("Раздел пока в разработке", show_alert=True)
+        await callback.answer("🦴 Анатомия ещё в разработке. Доступна по подписке «Год» (899₽/899⭐) или «6 лет» (2499₽/2499⭐) 💎", show_alert=True)
         return
     _, topic_key, bone_id = callback.data.split(":")
     topic = get_anatomy_topic_data(topic_key)
@@ -3922,7 +3951,7 @@ async def cb_anatomy_bone_match_start(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("anatomy_bone_mnemonics:"))
 async def cb_anatomy_bone_mnemonics(callback: CallbackQuery):
     if not anatomy_access_ok(callback.from_user.id):
-        await callback.answer("Раздел пока в разработке", show_alert=True)
+        await callback.answer("🦴 Анатомия ещё в разработке. Доступна по подписке «Год» (899₽/899⭐) или «6 лет» (2499₽/2499⭐) 💎", show_alert=True)
         return
     _, topic_key, bone_id, idx_s = callback.data.split(":")
     idx = int(idx_s)
@@ -3941,7 +3970,7 @@ async def cb_anatomy_bone_mnemonics(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("anatomy_material_list:"))
 async def cb_anatomy_material_list(callback: CallbackQuery):
     if not anatomy_access_ok(callback.from_user.id):
-        await callback.answer("Раздел пока в разработке", show_alert=True)
+        await callback.answer("🦴 Анатомия ещё в разработке. Доступна по подписке «Год» (899₽/899⭐) или «6 лет» (2499₽/2499⭐) 💎", show_alert=True)
         return
     await callback.answer()
     topic_key = callback.data.split(":")[1]
@@ -3956,7 +3985,7 @@ async def cb_anatomy_material_list(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("anatomy_material:"))
 async def cb_anatomy_material(callback: CallbackQuery):
     if not anatomy_access_ok(callback.from_user.id):
-        await callback.answer("Раздел пока в разработке", show_alert=True)
+        await callback.answer("🦴 Анатомия ещё в разработке. Доступна по подписке «Год» (899₽/899⭐) или «6 лет» (2499₽/2499⭐) 💎", show_alert=True)
         return
     _, topic_key, idx_s = callback.data.split(":")
     idx = int(idx_s)
@@ -3975,7 +4004,7 @@ async def cb_anatomy_material(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("anatomy_flash_start:"))
 async def cb_anatomy_flash_start(callback: CallbackQuery):
     if not anatomy_access_ok(callback.from_user.id):
-        await callback.answer("Раздел пока в разработке", show_alert=True)
+        await callback.answer("🦴 Анатомия ещё в разработке. Доступна по подписке «Год» (899₽/899⭐) или «6 лет» (2499₽/2499⭐) 💎", show_alert=True)
         return
     topic_key = callback.data.split(":")[1]
     topic = get_anatomy_topic_data(topic_key)
@@ -4022,7 +4051,7 @@ async def cb_anatomy_flash_stop(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("anatomy_match_start:"))
 async def cb_anatomy_match_start(callback: CallbackQuery):
     if not anatomy_access_ok(callback.from_user.id):
-        await callback.answer("Раздел пока в разработке", show_alert=True)
+        await callback.answer("🦴 Анатомия ещё в разработке. Доступна по подписке «Год» (899₽/899⭐) или «6 лет» (2499₽/2499⭐) 💎", show_alert=True)
         return
     topic_key = callback.data.split(":")[1]
     topic = get_anatomy_topic_data(topic_key)
@@ -4064,7 +4093,7 @@ async def cb_anatomy_match_stop(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("anatomy_mnemonics:"))
 async def cb_anatomy_mnemonics(callback: CallbackQuery):
     if not anatomy_access_ok(callback.from_user.id):
-        await callback.answer("Раздел пока в разработке", show_alert=True)
+        await callback.answer("🦴 Анатомия ещё в разработке. Доступна по подписке «Год» (899₽/899⭐) или «6 лет» (2499₽/2499⭐) 💎", show_alert=True)
         return
     _, topic_key, idx_s = callback.data.split(":")
     idx = int(idx_s)
@@ -4083,7 +4112,7 @@ async def cb_anatomy_mnemonics(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("anatomy_picture:"))
 async def cb_anatomy_picture(callback: CallbackQuery):
     if not anatomy_access_ok(callback.from_user.id):
-        await callback.answer("Раздел пока в разработке", show_alert=True)
+        await callback.answer("🦴 Анатомия ещё в разработке. Доступна по подписке «Год» (899₽/899⭐) или «6 лет» (2499₽/2499⭐) 💎", show_alert=True)
         return
     await callback.answer()
     topic_key = callback.data.split(":")[1]
