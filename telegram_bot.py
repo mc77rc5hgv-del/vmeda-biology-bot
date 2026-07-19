@@ -3608,7 +3608,7 @@ def get_anatomy_topic_keyboard(topic_key: str):
     topic = get_anatomy_topic_data(topic_key)
     builder = InlineKeyboardBuilder()
     if topic and topic.get("bones_list"):
-        builder.button(text="🦴 Кости черепа (по каждой кости)", callback_data=f"anatomy_bones:{topic_key}")
+        builder.button(text="🦴 Разбор по каждой кости", callback_data=f"anatomy_bones:{topic_key}")
     builder.button(text="📖 Весь материал подряд", callback_data=f"anatomy_material:{topic_key}:0")
     builder.button(text="🎴 Флэш-карточки (все)", callback_data=f"anatomy_flash_start:{topic_key}")
     builder.button(text="🔗 Сопоставление (все)", callback_data=f"anatomy_match_start:{topic_key}")
