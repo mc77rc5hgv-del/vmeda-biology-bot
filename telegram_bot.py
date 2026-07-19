@@ -95,6 +95,7 @@ def load_stats() -> dict:
             data.setdefault("donor_stars", {})
             data.setdefault("donor_rubles", {})
             data.setdefault("donor_hide_name", {})
+            data.setdefault("temporary_access", {})
             return data
         except (json.JSONDecodeError, OSError):
             logger.exception("Не удалось прочитать %s, статистика будет создана заново", STATS_FILE)
@@ -119,6 +120,7 @@ def load_stats() -> dict:
         "donor_stars": {},
         "donor_rubles": {},
         "donor_hide_name": {},
+        "temporary_access": {},
     }
 
 # Один воркер сериализует записи на диск и не даёт им блокировать event loop бота.
@@ -191,6 +193,7 @@ BOT_USERNAME = "VMEDA_examen_bot"
 REFERRAL_FULL_ACCESS_THRESHOLD = 2  # столько рефералов нужно, чтобы открыть доступ навсегда
 REFERRAL_WARNING_THRESHOLD = 3  # столько предупреждений даём, прежде чем закрыть доступ
 REFERRAL_WARNING_COOLDOWN_SECONDS = 4 * 60 * 60  # не чаще одного предупреждения раз в 4 часа
+TEMP_ACCESS_GRANT_SECONDS = 7 * 24 * 60 * 60  # длительность временного восстановления доступа
 
 def get_referral_link(user_id: int) -> str:
     return f"https://t.me/{BOT_USERNAME}?start=ref_{user_id}"
@@ -198,12 +201,26 @@ def get_referral_link(user_id: int) -> str:
 def get_referral_count(user_id: int) -> int:
     return len(stats["referrals"].get(str(user_id), []))
 
+def get_temp_access_expiry(user_id: int) -> float:
+    return stats["temporary_access"].get(str(user_id), 0)
+
+def has_temp_access(user_id: int) -> bool:
+    return time.time() < get_temp_access_expiry(user_id)
+
 def has_free_access(user_id: int) -> bool:
     return (
         is_admin(user_id)
         or get_referral_count(user_id) >= REFERRAL_FULL_ACCESS_THRESHOLD
         or user_id in stats["manual_access_granted"]
+        or has_temp_access(user_id)
     )
+
+def get_exhausted_users() -> list:
+    """ID пользователей, у которых счётчик предупреждений достиг порога и до сих пор нет доступа."""
+    return [
+        int(uid_str) for uid_str, entry in stats["referral_warnings"].items()
+        if entry.get("count", 0) >= REFERRAL_WARNING_THRESHOLD and not has_free_access(int(uid_str))
+    ]
 
 def get_referral_status_text(user_id: int) -> str:
     count = get_referral_count(user_id)
@@ -217,6 +234,16 @@ def get_referral_status_text(user_id: int) -> str:
             "⚔️ А ещё сейчас можно побороться за призы в <b>битве рефералов</b> — "
             "приглашай друзей дальше и попади в топ-3!\n\n"
             f"Твоя ссылка (можно приглашать ещё):\n{link}"
+        )
+    if has_temp_access(user_id):
+        remaining = format_time_left(get_temp_access_expiry(user_id) - time.time())
+        return (
+            f"👥 <b>Твои приглашения</b>\n{DIVIDER}\n\n"
+            f"🎁 Тебе временно открыт полный доступ ко всем разделам бота — осталось "
+            f"<b>{remaining}</b>.\n\n"
+            f"Приглашено друзей: <b>{count}</b> из {REFERRAL_FULL_ACCESS_THRESHOLD}\n\n"
+            "Пригласи друзей уже сейчас, чтобы доступ остался открытым и после окончания "
+            f"временного периода:\n{link}"
         )
     warn_count = stats["referral_warnings"].get(str(user_id), {}).get("count", 0)
     remaining_free = max(REFERRAL_WARNING_THRESHOLD - warn_count, 0)
@@ -393,13 +420,16 @@ def get_battle_text(user_id: int) -> str:
     lines.append(f"Твоя ссылка:\n{get_referral_link(user_id)}")
     return "\n".join(lines)
 
-async def _broadcast(text: str, keyboard=None) -> None:
-    for user_id in list(stats["total_users"]):
+async def _broadcast_to(user_ids, text: str, keyboard=None) -> None:
+    for user_id in list(user_ids):
         try:
             await bot.send_message(user_id, text, parse_mode="HTML", reply_markup=keyboard, disable_web_page_preview=True)
         except Exception:
             logger.exception("Не удалось отправить рассылку пользователю %s", user_id)
         await asyncio.sleep(0.05)
+
+async def _broadcast(text: str, keyboard=None) -> None:
+    await _broadcast_to(stats["total_users"], text, keyboard)
 
 async def announce_battle_start() -> None:
     builder = InlineKeyboardBuilder()
@@ -439,6 +469,21 @@ def get_battle_remind_broadcast_text() -> str:
         lines.append("")
     lines.append("Успей попасть в топ — жми «👥 Пригласить друзей» в главном меню и забирай свою ссылку!")
     return "\n".join(lines)
+
+def get_access_restored_broadcast_text() -> str:
+    return (
+        "🎁 <b>Тебе восстановлен доступ!</b>\n"
+        f"{DIVIDER}\n\n"
+        "Мы заметили, что у тебя закончились бесплатные заходы в разделы Биология, Физика и Химия "
+        "без приглашения друзей.\n\n"
+        "Специально для тебя доступ ко всем разделам бота открыт заново на <b>7 дней</b> — "
+        "взамен, пожалуйста, включи уведомления от бота (в Telegram: настройки чата с ботом → "
+        "уведомления), чтобы не пропустить важные новости и новые материалы.\n\n"
+        "⏳ Через 7 дней временный доступ закончится, и снова понадобится "
+        f"{REFERRAL_FULL_ACCESS_THRESHOLD} приглашённых друга, чтобы открыть доступ навсегда — "
+        "это правило не меняется и остаётся таким же для всех.\n\n"
+        "👥 Открыть доступ насовсем можно в любой момент — кнопка «Пригласить друзей» в главном меню."
+    )
 
 async def resolve_referral_battle() -> None:
     battle = stats.get("referral_battle")
@@ -1497,6 +1542,7 @@ def get_admin_menu():
     builder.button(text="⚔️ Битва рефералов", callback_data="admin_battle_menu")
     builder.button(text="💰 Записать донат рублями", callback_data="admin_donation_prompt")
     builder.button(text="📣 Анонс раздела поддержки", callback_data="admin_announce_support_confirm")
+    builder.button(text="🎁 Восстановить доступ исчерпавшим (7 дней)", callback_data="admin_restore_access_confirm")
     builder.button(text="📤 Опубликовать пост в канал", callback_data="admin_channel_post_prompt")
     builder.adjust(1)
     return builder.as_markup()
@@ -1727,6 +1773,53 @@ async def cb_admin_battle_remind_go(callback: CallbackQuery):
         reply_markup=get_admin_back_keyboard()
     )
 
+@dp.callback_query(F.data == "admin_restore_access_confirm")
+async def cb_admin_restore_access_confirm(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    cohort = get_exhausted_users()
+    if not cohort:
+        await callback.answer("Сейчас нет пользователей с исчерпанным доступом", show_alert=True)
+        return
+    await callback.answer()
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Восстановить и отправить", callback_data="admin_restore_access_go")
+    builder.button(text="❌ Отмена", callback_data="admin_panel")
+    builder.adjust(1)
+    preview = (
+        f"👀 <b>Предпросмотр рассылки</b>\n{DIVIDER}\n\n"
+        f"{get_access_restored_broadcast_text()}\n\n{DIVIDER}\n"
+        f"Доступ будет восстановлен на 7 дней и рассылка отправлена {len(cohort)} пользователям, "
+        "у которых закончились бесплатные заходы без рефералов.\n"
+        "Правило с рефералами для остальных пользователей не изменится."
+    )
+    await safe_edit_text(callback.message, preview, parse_mode="HTML", reply_markup=builder.as_markup())
+
+@dp.callback_query(F.data == "admin_restore_access_go")
+async def cb_admin_restore_access_go(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    cohort = get_exhausted_users()
+    if not cohort:
+        await callback.answer("Сейчас нет пользователей с исчерпанным доступом", show_alert=True)
+        return
+    await callback.answer("🎁 Восстанавливаю доступ и отправляю рассылку!", show_alert=True)
+    expiry = time.time() + TEMP_ACCESS_GRANT_SECONDS
+    for uid in cohort:
+        stats["temporary_access"][str(uid)] = expiry
+    stats["broadcast_count"] = stats.get("broadcast_count", 0) + 1
+    save_stats()
+    await _broadcast_to(cohort, get_access_restored_broadcast_text())
+    await safe_edit_text(
+        callback.message,
+        f"✅ Доступ восстановлен на 7 дней, рассылка отправлена (попытка охватить {len(cohort)} пользователей).\n\n"
+        "Правило с рефералами (2 друга для доступа навсегда) для остальных не изменилось.",
+        parse_mode="HTML",
+        reply_markup=get_admin_back_keyboard()
+    )
+
 @dp.callback_query(F.data == "admin_stats")
 async def cb_admin_stats(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
@@ -1734,10 +1827,7 @@ async def cb_admin_stats(callback: CallbackQuery):
         return
     await callback.answer()
     total_referrals = sum(len(v) for v in stats["referrals"].values())
-    exhausted_free_uses = sum(
-        1 for uid_str, entry in stats["referral_warnings"].items()
-        if entry.get("count", 0) >= REFERRAL_WARNING_THRESHOLD and not has_free_access(int(uid_str))
-    )
+    exhausted_free_uses = len(get_exhausted_users())
     text = (
         f"📊 <b>Статистика бота</b>\n{DIVIDER}\n\n"
         f"👥 Уникальных пользователей: <b>{len(stats['total_users'])}</b>\n"
