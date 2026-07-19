@@ -1734,6 +1734,10 @@ async def cb_admin_stats(callback: CallbackQuery):
         return
     await callback.answer()
     total_referrals = sum(len(v) for v in stats["referrals"].values())
+    exhausted_free_uses = sum(
+        1 for uid_str, entry in stats["referral_warnings"].items()
+        if entry.get("count", 0) >= REFERRAL_WARNING_THRESHOLD and not has_free_access(int(uid_str))
+    )
     text = (
         f"📊 <b>Статистика бота</b>\n{DIVIDER}\n\n"
         f"👥 Уникальных пользователей: <b>{len(stats['total_users'])}</b>\n"
@@ -1744,6 +1748,7 @@ async def cb_admin_stats(callback: CallbackQuery):
         f"📢 Рассылок отправлено: <b>{stats.get('broadcast_count', 0)}</b>\n"
         f"🔗 Всего рефералов: <b>{total_referrals}</b>\n"
         f"🔓 Ручных доступов выдано: <b>{len(stats['manual_access_granted'])}</b>\n"
+        f"🚫 Исчерпали бесплатные заходы без рефералов: <b>{exhausted_free_uses}</b>\n"
         f"🪪 Известно username: <b>{len(stats['usernames'])}</b>"
     )
     await safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=get_admin_back_keyboard())
