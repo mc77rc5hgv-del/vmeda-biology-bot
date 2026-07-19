@@ -1778,12 +1778,12 @@ def get_admin_menu():
     builder = InlineKeyboardBuilder()
     builder.button(text="📊 Статистика", callback_data="admin_stats")
     builder.button(text="👥 Список пользователей", callback_data="admin_userlist:0")
-    builder.button(text="🔓 Дать доступ по username", callback_data="admin_grant_prompt")
-    builder.button(text="🚫 Отозвать доступ по username", callback_data="admin_revoke_prompt")
+    builder.button(text="🔓 Дать доступ по username/ID", callback_data="admin_grant_prompt")
+    builder.button(text="🚫 Отозвать доступ по username/ID", callback_data="admin_revoke_prompt")
     builder.button(text="✉️ Написать пользователю", callback_data="admin_dm_prompt")
     builder.button(text="⚔️ Битва рефералов", callback_data="admin_battle_menu")
     builder.button(text="💰 Записать донат рублями", callback_data="admin_donation_prompt")
-    builder.button(text="💎 Выдать подписку по username", callback_data="admin_subscription_prompt")
+    builder.button(text="💎 Выдать подписку по username/ID", callback_data="admin_subscription_prompt")
     builder.button(text="📣 Оповещение о подписке", callback_data="admin_announce_subscription_confirm")
     builder.button(text="📣 Анонс раздела поддержки", callback_data="admin_announce_support_confirm")
     builder.button(text="🎁 Восстановить доступ исчерпавшим (7 дней)", callback_data="admin_restore_access_confirm")
@@ -1838,8 +1838,21 @@ def get_admin_back_keyboard():
     return builder.as_markup()
 
 def resolve_user_by_username(raw: str):
-    username = raw.strip().lstrip("@").lower()
+    """Резолвит введённый админом идентификатор — username (с @ или без) или
+    числовой Telegram ID — в (username_или_None, target_id_или_None). ID должен
+    принадлежать пользователю, который уже писал боту. username может быть None,
+    если пользователь найден по ID, но своего username у него нет."""
+    identifier = raw.strip().lstrip("@")
+    if identifier.isdigit():
+        user_id = int(identifier)
+        if user_id in stats["total_users"]:
+            return stats["user_username"].get(str(user_id)), user_id
+        return None, None
+    username = identifier.lower()
     return username, stats["usernames"].get(username)
+
+def format_admin_target_label(username, target_id: int) -> str:
+    return f"@{username} (ID {target_id})" if username else f"ID {target_id}"
 
 def format_user_line(user_id: int) -> str:
     uid_str = str(user_id)
@@ -2165,7 +2178,8 @@ async def cb_admin_grant_prompt(callback: CallbackQuery):
     ADMIN_PENDING[callback.from_user.id] = {"action": "grant"}
     await safe_edit_text(
         callback.message,
-        "🔓 <b>Выдать доступ по username</b>\n\nОтправь username пользователя (с @ или без), например: <code>@ivanov</code>",
+        "🔓 <b>Выдать доступ</b>\n\nОтправь username пользователя (с @ или без, например <code>@ivanov</code>) "
+        "или его числовой ID",
         parse_mode="HTML",
         reply_markup=get_admin_back_keyboard()
     )
@@ -2179,7 +2193,7 @@ async def cb_admin_revoke_prompt(callback: CallbackQuery):
     ADMIN_PENDING[callback.from_user.id] = {"action": "revoke"}
     await safe_edit_text(
         callback.message,
-        "🚫 <b>Отозвать ручной доступ по username</b>\n\nОтправь username пользователя (с @ или без)",
+        "🚫 <b>Отозвать ручной доступ</b>\n\nОтправь username пользователя (с @ или без) или его числовой ID",
         parse_mode="HTML",
         reply_markup=get_admin_back_keyboard()
     )
@@ -2193,7 +2207,8 @@ async def cb_admin_dm_prompt(callback: CallbackQuery):
     ADMIN_PENDING[callback.from_user.id] = {"action": "dm_username"}
     await safe_edit_text(
         callback.message,
-        "✉️ <b>Личное сообщение по username</b>\n\nОтправь username пользователя (с @ или без)",
+        "✉️ <b>Личное сообщение</b>\n\nОтправь username пользователя (с @ или без) или его числовой ID "
+        "— например, из «👥 Список пользователей»",
         parse_mode="HTML",
         reply_markup=get_admin_back_keyboard()
     )
@@ -2210,7 +2225,7 @@ async def cb_admin_donation_prompt(callback: CallbackQuery):
         "💰 <b>Записать пожертвование рублями</b>\n\n"
         "Переводы в рублях идут напрямую в чат с @vmeda_helper, бот их не видит — "
         "запиши сюда вручную, чтобы человек попал в рейтинг донатеров.\n\n"
-        "Отправь username пользователя (с @ или без)",
+        "Отправь username пользователя (с @ или без) или его числовой ID",
         parse_mode="HTML",
         reply_markup=get_admin_back_keyboard()
     )
@@ -2224,10 +2239,10 @@ async def cb_admin_subscription_prompt(callback: CallbackQuery):
     ADMIN_PENDING[callback.from_user.id] = {"action": "record_subscription_username"}
     await safe_edit_text(
         callback.message,
-        "💎 <b>Выдать подписку по username</b>\n\n"
+        "💎 <b>Выдать подписку</b>\n\n"
         "Для оплат рублями (перевод в чате с @vmeda_helper) подписку нужно включить вручную "
         "после подтверждения оплаты.\n\n"
-        "Отправь username пользователя (с @ или без)",
+        "Отправь username пользователя (с @ или без) или его числовой ID",
         parse_mode="HTML",
         reply_markup=get_admin_back_keyboard()
     )
@@ -2372,21 +2387,33 @@ async def handle_admin_pending_action(message: Message):
     action = pending["action"]
 
     if action in ("grant", "revoke", "dm_username", "record_donation_username", "record_subscription_username"):
-        username, target_id = resolve_user_by_username(message.text)
+        raw_input = message.text.strip()
+        username, target_id = resolve_user_by_username(raw_input)
         if not target_id:
-            await message.answer(
-                f"⚠️ Пользователь @{username} не найден — он ещё не писал боту, либо сменил username.\n"
-                "Попробуй ещё раз или вернись в /admin.",
-                parse_mode="HTML"
-            )
+            identifier = raw_input.lstrip("@")
+            if identifier.isdigit():
+                await message.answer(
+                    f"⚠️ Пользователь с ID <code>{identifier}</code> не найден — он ещё не писал боту.\n"
+                    "Попробуй ещё раз или вернись в /admin.",
+                    parse_mode="HTML"
+                )
+            else:
+                await message.answer(
+                    f"⚠️ Пользователь @{identifier} не найден — он ещё не писал боту, либо сменил username. "
+                    "Можно также ввести его числовой ID.\n"
+                    "Попробуй ещё раз или вернись в /admin.",
+                    parse_mode="HTML"
+                )
             return
+
+        label = format_admin_target_label(username, target_id)
 
         if action == "grant":
             if target_id not in stats["manual_access_granted"]:
                 stats["manual_access_granted"].append(target_id)
                 save_stats()
             del ADMIN_PENDING[admin_id]
-            await message.answer(f"✅ Доступ выдан @{username} (ID {target_id}).", parse_mode="HTML")
+            await message.answer(f"✅ Доступ выдан {label}.", parse_mode="HTML")
             try:
                 await bot.send_message(
                     target_id,
@@ -2402,33 +2429,33 @@ async def handle_admin_pending_action(message: Message):
                 save_stats()
             del ADMIN_PENDING[admin_id]
             await message.answer(
-                f"✅ Ручной доступ для @{username} (ID {target_id}) отозван.\n"
+                f"✅ Ручной доступ для {label} отозван.\n"
                 "Если у пользователя уже есть свои рефералы, доступ всё равно останется открытым.",
                 parse_mode="HTML"
             )
 
         elif action == "dm_username":
-            ADMIN_PENDING[admin_id] = {"action": "dm_message", "target_id": target_id, "target_username": username}
-            await message.answer(f"✅ Нашёл @{username} (ID {target_id}). Теперь отправь текст сообщения для него.", parse_mode="HTML")
+            ADMIN_PENDING[admin_id] = {"action": "dm_message", "target_id": target_id, "target_label": label}
+            await message.answer(f"✅ Нашёл {label}. Теперь отправь текст сообщения для него.", parse_mode="HTML")
 
         elif action == "record_donation_username":
-            ADMIN_PENDING[admin_id] = {"action": "record_donation_amount", "target_id": target_id, "target_username": username}
-            await message.answer(f"✅ Нашёл @{username} (ID {target_id}). Теперь пришли сумму в рублях (целое число).", parse_mode="HTML")
+            ADMIN_PENDING[admin_id] = {"action": "record_donation_amount", "target_id": target_id, "target_label": label}
+            await message.answer(f"✅ Нашёл {label}. Теперь пришли сумму в рублях (целое число).", parse_mode="HTML")
 
         elif action == "record_subscription_username":
-            ADMIN_PENDING[admin_id] = {"action": "record_subscription_tier", "target_id": target_id, "target_username": username}
+            ADMIN_PENDING[admin_id] = {"action": "record_subscription_tier", "target_id": target_id, "target_label": label}
             tier_lines = "\n".join(
                 f"{t} — {cfg['title']} ({cfg['price_rub']}₽)" for t, cfg in SUBSCRIPTION_TIERS.items()
             )
             await message.answer(
-                f"✅ Нашёл @{username} (ID {target_id}). Теперь пришли номер тарифа:\n\n{tier_lines}",
+                f"✅ Нашёл {label}. Теперь пришли номер тарифа:\n\n{tier_lines}",
                 parse_mode="HTML"
             )
         return
 
     if action == "record_donation_amount":
         target_id = pending["target_id"]
-        target_username = pending["target_username"]
+        target_label = pending["target_label"]
         raw = message.text.strip().replace(" ", "")
         if not raw.isdigit() or int(raw) <= 0:
             await message.answer("⚠️ Введи, пожалуйста, положительное целое число рублей.")
@@ -2438,12 +2465,12 @@ async def handle_admin_pending_action(message: Message):
         uid_str = str(target_id)
         stats["donor_rubles"][uid_str] = stats["donor_rubles"].get(uid_str, 0) + amount
         save_stats()
-        await message.answer(f"✅ Записано пожертвование {amount}₽ от @{target_username}.", parse_mode="HTML")
+        await message.answer(f"✅ Записано пожертвование {amount}₽ от {target_label}.", parse_mode="HTML")
         return
 
     if action == "record_subscription_tier":
         target_id = pending["target_id"]
-        target_username = pending["target_username"]
+        target_label = pending["target_label"]
         raw = message.text.strip()
         if not raw.isdigit() or int(raw) not in SUBSCRIPTION_TIERS:
             tier_lines = "\n".join(
@@ -2458,7 +2485,7 @@ async def handle_admin_pending_action(message: Message):
         sub = get_subscription(target_id)
         scope_label = "ко всем разделам бота" if cfg["scope"] == "all" else "к Биологии, Физике и Химии"
         await message.answer(
-            f"✅ Подписка «{cfg['title']}» выдана @{target_username} (ID {target_id}).",
+            f"✅ Подписка «{cfg['title']}» выдана {target_label}.",
             parse_mode="HTML"
         )
         try:
@@ -2475,7 +2502,7 @@ async def handle_admin_pending_action(message: Message):
 
     if action == "dm_message":
         target_id = pending["target_id"]
-        target_username = pending["target_username"]
+        target_label = pending["target_label"]
         del ADMIN_PENDING[admin_id]
         try:
             await bot.send_message(
@@ -2483,10 +2510,10 @@ async def handle_admin_pending_action(message: Message):
                 f"✉️ <b>Личное сообщение от администрации</b>\n{DIVIDER}\n\n{message.html_text}",
                 parse_mode="HTML"
             )
-            await message.answer(f"✅ Сообщение отправлено @{target_username}.", parse_mode="HTML")
+            await message.answer(f"✅ Сообщение отправлено {target_label}.", parse_mode="HTML")
         except Exception:
             logger.exception("Не удалось отправить личное сообщение пользователю %s", target_id)
-            await message.answer(f"⚠️ Не удалось отправить сообщение @{target_username} — возможно, он заблокировал бота.", parse_mode="HTML")
+            await message.answer(f"⚠️ Не удалось отправить сообщение {target_label} — возможно, он заблокировал бота.", parse_mode="HTML")
         return
 
     if action == "channel_post_text":
