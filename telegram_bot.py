@@ -240,8 +240,11 @@ SUBSCRIPTION_TIERS = {
         "price_rub": 239,
         "price_stars": 239,
         "emoji": "♾️",
+        "early_histology": True,
         "benefits": [
             "Полный доступ к Биологии, Физике и Химии — один раз и навсегда",
+            "🔬 Плюс ранний доступ к разделу Гистологии — она уже полностью готова: "
+            "препараты именно с академии, все протоколы сверены преподавателями",
             "Дешевле, чем 3 месячные подписки, а действует бессрочно",
             "Больше никогда не думать о рефералах и ограничениях",
         ],
@@ -256,7 +259,8 @@ SUBSCRIPTION_TIERS = {
         "emoji": "🚀",
         "benefits": [
             "Доступ вообще ко всем разделам бота на целый год",
-            "Плюс Анатомия и Гистология — уже сейчас, до их открытия всем остальным",
+            "Плюс Анатомия и уже полностью готовая Гистология (препараты с академии, "
+            "протоколы сверены преподавателями) — уже сейчас, до их открытия всем остальным",
             "Все новые разделы и предметы, которые добавятся в течение года — уже включены",
             "Меньше 2.5₽ в день за полную подготовку по всем предметам",
         ],
@@ -271,7 +275,8 @@ SUBSCRIPTION_TIERS = {
         "emoji": "👑",
         "benefits": [
             "Доступ ко всем разделам бота на весь срок обучения в академии",
-            "Анатомия, Гистология и все будущие разделы — сразу, без ожиданий",
+            "Анатомия и уже полностью готовая Гистология (препараты с академии, "
+            "протоколы сверены преподавателями), а также все будущие разделы — сразу, без ожиданий",
             "Один платёж на все 6 лет учёбы — и больше никаких трат на подготовку",
             "Меньше 35₽ в месяц — дешевле, чем что угодно другое",
         ],
@@ -292,12 +297,19 @@ def has_subscription_scope_all(user_id: int) -> bool:
     sub = get_subscription(user_id)
     return bool(sub) and sub.get("scope") == "all" and has_active_subscription(user_id)
 
+def has_subscription_histology_access(user_id: int) -> bool:
+    sub = get_subscription(user_id)
+    if not sub or not has_active_subscription(user_id):
+        return False
+    return sub.get("scope") == "all" or sub.get("early_histology", False)
+
 def grant_subscription(user_id: int, tier: int, method: str, price: int) -> None:
     cfg = SUBSCRIPTION_TIERS[tier]
     expires = None if cfg["duration_days"] is None else time.time() + cfg["duration_days"] * 86400
     stats["subscriptions"][str(user_id)] = {
         "tier": tier,
         "scope": cfg["scope"],
+        "early_histology": cfg.get("early_histology", False),
         "expires": expires,
         "purchased_at": time.time(),
         "method": method,
@@ -321,13 +333,20 @@ def get_exhausted_users() -> list:
         if entry.get("count", 0) >= REFERRAL_WARNING_THRESHOLD and not has_free_access(int(uid_str))
     ]
 
+def get_subscription_scope_label(sub: dict) -> str:
+    if sub.get("scope") == "all":
+        return "ко всем разделам бота"
+    if sub.get("early_histology"):
+        return "к Биологии, Физике, Химии и Гистологии"
+    return "к Биологии, Физике и Химии"
+
 def get_referral_status_text(user_id: int) -> str:
     count = get_referral_count(user_id)
     link = get_referral_link(user_id)
     if has_active_subscription(user_id):
         sub = get_subscription(user_id)
         cfg = SUBSCRIPTION_TIERS.get(sub["tier"], {})
-        scope_label = "ко всем разделам бота" if sub["scope"] == "all" else "к Биологии, Физике и Химии"
+        scope_label = get_subscription_scope_label(sub)
         return (
             f"👥 <b>Твои приглашения</b>\n{DIVIDER}\n\n"
             f"💎 У тебя активна подписка «{cfg.get('title', '')}» — доступ {scope_label}, "
@@ -1105,11 +1124,12 @@ def get_main_menu(user_id: int = None):
     builder.button(text="⚛️ Физика", callback_data="menu_physics")
     builder.button(text="🧪 Химия", callback_data="menu_chemistry")
     sub_all = user_id is not None and has_subscription_scope_all(user_id)
+    sub_histology = user_id is not None and has_subscription_histology_access(user_id)
     if ANATOMY_PUBLIC or (user_id is not None and is_admin(user_id)) or sub_all:
         label = "🦴 Анатомия" + ("" if ANATOMY_PUBLIC else (" 💎" if sub_all else " (админ)"))
         builder.button(text=label, callback_data="anatomy_menu")
-    if HISTOLOGY_PUBLIC or (user_id is not None and is_admin(user_id)) or sub_all:
-        label = "🔬 Гистология" + ("" if HISTOLOGY_PUBLIC else (" 💎" if sub_all else " (админ)"))
+    if HISTOLOGY_PUBLIC or (user_id is not None and is_admin(user_id)) or sub_histology:
+        label = "🔬 Гистология" + ("" if HISTOLOGY_PUBLIC else (" 💎" if sub_histology else " (админ)"))
         builder.button(text=label, callback_data="histology_menu")
     builder.button(text="👥 Пригласить друзей", callback_data="referral_info")
     builder.button(text="🏆 Рейтинг", callback_data="referral_leaderboard")
@@ -2549,7 +2569,7 @@ def get_my_subscription_status_block(user_id: int) -> str:
     if not sub or not has_active_subscription(user_id):
         return ""
     cfg = SUBSCRIPTION_TIERS.get(sub["tier"], {})
-    scope_label = "ко всем разделам бота" if sub["scope"] == "all" else "к Биологии, Физике и Химии"
+    scope_label = get_subscription_scope_label(sub)
     return (
         f"✅ У тебя активна подписка «{cfg.get('title', '')}»\n"
         f"Доступ {scope_label} — {format_subscription_expiry(sub['expires'])}.\n\n"
@@ -2557,6 +2577,16 @@ def get_my_subscription_status_block(user_id: int) -> str:
 
 def get_subscription_menu_text(user_id: int) -> str:
     lines = [f"💎 <b>Подписка без рефералов</b>\n{DIVIDER}\n"]
+    lines.append(
+        "⚠️ Разработка и содержание бота требуют серьёзных затрат — поэтому в дополнение "
+        "к бесплатному доступу за рефералов мы вынуждены были добавить платные подписки. "
+        "Так бот сможет и дальше жить, обновляться и получать новые разделы.\n"
+    )
+    lines.append(
+        "🔬 Раздел <b>Гистологии</b> уже полностью готов и проработан: все микрофотографии "
+        "и протоколы-описания взяты именно с препаратов академии, а содержание сверено "
+        "с преподавателями.\n"
+    )
     status = get_my_subscription_status_block(user_id)
     if status:
         lines.append(status)
@@ -4014,7 +4044,7 @@ async def cb_anatomy_picture(callback: CallbackQuery):
 HISTOLOGY_PUBLIC = False  # когда раздел будет готов для всех — переключить на True
 
 def histology_access_ok(user_id: int) -> bool:
-    return HISTOLOGY_PUBLIC or is_admin(user_id) or has_subscription_scope_all(user_id)
+    return HISTOLOGY_PUBLIC or is_admin(user_id) or has_subscription_histology_access(user_id)
 
 def get_histology_specimen(diag_key: str, spec_id: str):
     diag = HISTOLOGY.get(diag_key)
