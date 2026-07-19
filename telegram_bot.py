@@ -38,6 +38,7 @@ STATS_FILE = os.path.join(STATS_DIR, "stats.json")
 DIVIDER = "━━━━━━━━━━━━━━"
 IMAGES_DIR = "images"
 ANATOMY_IMAGES_DIR = os.path.join(IMAGES_DIR, "anatomy")
+HISTOLOGY_IMAGES_DIR = os.path.join(IMAGES_DIR, "histology")
 
 # ==================== ЗАГРУЗКА ДАННЫХ ====================
 with open("tickets.json", "r", encoding="utf-8") as f:
@@ -67,6 +68,9 @@ with open("physics_test_tickets.json", "r", encoding="utf-8") as f:
 
 with open("anatomy.json", "r", encoding="utf-8") as f:
     ANATOMY = json.load(f)
+
+with open("histology.json", "r", encoding="utf-8") as f:
+    HISTOLOGY = json.load(f)
 
 # ==================== СТАТИСТИКА (СОХРАНЯЕТСЯ НА ДИСК) ====================
 def load_stats() -> dict:
@@ -990,6 +994,8 @@ def get_main_menu(user_id: int = None):
     builder.button(text="🧪 Химия", callback_data="menu_chemistry")
     if ANATOMY_PUBLIC or (user_id is not None and is_admin(user_id)):
         builder.button(text="🦴 Анатомия" + ("" if ANATOMY_PUBLIC else " (админ)"), callback_data="anatomy_menu")
+    if HISTOLOGY_PUBLIC or (user_id is not None and is_admin(user_id)):
+        builder.button(text="🔬 Гистология" + ("" if HISTOLOGY_PUBLIC else " (админ)"), callback_data="histology_menu")
     builder.button(text="👥 Пригласить друзей", callback_data="referral_info")
     builder.button(text="🏆 Рейтинг", callback_data="referral_leaderboard")
     battle_label = "⚔️ Битва рефералов 🔥" if is_battle_active() else "⚔️ Битва рефералов"
@@ -3644,6 +3650,155 @@ async def cb_anatomy_picture(callback: CallbackQuery):
         parse_mode="HTML",
         reply_markup=builder.as_markup()
     )
+
+# ==================== ГИСТОЛОГИЯ ====================
+HISTOLOGY_PUBLIC = False  # когда раздел будет готов для всех — переключить на True
+
+def histology_access_ok(user_id: int) -> bool:
+    return HISTOLOGY_PUBLIC or is_admin(user_id)
+
+def get_histology_specimen(diag_key: str, spec_id: str):
+    diag = HISTOLOGY.get(diag_key)
+    if not diag:
+        return None
+    for spec in diag["specimens"]:
+        if spec["id"] == spec_id:
+            return spec
+    return None
+
+def get_histology_menu_keyboard():
+    builder = InlineKeyboardBuilder()
+    for diag_key, diag in HISTOLOGY.items():
+        builder.button(text=diag.get("menu_title", diag["title"]), callback_data=f"histology_topic:{diag_key}")
+    builder.adjust(1)
+    builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
+    return builder.as_markup()
+
+def get_histology_topic_text(diag_key: str) -> str:
+    diag = HISTOLOGY[diag_key]
+    n = len(diag["specimens"])
+    total = diag.get("total_official")
+    progress = f"{n}" if not total or n >= total else f"{n} из {total}"
+    note = "" if not total or n >= total else "\n\nОстальные препараты добавим по мере поступления презентаций."
+    return (
+        f"🔬 <b>{diag['title']}</b>\n{DIVIDER}\n\n"
+        f"Препаратов доступно: <b>{progress}</b>{note}\n\n"
+        "Выбери препарат:"
+    )
+
+def get_histology_topic_keyboard(diag_key: str):
+    diag = HISTOLOGY[diag_key]
+    builder = InlineKeyboardBuilder()
+    for spec in diag["specimens"]:
+        builder.button(text=f"№{spec['number']}. {spec['title']}", callback_data=f"histology_specimen:{diag_key}:{spec['id']}")
+    builder.adjust(1)
+    builder.row(InlineKeyboardButton(text="🔙 К разделу", callback_data="histology_menu"))
+    return builder.as_markup()
+
+def get_histology_specimen_text(diag_key: str, spec_id: str) -> str:
+    spec = get_histology_specimen(diag_key, spec_id)
+    lines = [f"🔬 <b>№{spec['number']}. {spec['title']}</b>\n{DIVIDER}\n"]
+    if spec.get("stain"):
+        lines.append(f"Окраска: {spec['stain']}")
+    if spec.get("magnification"):
+        lines.append(f"Увеличение: {spec['magnification']}")
+    lines.append("")
+    lines.append(spec["protocol"] or "Протокол-описание пока не добавлено.")
+    return "\n".join(lines)
+
+def get_histology_specimen_keyboard(diag_key: str, spec_id: str):
+    spec = get_histology_specimen(diag_key, spec_id)
+    builder = InlineKeyboardBuilder()
+    n_img = len(spec.get("images", []))
+    if n_img:
+        builder.button(text=f"🖼 Микрофото ({n_img})", callback_data=f"histology_img:{diag_key}:{spec_id}:0")
+    builder.adjust(1)
+    builder.row(InlineKeyboardButton(text="🔙 К списку препаратов", callback_data=f"histology_topic:{diag_key}"))
+    return builder.as_markup()
+
+def get_histology_image_keyboard(diag_key: str, spec_id: str, idx: int, total: int):
+    builder = InlineKeyboardBuilder()
+    nav = []
+    if idx > 0:
+        nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"histology_img:{diag_key}:{spec_id}:{idx-1}"))
+    if idx < total - 1:
+        nav.append(InlineKeyboardButton(text="➡️", callback_data=f"histology_img:{diag_key}:{spec_id}:{idx+1}"))
+    if nav:
+        builder.row(*nav)
+    builder.row(InlineKeyboardButton(text="🔙 К препарату", callback_data=f"histology_specimen:{diag_key}:{spec_id}"))
+    return builder.as_markup()
+
+async def render_histology_image(callback: CallbackQuery, diag_key: str, spec_id: str, idx: int):
+    spec = get_histology_specimen(diag_key, spec_id)
+    images = spec.get("images", [])
+    caption = f"🔬 №{spec['number']}. {spec['title']}\n\n{idx + 1}/{len(images)}"
+    keyboard = get_histology_image_keyboard(diag_key, spec_id, idx, len(images))
+    photo = FSInputFile(os.path.join(HISTOLOGY_IMAGES_DIR, images[idx]))
+    await callback.message.delete()
+    await callback.message.answer_photo(photo, caption=caption, reply_markup=keyboard)
+
+@dp.callback_query(F.data == "histology_menu")
+async def cb_histology_menu(callback: CallbackQuery):
+    if not histology_access_ok(callback.from_user.id):
+        await callback.answer("Раздел пока в разработке", show_alert=True)
+        return
+    await callback.answer()
+    await safe_edit_text(
+        callback.message,
+        f"🔬 <b>Гистология</b>\n{DIVIDER}\n\nВыбери диагностику:",
+        parse_mode="HTML",
+        reply_markup=get_histology_menu_keyboard()
+    )
+
+@dp.callback_query(F.data.startswith("histology_topic:"))
+async def cb_histology_topic(callback: CallbackQuery):
+    if not histology_access_ok(callback.from_user.id):
+        await callback.answer("Раздел пока в разработке", show_alert=True)
+        return
+    diag_key = callback.data.split(":")[1]
+    if diag_key not in HISTOLOGY:
+        await callback.answer("Раздел не найден", show_alert=True)
+        return
+    await callback.answer()
+    await safe_edit_text(
+        callback.message,
+        get_histology_topic_text(diag_key),
+        parse_mode="HTML",
+        reply_markup=get_histology_topic_keyboard(diag_key)
+    )
+
+@dp.callback_query(F.data.startswith("histology_specimen:"))
+async def cb_histology_specimen(callback: CallbackQuery):
+    if not histology_access_ok(callback.from_user.id):
+        await callback.answer("Раздел пока в разработке", show_alert=True)
+        return
+    _, diag_key, spec_id = callback.data.split(":")
+    spec = get_histology_specimen(diag_key, spec_id)
+    if not spec:
+        await callback.answer("Препарат не найден", show_alert=True)
+        return
+    await callback.answer()
+    await safe_edit_text(
+        callback.message,
+        get_histology_specimen_text(diag_key, spec_id),
+        parse_mode="HTML",
+        reply_markup=get_histology_specimen_keyboard(diag_key, spec_id)
+    )
+
+@dp.callback_query(F.data.startswith("histology_img:"))
+async def cb_histology_img(callback: CallbackQuery):
+    if not histology_access_ok(callback.from_user.id):
+        await callback.answer("Раздел пока в разработке", show_alert=True)
+        return
+    _, diag_key, spec_id, idx_s = callback.data.split(":")
+    idx = int(idx_s)
+    spec = get_histology_specimen(diag_key, spec_id)
+    images = spec.get("images", []) if spec else []
+    if not images or not (0 <= idx < len(images)):
+        await callback.answer("Фото для этого препарата пока нет", show_alert=True)
+        return
+    await callback.answer()
+    await render_histology_image(callback, diag_key, spec_id, idx)
 
 # ==================== ЗАПУСК ====================
 async def setup_bot_commands() -> None:
