@@ -100,6 +100,7 @@ def load_stats() -> dict:
             data.setdefault("donor_rubles", {})
             data.setdefault("donor_hide_name", {})
             data.setdefault("temporary_access", {})
+            data.setdefault("subscriptions", {})
             return data
         except (json.JSONDecodeError, OSError):
             logger.exception("Не удалось прочитать %s, статистика будет создана заново", STATS_FILE)
@@ -125,6 +126,7 @@ def load_stats() -> dict:
         "donor_rubles": {},
         "donor_hide_name": {},
         "temporary_access": {},
+        "subscriptions": {},
     }
 
 # Один воркер сериализует записи на диск и не даёт им блокировать event loop бота.
@@ -211,12 +213,105 @@ def get_temp_access_expiry(user_id: int) -> float:
 def has_temp_access(user_id: int) -> bool:
     return time.time() < get_temp_access_expiry(user_id)
 
+# ==================== ПЛАТНАЯ ПОДПИСКА ====================
+# scope "gated" — только Биология/Физика/Химия (то, что вообще закрывает реферальный гейт).
+# scope "all"  — то же плюс досрочный доступ к Анатомии/Гистологии и любым новым разделам,
+# которые появятся, пока подписка активна (даже если раздел ещё не открыт всем через *_PUBLIC).
+SUBSCRIPTION_TIERS = {
+    1: {
+        "title": "Месяц — Биология, Физика, Химия",
+        "short": "1 месяц, 3 экзамена",
+        "scope": "gated",
+        "duration_days": 30,
+        "price_rub": 79,
+        "price_stars": 79,
+        "emoji": "🔓",
+        "benefits": [
+            "Полный доступ к Биологии, Физике и Химии на 30 дней",
+            "Не нужно ждать и звать друзей — доступ открывается сразу после оплаты",
+            "Идеально, если экзамен уже скоро и нужно готовиться прямо сейчас",
+        ],
+    },
+    2: {
+        "title": "Навсегда — Биология, Физика, Химия",
+        "short": "навсегда, 3 экзамена",
+        "scope": "gated",
+        "duration_days": None,
+        "price_rub": 239,
+        "price_stars": 239,
+        "emoji": "♾️",
+        "benefits": [
+            "Полный доступ к Биологии, Физике и Химии — один раз и навсегда",
+            "Дешевле, чем 3 месячные подписки, а действует бессрочно",
+            "Больше никогда не думать о рефералах и ограничениях",
+        ],
+    },
+    3: {
+        "title": "Год — все экзамены",
+        "short": "1 год, все разделы",
+        "scope": "all",
+        "duration_days": 365,
+        "price_rub": 899,
+        "price_stars": 899,
+        "emoji": "🚀",
+        "benefits": [
+            "Доступ вообще ко всем разделам бота на целый год",
+            "Плюс Анатомия и Гистология — уже сейчас, до их открытия всем остальным",
+            "Все новые разделы и предметы, которые добавятся в течение года — уже включены",
+            "Меньше 2.5₽ в день за полную подготовку по всем предметам",
+        ],
+    },
+    4: {
+        "title": "6 лет — все экзамены",
+        "short": "6 лет, все разделы",
+        "scope": "all",
+        "duration_days": 6 * 365,
+        "price_rub": 2499,
+        "price_stars": 2499,
+        "emoji": "👑",
+        "benefits": [
+            "Доступ ко всем разделам бота на весь срок обучения в академии",
+            "Анатомия, Гистология и все будущие разделы — сразу, без ожиданий",
+            "Один платёж на все 6 лет учёбы — и больше никаких трат на подготовку",
+            "Меньше 35₽ в месяц — дешевле, чем что угодно другое",
+        ],
+    },
+}
+
+def get_subscription(user_id: int) -> dict:
+    return stats["subscriptions"].get(str(user_id))
+
+def has_active_subscription(user_id: int) -> bool:
+    sub = get_subscription(user_id)
+    if not sub:
+        return False
+    expires = sub.get("expires")
+    return expires is None or time.time() < expires
+
+def has_subscription_scope_all(user_id: int) -> bool:
+    sub = get_subscription(user_id)
+    return bool(sub) and sub.get("scope") == "all" and has_active_subscription(user_id)
+
+def grant_subscription(user_id: int, tier: int, method: str, price: int) -> None:
+    cfg = SUBSCRIPTION_TIERS[tier]
+    expires = None if cfg["duration_days"] is None else time.time() + cfg["duration_days"] * 86400
+    stats["subscriptions"][str(user_id)] = {
+        "tier": tier,
+        "scope": cfg["scope"],
+        "expires": expires,
+        "purchased_at": time.time(),
+        "method": method,
+        "price": price,
+    }
+    save_stats()
+
 def has_free_access(user_id: int) -> bool:
     return (
         is_admin(user_id)
         or get_referral_count(user_id) >= REFERRAL_FULL_ACCESS_THRESHOLD
         or user_id in stats["manual_access_granted"]
         or has_temp_access(user_id)
+        or has_active_subscription(user_id)
     )
 
 def get_exhausted_users() -> list:
@@ -229,6 +324,18 @@ def get_exhausted_users() -> list:
 def get_referral_status_text(user_id: int) -> str:
     count = get_referral_count(user_id)
     link = get_referral_link(user_id)
+    if has_active_subscription(user_id):
+        sub = get_subscription(user_id)
+        cfg = SUBSCRIPTION_TIERS.get(sub["tier"], {})
+        scope_label = "ко всем разделам бота" if sub["scope"] == "all" else "к Биологии, Физике и Химии"
+        return (
+            f"👥 <b>Твои приглашения</b>\n{DIVIDER}\n\n"
+            f"💎 У тебя активна подписка «{cfg.get('title', '')}» — доступ {scope_label}, "
+            f"{format_subscription_expiry(sub['expires'])}.\n\n"
+            "Рефералы тебе не нужны, но можно продолжать приглашать друзей и участвовать "
+            "в <b>битве рефералов</b> за призы!\n\n"
+            f"Твоя ссылка:\n{link}"
+        )
     if count >= REFERRAL_FULL_ACCESS_THRESHOLD or user_id in stats["manual_access_granted"]:
         extra = f"Приглашено друзей: <b>{count}</b>\n" if count > 0 else ""
         return (
@@ -268,7 +375,9 @@ def get_referral_status_text(user_id: int) -> str:
         f"{invite_line}\n\n"
         f"{link}\n\n"
         f"Приглашено друзей: <b>{count}</b> из {REFERRAL_FULL_ACCESS_THRESHOLD}\n"
-        f"Осталось бесплатных заходов без рефералов: <b>{remaining_free}</b>"
+        f"Осталось бесплатных заходов без рефералов: <b>{remaining_free}</b>\n\n"
+        "💎 Не хочешь ждать друзей? Открой доступ сразу оплатой — подписки от 79₽. "
+        "Жми «💎 Открыть доступ без рефералов» ниже."
     )
 
 RANK_MEDALS = ["🥇", "🥈", "🥉"]
@@ -654,9 +763,9 @@ async def referral_gate_middleware(handler, event: Update, data):
         try:
             if event.callback_query:
                 await event.callback_query.answer("🚨 Доступ закрыт — пригласи друзей! ‼️", show_alert=True)
-                await event.callback_query.message.answer(block_text, parse_mode="HTML")
+                await event.callback_query.message.answer(block_text, parse_mode="HTML", reply_markup=get_subscription_teaser_keyboard())
             elif event.message:
-                await event.message.answer(block_text, parse_mode="HTML")
+                await event.message.answer(block_text, parse_mode="HTML", reply_markup=get_subscription_teaser_keyboard())
         except Exception:
             logger.exception("Не удалось отправить сообщение о блокировке пользователю %s", user.id)
         return  # обработчик НЕ вызываем — доступ закрыт
@@ -678,9 +787,9 @@ async def referral_gate_middleware(handler, event: Update, data):
         )
         try:
             if event.callback_query:
-                await event.callback_query.message.answer(warn_text, parse_mode="HTML")
+                await event.callback_query.message.answer(warn_text, parse_mode="HTML", reply_markup=get_subscription_teaser_keyboard())
             elif event.message:
-                await event.message.answer(warn_text, parse_mode="HTML")
+                await event.message.answer(warn_text, parse_mode="HTML", reply_markup=get_subscription_teaser_keyboard())
         except Exception:
             logger.exception("Не удалось отправить предупреждение о реферале пользователю %s", user.id)
 
@@ -697,10 +806,12 @@ HELPER_ACCOUNT_URL = "https://t.me/vmeda_helper"
 def get_support_text() -> str:
     return (
         f"😇💰 <b>Поддержка автора</b>\n{DIVIDER}\n\n"
-        "Бот полностью бесплатный, без рекламы и платных подписок.\n\n"
+        "Бот без рекламы, а основные разделы всегда можно открыть бесплатно за рефералов.\n\n"
         "На разработку и организацию бота (хостинг, домен, работа над контентом) "
         "потрачено уже около <b>5000₽</b>, а получено с бота — <b>0₽</b>.\n\n"
-        "Если бот тебе помогает — буду очень благодарен любой поддержке! "
+        "Здесь — просто пожертвование без каких-либо условий, любая сумма. "
+        "Если хочешь вместо этого открыть доступ без рефералов — "
+        "загляни в «💎 Подписка» в главном меню.\n\n"
         "Можно звёздами Telegram или переводом в рублях — выбери, как удобнее 👇"
     )
 
@@ -719,7 +830,8 @@ def get_support_keyboard(user_id: int):
 def get_support_announcement_text() -> str:
     return (
         f"📣 <b>Новое в боте — раздел «Поддержка автора»!</b>\n{DIVIDER}\n\n"
-        "Бот бесплатный, без рекламы и подписок — но на разработку и хостинг уже "
+        "Бот без рекламы, основные разделы всегда можно открыть бесплатно за рефералов — "
+        "но на разработку и хостинг уже "
         "потрачено около <b>5000₽</b>, а получено с бота — <b>0₽</b>.\n\n"
         "Теперь его можно поддержать:\n"
         "⭐ звёздами Telegram — сумму выбираешь сам\n"
@@ -992,20 +1104,26 @@ def get_main_menu(user_id: int = None):
     builder.button(text="🧬 Биология", callback_data="menu_biology")
     builder.button(text="⚛️ Физика", callback_data="menu_physics")
     builder.button(text="🧪 Химия", callback_data="menu_chemistry")
-    if ANATOMY_PUBLIC or (user_id is not None and is_admin(user_id)):
-        builder.button(text="🦴 Анатомия" + ("" if ANATOMY_PUBLIC else " (админ)"), callback_data="anatomy_menu")
-    if HISTOLOGY_PUBLIC or (user_id is not None and is_admin(user_id)):
-        builder.button(text="🔬 Гистология" + ("" if HISTOLOGY_PUBLIC else " (админ)"), callback_data="histology_menu")
+    sub_all = user_id is not None and has_subscription_scope_all(user_id)
+    if ANATOMY_PUBLIC or (user_id is not None and is_admin(user_id)) or sub_all:
+        label = "🦴 Анатомия" + ("" if ANATOMY_PUBLIC else (" 💎" if sub_all else " (админ)"))
+        builder.button(text=label, callback_data="anatomy_menu")
+    if HISTOLOGY_PUBLIC or (user_id is not None and is_admin(user_id)) or sub_all:
+        label = "🔬 Гистология" + ("" if HISTOLOGY_PUBLIC else (" 💎" if sub_all else " (админ)"))
+        builder.button(text=label, callback_data="histology_menu")
     builder.button(text="👥 Пригласить друзей", callback_data="referral_info")
     builder.button(text="🏆 Рейтинг", callback_data="referral_leaderboard")
     battle_label = "⚔️ Битва рефералов 🔥" if is_battle_active() else "⚔️ Битва рефералов"
     builder.button(text=battle_label, callback_data="referral_battle")
+    if user_id is None or not has_free_access(user_id):
+        builder.button(text="💎 Подписка без рефералов", callback_data="subscription_menu")
     builder.button(text="😇 Поддержать автора 💰", callback_data="support_menu")
     builder.adjust(1)
     return builder.as_markup()
 
 def get_referral_back_keyboard():
     builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="💎 Открыть доступ без рефералов", callback_data="subscription_menu"))
     builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
     return builder.as_markup()
 
@@ -1547,6 +1665,7 @@ def get_admin_menu():
     builder.button(text="✉️ Написать пользователю", callback_data="admin_dm_prompt")
     builder.button(text="⚔️ Битва рефералов", callback_data="admin_battle_menu")
     builder.button(text="💰 Записать донат рублями", callback_data="admin_donation_prompt")
+    builder.button(text="💎 Выдать подписку по username", callback_data="admin_subscription_prompt")
     builder.button(text="📣 Анонс раздела поддержки", callback_data="admin_announce_support_confirm")
     builder.button(text="🎁 Восстановить доступ исчерпавшим (7 дней)", callback_data="admin_restore_access_confirm")
     builder.button(text="📤 Опубликовать пост в канал", callback_data="admin_channel_post_prompt")
@@ -1918,6 +2037,23 @@ async def cb_admin_donation_prompt(callback: CallbackQuery):
         reply_markup=get_admin_back_keyboard()
     )
 
+@dp.callback_query(F.data == "admin_subscription_prompt")
+async def cb_admin_subscription_prompt(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer()
+    ADMIN_PENDING[callback.from_user.id] = {"action": "record_subscription_username"}
+    await safe_edit_text(
+        callback.message,
+        "💎 <b>Выдать подписку по username</b>\n\n"
+        "Для оплат рублями (перевод в чате с @vmeda_helper) подписку нужно включить вручную "
+        "после подтверждения оплаты.\n\n"
+        "Отправь username пользователя (с @ или без)",
+        parse_mode="HTML",
+        reply_markup=get_admin_back_keyboard()
+    )
+
 @dp.callback_query(F.data == "admin_announce_support_confirm")
 async def cb_admin_announce_support_confirm(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
@@ -2023,7 +2159,7 @@ async def handle_admin_pending_action(message: Message):
     pending = ADMIN_PENDING[admin_id]
     action = pending["action"]
 
-    if action in ("grant", "revoke", "dm_username", "record_donation_username"):
+    if action in ("grant", "revoke", "dm_username", "record_donation_username", "record_subscription_username"):
         username, target_id = resolve_user_by_username(message.text)
         if not target_id:
             await message.answer(
@@ -2066,6 +2202,16 @@ async def handle_admin_pending_action(message: Message):
         elif action == "record_donation_username":
             ADMIN_PENDING[admin_id] = {"action": "record_donation_amount", "target_id": target_id, "target_username": username}
             await message.answer(f"✅ Нашёл @{username} (ID {target_id}). Теперь пришли сумму в рублях (целое число).", parse_mode="HTML")
+
+        elif action == "record_subscription_username":
+            ADMIN_PENDING[admin_id] = {"action": "record_subscription_tier", "target_id": target_id, "target_username": username}
+            tier_lines = "\n".join(
+                f"{t} — {cfg['title']} ({cfg['price_rub']}₽)" for t, cfg in SUBSCRIPTION_TIERS.items()
+            )
+            await message.answer(
+                f"✅ Нашёл @{username} (ID {target_id}). Теперь пришли номер тарифа:\n\n{tier_lines}",
+                parse_mode="HTML"
+            )
         return
 
     if action == "record_donation_amount":
@@ -2081,6 +2227,38 @@ async def handle_admin_pending_action(message: Message):
         stats["donor_rubles"][uid_str] = stats["donor_rubles"].get(uid_str, 0) + amount
         save_stats()
         await message.answer(f"✅ Записано пожертвование {amount}₽ от @{target_username}.", parse_mode="HTML")
+        return
+
+    if action == "record_subscription_tier":
+        target_id = pending["target_id"]
+        target_username = pending["target_username"]
+        raw = message.text.strip()
+        if not raw.isdigit() or int(raw) not in SUBSCRIPTION_TIERS:
+            tier_lines = "\n".join(
+                f"{t} — {cfg['title']}" for t, cfg in SUBSCRIPTION_TIERS.items()
+            )
+            await message.answer(f"⚠️ Введи номер тарифа из списка:\n\n{tier_lines}")
+            return
+        tier_id = int(raw)
+        cfg = SUBSCRIPTION_TIERS[tier_id]
+        del ADMIN_PENDING[admin_id]
+        grant_subscription(target_id, tier_id, "rubles", cfg["price_rub"])
+        sub = get_subscription(target_id)
+        scope_label = "ко всем разделам бота" if cfg["scope"] == "all" else "к Биологии, Физике и Химии"
+        await message.answer(
+            f"✅ Подписка «{cfg['title']}» выдана @{target_username} (ID {target_id}).",
+            parse_mode="HTML"
+        )
+        try:
+            await bot.send_message(
+                target_id,
+                f"🎉 <b>Подписка «{cfg['title']}» активирована!</b>\n\n"
+                f"Доступ {scope_label} открыт — {format_subscription_expiry(sub['expires'])}.\n"
+                "Правило про рефералов для тебя больше не действует. Спасибо за поддержку! 🙏😇",
+                parse_mode="HTML"
+            )
+        except Exception:
+            logger.exception("Не удалось уведомить пользователя %s о выдаче подписки", target_id)
         return
 
     if action == "dm_message":
@@ -2360,6 +2538,160 @@ async def cb_donate_rubles_custom(callback: CallbackQuery):
         reply_markup=builder.as_markup()
     )
 
+# ==================== ПЛАТНАЯ ПОДПИСКА (UI и оплата) ====================
+def format_subscription_expiry(expires) -> str:
+    if expires is None:
+        return "навсегда"
+    return f"до {date.fromtimestamp(expires).strftime('%d.%m.%Y')}"
+
+def get_my_subscription_status_block(user_id: int) -> str:
+    sub = get_subscription(user_id)
+    if not sub or not has_active_subscription(user_id):
+        return ""
+    cfg = SUBSCRIPTION_TIERS.get(sub["tier"], {})
+    scope_label = "ко всем разделам бота" if sub["scope"] == "all" else "к Биологии, Физике и Химии"
+    return (
+        f"✅ У тебя активна подписка «{cfg.get('title', '')}»\n"
+        f"Доступ {scope_label} — {format_subscription_expiry(sub['expires'])}.\n\n"
+    )
+
+def get_subscription_menu_text(user_id: int) -> str:
+    lines = [f"💎 <b>Подписка без рефералов</b>\n{DIVIDER}\n"]
+    status = get_my_subscription_status_block(user_id)
+    if status:
+        lines.append(status)
+    lines.append(
+        "Не хочешь ждать или звать друзей? Открой доступ сразу оплатой — без рефералов "
+        "и ограничений. Выбери вариант:\n"
+    )
+    for tier_id, cfg in SUBSCRIPTION_TIERS.items():
+        lines.append(f"{cfg['emoji']} <b>{cfg['title']}</b> — {cfg['price_rub']}₽ / {cfg['price_stars']} ⭐")
+        for b in cfg["benefits"]:
+            lines.append(f"• {b}")
+        lines.append("")
+    lines.append(
+        "После оплаты правило про рефералов для тебя больше не действует — доступ "
+        "открывается сразу и держится всё оплаченное время."
+    )
+    return "\n".join(lines)
+
+def get_subscription_menu_keyboard():
+    builder = InlineKeyboardBuilder()
+    for tier_id, cfg in SUBSCRIPTION_TIERS.items():
+        builder.button(
+            text=f"{cfg['emoji']} {cfg['short']} — {cfg['price_rub']}₽/{cfg['price_stars']}⭐",
+            callback_data=f"sub_tier:{tier_id}"
+        )
+    builder.adjust(1)
+    builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
+    return builder.as_markup()
+
+def get_sub_tier_text(tier_id: int) -> str:
+    cfg = SUBSCRIPTION_TIERS[tier_id]
+    lines = [f"{cfg['emoji']} <b>{cfg['title']}</b>\n{DIVIDER}\n"]
+    for b in cfg["benefits"]:
+        lines.append(f"• {b}")
+    lines.append(f"\nЦена: <b>{cfg['price_rub']}₽</b> или <b>{cfg['price_stars']} ⭐</b>")
+    lines.append("\nВыбери способ оплаты:")
+    return "\n".join(lines)
+
+def get_sub_tier_keyboard(tier_id: int):
+    cfg = SUBSCRIPTION_TIERS[tier_id]
+    builder = InlineKeyboardBuilder()
+    builder.button(text=f"⭐ Оплатить {cfg['price_stars']} звёзд", callback_data=f"buy_sub_stars:{tier_id}")
+    builder.button(text=f"💵 Оплатить {cfg['price_rub']}₽", callback_data=f"buy_sub_rubles:{tier_id}")
+    builder.adjust(1)
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="subscription_menu"))
+    return builder.as_markup()
+
+def get_sub_rubles_message_text(tier_id: int) -> str:
+    cfg = SUBSCRIPTION_TIERS[tier_id]
+    return (
+        f"💵 <b>Оплата подписки «{cfg['title']}» — {cfg['price_rub']}₽</b>\n{DIVIDER}\n\n"
+        f'Нажми на кнопку ниже — откроется чат с <a href="{HELPER_ACCOUNT_URL}">@vmeda_helper</a>, '
+        "сообщение с тарифом уже будет готово. Отправь его и переведи по присланным реквизитам — "
+        "как только оплата подтвердится, подписка будет включена вручную.\n\n"
+        "Спасибо, что поддерживаешь бота! 🙏"
+    )
+
+def get_sub_rubles_keyboard(tier_id: int):
+    cfg = SUBSCRIPTION_TIERS[tier_id]
+    template = (
+        f"Привет! Хочу оформить подписку «{cfg['title']}» за {cfg['price_rub']}₽ в боте "
+        "VMEDA_examen_bot. Подскажи, пожалуйста, реквизиты для перевода."
+    )
+    url = f"{HELPER_ACCOUNT_URL}?text={urllib.parse.quote(template)}"
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="💸 Написать @vmeda_helper", url=url))
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data=f"sub_tier:{tier_id}"))
+    return builder.as_markup()
+
+async def send_subscription_stars_invoice(chat_id: int, tier_id: int) -> None:
+    cfg = SUBSCRIPTION_TIERS[tier_id]
+    await bot.send_invoice(
+        chat_id=chat_id,
+        title=f"Подписка: {cfg['title']}",
+        description=f"VMEDA_examen_bot — подписка «{cfg['title']}». Доступ откроется сразу после оплаты.",
+        payload=f"sub_stars_{tier_id}_{chat_id}_{int(time.time())}",
+        provider_token="",
+        currency="XTR",
+        prices=[LabeledPrice(label=cfg["title"], amount=cfg["price_stars"])],
+    )
+
+def get_subscription_teaser_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="💎 Открыть доступ без рефералов", callback_data="subscription_menu"))
+    return builder.as_markup()
+
+@dp.callback_query(F.data == "subscription_menu")
+async def cb_subscription_menu(callback: CallbackQuery):
+    await callback.answer()
+    await safe_edit_text(
+        callback.message,
+        get_subscription_menu_text(callback.from_user.id),
+        parse_mode="HTML",
+        reply_markup=get_subscription_menu_keyboard(),
+        disable_web_page_preview=True,
+    )
+
+@dp.callback_query(F.data.startswith("sub_tier:"))
+async def cb_sub_tier(callback: CallbackQuery):
+    tier_id = int(callback.data.split(":")[1])
+    if tier_id not in SUBSCRIPTION_TIERS:
+        await callback.answer("Тариф не найден", show_alert=True)
+        return
+    await callback.answer()
+    await safe_edit_text(
+        callback.message,
+        get_sub_tier_text(tier_id),
+        parse_mode="HTML",
+        reply_markup=get_sub_tier_keyboard(tier_id)
+    )
+
+@dp.callback_query(F.data.startswith("buy_sub_stars:"))
+async def cb_buy_sub_stars(callback: CallbackQuery):
+    tier_id = int(callback.data.split(":")[1])
+    if tier_id not in SUBSCRIPTION_TIERS:
+        await callback.answer("Тариф не найден", show_alert=True)
+        return
+    await callback.answer()
+    await send_subscription_stars_invoice(callback.from_user.id, tier_id)
+
+@dp.callback_query(F.data.startswith("buy_sub_rubles:"))
+async def cb_buy_sub_rubles(callback: CallbackQuery):
+    tier_id = int(callback.data.split(":")[1])
+    if tier_id not in SUBSCRIPTION_TIERS:
+        await callback.answer("Тариф не найден", show_alert=True)
+        return
+    await callback.answer()
+    await safe_edit_text(
+        callback.message,
+        get_sub_rubles_message_text(tier_id),
+        parse_mode="HTML",
+        reply_markup=get_sub_rubles_keyboard(tier_id),
+        disable_web_page_preview=True,
+    )
+
 @dp.pre_checkout_query()
 async def handle_pre_checkout(pre_checkout_query) -> None:
     await pre_checkout_query.answer(ok=True)
@@ -2368,6 +2700,33 @@ async def handle_pre_checkout(pre_checkout_query) -> None:
 async def handle_successful_payment(message: Message):
     payment = message.successful_payment
     stars = payment.total_amount
+    payload = payment.invoice_payload or ""
+
+    if payload.startswith("sub_stars_"):
+        tier_id = int(payload.split("_")[2])
+        grant_subscription(message.from_user.id, tier_id, "stars", stars)
+        cfg = SUBSCRIPTION_TIERS[tier_id]
+        sub = get_subscription(message.from_user.id)
+        scope_label = "ко всем разделам бота" if cfg["scope"] == "all" else "к Биологии, Физике и Химии"
+        await message.answer(
+            f"🎉 <b>Подписка «{cfg['title']}» активирована!</b>\n\n"
+            f"Доступ {scope_label} открыт — {format_subscription_expiry(sub['expires'])}.\n"
+            "Правило про рефералов для тебя больше не действует. Спасибо за поддержку! 🙏😇",
+            parse_mode="HTML"
+        )
+        user = message.from_user
+        for admin_id in ADMIN_IDS:
+            try:
+                await bot.send_message(
+                    admin_id,
+                    f"💎 <b>Новая подписка звёздами!</b>\n\n«{cfg['title']}» ({stars} ⭐) — "
+                    f"{user.full_name} (ID <code>{user.id}</code>)",
+                    parse_mode="HTML"
+                )
+            except Exception:
+                logger.exception("Не удалось уведомить админа %s о подписке", admin_id)
+        return
+
     stats["donations_stars_total"] += stars
     stats["donations_stars_count"] += 1
     uid_str = str(message.from_user.id)
@@ -2941,7 +3300,7 @@ ANATOMY_FLASH_SESSIONS: dict[int, dict] = {}
 ANATOMY_MATCH_SESSIONS: dict[int, dict] = {}
 
 def anatomy_access_ok(user_id: int) -> bool:
-    return ANATOMY_PUBLIC or is_admin(user_id)
+    return ANATOMY_PUBLIC or is_admin(user_id) or has_subscription_scope_all(user_id)
 
 def get_anatomy_topic_data(topic_key: str):
     for section in ANATOMY.values():
@@ -3655,7 +4014,7 @@ async def cb_anatomy_picture(callback: CallbackQuery):
 HISTOLOGY_PUBLIC = False  # когда раздел будет готов для всех — переключить на True
 
 def histology_access_ok(user_id: int) -> bool:
-    return HISTOLOGY_PUBLIC or is_admin(user_id)
+    return HISTOLOGY_PUBLIC or is_admin(user_id) or has_subscription_scope_all(user_id)
 
 def get_histology_specimen(diag_key: str, spec_id: str):
     diag = HISTOLOGY.get(diag_key)
