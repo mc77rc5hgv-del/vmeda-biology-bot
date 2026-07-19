@@ -418,6 +418,28 @@ async def announce_battle_start() -> None:
     )
     await _broadcast(text, builder.as_markup())
 
+def get_battle_remind_broadcast_text() -> str:
+    battle = stats["referral_battle"]
+    remaining = format_time_left(battle["end_ts"] - time.time())
+    leaderboard = get_battle_leaderboard()
+    lines = [
+        "⚔️🔥 <b>БИТВА РЕФЕРАЛОВ ПРОДОЛЖАЕТСЯ!</b> 🔥⚔️\n",
+        f"{DIVIDER}\n",
+        f"⏳ Осталось: <b>{remaining}</b>\n",
+        "🎁 Призы для топ-3:",
+        format_battle_prizes_block(),
+        "",
+    ]
+    if leaderboard:
+        lines.append("<b>Текущий рейтинг битвы:</b>")
+        for i, (uid, diff) in enumerate(leaderboard):
+            icon = RANK_MEDALS[i] if i < 3 else f"{i+1}."
+            name = stats["user_names"].get(uid, f"Пользователь {uid}")
+            lines.append(f"{icon} {name} — <b>{diff}</b>")
+        lines.append("")
+    lines.append("Успей попасть в топ — жми «👥 Пригласить друзей» в главном меню и забирай свою ссылку!")
+    return "\n".join(lines)
+
 async def resolve_referral_battle() -> None:
     battle = stats.get("referral_battle")
     if not battle or not battle.get("active"):
@@ -1483,6 +1505,7 @@ def get_admin_battle_keyboard():
     builder = InlineKeyboardBuilder()
     if is_battle_active():
         builder.button(text="🔄 Обновить", callback_data="admin_battle_menu")
+        builder.button(text="📣 Разослать напоминание о битве", callback_data="admin_battle_remind_confirm")
         builder.button(text="🛑 Завершить досрочно", callback_data="admin_battle_end_confirm")
     else:
         builder.button(text="🚀 Начать битву рефералов (24ч)", callback_data="admin_battle_start_confirm")
@@ -1660,6 +1683,48 @@ async def cb_admin_battle_end_go(callback: CallbackQuery):
         get_admin_battle_text(),
         parse_mode="HTML",
         reply_markup=get_admin_battle_keyboard()
+    )
+
+@dp.callback_query(F.data == "admin_battle_remind_confirm")
+async def cb_admin_battle_remind_confirm(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    if not is_battle_active():
+        await callback.answer("Битва сейчас не идёт", show_alert=True)
+        return
+    await callback.answer()
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Отправить всем", callback_data="admin_battle_remind_go")
+    builder.button(text="❌ Отмена", callback_data="admin_battle_menu")
+    builder.adjust(1)
+    preview = (
+        f"👀 <b>Предпросмотр напоминания</b>\n{DIVIDER}\n\n"
+        f"{get_battle_remind_broadcast_text()}\n\n{DIVIDER}\n"
+        f"Отправить это всем {len(stats['total_users'])} пользователям?"
+    )
+    await safe_edit_text(callback.message, preview, parse_mode="HTML", reply_markup=builder.as_markup())
+
+@dp.callback_query(F.data == "admin_battle_remind_go")
+async def cb_admin_battle_remind_go(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    if not is_battle_active():
+        await callback.answer("Битва сейчас не идёт", show_alert=True)
+        return
+    await callback.answer("📣 Рассылка запущена!", show_alert=True)
+    recipients = len(stats["total_users"])
+    stats["broadcast_count"] = stats.get("broadcast_count", 0) + 1
+    save_stats()
+    builder = InlineKeyboardBuilder()
+    builder.button(text="⚔️ Битва рефералов", callback_data="referral_battle")
+    await _broadcast(get_battle_remind_broadcast_text(), builder.as_markup())
+    await safe_edit_text(
+        callback.message,
+        f"✅ Напоминание о битве рефералов отправлено (попытка охватить {recipients} пользователей).",
+        parse_mode="HTML",
+        reply_markup=get_admin_back_keyboard()
     )
 
 @dp.callback_query(F.data == "admin_stats")
