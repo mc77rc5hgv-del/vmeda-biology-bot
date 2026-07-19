@@ -632,6 +632,22 @@ def get_access_restored_broadcast_text() -> str:
         "👥 Открыть доступ насовсем можно в любой момент — кнопка «Пригласить друзей» в главном меню."
     )
 
+def get_battle_results_announcement_text(top3: list) -> str:
+    if not top3:
+        return (
+            f"🏁 <b>Битва рефералов завершена!</b>\n{DIVIDER}\n\n"
+            "За время битвы никто не пригласил новых друзей — приз не разыгран в этот раз."
+        )
+    lines = [f"🏁 <b>Битва рефералов завершена!</b>\n{DIVIDER}\n", "Победители:"]
+    for i, (uid_str, diff) in enumerate(top3):
+        name = stats["user_names"].get(uid_str, f"Пользователь {uid_str}")
+        lines.append(f"{RANK_MEDALS[i]} {name} — <b>{diff}</b> приглашённых")
+        lines.append(f"🎁 {BATTLE_PRIZE_LABELS[i]}")
+        lines.append(f"💸 Сэкономил(а) на подписках: ~<b>{format_rub(BATTLE_PRIZE_VALUES_RUB[i])}₽</b>")
+        lines.append("")
+    lines.append("Администратор свяжется с победителями лично 🤝")
+    return "\n".join(lines)
+
 async def resolve_referral_battle() -> None:
     battle = stats.get("referral_battle")
     if not battle or not battle.get("active"):
@@ -641,21 +657,7 @@ async def resolve_referral_battle() -> None:
     battle["results"] = top3
     save_stats()
 
-    if top3:
-        lines = [f"🏁 <b>Битва рефералов завершена!</b>\n{DIVIDER}\n", "Победители:"]
-        for i, (uid_str, diff) in enumerate(top3):
-            name = stats["user_names"].get(uid_str, f"Пользователь {uid_str}")
-            lines.append(f"{RANK_MEDALS[i]} {name} — <b>{diff}</b> приглашённых")
-            lines.append(f"🎁 {BATTLE_PRIZE_LABELS[i]}")
-            lines.append(f"💸 Сэкономил(а) на подписках: ~<b>{format_rub(BATTLE_PRIZE_VALUES_RUB[i])}₽</b>")
-            lines.append("")
-        lines.append("Администратор свяжется с победителями лично 🤝")
-        result_text = "\n".join(lines)
-    else:
-        result_text = (
-            f"🏁 <b>Битва рефералов завершена!</b>\n{DIVIDER}\n\n"
-            "За время битвы никто не пригласил новых друзей — приз не разыгран в этот раз."
-        )
+    result_text = get_battle_results_announcement_text(top3)
     await _broadcast(result_text)
 
     if top3:
@@ -1751,6 +1753,9 @@ def get_admin_battle_keyboard():
         builder.button(text="🛑 Завершить досрочно", callback_data="admin_battle_end_confirm")
     else:
         builder.button(text="🚀 Начать битву рефералов (24ч)", callback_data="admin_battle_start_confirm")
+    battle = stats.get("referral_battle")
+    if battle and battle.get("results") is not None:
+        builder.button(text="🏁 Итоги последней битвы (для публикации)", callback_data="admin_battle_last_results")
     builder.button(text="🔙 В админ-панель", callback_data="admin_panel")
     builder.adjust(1)
     return builder.as_markup()
@@ -1855,6 +1860,27 @@ async def cb_admin_battle_menu(callback: CallbackQuery):
         get_admin_battle_text(),
         parse_mode="HTML",
         reply_markup=get_admin_battle_keyboard()
+    )
+
+@dp.callback_query(F.data == "admin_battle_last_results")
+async def cb_admin_battle_last_results(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    battle = stats.get("referral_battle")
+    results = battle.get("results") if battle else None
+    if results is None:
+        await callback.answer("Нет сохранённых итогов ни одной завершённой битвы", show_alert=True)
+        return
+    await callback.answer()
+    text = get_battle_results_announcement_text(results)
+    await safe_edit_text(
+        callback.message,
+        f"{text}\n\n{DIVIDER}\n"
+        "👆 Текст выше — в том же виде, что уходит пользователям рассылкой. "
+        "Скопируй его, чтобы опубликовать отдельно.",
+        parse_mode="HTML",
+        reply_markup=get_admin_back_keyboard()
     )
 
 @dp.callback_query(F.data == "admin_battle_start_confirm")
