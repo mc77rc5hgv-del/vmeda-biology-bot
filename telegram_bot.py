@@ -444,6 +444,21 @@ BATTLE_PRIZE_LABELS = [
 ]
 BATTLE_CHANNEL_POSTING_NOTICE = "📢 <b>ПОСТИНГ В TELEGRAM-КАНАЛЫ РАЗРЕШЁН 🤝</b>"
 
+# Цена подписки в Helperchat_bot (используется и для «год», и для «навсегда» — другой цены нет).
+HELPERCHAT_SUBSCRIPTION_PRICE = 1999
+
+# Денежная оценка приза за место — используется, чтобы показать победителю, сколько он сэкономил.
+# 1 место = «6 лет» подписки VMEDA_examen_bot (ближайший эквивалент «вечного» доступа) + Helperchat_bot.
+# 2 место = «Год» подписки VMEDA_examen_bot + Helperchat_bot. 3 место = только «Год» подписки VMEDA_examen_bot.
+BATTLE_PRIZE_VALUES_RUB = [
+    SUBSCRIPTION_TIERS[4]["price_rub"] + HELPERCHAT_SUBSCRIPTION_PRICE,
+    SUBSCRIPTION_TIERS[3]["price_rub"] + HELPERCHAT_SUBSCRIPTION_PRICE,
+    SUBSCRIPTION_TIERS[3]["price_rub"],
+]
+
+def format_rub(amount: int) -> str:
+    return f"{amount:,}".replace(",", " ")
+
 def format_battle_prizes_block() -> str:
     return "\n".join(f"{RANK_MEDALS[i]} <b>{i + 1} место</b> — {BATTLE_PRIZE_LABELS[i]}" for i in range(3))
 
@@ -632,6 +647,7 @@ async def resolve_referral_battle() -> None:
             name = stats["user_names"].get(uid_str, f"Пользователь {uid_str}")
             lines.append(f"{RANK_MEDALS[i]} {name} — <b>{diff}</b> приглашённых")
             lines.append(f"🎁 {BATTLE_PRIZE_LABELS[i]}")
+            lines.append(f"💸 Сэкономил(а) на подписках: ~<b>{format_rub(BATTLE_PRIZE_VALUES_RUB[i])}₽</b>")
             lines.append("")
         lines.append("Администратор свяжется с победителями лично 🤝")
         result_text = "\n".join(lines)
