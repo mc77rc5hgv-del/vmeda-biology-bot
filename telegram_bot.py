@@ -867,6 +867,28 @@ def get_support_announcement_keyboard():
     builder.button(text="😇 Поддержать автора 💰", callback_data="support_menu")
     return builder.as_markup()
 
+def get_subscription_announcement_text() -> str:
+    return (
+        f"💎 <b>Новое в боте — платная подписка без рефералов!</b>\n{DIVIDER}\n\n"
+        "Разработка и содержание бота требуют серьёзных затрат — поэтому в дополнение "
+        "к бесплатному доступу за 2 рефералов теперь можно открыть доступ сразу оплатой:\n\n"
+        "🔓 <b>79₽ / 79⭐</b> — месяц: Биология, Физика, Химия\n"
+        "♾️ <b>239₽ / 239⭐</b> — навсегда: Биология, Физика, Химия + ранний доступ к "
+        "полностью готовой Гистологии (препараты именно с академии, протоколы сверены "
+        "преподавателями)\n"
+        "🚀 <b>899₽ / 899⭐</b> — год: вообще все разделы бота, включая Анатомию и Гистологию, "
+        "плюс всё новое, что добавится за год\n"
+        "👑 <b>2499₽ / 2499⭐</b> — 6 лет: все разделы на весь срок учёбы в академии\n\n"
+        "После оплаты правило с рефералами для тебя больше не действует — доступ "
+        "открывается сразу и держится всё оплаченное время.\n\n"
+        "Загляни в «💎 Подписка» в главном меню, чтобы посмотреть плюсы каждого тарифа 👇"
+    )
+
+def get_subscription_announcement_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="💎 Подписка без рефералов", callback_data="subscription_menu")
+    return builder.as_markup()
+
 def donor_display_name(uid_str: str) -> str:
     if stats.get("donor_hide_name", {}).get(uid_str):
         return "🙈 Аноним"
@@ -1686,6 +1708,7 @@ def get_admin_menu():
     builder.button(text="⚔️ Битва рефералов", callback_data="admin_battle_menu")
     builder.button(text="💰 Записать донат рублями", callback_data="admin_donation_prompt")
     builder.button(text="💎 Выдать подписку по username", callback_data="admin_subscription_prompt")
+    builder.button(text="📣 Оповещение о подписке", callback_data="admin_announce_subscription_confirm")
     builder.button(text="📣 Анонс раздела поддержки", callback_data="admin_announce_support_confirm")
     builder.button(text="🎁 Восстановить доступ исчерпавшим (7 дней)", callback_data="admin_restore_access_confirm")
     builder.button(text="📤 Опубликовать пост в канал", callback_data="admin_channel_post_prompt")
@@ -2104,6 +2127,40 @@ async def cb_admin_announce_support_go(callback: CallbackQuery):
     await safe_edit_text(
         callback.message,
         f"✅ Анонс раздела поддержки отправлен (попытка охватить {recipients} пользователей).",
+        parse_mode="HTML",
+        reply_markup=get_admin_back_keyboard()
+    )
+
+@dp.callback_query(F.data == "admin_announce_subscription_confirm")
+async def cb_admin_announce_subscription_confirm(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer()
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Отправить всем", callback_data="admin_announce_subscription_go")
+    builder.button(text="❌ Отмена", callback_data="admin_panel")
+    builder.adjust(1)
+    preview = (
+        f"👀 <b>Предпросмотр анонса</b>\n{DIVIDER}\n\n"
+        f"{get_subscription_announcement_text()}\n\n{DIVIDER}\n"
+        f"Отправить это всем {len(stats['total_users'])} пользователям?"
+    )
+    await safe_edit_text(callback.message, preview, parse_mode="HTML", reply_markup=builder.as_markup())
+
+@dp.callback_query(F.data == "admin_announce_subscription_go")
+async def cb_admin_announce_subscription_go(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer("📣 Рассылка запущена!", show_alert=True)
+    recipients = len(stats["total_users"])
+    stats["broadcast_count"] = stats.get("broadcast_count", 0) + 1
+    save_stats()
+    await _broadcast(get_subscription_announcement_text(), get_subscription_announcement_keyboard())
+    await safe_edit_text(
+        callback.message,
+        f"✅ Оповещение о подписке отправлено (попытка охватить {recipients} пользователей).",
         parse_mode="HTML",
         reply_markup=get_admin_back_keyboard()
     )
