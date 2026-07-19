@@ -2008,6 +2008,34 @@ async def cb_admin_stats(callback: CallbackQuery):
     await callback.answer()
     total_referrals = sum(len(v) for v in stats["referrals"].values())
     exhausted_free_uses = len(get_exhausted_users())
+
+    subs = stats["subscriptions"]
+    active_by_tier = {tier_id: 0 for tier_id in SUBSCRIPTION_TIERS}
+    active_total = 0
+    sub_revenue_stars = 0
+    sub_revenue_rubles = 0
+    for uid_str, sub in subs.items():
+        method = sub.get("method")
+        price = sub.get("price", 0)
+        if method == "stars":
+            sub_revenue_stars += price
+        elif method == "rubles":
+            sub_revenue_rubles += price
+        if has_active_subscription(int(uid_str)):
+            active_total += 1
+            tier = sub.get("tier")
+            if tier in active_by_tier:
+                active_by_tier[tier] += 1
+    subscription_lines = "\n".join(
+        f"  {cfg['emoji']} {cfg['short']}: <b>{active_by_tier[tier_id]}</b>"
+        for tier_id, cfg in SUBSCRIPTION_TIERS.items()
+    )
+
+    donation_stars_total = stats.get("donations_stars_total", 0)
+    donation_stars_count = stats.get("donations_stars_count", 0)
+    donation_rubles_total = sum(stats.get("donor_rubles", {}).values())
+    donation_rubles_count = len(stats.get("donor_rubles", {}))
+
     text = (
         f"📊 <b>Статистика бота</b>\n{DIVIDER}\n\n"
         f"👥 Уникальных пользователей: <b>{len(stats['total_users'])}</b>\n"
@@ -2019,7 +2047,15 @@ async def cb_admin_stats(callback: CallbackQuery):
         f"🔗 Всего рефералов: <b>{total_referrals}</b>\n"
         f"🔓 Ручных доступов выдано: <b>{len(stats['manual_access_granted'])}</b>\n"
         f"🚫 Исчерпали бесплатные заходы без рефералов: <b>{exhausted_free_uses}</b>\n"
-        f"🪪 Известно username: <b>{len(stats['usernames'])}</b>"
+        f"🪪 Известно username: <b>{len(stats['usernames'])}</b>\n"
+        f"\n💎 <b>Подписки</b>\n"
+        f"Всего куплено: <b>{len(subs)}</b>, активных сейчас: <b>{active_total}</b>\n"
+        f"{subscription_lines}\n"
+        f"\n💰 <b>Платежи</b>\n"
+        f"⭐ Донаты звёздами: <b>{donation_stars_total}</b> ({donation_stars_count} платежей)\n"
+        f"💵 Донаты рублями: <b>{donation_rubles_total}</b>₽ ({donation_rubles_count} чел.)\n"
+        f"⭐ Подписки звёздами: <b>{sub_revenue_stars}</b>\n"
+        f"💵 Подписки рублями: <b>{sub_revenue_rubles}</b>₽"
     )
     await safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=get_admin_back_keyboard())
 
