@@ -1238,8 +1238,11 @@ def get_main_menu(user_id: int = None):
     builder.button(text="🏆 Рейтинг", callback_data="referral_leaderboard")
     battle_label = "⚔️ Битва рефералов 🔥" if is_battle_active() else "⚔️ Битва рефералов"
     builder.button(text=battle_label, callback_data="referral_battle")
-    if user_id is None or not has_free_access(user_id):
-        builder.button(text="💎 Подписка без рефералов", callback_data="subscription_menu")
+    if user_id is not None and has_active_subscription(user_id):
+        sub_label = "💎 Моя подписка"
+    else:
+        sub_label = "💎 Подписка без рефералов"
+    builder.button(text=sub_label, callback_data="subscription_menu")
     builder.button(text="😇 Поддержать автора 💰", callback_data="support_menu")
     builder.adjust(1)
     return builder.as_markup()
@@ -1250,9 +1253,11 @@ def get_referral_back_keyboard():
     builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
     return builder.as_markup()
 
-def get_referral_full_access_keyboard():
+def get_referral_full_access_keyboard(user_id: int = None):
     builder = InlineKeyboardBuilder()
     builder.button(text="⚔️ Битва рефералов", callback_data="referral_battle")
+    sub_label = "💎 Моя подписка" if user_id is not None and has_active_subscription(user_id) else "💎 Подписка"
+    builder.button(text=sub_label, callback_data="subscription_menu")
     builder.button(text="🔙 Назад в меню", callback_data="back_to_main")
     builder.adjust(1)
     return builder.as_markup()
@@ -2645,7 +2650,7 @@ async def cb_back_to_main(callback: CallbackQuery):
 async def cb_referral_info(callback: CallbackQuery):
     await callback.answer()
     user_id = callback.from_user.id
-    keyboard = get_referral_full_access_keyboard() if has_free_access(user_id) else get_referral_back_keyboard()
+    keyboard = get_referral_full_access_keyboard(user_id) if has_free_access(user_id) else get_referral_back_keyboard()
     await safe_edit_text(
         callback.message,
         get_referral_status_text(user_id),
