@@ -1,6 +1,7 @@
 import asyncio
 import copy
 import html
+import io
 import json
 import logging
 import random
@@ -20,6 +21,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.enums import ChatMemberStatus
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.dispatcher.event.bases import SkipHandler
+from docx import Document as DocxDocument
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -1232,62 +1234,107 @@ async def send_answer(target, body: str, short_caption: str, question: dict, key
         logger.exception("Не удалось отправить изображение %s", image_path)
     await target.answer(body, parse_mode="HTML", reply_markup=keyboard)
 
-# ==================== ВЫГРУЗКА РАЗДЕЛОВ В ТЕКСТОВЫЙ ФАЙЛ ====================
-_HTML_TAG_RE = re.compile(r"<[^>]+>")
+# ==================== ВЫГРУЗКА РАЗДЕЛОВ В WORD-ФАЙЛ ====================
+_HTML_TOKEN_RE = re.compile(r"(<b>|</b>|<i>|</i>|<u>|</u>)")
 
 def strip_html_tags(text: str) -> str:
-    """Контент хранится с Telegram-HTML-разметкой (<b>, <i>, <u>) — для .txt-выгрузки она не нужна."""
-    return _HTML_TAG_RE.sub("", text)
+    """Контент хранится с Telegram-HTML-разметкой (<b>, <i>, <u>) — вне докс-раннов она не нужна."""
+    return _HTML_TOKEN_RE.sub("", text)
 
-def build_text_file(title: str, body_lines: list) -> BufferedInputFile:
-    content = title + "\n" + "=" * len(title) + "\n\n" + "\n".join(body_lines)
-    filename = re.sub(r"[^\w\-]+", "_", title, flags=re.UNICODE).strip("_")[:60] + ".txt"
-    return BufferedInputFile(content.encode("utf-8"), filename=filename)
+def add_html_run(paragraph, text: str) -> None:
+    """Разбирает Telegram-HTML-подмножество (<b>, <i>, <u>) в форматированные докс-раны."""
+    bold = italic = underline = False
+    for token in _HTML_TOKEN_RE.split(text):
+        if token == "<b>":
+            bold = True
+        elif token == "</b>":
+            bold = False
+        elif token == "<i>":
+            italic = True
+        elif token == "</i>":
+            italic = False
+        elif token == "<u>":
+            underline = True
+        elif token == "</u>":
+            underline = False
+        elif token:
+            run = paragraph.add_run(token)
+            run.bold = bold
+            run.italic = italic
+            run.underline = underline
+
+def add_html_paragraphs(doc, text: str) -> None:
+    """text может содержать \n\n (разрыв абзаца) и \n (перенос строки внутри абзаца)."""
+    for block in text.split("\n\n"):
+        p = doc.add_paragraph()
+        for i, line in enumerate(block.split("\n")):
+            if i > 0:
+                p.add_run().add_break()
+            add_html_run(p, line)
+
+def add_labeled_field(doc, label: str, value: str) -> None:
+    p = doc.add_paragraph()
+    p.add_run(f"{label}:").bold = True
+    add_html_paragraphs(doc, value)
+
+def add_topic_block(doc, topic: dict) -> None:
+    """Общий для physics_tasks.json и chemistry_tasks.json блок темы: заголовок, вступление,
+    формулы/алгоритм и разобранные задачи."""
+    doc.add_heading(topic["title"], level=2)
+    if topic.get("intro"):
+        add_html_paragraphs(doc, topic["intro"])
+    add_html_paragraphs(doc, topic["formulas"])
+    for task in topic.get("tasks", []):
+        doc.add_heading(f"{task['num']}. {task['title']}", level=3)
+        add_labeled_field(doc, "Условие", task["condition"])
+        add_labeled_field(doc, "Решение", task["solution"])
+
+def docx_filename(title: str) -> str:
+    return re.sub(r"[^\w\-]+", "_", title, flags=re.UNICODE).strip("_")[:60] + ".docx"
+
+def build_docx_file(title: str, fill_fn) -> BufferedInputFile:
+    doc = DocxDocument()
+    doc.add_heading(title, level=0)
+    fill_fn(doc)
+    buf = io.BytesIO()
+    doc.save(buf)
+    return BufferedInputFile(buf.getvalue(), filename=docx_filename(title))
 
 def build_biology_tickets_file() -> BufferedInputFile:
-    lines = []
-    for ticket in TICKETS:
-        lines.append(f"\n{ticket['title']}\n{'-' * len(ticket['title'])}")
-        for q in ticket["questions"]:
-            lines.append(f"\n{q['num']}. {strip_html_tags(q['title'])}\n{strip_html_tags(q['answer'])}")
-    return build_text_file("Биология — все билеты (вопросы и ответы)", lines)
+    def fill(doc):
+        for ticket in TICKETS:
+            doc.add_heading(ticket["title"], level=1)
+            for q in ticket["questions"]:
+                doc.add_heading(f"{q['num']}. {q['title']}", level=2)
+                add_html_paragraphs(doc, q["answer"])
+    return build_docx_file("Биология — все билеты (вопросы и ответы)", fill)
 
 def build_physics_full_file() -> BufferedInputFile:
-    lines = ["ЧАСТЬ 1. ТЕСТОВАЯ ЧАСТЬ — 186 ВОПРОСОВ (ПО АЛФАВИТУ)\n"]
-    items = sorted(PHYSICS_QUESTIONS.values(), key=lambda v: v["title"])
-    for item in items:
-        lines.append(f"\n{strip_html_tags(item['title'])}\n{strip_html_tags(item['answer'])}")
-    lines.append("\n\n" + "=" * 40)
-    lines.append("ЧАСТЬ 2. ШАБЛОНЫ РЕШЕНИЯ ЗАДАЧ ПО ВСЕМ ТЕМАМ\n")
-    for topic in PHYSICS_TASKS.values():
-        lines.append(f"\n### {strip_html_tags(topic['title'])} ###")
-        if topic.get("intro"):
-            lines.append(strip_html_tags(topic["intro"]))
-        lines.append("\n" + strip_html_tags(topic["formulas"]))
-        lines.append("\nПримеры решённых задач:")
-        for task in topic["tasks"]:
-            lines.append(
-                f"\n{task['num']}. {strip_html_tags(task['title'])}\n"
-                f"Условие: {strip_html_tags(task['condition'])}\n"
-                f"Решение: {strip_html_tags(task['solution'])}"
-            )
-    return build_text_file("Физика — тестовая часть и шаблоны решения задач", lines)
+    def fill(doc):
+        doc.add_heading("Часть 1. Тестовая часть — 186 вопросов (по алфавиту)", level=1)
+        items = sorted(PHYSICS_QUESTIONS.values(), key=lambda v: v["title"])
+        for item in items:
+            doc.add_heading(item["title"], level=2)
+            add_html_paragraphs(doc, item["answer"])
+        doc.add_page_break()
+        doc.add_heading("Часть 2. Шаблоны решения задач по всем темам", level=1)
+        for topic in PHYSICS_TASKS.values():
+            add_topic_block(doc, topic)
+    return build_docx_file("Физика — тестовая часть и шаблоны решения задач", fill)
 
 def build_physics_ticket_tasks_file() -> BufferedInputFile:
-    lines = []
-    for num in sorted(PHYSICS_TEST_TICKETS.keys(), key=int):
-        ticket = PHYSICS_TEST_TICKETS[num]
-        tasks = ticket.get("tasks")
-        if not tasks:
-            continue
-        lines.append(f"\n{ticket['title']} — Часть 2. Задачи\n{'-' * 40}")
-        for task in tasks:
-            lines.append(
-                f"\nЗадача {task['num']}. {strip_html_tags(task['title'])}\n"
-                f"Условие: {strip_html_tags(task['condition'])}\n"
-                f"Решение: {strip_html_tags(task['solution'])}"
-            )
-    return build_text_file("Физика — билеты с задачами (ответы)", lines)
+    def fill(doc):
+        for num in sorted(PHYSICS_TEST_TICKETS.keys(), key=int):
+            ticket = PHYSICS_TEST_TICKETS[num]
+            tasks = ticket.get("tasks")
+            if not tasks:
+                continue
+            doc.add_heading(f"{ticket['title']} — Часть 2. Задачи", level=1)
+            for task in tasks:
+                doc.add_heading(f"Задача {task['num']}. {task['title']}", level=2)
+                add_labeled_field(doc, "Условие", task["condition"])
+                add_labeled_field(doc, "Решение", task["solution"])
+    return build_docx_file("Физика — билеты с задачами (ответы)", fill)
 
 _LAB_FIELD_LABELS = {
     "positive_sol": "Положительный золь", "negative_sol": "Отрицательный золь",
@@ -1297,37 +1344,27 @@ _LAB_FIELD_LABELS = {
 }
 
 def build_chemistry_labs_file() -> BufferedInputFile:
-    lines = []
-    for lab in CHEMISTRY_LABS["labs"]:
-        lines.append(f"\nЛабораторная работа {lab['number']}. {strip_html_tags(lab['theme'])}\n{'-' * 40}")
-        lines.append(f"Условие: {strip_html_tags(lab['condition'])}")
-        for exp in lab.get("experiments", []):
-            lines.append(f"\n{strip_html_tags(exp['name'])}")
-            for key in ("description", "mechanism", "technique", "sorbent", "eluent", "procedure"):
-                value = exp.get(key)
+    def fill(doc):
+        for lab in CHEMISTRY_LABS["labs"]:
+            doc.add_heading(f"Лабораторная работа {lab['number']}. {lab['theme']}", level=1)
+            add_labeled_field(doc, "Условие", lab["condition"])
+            for exp in lab.get("experiments", []):
+                doc.add_heading(exp.get("name", ""), level=2)
+                for key in ("description", "mechanism", "technique", "sorbent", "eluent", "procedure"):
+                    value = exp.get(key)
+                    if value:
+                        add_html_paragraphs(doc, value)
+            for key, label in _LAB_FIELD_LABELS.items():
+                value = lab.get(key)
                 if value:
-                    lines.append(strip_html_tags(value))
-        for key, label in _LAB_FIELD_LABELS.items():
-            value = lab.get(key)
-            if value:
-                lines.append(f"\n{label}: {strip_html_tags(value)}")
-    return build_text_file("Химия — все лабораторные работы", lines)
+                    add_labeled_field(doc, label, value)
+    return build_docx_file("Химия — все лабораторные работы", fill)
 
 def build_chemistry_tasks_file() -> BufferedInputFile:
-    lines = []
-    for topic in CHEMISTRY_TASKS.values():
-        lines.append(f"\n### {strip_html_tags(topic['title'])} ###")
-        if topic.get("intro"):
-            lines.append(strip_html_tags(topic["intro"]))
-        lines.append("\n" + strip_html_tags(topic["formulas"]))
-        lines.append("\nЗадачи:")
-        for task in topic["tasks"]:
-            lines.append(
-                f"\n{task['num']}. {strip_html_tags(task['title'])}\n"
-                f"Условие: {strip_html_tags(task['condition'])}\n"
-                f"Решение: {strip_html_tags(task['solution'])}"
-            )
-    return build_text_file("Химия — все задачи", lines)
+    def fill(doc):
+        for topic in CHEMISTRY_TASKS.values():
+            add_topic_block(doc, topic)
+    return build_docx_file("Химия — все задачи", fill)
 
 # ==================== КЛАВИАТУРЫ ====================
 def get_main_menu(user_id: int = None):

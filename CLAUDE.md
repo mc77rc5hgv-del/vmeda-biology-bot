@@ -10,7 +10,8 @@ in top-level JSON files loaded into memory at import time. Hosted on Railway, au
 
 ## Commands
 
-Install deps: `pip install -r requirements.txt` (single dependency: `aiogram==3.7.0`).
+Install deps: `pip install -r requirements.txt` (`aiogram==3.7.0` for the bot itself, `python-docx==1.2.0` for the
+per-subject Word-file export buttons).
 
 Syntax-check after any edit (fast, no token/network needed):
 ```
