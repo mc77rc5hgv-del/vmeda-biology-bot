@@ -24,25 +24,29 @@ BOT_TOKEN=<token> STATS_DIR=/some/writable/dir python3 telegram_bot.py
 
 ### Tests
 
-There is no `tests/` directory in the repo — the test suite lives entirely in the session scratchpad
-(`/tmp/claude-.../scratchpad/test_*.py`, one file per feature area: `test_gate.py`, `test_referral_gate.py`,
-`test_middleware.py`, `test_battle.py`, `test_battle_remind.py`, `test_admin_stats.py`, `test_bones.py`,
-`test_handlers.py`, `test_images.py`, `test_new_sections.py`, `test_new_images.py`, `test_new_material.py`,
-`test_restore_access.py`, `test_histology.py`, `test_subscription.py`, `test_admin_lookup.py`,
-`test_lower_limb_bones.py`, `test_referral_reminder.py`, and more as features are added). Because they never got
-committed, **always check the scratchpad for existing tests before writing new ones** — extend the matching file
-rather than duplicating coverage.
+Live in `tests/` (one file per feature area: `test_gate.py`, `test_referral_gate.py`, `test_middleware.py`,
+`test_battle.py`, `test_battle_remind.py`, `test_admin_stats.py`, `test_bones.py`, `test_handlers.py`,
+`test_images.py`, `test_new_sections.py`, `test_new_images.py`, `test_new_material.py`, `test_restore_access.py`,
+`test_histology.py`, `test_subscription.py`, `test_admin_lookup.py`, `test_lower_limb_bones.py`,
+`test_referral_reminder.py`, and more as features are added). **Always check for an existing test file covering
+the area you're touching before writing a new one** — extend the matching file rather than duplicating coverage.
 
 Each test file is a standalone async script that imports `telegram_bot` directly (no pytest) and drives real
-handler functions with hand-rolled `FakeUser`/`FakeMsg`/`FakeCB` mocks (see any existing test file for the pattern).
-Run one with fresh state:
+handler functions with hand-rolled `FakeUser`/`FakeMsg`/`FakeCB` mocks (see any existing test file for the
+pattern). They import `from _bootstrap import tb` instead of `import telegram_bot as tb` directly —
+`tests/_bootstrap.py` puts the repo root on `sys.path`, chdirs there for the JSON-file loads at import time, and
+points `STATS_DIR` at a fresh `tempfile.mkdtemp()` so every run is isolated from the real `stats.json` and from
+other test files, with no manual cleanup needed between runs.
+
+Run everything (CI does this on every push):
 ```
-rm -f "$SCRATCH/stats.json" "$SCRATCH/stats.json.tmp"
-BOT_TOKEN="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11" STATS_DIR="$SCRATCH" python3 "$SCRATCH/test_foo.py"
+python3 tests/run_all.py
 ```
-`$SCRATCH` is the session's scratchpad directory. `STATS_DIR` must point there (not the repo) so tests never touch
-real `stats.json`. Run every `test_*.py` in the scratchpad after any change to `telegram_bot.py` — the suite is the
-only regression safety net.
+Run a single file the same way you'd run any script:
+```
+python3 tests/test_foo.py
+```
+This is the only regression safety net — run the full suite after any change to `telegram_bot.py`.
 
 ### Deploy
 
