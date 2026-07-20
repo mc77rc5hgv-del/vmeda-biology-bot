@@ -140,3 +140,23 @@ Admin-triggered mass messages follow one recurring shape: a `_confirm` handler c
 shows a preview + confirm button, a `_go` handler re-validates the cohort (it may have changed) and calls
 `_broadcast()` (all users) or `_broadcast_to(cohort, text, keyboard=None)` (a filtered list), then increments
 `stats["broadcast_count"]`. Reuse this shape for new admin broadcasts rather than inventing a new one.
+
+## Known pitfalls (bug classes that have already recurred)
+
+- **Per-topic keyboard labels hardcoded to one topic.** `get_anatomy_topic_keyboard()`'s bones-list button was
+  hardcoded `"🦴 Кости черепа (по каждой кости)"` — correct only for the `skull` topic — and stayed that way
+  through `trunk_bones`/`upper_limb_bones`/`lower_limb_bones` being added, showing "Кости черепа" on unrelated
+  topics for months before it got noticed. When a keyboard/text function is reused across multiple
+  topics/subjects/tiers, grep its literal strings for a name that only applies to the *first* case it was written
+  for.
+- **UI elements hidden by access/state instead of relabeled.** The `get_main_menu()` subscription button used to
+  be `if not has_free_access(user_id): show button` — once a user crossed the referral threshold the entry point
+  to subscriptions vanished from the menu entirely, with no path back to it. Prefer always showing an entry point
+  with a state-dependent label (`"Подписка без рефералов"` vs `"Моя подписка"`) over conditionally hiding it —
+  hiding silently removes discoverability and is easy to ship without noticing in testing (the admin/test account
+  usually *has* access, so the hidden state never gets exercised).
+- **Values duplicated out of `SUBSCRIPTION_TIERS` into hand-written text.** Prices and tier facts got hardcoded
+  into `get_referral_status_text()`, `get_subscription_announcement_text()`, and a stray teaser line, separately
+  from `SUBSCRIPTION_TIERS` itself. Changing a price (e.g. tier 1: 79₽→89₽) meant grepping the whole file for the
+  old literal. Prefer `SUBSCRIPTION_TIERS[n]['price_rub']` interpolation over restating a price/duration/scope as
+  a literal, even in one-off marketing copy.
