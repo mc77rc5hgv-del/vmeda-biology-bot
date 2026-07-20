@@ -207,7 +207,13 @@ async def main():
         tt = kb_texts(tier_kb)
         assert any("Оплатить" in t and "звёзд" in t for t in tt)
         assert any("Оплатить" in t and "₽" in t for t in tt)
-    print("per-tier screens OK for all 4 tiers")
+        if tier_id == 1:
+            assert "Выгоднее" in tier_text and "239₽" in tier_text and "150₽" in tier_text
+            assert any("Навсегда" in t for t in tt)
+        else:
+            assert "Выгоднее" not in tier_text
+            assert not any("Навсегда" in t for t in tt)
+    print("per-tier screens OK for all 4 tiers; tier 1 pre-payment screen offers tier 2 upsell")
 
     # 9. Rubles flow: deep-link keyboard and message text
     for tier_id in tb.SUBSCRIPTION_TIERS:

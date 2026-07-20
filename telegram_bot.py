@@ -3205,6 +3205,8 @@ def get_sub_tier_text(tier_id: int) -> str:
     for b in cfg["benefits"]:
         lines.append(f"• {b}")
     lines.append(f"\nЦена: <b>{cfg['price_rub']}₽</b> или <b>{cfg['price_stars']} ⭐</b>")
+    if tier_id == 1:
+        lines.append(get_tier1_upsell_text())
     lines.append("\nВыбери способ оплаты:")
     return "\n".join(lines)
 
@@ -3214,6 +3216,11 @@ def get_sub_tier_keyboard(tier_id: int):
     builder.button(text=f"⭐ Оплатить {cfg['price_stars']} звёзд", callback_data=f"buy_sub_stars:{tier_id}")
     builder.button(text=f"💵 Оплатить {cfg['price_rub']}₽", callback_data=f"buy_sub_rubles:{tier_id}")
     builder.adjust(1)
+    if tier_id == 1:
+        builder.row(InlineKeyboardButton(
+            text=f"♾️ Лучше взять «Навсегда» за {SUBSCRIPTION_TIERS[2]['price_rub']}₽",
+            callback_data="sub_tier:2"
+        ))
     builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="subscription_menu"))
     return builder.as_markup()
 
