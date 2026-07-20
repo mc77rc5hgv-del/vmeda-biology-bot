@@ -1810,6 +1810,7 @@ def build_channel_post_keyboard(buttons: list):
 def get_admin_menu():
     builder = InlineKeyboardBuilder()
     builder.button(text="📊 Статистика", callback_data="admin_stats")
+    builder.button(text="📥 Экспорт stats.json", callback_data="admin_export_stats")
     builder.button(text="👥 Список пользователей", callback_data="admin_userlist:0")
     builder.button(text="🔓 Дать доступ по username/ID", callback_data="admin_grant_prompt")
     builder.button(text="🚫 Отозвать доступ по username/ID", callback_data="admin_revoke_prompt")
@@ -2239,6 +2240,20 @@ async def cb_admin_stats(callback: CallbackQuery):
         f"💵 Подписки рублями: <b>{sub_revenue_rubles}</b>₽"
     )
     await safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=get_admin_back_keyboard())
+
+@dp.callback_query(F.data == "admin_export_stats")
+async def cb_admin_export_stats(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer()
+    if not os.path.exists(STATS_FILE):
+        await callback.message.answer("Файл stats.json ещё не создан.")
+        return
+    await callback.message.answer_document(
+        FSInputFile(STATS_FILE),
+        caption="📥 Текущий stats.json (снимок на момент запроса, только чтение — сама выгрузка ничего не меняет)."
+    )
 
 @dp.callback_query(F.data.startswith("admin_userlist:"))
 async def cb_admin_userlist(callback: CallbackQuery):

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import asyncio, random
+import asyncio, random, copy, os
 from _bootstrap import tb
 
 ADMIN_ID = next(iter(tb.ADMIN_IDS))
@@ -11,6 +11,7 @@ class FakeUser:
 class FakeMsg:
     def __init__(self):
         self.edits = []
+        self.documents = []
     async def edit_text(self, text, **kwargs):
         self.edits.append(text)
         return self
@@ -18,6 +19,9 @@ class FakeMsg:
         pass
     async def answer(self, text, **kwargs):
         self.edits.append(text)
+        return self
+    async def answer_document(self, document, **kwargs):
+        self.documents.append((document, kwargs.get("caption")))
         return self
 
 class FakeCB:
@@ -134,6 +138,26 @@ async def main():
     tb.stats["subscriptions"].pop(uid_sub_rubles, None)
     tb.stats["donor_rubles"].pop(uid_donor_rubles, None)
     print("subscriptions + payments stats block present and correct: OK")
+
+    # stats.json export: admin gets the current file as a document, nothing is modified/reset
+    tb.save_stats()
+    tb._stats_executor.submit(lambda: None).result()  # barrier: wait for the queued write (single worker, FIFO) to land
+    referral_warnings_before = copy.deepcopy(tb.stats["referral_warnings"])
+
+    cb_export = FakeCB("admin_export_stats")
+    await tb.cb_admin_export_stats(cb_export)
+    assert cb_export.message.documents, "expected a document to be sent"
+    doc, caption = cb_export.message.documents[0]
+    assert doc.path == tb.STATS_FILE
+    assert caption and "stats.json" in caption
+    assert os.path.exists(tb.STATS_FILE)
+    assert tb.stats["referral_warnings"] == referral_warnings_before, "export must not mutate stats"
+    print("admin export sends current stats.json, stats untouched: OK")
+
+    cb_export2 = FakeCB("admin_export_stats", uid=123456789)
+    await tb.cb_admin_export_stats(cb_export2)
+    assert not cb_export2.message.documents
+    print("export non-admin blocked: OK")
 
     print("ALL ADMIN STATS TESTS PASSED")
 
