@@ -323,6 +323,9 @@ def has_subscription_scope_all(user_id: int) -> bool:
     sub = get_subscription(user_id)
     return bool(sub) and sub.get("scope") == "all" and has_active_subscription(user_id)
 
+def biology_tickets_download_ok(user_id: int) -> bool:
+    return is_admin(user_id) or has_subscription_scope_all(user_id)
+
 def has_subscription_histology_access(user_id: int) -> bool:
     sub = get_subscription(user_id)
     if not sub or not has_active_subscription(user_id):
@@ -833,7 +836,8 @@ GATED_CALLBACKS = {
     "menu_biology", "menu_tickets", "menu_questions",
     "quiz_start", "quiz_show_answer", "quiz_know", "quiz_dont_know", "quiz_stop",
     "random_ticket", "question_random", "question_by_number", "question_search",
-    "download_biology_tickets",
+    # download_biology_tickets гейтится отдельно, biology_tickets_download_ok() —
+    # требует подписку scope="all" (899₽+), а не общий реферальный порог.
     # Физика
     "menu_physics", "physics_tickets", "physics_theory_tickets", "physics_test_tickets",
     "physics_test", "physics_tasks", "download_physics_full", "download_physics_ticket_tasks",
@@ -2900,8 +2904,37 @@ async def cb_menu_biology(callback: CallbackQuery):
         reply_markup=get_biology_menu()
     )
 
+def get_biology_tickets_locked_text() -> str:
+    tier_lines = "\n".join(
+        f"«{cfg['emoji']} {cfg['title']}» ({cfg['price_rub']}₽ / {cfg['price_stars']}⭐)"
+        for cfg in SUBSCRIPTION_TIERS.values() if cfg["scope"] == "all"
+    )
+    return (
+        f"📄 <b>Билеты по биологии — файл с ответами</b>\n{DIVIDER}\n\n"
+        "Скачивание готового файла со всеми вопросами и ответами доступно по подписке:\n\n"
+        f"{tier_lines}\n\n"
+        "Само прохождение билетов и вопросов в боте остаётся доступным как обычно — "
+        "подписка нужна только для скачивания файла."
+    )
+
+def get_biology_tickets_locked_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="💎 Оформить подписку", callback_data="subscription_menu")
+    builder.button(text="🔙 Назад к Биологии", callback_data="menu_biology")
+    builder.adjust(1)
+    return builder.as_markup()
+
 @dp.callback_query(F.data == "download_biology_tickets")
 async def cb_download_biology_tickets(callback: CallbackQuery):
+    if not biology_tickets_download_ok(callback.from_user.id):
+        await callback.answer()
+        await safe_edit_text(
+            callback.message,
+            get_biology_tickets_locked_text(),
+            parse_mode="HTML",
+            reply_markup=get_biology_tickets_locked_keyboard()
+        )
+        return
     await callback.answer()
     await callback.message.answer_document(
         build_biology_tickets_file(),

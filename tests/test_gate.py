@@ -8,7 +8,6 @@ GATED_EXAMPLES = [
     "quiz_start", "quiz_show_answer", "quiz_know", "quiz_dont_know", "quiz_stop",
     "random_ticket", "question_random", "question_by_number", "question_search",
     "ticket:12", "ticket_q:12:1", "qpage:2", "q:42",
-    "download_biology_tickets",
     "menu_physics", "physics_tickets", "physics_theory_tickets", "physics_test_tickets",
     "phys_test_ticket:3", "phys_test_ticket_tasks:3", "phys_test_ticket_task_show:3:1",
     "physics_test", "physics_page:1", "physics_q:10",
@@ -23,6 +22,9 @@ GATED_EXAMPLES = [
 # Every callback_data example that should be EXEMPT (always accessible)
 EXEMPT_EXAMPLES = [
     "back_to_main",
+    # download_biology_tickets гейтится отдельно (biology_tickets_download_ok — подписка scope="all"),
+    # не общим реферальным порогом.
+    "download_biology_tickets",
     "referral_info", "referral_leaderboard", "referral_battle",
     "support_menu", "toggle_donor_visibility", "donors_leaderboard",
     "donate_stars_menu", "donate_stars_amount:100", "donate_stars_confirm:100",

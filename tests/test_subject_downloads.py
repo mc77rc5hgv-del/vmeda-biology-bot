@@ -53,8 +53,29 @@ async def main():
     assert "download_chemistry_labs" in chem_kb_data and "download_chemistry_tasks" in chem_kb_data
     print("menus expose download buttons: OK")
 
-    # biology: all 40 tickets present, HTML stripped, content matches source, real .docx
-    cb = FakeCB("download_biology_tickets")
+    # biology tickets download requires a scope="all" subscription (899₽+) — locked otherwise
+    cb_locked = FakeCB("download_biology_tickets", uid=444555666)
+    tb.stats["subscriptions"].pop("444555666", None)
+    await tb.cb_download_biology_tickets(cb_locked)
+    assert not cb_locked.message.documents, "must not send the file without a qualifying subscription"
+    locked_text, locked_kb = cb_locked.message.edits[0]
+    assert "899" in locked_text and "2499" in locked_text
+    assert "subscription_menu" in kb_data(locked_kb)
+    assert "menu_biology" in kb_data(locked_kb)
+    print("biology tickets download locked without scope=all subscription: OK")
+
+    # admin bypasses the gate regardless of subscription
+    cb_admin = FakeCB("download_biology_tickets", uid=next(iter(tb.ADMIN_IDS)))
+    await tb.cb_download_biology_tickets(cb_admin)
+    assert cb_admin.message.documents, "admin must always get the file"
+    print("biology tickets download: admin bypass OK")
+
+    # biology: all 40 tickets present, HTML stripped, content matches source, real .docx —
+    # tested via a user holding a qualifying scope="all" subscription
+    bio_sub_uid = 777888999
+    tb.stats["subscriptions"].pop(str(bio_sub_uid), None)
+    tb.grant_subscription(bio_sub_uid, 3, "stars", 899)
+    cb = FakeCB("download_biology_tickets", uid=bio_sub_uid)
     await tb.cb_download_biology_tickets(cb)
     assert cb.message.documents
     doc, caption = cb.message.documents[0]
@@ -65,6 +86,7 @@ async def main():
         assert ticket["title"] in text
     assert tb.strip_html_tags(tb.TICKETS[0]["questions"][0]["answer"]).split("\n\n")[0] in text
     assert caption and f"@{tb.BOT_USERNAME}" in caption
+    tb.stats["subscriptions"].pop(str(bio_sub_uid), None)
     print(f"biology tickets file: {len(tb.TICKETS)} tickets, HTML-free docx, content matches: OK")
 
     # physics: 186 questions + all 9 task topics present
