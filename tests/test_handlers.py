@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import os, sys, asyncio
+import asyncio
 from _bootstrap import tb
 
 ADMIN_ID = next(iter(tb.ADMIN_IDS)) if tb.ADMIN_IDS else 1

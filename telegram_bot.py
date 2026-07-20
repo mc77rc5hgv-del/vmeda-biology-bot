@@ -3259,7 +3259,7 @@ async def cb_chemistry_labs(callback: CallbackQuery):
 async def cb_show_lab(callback: CallbackQuery):
     await callback.answer()
     lab_num = int(callback.data.split(":")[1])
-    lab = next((l for l in CHEMISTRY_LABS["labs"] if l["number"] == lab_num), None)
+    lab = next((entry for entry in CHEMISTRY_LABS["labs"] if entry["number"] == lab_num), None)
     if not lab:
         await callback.answer("Лабораторная работа не найдена", show_alert=True)
         return
@@ -3282,7 +3282,7 @@ async def cb_show_lab(callback: CallbackQuery):
 async def cb_lab_experiments(callback: CallbackQuery):
     await callback.answer()
     lab_num = int(callback.data.split(":")[1])
-    lab = next((l for l in CHEMISTRY_LABS["labs"] if l["number"] == lab_num), None)
+    lab = next((entry for entry in CHEMISTRY_LABS["labs"] if entry["number"] == lab_num), None)
     if not lab or not lab.get("experiments"):
         await callback.answer("Опыты не найдены", show_alert=True)
         return
@@ -3297,7 +3297,7 @@ async def cb_lab_experiments(callback: CallbackQuery):
 async def cb_lab_calculations(callback: CallbackQuery):
     await callback.answer()
     lab_num = int(callback.data.split(":")[1])
-    lab = next((l for l in CHEMISTRY_LABS["labs"] if l["number"] == lab_num), None)
+    lab = next((entry for entry in CHEMISTRY_LABS["labs"] if entry["number"] == lab_num), None)
     if not lab or not lab.get("calculations"):
         await callback.answer("Расчёты не найдены", show_alert=True)
         return

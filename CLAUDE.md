@@ -17,6 +17,14 @@ Syntax-check after any edit (fast, no token/network needed):
 python3 -m py_compile telegram_bot.py
 ```
 
+Lint (config in `pyproject.toml`; `tests/` gets a scoped ignore for the deliberately compact mock-class style —
+see "Known pitfalls"):
+```
+ruff check .
+```
+`ruff` isn't in `requirements.txt` (it's a dev-only tool, not a runtime dependency) — install with `pip install ruff`
+if it's not already on your PATH. CI installs it explicitly.
+
 Run the bot locally (needs a real `BOT_TOKEN`):
 ```
 BOT_TOKEN=<token> STATS_DIR=/some/writable/dir python3 telegram_bot.py

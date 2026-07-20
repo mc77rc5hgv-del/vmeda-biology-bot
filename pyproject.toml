@@ -1,0 +1,10 @@
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+
+[tool.ruff.lint.per-file-ignores]
+# tests/*.py use deliberately compact, hand-rolled mock classes (multiple imports/
+# statements per line) — see CLAUDE.md "Known pitfalls" for why this stays as-is.
+"tests/*.py" = ["E401", "E701", "E702"]

@@ -26,6 +26,6 @@ os.environ.setdefault("STATS_DIR", tempfile.mkdtemp(prefix="vmeda_test_stats_"))
 _prev_cwd = os.getcwd()
 os.chdir(REPO_ROOT)
 try:
-    import telegram_bot as tb  # noqa: E402
+    import telegram_bot as tb  # noqa: E402, F401
 finally:
     os.chdir(_prev_cwd)

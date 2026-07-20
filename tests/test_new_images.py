@@ -64,7 +64,6 @@ async def main():
     cb = FakeCB("anatomy_section:osteology")
     await tb.cb_anatomy_section(cb)
     assert cb.message.edits
-    kb = cb.message.edits  # can't easily inspect keyboard here without reply_markup capture; separate check below
 
     # bone hub text should reflect image counts correctly
     hub_text = tb.get_anatomy_bone_hub_text("trunk_bones", "columna_vertebralis")

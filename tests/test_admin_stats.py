@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import os, sys, asyncio, random
+import asyncio, random
 from _bootstrap import tb
 
 ADMIN_ID = next(iter(tb.ADMIN_IDS))
@@ -32,8 +32,6 @@ def fresh_uid():
     return str(random.randint(10_000_000, 99_999_999))
 
 async def main():
-    before_snapshot = dict(tb.stats["referral_warnings"])
-
     # user A: blocked (count >= threshold, no free access) -> should count
     uid_a = fresh_uid()
     tb.stats["referral_warnings"][uid_a] = {"count": tb.REFERRAL_WARNING_THRESHOLD, "last_warn_at": 0}

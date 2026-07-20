@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-import os, sys, asyncio
 from _bootstrap import tb
 
 UID = 555999

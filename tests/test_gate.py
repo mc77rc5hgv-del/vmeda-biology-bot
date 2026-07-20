@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import os, sys, re
+import sys, re
 from _bootstrap import tb
 
 # Every callback_data example that should be GATED (biology/physics/chemistry)
@@ -55,7 +55,6 @@ print(f"Checked {len(GATED_EXAMPLES)} gated + {len(EXEMPT_EXAMPLES)} exempt call
 
 # Cross-check against every actually-registered callback filter in the dispatcher,
 # to catch anything the manual lists above missed.
-import inspect
 handlers = tb.dp.observers["callback_query"].handlers
 missing_from_lists = []
 for h in handlers:

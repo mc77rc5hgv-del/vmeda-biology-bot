@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import os, sys, asyncio, time, random
+import asyncio, time, random
 from _bootstrap import tb
 from html.parser import HTMLParser
 

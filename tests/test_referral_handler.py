@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import os, sys, asyncio
+import asyncio
 from _bootstrap import tb
 
 class FakeUser:
