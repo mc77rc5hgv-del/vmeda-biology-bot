@@ -111,10 +111,20 @@ button-driven album isn't possible without losing the nav buttons).
    warning per `REFERRAL_WARNING_COOLDOWN_SECONDS`, 4h) before a hard block.
 2. **Anatomy/Histology gates** (`anatomy_access_ok` / `histology_access_ok`): separate boolean functions, not part
    of the referral allowlist — public-flag-gated (`ANATOMY_PUBLIC` / `HISTOLOGY_PUBLIC`, both currently `False`)
-   until admin flips them, bypassed by admin or by a subscription with the matching scope.
+   until admin flips them, bypassed by admin, by a subscription with the matching scope, or (Histology only) by
+   reaching `REFERRAL_FULL_ACCESS_THRESHOLD` referrals — same free-access rule as Biology/Physics/Chemistry.
+   Anatomy currently has no referral bypass, only admin/`scope="all"` subscription.
 
 `has_free_access(user_id)` is the umbrella predicate composing: admin, referral threshold, manual grant
-(`stats["manual_access_granted"]`), temp access (`stats["temporary_access"]`), active subscription.
+(`stats["manual_access_granted"]`), temp access (`stats["temporary_access"]`), active subscription. It does not
+cover Anatomy/Histology — those check `anatomy_access_ok`/`histology_access_ok` directly.
+
+**Section promos** (`start_section_promo(section, duration_seconds)` / `is_section_promo_active(section)`,
+stored in `stats["section_promos"][section] = until_ts`): a time-boxed global override that makes one section free
+for everyone regardless of referrals/subscription, e.g. "open Histology to all for 24h" via the admin panel
+(`admin_histology_promo_confirm` → `admin_histology_promo_go`, mirrors the referral-battle start pattern and
+broadcasts an announcement). Self-expires — no timer task needed, the access check just compares against
+`time.time()`.
 
 ### Subscriptions (`SUBSCRIPTION_TIERS`)
 

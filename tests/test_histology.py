@@ -126,8 +126,37 @@ async def main():
     locked_text, locked_kb = cb.message.edits[0]
     check_html(locked_text)
     assert "по подписке" in locked_text and "239" in locked_text
+    assert str(tb.REFERRAL_FULL_ACCESS_THRESHOLD) in locked_text
     assert any("Оформить подписку" in t for t in kb_texts(locked_kb))
-    print("non-admin sees histology locked screen with subscription info: OK")
+    assert any("Пригласить друзей" in t for t in kb_texts(locked_kb))
+    print("non-admin sees histology locked screen with referral+subscription info: OK")
+
+    # 4b. Referral threshold alone (no subscription) now unlocks Histology permanently
+    referral_uid = random.randint(10_000_000, 99_999_999)
+    assert not tb.histology_access_ok(referral_uid)
+    tb.stats["referrals"][str(referral_uid)] = [str(i) for i in range(tb.REFERRAL_FULL_ACCESS_THRESHOLD)]
+    assert tb.histology_access_ok(referral_uid)
+    tb.stats["referrals"].pop(str(referral_uid), None)
+    print("referral threshold alone unlocks Histology: OK")
+
+    # 4c. Section promo: makes Histology free for everyone until it expires
+    promo_uid = random.randint(10_000_000, 99_999_999)
+    assert not tb.histology_access_ok(promo_uid)
+    assert not tb.is_section_promo_active("histology")
+    until = tb.start_section_promo("histology", 3600)
+    assert until > tb.time.time()
+    assert tb.is_section_promo_active("histology")
+    assert tb.histology_access_ok(promo_uid)
+    cb_promo = FakeCB("histology_menu", uid=promo_uid)
+    await tb.cb_histology_menu(cb_promo)
+    promo_text, promo_kb = cb_promo.message.edits[0]
+    assert "Гистология" in promo_text and "Выбери диагностику" in promo_text
+    # expire it (simulate time passing) -> access reverts to referral/subscription rule
+    tb.stats["section_promos"]["histology"] = tb.time.time() - 1
+    assert not tb.is_section_promo_active("histology")
+    assert not tb.histology_access_ok(promo_uid)
+    tb.stats["section_promos"].pop("histology", None)
+    print("section promo grants temporary access to everyone, then expires: OK")
 
     # 5. Admin flow: menu -> topic -> specimen -> image carousel (diagnostika_1, spec d1_01)
     cb1 = FakeCB("histology_menu")
@@ -229,7 +258,7 @@ async def main():
     admin_menu = tb.get_main_menu(user_id=ADMIN_ID)
     assert "🔬 Гистология (админ)" in kb_texts(admin_menu)
     non_admin_menu = tb.get_main_menu(user_id=non_admin)
-    assert "🔬 Гистология (по подписке)" in kb_texts(non_admin_menu)
+    assert "🔬 Гистология (рефералы/подписка)" in kb_texts(non_admin_menu)
     print("main menu gating: OK")
 
     # 11. is_gated_callback exempts histology (should behave like anatomy: never gated)
@@ -331,6 +360,47 @@ async def main():
     assert "Отвечено: 10" in summary_caption
     assert any("Пройти ещё раз" in t for t in kb_texts(summary_kb))
     print("guess mode full run-through -> summary: OK")
+
+    # 13. Admin promo trigger: non-admin blocked, confirm previews, go starts a 24h promo + broadcasts
+    orig_broadcast = tb._broadcast
+    broadcast_calls = []
+    async def fake_broadcast(text, keyboard=None):
+        broadcast_calls.append((text, keyboard))
+    tb._broadcast = fake_broadcast
+
+    tb.stats["section_promos"].pop("histology", None)
+    non_admin2 = random.randint(10_000_000, 99_999_999)
+    cb_nb = FakeCB("admin_histology_promo_confirm", uid=non_admin2)
+    await tb.cb_admin_histology_promo_confirm(cb_nb)
+    assert not cb_nb.message.edits
+    print("promo trigger non-admin blocked: OK")
+
+    cb_confirm = FakeCB("admin_histology_promo_confirm")
+    await tb.cb_admin_histology_promo_confirm(cb_confirm)
+    assert cb_confirm.message.edits
+    confirm_text, confirm_kb = cb_confirm.message.edits[0]
+    check_html(confirm_text)
+    assert "24 часа" in confirm_text
+    assert any("Да, открыть на 24ч" in t for t in kb_texts(confirm_kb))
+    print("promo trigger preview renders: OK")
+
+    cb_go = FakeCB("admin_histology_promo_go")
+    await tb.cb_admin_histology_promo_go(cb_go)
+    await asyncio.sleep(0)  # let the asyncio.create_task(announce_histology_promo_start()) run
+    assert tb.is_section_promo_active("histology")
+    assert broadcast_calls, "expected a broadcast announcing the promo"
+    check_html(broadcast_calls[0][0])
+    assert "Гистология" in broadcast_calls[0][0]
+    print("promo go activates promo + broadcasts: OK")
+
+    cb_go_twice = FakeCB("admin_histology_promo_go")
+    await tb.cb_admin_histology_promo_go(cb_go_twice)
+    assert cb_go_twice._answers and cb_go_twice._answers[0][1] is True
+    assert len(broadcast_calls) == 1, "second start attempt must not broadcast again"
+    print("promo go blocks double-start while active: OK")
+
+    tb.stats["section_promos"].pop("histology", None)
+    tb._broadcast = orig_broadcast
 
     print("ALL HISTOLOGY TESTS PASSED")
 

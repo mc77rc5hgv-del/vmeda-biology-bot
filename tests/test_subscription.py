@@ -363,7 +363,7 @@ async def main():
     menu_no_sub = tb.get_main_menu(user_id=non_admin)
     assert "💎 Подписка без рефералов" in kb_texts(menu_no_sub)
     assert "🦴 Анатомия (в разработке)" in kb_texts(menu_no_sub), "Anatomy button stays visible even with no access"
-    assert "🔬 Гистология (по подписке)" in kb_texts(menu_no_sub), "Histology button stays visible even with no access"
+    assert "🔬 Гистология (рефералы/подписка)" in kb_texts(menu_no_sub), "Histology button stays visible even with no access"
 
     tb.grant_subscription(non_admin, 3, "stars", 899)
     menu_with_sub = tb.get_main_menu(user_id=non_admin)

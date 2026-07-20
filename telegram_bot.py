@@ -103,6 +103,7 @@ def load_stats() -> dict:
             data.setdefault("donor_hide_name", {})
             data.setdefault("temporary_access", {})
             data.setdefault("subscriptions", {})
+            data.setdefault("section_promos", {})
             return data
         except (json.JSONDecodeError, OSError):
             logger.exception("Не удалось прочитать %s, статистика будет создана заново", STATS_FILE)
@@ -129,6 +130,7 @@ def load_stats() -> dict:
         "donor_hide_name": {},
         "temporary_access": {},
         "subscriptions": {},
+        "section_promos": {},
     }
 
 # Один воркер сериализует записи на диск и не даёт им блокировать event loop бота.
@@ -153,6 +155,17 @@ def save_stats() -> None:
     future.add_done_callback(_log_stats_write_result)
 
 stats = load_stats()
+
+# ==================== ВРЕМЕННЫЕ ПРОМО-ОКНА ДОСТУПА ДЛЯ РАЗДЕЛОВ ====================
+def start_section_promo(section: str, duration_seconds: int) -> float:
+    """Делает раздел (по ключу, например "histology") бесплатным для всех до истечения окна."""
+    until = time.time() + duration_seconds
+    stats.setdefault("section_promos", {})[section] = until
+    save_stats()
+    return until
+
+def is_section_promo_active(section: str) -> bool:
+    return time.time() < stats.get("section_promos", {}).get(section, 0)
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
@@ -1387,10 +1400,14 @@ def get_main_menu(user_id: int = None):
         histology_label = "🔬 Гистология"
     elif user_id is not None and is_admin(user_id):
         histology_label = "🔬 Гистология (админ)"
+    elif is_section_promo_active("histology"):
+        histology_label = "🔬 Гистология 🎉"
+    elif user_id is not None and get_referral_count(user_id) >= REFERRAL_FULL_ACCESS_THRESHOLD:
+        histology_label = "🔬 Гистология"
     elif sub_histology:
         histology_label = "🔬 Гистология 💎"
     else:
-        histology_label = "🔬 Гистология (по подписке)"
+        histology_label = "🔬 Гистология (рефералы/подписка)"
     builder.button(text=histology_label, callback_data="histology_menu")
     builder.button(text="👥 Пригласить друзей", callback_data="referral_info")
     builder.button(text="🏆 Рейтинг", callback_data="referral_leaderboard")
@@ -1989,6 +2006,7 @@ def get_admin_menu():
     builder.button(text="🎁 Восстановить доступ исчерпавшим (7 дней)", callback_data="admin_restore_access_confirm")
     builder.button(text="📣 Напомнить о реферале/подписке (<2 реф.)", callback_data="admin_referral_reminder_confirm")
     builder.button(text="📤 Опубликовать пост в канал", callback_data="admin_channel_post_prompt")
+    builder.button(text="🔬 Открыть Гистологию всем на 24ч", callback_data="admin_histology_promo_confirm")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -2178,6 +2196,44 @@ async def cb_admin_battle_start_go(callback: CallbackQuery):
         get_admin_battle_text(),
         parse_mode="HTML",
         reply_markup=get_admin_battle_keyboard()
+    )
+
+@dp.callback_query(F.data == "admin_histology_promo_confirm")
+async def cb_admin_histology_promo_confirm(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer()
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Да, открыть на 24ч", callback_data="admin_histology_promo_go")
+    builder.button(text="❌ Отмена", callback_data="admin_panel")
+    builder.adjust(1)
+    await safe_edit_text(
+        callback.message,
+        "🔬 <b>Подтверди промо-доступ к Гистологии</b>\n\n"
+        "Раздел станет бесплатным для всех на 24 часа. После этого доступ вернётся к обычному "
+        f"правилу: {REFERRAL_FULL_ACCESS_THRESHOLD} реферала или подписка (как остальные предметы).\n\n"
+        "Всем пользователям придёт рассылка с объявлением.",
+        parse_mode="HTML",
+        reply_markup=builder.as_markup()
+    )
+
+@dp.callback_query(F.data == "admin_histology_promo_go")
+async def cb_admin_histology_promo_go(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    if is_section_promo_active("histology"):
+        await callback.answer("Промо уже идёт", show_alert=True)
+        return
+    await callback.answer("🚀 Гистология открыта для всех на 24 часа!", show_alert=True)
+    start_section_promo("histology", HISTOLOGY_PROMO_SECONDS)
+    asyncio.create_task(announce_histology_promo_start())
+    await safe_edit_text(
+        callback.message,
+        "✅ Гистология открыта для всех на 24 часа.",
+        parse_mode="HTML",
+        reply_markup=get_admin_back_keyboard()
     )
 
 @dp.callback_query(F.data == "admin_battle_end_confirm")
@@ -4630,9 +4686,14 @@ async def cb_anatomy_picture(callback: CallbackQuery):
 
 # ==================== ГИСТОЛОГИЯ ====================
 HISTOLOGY_PUBLIC = False  # когда раздел будет готов для всех — переключить на True
+HISTOLOGY_PROMO_SECONDS = 24 * 60 * 60
 
 def histology_access_ok(user_id: int) -> bool:
-    return HISTOLOGY_PUBLIC or is_admin(user_id) or has_subscription_histology_access(user_id)
+    if HISTOLOGY_PUBLIC or is_admin(user_id) or is_section_promo_active("histology"):
+        return True
+    if has_subscription_histology_access(user_id):
+        return True
+    return get_referral_count(user_id) >= REFERRAL_FULL_ACCESS_THRESHOLD
 
 def get_histology_specimen(diag_key: str, spec_id: str):
     diag = HISTOLOGY.get(diag_key)
@@ -4649,17 +4710,31 @@ def get_histology_locked_text() -> str:
         "✅ Раздел уже полностью готов и проработан: все микрофотографии и "
         "протоколы-описания взяты именно с препаратов академии, а содержание "
         "сверено с преподавателями.\n\n"
-        "Доступен по подписке от <b>239₽ / 239⭐</b> (тариф «Навсегда — Биология, "
-        "Физика, Химия») и выше — во всех тарифах с этой цены и дороже Гистология уже включена.\n\n"
-        "После оплаты раздел открывается сразу."
+        f"Открывается бесплатно — как Биология, Физика и Химия — после "
+        f"<b>{REFERRAL_FULL_ACCESS_THRESHOLD}</b> приглашённых друзей, либо сразу по подписке от "
+        "<b>239₽ / 239⭐</b> (тариф «Навсегда — Биология, Физика, Химия») и выше."
     )
 
 def get_histology_locked_keyboard():
     builder = InlineKeyboardBuilder()
+    builder.button(text="👥 Пригласить друзей", callback_data="referral_info")
     builder.button(text="💎 Оформить подписку", callback_data="subscription_menu")
     builder.button(text="🔙 Назад в меню", callback_data="back_to_main")
     builder.adjust(1)
     return builder.as_markup()
+
+async def announce_histology_promo_start() -> None:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔬 Гистология", callback_data="histology_menu")
+    text = (
+        "🔬🎉 <b>ГИСТОЛОГИЯ ОТКРЫТА ДЛЯ ВСЕХ!</b> 🎉🔬\n"
+        f"{DIVIDER}\n\n"
+        "На <b>24 часа</b> раздел «Гистология» — все препараты, микрофотографии и разборы — "
+        "доступен абсолютно бесплатно, без рефералов и подписки.\n\n"
+        f"После этого доступ, как обычно: {REFERRAL_FULL_ACCESS_THRESHOLD} реферала или подписка.\n\n"
+        "Успей посмотреть, пока открыто! 🚀"
+    )
+    await _broadcast(text, builder.as_markup())
 
 def get_histology_menu_keyboard():
     builder = InlineKeyboardBuilder()
@@ -4756,7 +4831,7 @@ async def cb_histology_menu(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("histology_topic:"))
 async def cb_histology_topic(callback: CallbackQuery):
     if not histology_access_ok(callback.from_user.id):
-        await callback.answer("🔬 Гистология доступна по подписке от 239₽/239⭐ и выше 💎", show_alert=True)
+        await callback.answer(f"🔬 Гистология открывается после {REFERRAL_FULL_ACCESS_THRESHOLD} рефералов или по подписке от 239₽/239⭐ 💎", show_alert=True)
         return
     diag_key = callback.data.split(":")[1]
     if diag_key not in HISTOLOGY:
@@ -4773,7 +4848,7 @@ async def cb_histology_topic(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("histology_specimen:"))
 async def cb_histology_specimen(callback: CallbackQuery):
     if not histology_access_ok(callback.from_user.id):
-        await callback.answer("🔬 Гистология доступна по подписке от 239₽/239⭐ и выше 💎", show_alert=True)
+        await callback.answer(f"🔬 Гистология открывается после {REFERRAL_FULL_ACCESS_THRESHOLD} рефералов или по подписке от 239₽/239⭐ 💎", show_alert=True)
         return
     _, diag_key, spec_id = callback.data.split(":")
     spec = get_histology_specimen(diag_key, spec_id)
@@ -4791,7 +4866,7 @@ async def cb_histology_specimen(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("histology_img:"))
 async def cb_histology_img(callback: CallbackQuery):
     if not histology_access_ok(callback.from_user.id):
-        await callback.answer("🔬 Гистология доступна по подписке от 239₽/239⭐ и выше 💎", show_alert=True)
+        await callback.answer(f"🔬 Гистология открывается после {REFERRAL_FULL_ACCESS_THRESHOLD} рефералов или по подписке от 239₽/239⭐ 💎", show_alert=True)
         return
     _, diag_key, spec_id, idx_s = callback.data.split(":")
     idx = int(idx_s)
@@ -4899,7 +4974,7 @@ async def render_histology_guess_summary(user_id: int, aborted: bool = False):
 @dp.callback_query(F.data.startswith("histology_guess_start:"))
 async def cb_histology_guess_start(callback: CallbackQuery):
     if not histology_access_ok(callback.from_user.id):
-        await callback.answer("🔬 Гистология доступна по подписке от 239₽/239⭐ и выше 💎", show_alert=True)
+        await callback.answer(f"🔬 Гистология открывается после {REFERRAL_FULL_ACCESS_THRESHOLD} рефералов или по подписке от 239₽/239⭐ 💎", show_alert=True)
         return
     scope = callback.data.split(":", 1)[1]
     user_id = callback.from_user.id
