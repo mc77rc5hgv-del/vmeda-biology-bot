@@ -812,7 +812,7 @@ def track_user_identity(user) -> None:
     """Обновляет карты имя/username <-> id, чтобы админ мог находить пользователей по @username."""
     uid_str = str(user.id)
     changed = False
-    new_name = user.full_name or f"Пользователь {user.id}"
+    new_name = html.escape(user.full_name) if user.full_name else f"Пользователь {user.id}"
     if stats["user_names"].get(uid_str) != new_name:
         stats["user_names"][uid_str] = new_name
         changed = True
@@ -1913,6 +1913,8 @@ async def cmd_start(message: Message):
 
 @dp.message(Command("stats"))
 async def cmd_stats(message: Message):
+    if not is_admin(message.from_user.id):
+        return
     text = (
         "📊 <b>Статистика бота</b>\n"
         f"{DIVIDER}\n"
@@ -3351,7 +3353,7 @@ async def handle_successful_payment(message: Message):
                 await bot.send_message(
                     admin_id,
                     f"💎 <b>Новая подписка звёздами!</b>\n\n«{cfg['title']}» ({stars} ⭐) — "
-                    f"{user.full_name} (ID <code>{user.id}</code>)",
+                    f"{html.escape(user.full_name)} (ID <code>{user.id}</code>)",
                     parse_mode="HTML"
                 )
             except Exception:
@@ -3373,7 +3375,8 @@ async def handle_successful_payment(message: Message):
         try:
             await bot.send_message(
                 admin_id,
-                f"⭐ <b>Новое пожертвование звёздами!</b>\n\n{stars} ⭐ от {user.full_name} (ID <code>{user.id}</code>)",
+                f"⭐ <b>Новое пожертвование звёздами!</b>\n\n{stars} ⭐ от "
+                f"{html.escape(user.full_name)} (ID <code>{user.id}</code>)",
                 parse_mode="HTML"
             )
         except Exception:

@@ -5,9 +5,21 @@ line-length = 120
 extend-exclude = ["scripts/content-authoring"]
 
 [tool.ruff.lint]
-select = ["E4", "E7", "E9", "F"]
+select = ["E4", "E7", "E9", "F", "S"]
+# S105: flags a variable literally named `token` inside add_html_run()'s HTML-tag parser (a parsed tag
+# name, not a secret). S311: flags random.choice() used for "random ticket"/"random question" study
+# features — non-cryptographic use, not a security-sensitive RNG context.
+ignore = ["S105", "S311"]
 
 [tool.ruff.lint.per-file-ignores]
 # tests/*.py use deliberately compact, hand-rolled mock classes (multiple imports/
 # statements per line) — see CLAUDE.md "Known pitfalls" for why this stays as-is.
-"tests/*.py" = ["E401", "E701", "E702"]
+# S101: these test scripts are standalone (no pytest) and use bare `assert` by design as
+# their only check mechanism — see CLAUDE.md "Tests" section.
+"tests/*.py" = ["E401", "E701", "E702", "S101"]
+# tests/run_all.py shells out to `python3 <fixed local test file path>` for each test file it
+# discovers itself — not attacker-controlled input.
+"tests/run_all.py" = ["S603"]
+# One-off dev tool run manually by a maintainer with a trusted local spec file; the subprocess
+# args are fixed except for a developer-provided filename, not attacker/network input.
+"scripts/fetch_commons.py" = ["S603", "S607"]

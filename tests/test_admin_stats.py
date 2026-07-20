@@ -160,6 +160,26 @@ async def main():
     assert not cb_export2.message.documents
     print("export non-admin blocked: OK")
 
+    # /stats command: admin-only (info-disclosure guard)
+    class FakeStatsMsg:
+        def __init__(self, uid):
+            self.from_user = FakeUser(uid)
+            self.sent = []
+        async def answer(self, text, **kwargs):
+            self.sent.append(text)
+            return self
+
+    msg_admin = FakeStatsMsg(ADMIN_ID)
+    await tb.cmd_stats(msg_admin)
+    assert msg_admin.sent, "admin should get a /stats reply"
+    assert "Статистика бота" in msg_admin.sent[0]
+    print("/stats admin gets stats: OK")
+
+    msg_non_admin = FakeStatsMsg(123456789)
+    await tb.cmd_stats(msg_non_admin)
+    assert not msg_non_admin.sent, "/stats must not leak metrics to non-admins"
+    print("/stats non-admin blocked: OK")
+
     print("ALL ADMIN STATS TESTS PASSED")
 
 asyncio.run(main())
