@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import (
-    Message, CallbackQuery, InlineKeyboardButton, FSInputFile, Update,
+    Message, CallbackQuery, InlineKeyboardButton, FSInputFile, BufferedInputFile, Update,
     BotCommand, BotCommandScopeDefault, BotCommandScopeChat, LabeledPrice,
 )
 from aiogram.filters import CommandStart, Command
@@ -808,12 +808,13 @@ GATED_CALLBACKS = {
     "menu_biology", "menu_tickets", "menu_questions",
     "quiz_start", "quiz_show_answer", "quiz_know", "quiz_dont_know", "quiz_stop",
     "random_ticket", "question_random", "question_by_number", "question_search",
+    "download_biology_tickets",
     # Физика
     "menu_physics", "physics_tickets", "physics_theory_tickets", "physics_test_tickets",
-    "physics_test", "physics_tasks",
+    "physics_test", "physics_tasks", "download_physics_full", "download_physics_ticket_tasks",
     # Химия
     "menu_chemistry", "chemistry_theory", "chemistry_theory_list",
-    "chemistry_tasks", "chemistry_labs",
+    "chemistry_tasks", "chemistry_labs", "download_chemistry_labs", "download_chemistry_tasks",
 }
 GATED_PREFIXES = (
     # Биология
@@ -1231,6 +1232,103 @@ async def send_answer(target, body: str, short_caption: str, question: dict, key
         logger.exception("Не удалось отправить изображение %s", image_path)
     await target.answer(body, parse_mode="HTML", reply_markup=keyboard)
 
+# ==================== ВЫГРУЗКА РАЗДЕЛОВ В ТЕКСТОВЫЙ ФАЙЛ ====================
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+def strip_html_tags(text: str) -> str:
+    """Контент хранится с Telegram-HTML-разметкой (<b>, <i>, <u>) — для .txt-выгрузки она не нужна."""
+    return _HTML_TAG_RE.sub("", text)
+
+def build_text_file(title: str, body_lines: list) -> BufferedInputFile:
+    content = title + "\n" + "=" * len(title) + "\n\n" + "\n".join(body_lines)
+    filename = re.sub(r"[^\w\-]+", "_", title, flags=re.UNICODE).strip("_")[:60] + ".txt"
+    return BufferedInputFile(content.encode("utf-8"), filename=filename)
+
+def build_biology_tickets_file() -> BufferedInputFile:
+    lines = []
+    for ticket in TICKETS:
+        lines.append(f"\n{ticket['title']}\n{'-' * len(ticket['title'])}")
+        for q in ticket["questions"]:
+            lines.append(f"\n{q['num']}. {strip_html_tags(q['title'])}\n{strip_html_tags(q['answer'])}")
+    return build_text_file("Биология — все билеты (вопросы и ответы)", lines)
+
+def build_physics_full_file() -> BufferedInputFile:
+    lines = ["ЧАСТЬ 1. ТЕСТОВАЯ ЧАСТЬ — 186 ВОПРОСОВ (ПО АЛФАВИТУ)\n"]
+    items = sorted(PHYSICS_QUESTIONS.values(), key=lambda v: v["title"])
+    for item in items:
+        lines.append(f"\n{strip_html_tags(item['title'])}\n{strip_html_tags(item['answer'])}")
+    lines.append("\n\n" + "=" * 40)
+    lines.append("ЧАСТЬ 2. ШАБЛОНЫ РЕШЕНИЯ ЗАДАЧ ПО ВСЕМ ТЕМАМ\n")
+    for topic in PHYSICS_TASKS.values():
+        lines.append(f"\n### {strip_html_tags(topic['title'])} ###")
+        if topic.get("intro"):
+            lines.append(strip_html_tags(topic["intro"]))
+        lines.append("\n" + strip_html_tags(topic["formulas"]))
+        lines.append("\nПримеры решённых задач:")
+        for task in topic["tasks"]:
+            lines.append(
+                f"\n{task['num']}. {strip_html_tags(task['title'])}\n"
+                f"Условие: {strip_html_tags(task['condition'])}\n"
+                f"Решение: {strip_html_tags(task['solution'])}"
+            )
+    return build_text_file("Физика — тестовая часть и шаблоны решения задач", lines)
+
+def build_physics_ticket_tasks_file() -> BufferedInputFile:
+    lines = []
+    for num in sorted(PHYSICS_TEST_TICKETS.keys(), key=int):
+        ticket = PHYSICS_TEST_TICKETS[num]
+        tasks = ticket.get("tasks")
+        if not tasks:
+            continue
+        lines.append(f"\n{ticket['title']} — Часть 2. Задачи\n{'-' * 40}")
+        for task in tasks:
+            lines.append(
+                f"\nЗадача {task['num']}. {strip_html_tags(task['title'])}\n"
+                f"Условие: {strip_html_tags(task['condition'])}\n"
+                f"Решение: {strip_html_tags(task['solution'])}"
+            )
+    return build_text_file("Физика — билеты с задачами (ответы)", lines)
+
+_LAB_FIELD_LABELS = {
+    "positive_sol": "Положительный золь", "negative_sol": "Отрицательный золь",
+    "procedure": "Методика", "theory": "Теория", "titrant": "Титрант",
+    "indicator": "Индикатор", "buffer": "Буфер", "equations": "Уравнения реакций",
+    "calculations": "Расчёты",
+}
+
+def build_chemistry_labs_file() -> BufferedInputFile:
+    lines = []
+    for lab in CHEMISTRY_LABS["labs"]:
+        lines.append(f"\nЛабораторная работа {lab['number']}. {strip_html_tags(lab['theme'])}\n{'-' * 40}")
+        lines.append(f"Условие: {strip_html_tags(lab['condition'])}")
+        for exp in lab.get("experiments", []):
+            lines.append(f"\n{strip_html_tags(exp['name'])}")
+            for key in ("description", "mechanism", "technique", "sorbent", "eluent", "procedure"):
+                value = exp.get(key)
+                if value:
+                    lines.append(strip_html_tags(value))
+        for key, label in _LAB_FIELD_LABELS.items():
+            value = lab.get(key)
+            if value:
+                lines.append(f"\n{label}: {strip_html_tags(value)}")
+    return build_text_file("Химия — все лабораторные работы", lines)
+
+def build_chemistry_tasks_file() -> BufferedInputFile:
+    lines = []
+    for topic in CHEMISTRY_TASKS.values():
+        lines.append(f"\n### {strip_html_tags(topic['title'])} ###")
+        if topic.get("intro"):
+            lines.append(strip_html_tags(topic["intro"]))
+        lines.append("\n" + strip_html_tags(topic["formulas"]))
+        lines.append("\nЗадачи:")
+        for task in topic["tasks"]:
+            lines.append(
+                f"\n{task['num']}. {strip_html_tags(task['title'])}\n"
+                f"Условие: {strip_html_tags(task['condition'])}\n"
+                f"Решение: {strip_html_tags(task['solution'])}"
+            )
+    return build_text_file("Химия — все задачи", lines)
+
 # ==================== КЛАВИАТУРЫ ====================
 def get_main_menu(user_id: int = None):
     builder = InlineKeyboardBuilder()
@@ -1290,6 +1388,7 @@ def get_biology_menu():
     builder.button(text="📘 Билеты", callback_data="menu_tickets")
     builder.button(text="📝 Вопросы", callback_data="menu_questions")
     builder.button(text="🎯 Опрос (10 вопросов)", callback_data="quiz_start")
+    builder.button(text="📄 Все билеты (текстовый файл)", callback_data="download_biology_tickets")
     builder.adjust(1)
     builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
     return builder.as_markup()
@@ -1453,6 +1552,8 @@ def get_physics_menu():
     builder.button(text="📝 Тестовая часть (186 вопросов)", callback_data="physics_test")
     builder.button(text="📘 Билеты", callback_data="physics_tickets")
     builder.button(text="🧮 Задачи", callback_data="physics_tasks")
+    builder.button(text="📄 186 вопросов + шаблоны задач (файл)", callback_data="download_physics_full")
+    builder.button(text="📄 Ответы на задачи билетов (файл)", callback_data="download_physics_ticket_tasks")
     builder.adjust(1)
     builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
     return builder.as_markup()
@@ -1596,6 +1697,8 @@ def get_chemistry_menu():
     builder.button(text="📚 Теория", callback_data="chemistry_theory")
     builder.button(text="📝 Задачи", callback_data="chemistry_tasks")
     builder.button(text="🧪 Лабораторные работы", callback_data="chemistry_labs")
+    builder.button(text="📄 Все лабораторные работы (файл)", callback_data="download_chemistry_labs")
+    builder.button(text="📄 Все задачи (файл)", callback_data="download_chemistry_tasks")
     builder.adjust(1)
     builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
     return builder.as_markup()
@@ -2687,6 +2790,14 @@ async def cb_menu_biology(callback: CallbackQuery):
         reply_markup=get_biology_menu()
     )
 
+@dp.callback_query(F.data == "download_biology_tickets")
+async def cb_download_biology_tickets(callback: CallbackQuery):
+    await callback.answer()
+    await callback.message.answer_document(
+        build_biology_tickets_file(),
+        caption="📄 Все билеты по биологии — вопросы и ответы."
+    )
+
 @dp.callback_query(F.data == "quiz_start")
 async def cb_quiz_start(callback: CallbackQuery):
     if not QUESTIONS:
@@ -3175,6 +3286,22 @@ async def cb_menu_physics(callback: CallbackQuery):
         reply_markup=get_physics_menu()
     )
 
+@dp.callback_query(F.data == "download_physics_full")
+async def cb_download_physics_full(callback: CallbackQuery):
+    await callback.answer()
+    await callback.message.answer_document(
+        build_physics_full_file(),
+        caption="📄 Физика: тестовая часть (186 вопросов) + шаблоны решения задач по всем темам."
+    )
+
+@dp.callback_query(F.data == "download_physics_ticket_tasks")
+async def cb_download_physics_ticket_tasks(callback: CallbackQuery):
+    await callback.answer()
+    await callback.message.answer_document(
+        build_physics_ticket_tasks_file(),
+        caption="📄 Ответы на задачи (Часть 2) билетов 66-69."
+    )
+
 @dp.callback_query(F.data == "menu_chemistry")
 async def cb_menu_chemistry(callback: CallbackQuery):
     await callback.answer()
@@ -3183,6 +3310,22 @@ async def cb_menu_chemistry(callback: CallbackQuery):
         f"🧪 <b>Химия</b>\n{DIVIDER}\n\nВыбери раздел:",
         parse_mode="HTML",
         reply_markup=get_chemistry_menu()
+    )
+
+@dp.callback_query(F.data == "download_chemistry_labs")
+async def cb_download_chemistry_labs(callback: CallbackQuery):
+    await callback.answer()
+    await callback.message.answer_document(
+        build_chemistry_labs_file(),
+        caption="📄 Все лабораторные работы по химии."
+    )
+
+@dp.callback_query(F.data == "download_chemistry_tasks")
+async def cb_download_chemistry_tasks(callback: CallbackQuery):
+    await callback.answer()
+    await callback.message.answer_document(
+        build_chemistry_tasks_file(),
+        caption="📄 Все задачи по химии."
     )
 
 # ==================== ХИМИЯ - ТЕОРИЯ (С НАВИГАЦИЕЙ) ====================

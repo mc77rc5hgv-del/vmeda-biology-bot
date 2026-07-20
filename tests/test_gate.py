@@ -8,13 +8,16 @@ GATED_EXAMPLES = [
     "quiz_start", "quiz_show_answer", "quiz_know", "quiz_dont_know", "quiz_stop",
     "random_ticket", "question_random", "question_by_number", "question_search",
     "ticket:12", "ticket_q:12:1", "qpage:2", "q:42",
+    "download_biology_tickets",
     "menu_physics", "physics_tickets", "physics_theory_tickets", "physics_test_tickets",
     "phys_test_ticket:3", "phys_test_ticket_tasks:3", "phys_test_ticket_task_show:3:1",
     "physics_test", "physics_page:1", "physics_q:10",
     "physics_tasks", "phystask_topic:1", "phystask_formulas:1", "phystask_list:1", "phystask_show:1:2",
+    "download_physics_full", "download_physics_ticket_tasks",
     "menu_chemistry", "chemistry_theory", "chem_theory:1", "chemistry_theory_list",
     "chemistry_tasks", "chemtask_topic:1", "chemtask_formulas:1", "chemtask_list:1", "chemtask_show:1:2",
     "chemistry_labs", "lab:1", "lab_exp:1:2", "lab_calc:1:2",
+    "download_chemistry_labs", "download_chemistry_tasks",
 ]
 
 # Every callback_data example that should be EXEMPT (always accessible)
