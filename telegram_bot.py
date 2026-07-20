@@ -2813,13 +2813,16 @@ async def handle_admin_pending_action(message: Message):
             parse_mode="HTML"
         )
         try:
-            await bot.send_message(
-                target_id,
+            target_text = (
                 f"🎉 <b>Подписка «{cfg['title']}» активирована!</b>\n\n"
                 f"Доступ {scope_label} открыт — {format_subscription_expiry(sub['expires'])}.\n"
-                "Правило про рефералов для тебя больше не действует. Спасибо за поддержку! 🙏😇",
-                parse_mode="HTML"
+                "Правило про рефералов для тебя больше не действует. Спасибо за поддержку! 🙏😇"
             )
+            target_keyboard = None
+            if tier_id == 1:
+                target_text += get_tier1_upsell_text()
+                target_keyboard = get_tier1_upsell_keyboard()
+            await bot.send_message(target_id, target_text, parse_mode="HTML", reply_markup=target_keyboard)
         except Exception:
             logger.exception("Не удалось уведомить пользователя %s о выдаче подписки", target_id)
         return
@@ -3126,6 +3129,25 @@ def get_my_subscription_status_block(user_id: int) -> str:
         f"Доступ {scope_label} — {format_subscription_expiry(sub['expires'])}.\n\n"
     )
 
+def get_tier1_upsell_text() -> str:
+    t1 = SUBSCRIPTION_TIERS[1]
+    t2 = SUBSCRIPTION_TIERS[2]
+    diff_rub = t2["price_rub"] - t1["price_rub"]
+    diff_stars = t2["price_stars"] - t1["price_stars"]
+    return (
+        f"\n\n💡 <b>Выгоднее:</b> тариф «{t2['emoji']} {t2['title']}» — всего на <b>{diff_rub}₽ / {diff_stars}⭐</b> "
+        f"дороже (<b>{t2['price_rub']}₽ / {t2['price_stars']}⭐</b> вместо {t1['price_rub']}₽), а доступ не "
+        "закончится через 30 дней, а останется навсегда — плюс сразу открывается Гистология."
+    )
+
+def get_tier1_upsell_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text=f"♾️ Перейти на «Навсегда» за {SUBSCRIPTION_TIERS[2]['price_rub']}₽",
+        callback_data="sub_tier:2"
+    )
+    return builder.as_markup()
+
 def get_subscription_menu_text(user_id: int) -> str:
     lines = [f"💎 <b>Подписка без рефералов</b>\n{DIVIDER}\n"]
     lines.append(
@@ -3299,12 +3321,16 @@ async def handle_successful_payment(message: Message):
         cfg = SUBSCRIPTION_TIERS[tier_id]
         sub = get_subscription(message.from_user.id)
         scope_label = "ко всем разделам бота" if cfg["scope"] == "all" else "к Биологии, Физике и Химии"
-        await message.answer(
+        text = (
             f"🎉 <b>Подписка «{cfg['title']}» активирована!</b>\n\n"
             f"Доступ {scope_label} открыт — {format_subscription_expiry(sub['expires'])}.\n"
-            "Правило про рефералов для тебя больше не действует. Спасибо за поддержку! 🙏😇",
-            parse_mode="HTML"
+            "Правило про рефералов для тебя больше не действует. Спасибо за поддержку! 🙏😇"
         )
+        keyboard = None
+        if tier_id == 1:
+            text += get_tier1_upsell_text()
+            keyboard = get_tier1_upsell_keyboard()
+        await message.answer(text, parse_mode="HTML", reply_markup=keyboard)
         user = message.from_user
         for admin_id in ADMIN_IDS:
             try:

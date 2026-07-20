@@ -331,6 +331,67 @@ async def main():
     tb.bot.send_message = orig_send_message
     print("admin flow rejects invalid tier number: OK")
 
+    # 14b. Buying tier 1 (89₽/⭐) offers an upsell to tier 2 (239₽/⭐); tier 4 purchase does not
+    upsell_uid = random.randint(10_000_000, 99_999_999)
+    orig_send_invoice2 = tb.bot.send_invoice
+    async def fake_send_invoice2(**kwargs):
+        pass
+    tb.bot.send_invoice = fake_send_invoice2
+    orig_send_message4 = tb.bot.send_message
+    async def fake_send_message4(chat_id, text, **kwargs):
+        pass
+    tb.bot.send_message = fake_send_message4
+
+    msg_t1 = FakeMsg(from_user=FakeUser(upsell_uid))
+    msg_t1.successful_payment = FakeSuccessfulPayment(89, f"sub_stars_1_{upsell_uid}_{int(time.time())}")
+    await tb.handle_successful_payment(msg_t1)
+    assert msg_t1.answers, "expected a confirmation message"
+    t1_text, t1_kb = msg_t1.answers[0]
+    check_html(t1_text)
+    assert "активирована" in t1_text
+    assert "Выгоднее" in t1_text and "239₽" in t1_text and "150₽" in t1_text
+    assert t1_kb is not None and any("Навсегда" in b.text for row in t1_kb.inline_keyboard for b in row)
+    tb.stats["subscriptions"].pop(str(upsell_uid), None)
+    print("tier 1 stars purchase offers tier 2 upsell: OK")
+
+    upsell_uid2 = random.randint(10_000_000, 99_999_999)
+    msg_t4 = FakeMsg(from_user=FakeUser(upsell_uid2))
+    msg_t4.successful_payment = FakeSuccessfulPayment(2499, f"sub_stars_4_{upsell_uid2}_{int(time.time())}")
+    await tb.handle_successful_payment(msg_t4)
+    assert msg_t4.answers
+    t4_text, t4_kb = msg_t4.answers[0]
+    assert "Выгоднее" not in t4_text and t4_kb is None
+    tb.stats["subscriptions"].pop(str(upsell_uid2), None)
+    tb.bot.send_invoice = orig_send_invoice2
+    tb.bot.send_message = orig_send_message4
+    print("tier 4 purchase shows no upsell: OK")
+
+    # Same upsell on the admin manual-rubles-grant path (tier 1)
+    upsell_uid3 = random.randint(10_000_000, 99_999_999)
+    tb.stats["user_username"][str(upsell_uid3)] = "upselltester"
+    tb.stats["usernames"]["upselltester"] = upsell_uid3
+    admin_notify2 = []
+    async def fake_send_message3(chat_id, text, **kwargs):
+        admin_notify2.append((chat_id, text, kwargs.get("reply_markup")))
+    orig_send_message3 = tb.bot.send_message
+    tb.bot.send_message = fake_send_message3
+
+    cb_prompt3 = FakeCB("admin_subscription_prompt")
+    await tb.cb_admin_subscription_prompt(cb_prompt3)
+    m5 = FakeMsg(from_user=FakeUser(ADMIN_ID))
+    m5.text = "upselltester"
+    await tb.handle_admin_pending_action(m5)
+    m6 = FakeMsg(from_user=FakeUser(ADMIN_ID))
+    m6.text = "1"
+    await tb.handle_admin_pending_action(m6)
+    assert admin_notify2, "expected the target user to be notified"
+    notify_chat_id, notify_text, notify_kb = admin_notify2[-1]
+    assert notify_chat_id == upsell_uid3
+    assert "Выгоднее" in notify_text and notify_kb is not None
+    tb.stats["subscriptions"].pop(str(upsell_uid3), None)
+    tb.bot.send_message = orig_send_message3
+    print("tier 1 admin rubles grant offers tier 2 upsell: OK")
+
     # 15. Referral gate integration: get_referral_status_text shows subscription branch
     tb.grant_subscription(non_admin, 3, "stars", 899)
     status_text = tb.get_referral_status_text(non_admin)
