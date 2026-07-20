@@ -150,7 +150,7 @@ async def main():
     doc, caption = cb_export.message.documents[0]
     assert doc.path == tb.STATS_FILE
     assert caption and "stats.json" in caption
-    assert tb.BOT_USERNAME in caption
+    assert f"@{tb.BOT_USERNAME}" in caption
     assert os.path.exists(tb.STATS_FILE)
     assert tb.stats["referral_warnings"] == referral_warnings_before, "export must not mutate stats"
     print("admin export sends current stats.json, stats untouched: OK")

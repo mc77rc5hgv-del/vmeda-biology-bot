@@ -33,7 +33,6 @@ if not BOT_TOKEN:
         "never hardcode the token in source code."
     )
 CHANNEL_ID = "@Vmeda_examen"
-BOT_USERNAME = "@VMEDA_examen_bot"
 ADMIN_IDS = {1326779223, 8601892147}
 STATS_DIR = os.getenv("STATS_DIR", ".")
 STATS_FILE = os.path.join(STATS_DIR, "stats.json")
@@ -2419,7 +2418,7 @@ async def cb_admin_export_stats(callback: CallbackQuery):
         return
     await callback.message.answer_document(
         FSInputFile(STATS_FILE),
-        caption=f"📥 Текущий stats.json (снимок на момент запроса, только чтение — сама выгрузка ничего не меняет).\n\n{BOT_USERNAME}"
+        caption=f"📥 Текущий stats.json (снимок на момент запроса, только чтение — сама выгрузка ничего не меняет).\n\n@{BOT_USERNAME}"
     )
 
 @dp.callback_query(F.data.startswith("admin_userlist:"))
@@ -2833,7 +2832,7 @@ async def cb_download_biology_tickets(callback: CallbackQuery):
     await callback.answer()
     await callback.message.answer_document(
         build_biology_tickets_file(),
-        caption=f"📄 Все билеты по биологии — вопросы и ответы.\n\n{BOT_USERNAME}"
+        caption=f"📄 Все билеты по биологии — вопросы и ответы.\n\n@{BOT_USERNAME}"
     )
 
 @dp.callback_query(F.data == "quiz_start")
@@ -3329,7 +3328,7 @@ async def cb_download_physics_full(callback: CallbackQuery):
     await callback.answer()
     await callback.message.answer_document(
         build_physics_full_file(),
-        caption=f"📄 Физика: тестовая часть (186 вопросов) + шаблоны решения задач по всем темам.\n\n{BOT_USERNAME}"
+        caption=f"📄 Физика: тестовая часть (186 вопросов) + шаблоны решения задач по всем темам.\n\n@{BOT_USERNAME}"
     )
 
 @dp.callback_query(F.data == "download_physics_ticket_tasks")
@@ -3337,7 +3336,7 @@ async def cb_download_physics_ticket_tasks(callback: CallbackQuery):
     await callback.answer()
     await callback.message.answer_document(
         build_physics_ticket_tasks_file(),
-        caption=f"📄 Ответы на задачи (Часть 2) билетов 66-69.\n\n{BOT_USERNAME}"
+        caption=f"📄 Ответы на задачи (Часть 2) билетов 66-69.\n\n@{BOT_USERNAME}"
     )
 
 @dp.callback_query(F.data == "menu_chemistry")
@@ -3355,7 +3354,7 @@ async def cb_download_chemistry_labs(callback: CallbackQuery):
     await callback.answer()
     await callback.message.answer_document(
         build_chemistry_labs_file(),
-        caption=f"📄 Все лабораторные работы по химии.\n\n{BOT_USERNAME}"
+        caption=f"📄 Все лабораторные работы по химии.\n\n@{BOT_USERNAME}"
     )
 
 @dp.callback_query(F.data == "download_chemistry_tasks")
@@ -3363,7 +3362,7 @@ async def cb_download_chemistry_tasks(callback: CallbackQuery):
     await callback.answer()
     await callback.message.answer_document(
         build_chemistry_tasks_file(),
-        caption=f"📄 Все задачи по химии.\n\n{BOT_USERNAME}"
+        caption=f"📄 Все задачи по химии.\n\n@{BOT_USERNAME}"
     )
 
 # ==================== ХИМИЯ - ТЕОРИЯ (С НАВИГАЦИЕЙ) ====================
