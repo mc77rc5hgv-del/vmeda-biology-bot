@@ -84,18 +84,21 @@ async def main():
     assert not tb.has_free_access(non_admin)
     print("no subscription -> no access: OK")
 
-    # 3. Grant tier 1 (gated, 30 days) -> has_free_access True, scope_all False
+    # 3. Grant tier 1 (gated, 30 days) -> has_free_access True, scope_all False, but Histology IS
+    # unlocked (until end of 2026 — a time-boxed perk on the cheapest tier, unlike Anatomy)
     tb.grant_subscription(non_admin, 1, "stars", 89)
     assert tb.has_active_subscription(non_admin)
     assert tb.has_free_access(non_admin)
     assert not tb.has_subscription_scope_all(non_admin)
     assert not tb.anatomy_access_ok(non_admin)
-    assert not tb.histology_access_ok(non_admin)
+    assert tb.histology_access_ok(non_admin)
+    assert tb.time.time() < tb.TIER1_HISTOLOGY_DEADLINE
     sub = tb.get_subscription(non_admin)
     assert sub["tier"] == 1 and sub["scope"] == "gated" and sub["method"] == "stars" and sub["price"] == 89
     expected_expiry = time.time() + 30 * 86400
     assert abs(sub["expires"] - expected_expiry) < 5
-    print("tier 1 grants gated-only access with 30-day expiry: OK")
+    assert "до конца 2026" in tb.get_subscription_scope_label(sub)
+    print("tier 1 grants gated access + time-boxed Histology (until end of 2026), no Anatomy: OK")
 
     # 4. Grant tier 3 (all, 365 days) -> scope_all True, anatomy/histology unlocked
     tb.grant_subscription(non_admin, 3, "rubles", 899)

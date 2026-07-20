@@ -236,6 +236,7 @@ def has_temp_access(user_id: int) -> bool:
 # scope "gated" — только Биология/Физика/Химия (то, что вообще закрывает реферальный гейт).
 # scope "all"  — то же плюс досрочный доступ к Анатомии/Гистологии и любым новым разделам,
 # которые появятся, пока подписка активна (даже если раздел ещё не открыт всем через *_PUBLIC).
+TIER1_HISTOLOGY_DEADLINE = time.mktime(date(2027, 1, 1).timetuple())  # доступ к Гистологии по тарифу 1 — до конца 2026 года
 SUBSCRIPTION_TIERS = {
     1: {
         "title": "Месяц — Биология, Физика, Химия",
@@ -248,6 +249,7 @@ SUBSCRIPTION_TIERS = {
         "joke": "ЭНЕРГЕТИК 🤮 или УСПЕШНАЯ СДАЧА ЭКЗАМЕНА 😇",
         "benefits": [
             "Полный доступ к Биологии, Физике и Химии на 30 дней",
+            "🔬 Плюс доступ к Гистологии — действует до конца 2026 года",
             "Не нужно ждать и звать друзей — доступ открывается сразу после оплаты",
             "Идеально, если экзамен уже скоро и нужно готовиться прямо сейчас",
         ],
@@ -325,7 +327,9 @@ def has_subscription_histology_access(user_id: int) -> bool:
     sub = get_subscription(user_id)
     if not sub or not has_active_subscription(user_id):
         return False
-    return sub.get("scope") == "all" or sub.get("early_histology", False)
+    if sub.get("scope") == "all" or sub.get("early_histology", False):
+        return True
+    return sub.get("tier") == 1 and time.time() < TIER1_HISTOLOGY_DEADLINE
 
 def grant_subscription(user_id: int, tier: int, method: str, price: int) -> None:
     cfg = SUBSCRIPTION_TIERS[tier]
@@ -367,6 +371,8 @@ def get_subscription_scope_label(sub: dict) -> str:
         return "ко всем разделам бота"
     if sub.get("early_histology"):
         return "к Биологии, Физике, Химии и Гистологии"
+    if sub.get("tier") == 1 and time.time() < TIER1_HISTOLOGY_DEADLINE:
+        return "к Биологии, Физике, Химии и Гистологии (до конца 2026 года)"
     return "к Биологии, Физике и Химии"
 
 def get_referral_status_text(user_id: int) -> str:
@@ -2807,7 +2813,7 @@ async def handle_admin_pending_action(message: Message):
         del ADMIN_PENDING[admin_id]
         grant_subscription(target_id, tier_id, "rubles", cfg["price_rub"])
         sub = get_subscription(target_id)
-        scope_label = "ко всем разделам бота" if cfg["scope"] == "all" else "к Биологии, Физике и Химии"
+        scope_label = get_subscription_scope_label(sub)
         await message.answer(
             f"✅ Подписка «{cfg['title']}» выдана {target_label}.",
             parse_mode="HTML"
@@ -3137,7 +3143,8 @@ def get_tier1_upsell_text() -> str:
     return (
         f"\n\n💡 <b>Выгоднее:</b> тариф «{t2['emoji']} {t2['title']}» — всего на <b>{diff_rub}₽ / {diff_stars}⭐</b> "
         f"дороже (<b>{t2['price_rub']}₽ / {t2['price_stars']}⭐</b> вместо {t1['price_rub']}₽), а доступ не "
-        "закончится через 30 дней, а останется навсегда — плюс сразу открывается Гистология."
+        "закончится через 30 дней, а останется навсегда — включая Гистологию, которая по этому тарифу "
+        "не ограничена концом 2026 года."
     )
 
 def get_tier1_upsell_keyboard():
@@ -3327,7 +3334,7 @@ async def handle_successful_payment(message: Message):
         grant_subscription(message.from_user.id, tier_id, "stars", stars)
         cfg = SUBSCRIPTION_TIERS[tier_id]
         sub = get_subscription(message.from_user.id)
-        scope_label = "ко всем разделам бота" if cfg["scope"] == "all" else "к Биологии, Физике и Химии"
+        scope_label = get_subscription_scope_label(sub)
         text = (
             f"🎉 <b>Подписка «{cfg['title']}» активирована!</b>\n\n"
             f"Доступ {scope_label} открыт — {format_subscription_expiry(sub['expires'])}.\n"
