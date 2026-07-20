@@ -64,6 +64,7 @@ async def main():
     for ticket in tb.TICKETS:
         assert ticket["title"] in text
     assert tb.strip_html_tags(tb.TICKETS[0]["questions"][0]["answer"]).split("\n\n")[0] in text
+    assert caption and tb.BOT_USERNAME in caption
     print(f"biology tickets file: {len(tb.TICKETS)} tickets, HTML-free docx, content matches: OK")
 
     # physics: 186 questions + all 9 task topics present
@@ -77,6 +78,7 @@ async def main():
         assert tb.strip_html_tags(item["title"]) in text2
     for topic in tb.PHYSICS_TASKS.values():
         assert tb.strip_html_tags(topic["title"]) in text2
+    assert caption2 and tb.BOT_USERNAME in caption2
     print("physics full file: 186 questions + all task topics present, HTML-free: OK")
 
     # physics: 4-ticket task answers file has all 20 solved problems
@@ -92,6 +94,7 @@ async def main():
             total_tasks += 1
             assert tb.strip_html_tags(task["title"]) in text3
     assert total_tasks == 20
+    assert caption3 and tb.BOT_USERNAME in caption3
     print("physics ticket-tasks file: all 20 solved problems present: OK")
 
     # chemistry: labs file
@@ -104,6 +107,7 @@ async def main():
         assert tb.strip_html_tags(lab["theme"]) in text4
         for exp in lab.get("experiments", []):
             assert tb.strip_html_tags(exp["name"]) in text4
+    assert caption4 and tb.BOT_USERNAME in caption4
     print(f"chemistry labs file: {len(tb.CHEMISTRY_LABS['labs'])} labs present, HTML-free: OK")
 
     # chemistry: tasks file
@@ -114,6 +118,7 @@ async def main():
     assert "<b>" not in text5
     for topic in tb.CHEMISTRY_TASKS.values():
         assert tb.strip_html_tags(topic["title"]) in text5
+    assert caption5 and tb.BOT_USERNAME in caption5
     print(f"chemistry tasks file: {len(tb.CHEMISTRY_TASKS)} topics present, HTML-free: OK")
 
     # filenames are sane .docx files, and bold/italic runs actually survived as real formatting
