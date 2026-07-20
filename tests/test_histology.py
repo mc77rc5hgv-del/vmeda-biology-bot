@@ -117,29 +117,67 @@ async def main():
         assert any(f"№{n}" in t for t in texts), (n, texts)
     print("menu keyboard OK:", texts)
 
-    # 4. Access control: non-admin sees locked screen (not raw content) while HISTOLOGY_PUBLIC=False
+    # 4. Access control: first-ever visit silently grants a free trial week (like the others'
+    # grace period), so a brand-new non-admin sees the REAL menu, not a locked screen.
     assert tb.HISTOLOGY_PUBLIC is False
     non_admin = random.randint(10_000_000, 99_999_999)
+    assert not tb.histology_access_ok(non_admin)
+    assert str(non_admin) not in tb.stats["histology_temp_access"]
     cb = FakeCB("histology_menu", uid=non_admin)
     await tb.cb_histology_menu(cb)
-    assert cb.message.edits, "locked screen should render"
-    locked_text, locked_kb = cb.message.edits[0]
+    assert cb.message.edits, "expected menu render, not locked screen, on first-ever visit"
+    first_text, first_kb = cb.message.edits[0]
+    assert "Выбери диагностику" in first_text
+    assert tb.has_histology_temp_access(non_admin), "first visit should silently grant a trial"
+    assert str(non_admin) not in tb.stats["histology_warnings"], "no warning yet on the granting visit"
+    days_left = (tb.get_histology_temp_expiry(non_admin) - tb.time.time()) / 86400
+    assert 6.9 < days_left <= 7.0, days_left
+    print("first-ever histology visit silently grants a 1-week trial and shows real content: OK")
+
+    # 4b. Second visit (still within the trial): warning #1 fires as a separate nudge message,
+    # but the requested content still renders — same non-blocking pattern as the referral gate.
+    cb2 = FakeCB("histology_menu", uid=non_admin)
+    await tb.cb_histology_menu(cb2)
+    assert len(cb2.message.edits) == 2, "expected a separate warning message + the actual content"
+    warn_sent_text = cb2.message.edits[0][0]
+    check_html(warn_sent_text)
+    assert "Гистология скоро закроется" in warn_sent_text
+    assert "Выбери диагностику" in cb2.message.edits[-1][0], "content should still render during the trial"
+    warn_entry = tb.stats["histology_warnings"][str(non_admin)]
+    assert warn_entry["count"] == 1
+    print("second visit fires warning 1/3 but still lets content through: OK")
+
+    # 4c. Trial exhausted (expired) + 3 warnings already given, no referrals/subscription -> hard block
+    tb.stats["histology_temp_access"][str(non_admin)] = tb.time.time() - 1
+    tb.stats["histology_warnings"][str(non_admin)] = {"count": tb.HISTOLOGY_WARNING_THRESHOLD, "last_warn_at": 0}
+    assert not tb.histology_access_ok(non_admin)
+    cb3 = FakeCB("histology_menu", uid=non_admin)
+    await tb.cb_histology_menu(cb3)
+    assert cb3.message.edits, "locked screen should render"
+    locked_text, locked_kb = cb3.message.edits[0]
     check_html(locked_text)
     assert "по подписке" in locked_text and "239" in locked_text
     assert str(tb.REFERRAL_FULL_ACCESS_THRESHOLD) in locked_text
     assert any("Оформить подписку" in t for t in kb_texts(locked_kb))
     assert any("Пригласить друзей" in t for t in kb_texts(locked_kb))
-    print("non-admin sees histology locked screen with referral+subscription info: OK")
+    print("exhausted trial + no referrals/subscription -> locked screen: OK")
+    tb.stats["histology_temp_access"].pop(str(non_admin), None)
+    tb.stats["histology_warnings"].pop(str(non_admin), None)
 
-    # 4b. Referral threshold alone (no subscription) now unlocks Histology permanently
+    # 4d. Referral threshold alone (no subscription, no trial) unlocks Histology permanently,
+    # bypassing the trial/warning system entirely
     referral_uid = random.randint(10_000_000, 99_999_999)
     assert not tb.histology_access_ok(referral_uid)
     tb.stats["referrals"][str(referral_uid)] = [str(i) for i in range(tb.REFERRAL_FULL_ACCESS_THRESHOLD)]
     assert tb.histology_access_ok(referral_uid)
+    cb_ref = FakeCB("histology_menu", uid=referral_uid)
+    await tb.cb_histology_menu(cb_ref)
+    assert "Выбери диагностику" in cb_ref.message.edits[0][0]
+    assert str(referral_uid) not in tb.stats["histology_temp_access"], "referral access shouldn't touch the trial"
     tb.stats["referrals"].pop(str(referral_uid), None)
-    print("referral threshold alone unlocks Histology: OK")
+    print("referral threshold alone unlocks Histology, bypassing the trial: OK")
 
-    # 4c. Section promo: makes Histology free for everyone until it expires
+    # 4e. Section promo: makes Histology free for everyone until it expires
     promo_uid = random.randint(10_000_000, 99_999_999)
     assert not tb.histology_access_ok(promo_uid)
     assert not tb.is_section_promo_active("histology")
@@ -268,12 +306,16 @@ async def main():
     assert not tb.is_gated_callback("histology_guess_start:all")
     print("histology callbacks exempt from referral gate: OK")
 
-    # 12. Guess-the-specimen mode: non-admin blocked
+    # 12. Guess-the-specimen mode: exhausted-trial non-admin blocked (same gate as histology_menu)
+    tb.stats["histology_temp_access"][str(non_admin)] = tb.time.time() - 1
+    tb.stats["histology_warnings"][str(non_admin)] = {"count": tb.HISTOLOGY_WARNING_THRESHOLD, "last_warn_at": 0}
     cb_g0 = FakeCB("histology_guess_start:all", uid=non_admin)
     await tb.cb_histology_guess_start(cb_g0)
     assert cb_g0._answers and cb_g0._answers[0][1] is True
     assert not cb_g0.message.deleted and not cb_g0.message.photos
-    print("guess mode non-admin blocked: OK")
+    tb.stats["histology_temp_access"].pop(str(non_admin), None)
+    tb.stats["histology_warnings"].pop(str(non_admin), None)
+    print("guess mode blocked once trial exhausted: OK")
 
     # 13. Guess mode: scoped to a single diagnostika (diagnostika_1, 10 specimens -> full session size 10)
     assert ADMIN_ID not in tb.HISTOLOGY_GUESS_SESSIONS

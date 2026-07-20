@@ -104,6 +104,8 @@ def load_stats() -> dict:
             data.setdefault("temporary_access", {})
             data.setdefault("subscriptions", {})
             data.setdefault("section_promos", {})
+            data.setdefault("histology_warnings", {})
+            data.setdefault("histology_temp_access", {})
             return data
         except (json.JSONDecodeError, OSError):
             logger.exception("Не удалось прочитать %s, статистика будет создана заново", STATS_FILE)
@@ -131,6 +133,8 @@ def load_stats() -> dict:
         "temporary_access": {},
         "subscriptions": {},
         "section_promos": {},
+        "histology_warnings": {},
+        "histology_temp_access": {},
     }
 
 # Один воркер сериализует записи на диск и не даёт им блокировать event loop бота.
@@ -1406,6 +1410,8 @@ def get_main_menu(user_id: int = None):
         histology_label = "🔬 Гистология"
     elif sub_histology:
         histology_label = "🔬 Гистология 💎"
+    elif user_id is not None and has_histology_temp_access(user_id):
+        histology_label = "🔬 Гистология (пробный период)"
     else:
         histology_label = "🔬 Гистология (рефералы/подписка)"
     builder.button(text=histology_label, callback_data="histology_menu")
@@ -4687,13 +4693,88 @@ async def cb_anatomy_picture(callback: CallbackQuery):
 # ==================== ГИСТОЛОГИЯ ====================
 HISTOLOGY_PUBLIC = False  # когда раздел будет готов для всех — переключить на True
 HISTOLOGY_PROMO_SECONDS = 24 * 60 * 60
+HISTOLOGY_WARNING_THRESHOLD = REFERRAL_WARNING_THRESHOLD  # 3 предупреждения, как у Биологии/Физики/Химии
+HISTOLOGY_WARNING_COOLDOWN_SECONDS = REFERRAL_WARNING_COOLDOWN_SECONDS  # не чаще раза в 4ч
+
+def get_histology_temp_expiry(user_id: int) -> float:
+    return stats["histology_temp_access"].get(str(user_id), 0)
+
+def has_histology_temp_access(user_id: int) -> bool:
+    return time.time() < get_histology_temp_expiry(user_id)
+
+def histology_permanently_unlocked(user_id: int) -> bool:
+    """Доступ, не зависящий от тающего пробного окна (в отличие от has_histology_temp_access)."""
+    return (
+        HISTOLOGY_PUBLIC or is_admin(user_id) or is_section_promo_active("histology")
+        or has_subscription_histology_access(user_id)
+        or get_referral_count(user_id) >= REFERRAL_FULL_ACCESS_THRESHOLD
+    )
 
 def histology_access_ok(user_id: int) -> bool:
-    if HISTOLOGY_PUBLIC or is_admin(user_id) or is_section_promo_active("histology"):
+    return histology_permanently_unlocked(user_id) or has_histology_temp_access(user_id)
+
+async def histology_gate_ok(callback: CallbackQuery) -> bool:
+    """Единый шлюз для контента гистологии — как у Биологии/Физики/Химии, только пробное окно
+    без рефералов/подписки ограничено неделей, а не только числом предупреждений:
+    1) первый визит — молча выдаём неделю пробного доступа (TEMP_ACCESS_GRANT_SECONDS);
+    2) дальше — до HISTOLOGY_WARNING_THRESHOLD (3) предупреждений с кулдауном между ними;
+    3) блок наступает по любому из двух условий: предупреждения исчерпаны ИЛИ неделя истекла —
+       и снимается только рефералами (REFERRAL_FULL_ACCESS_THRESHOLD) или подпиской.
+    Возвращает True, если хендлер должен продолжить (и сам обязан вызвать callback.answer()).
+    Возвращает False, если гейт уже сам ответил на callback и отредактировал сообщение."""
+    user_id = callback.from_user.id
+    user_id_str = str(user_id)
+
+    if histology_permanently_unlocked(user_id):
         return True
-    if has_subscription_histology_access(user_id):
+
+    if not has_histology_temp_access(user_id) and user_id_str not in stats["histology_warnings"]:
+        stats["histology_temp_access"][user_id_str] = time.time() + TEMP_ACCESS_GRANT_SECONDS
+        save_stats()
         return True
-    return get_referral_count(user_id) >= REFERRAL_FULL_ACCESS_THRESHOLD
+
+    entry = stats["histology_warnings"].get(user_id_str, {"count": 0, "last_warn_at": 0})
+
+    if not has_histology_temp_access(user_id) or entry["count"] >= HISTOLOGY_WARNING_THRESHOLD:
+        await callback.answer("🚨 Гистология закрыта — пригласи друзей или оформи подписку!", show_alert=True)
+        await safe_edit_text(
+            callback.message,
+            get_histology_locked_text(),
+            parse_mode="HTML",
+            reply_markup=get_histology_locked_keyboard()
+        )
+        return False
+
+    now = time.time()
+    if now - entry.get("last_warn_at", 0) >= HISTOLOGY_WARNING_COOLDOWN_SECONDS:
+        entry["count"] += 1
+        entry["last_warn_at"] = now
+        stats["histology_warnings"][user_id_str] = entry
+        save_stats()
+        remaining = HISTOLOGY_WARNING_THRESHOLD - entry["count"]
+        days_left = max(int((get_histology_temp_expiry(user_id) - now) // 86400), 0)
+        price_rub = SUBSCRIPTION_TIERS[2]["price_rub"]
+        price_stars = SUBSCRIPTION_TIERS[2]["price_stars"]
+        if remaining > 0:
+            warn_text = (
+                "⚠️❗️ <b>Гистология скоро закроется!</b> ❗️⚠️\n\n"
+                f"Бесплатный пробный доступ действует ещё примерно <b>{days_left} дн.</b> Пригласи "
+                f"{REFERRAL_FULL_ACCESS_THRESHOLD} друзей или оформи подписку от <b>{price_rub}₽ / {price_stars}⭐</b> — "
+                "и раздел останется открытым навсегда."
+            )
+        else:
+            warn_text = (
+                "🚨‼️ <b>ПОСЛЕДНЕЕ ПРЕДУПРЕЖДЕНИЕ!</b> ‼️🚨\n\n"
+                f"В следующий раз доступ к Гистологии закроется, если не пригласишь "
+                f"{REFERRAL_FULL_ACCESS_THRESHOLD} друзей или не оформишь подписку от "
+                f"<b>{price_rub}₽ / {price_stars}⭐</b>."
+            )
+        try:
+            await callback.message.answer(warn_text, parse_mode="HTML", reply_markup=get_histology_locked_keyboard())
+        except Exception:
+            logger.exception("Не удалось отправить предупреждение о гистологии пользователю %s", user_id)
+
+    return True
 
 def get_histology_specimen(diag_key: str, spec_id: str):
     diag = HISTOLOGY.get(diag_key)
@@ -4712,7 +4793,9 @@ def get_histology_locked_text() -> str:
         "сверено с преподавателями.\n\n"
         f"Открывается бесплатно — как Биология, Физика и Химия — после "
         f"<b>{REFERRAL_FULL_ACCESS_THRESHOLD}</b> приглашённых друзей, либо сразу по подписке от "
-        "<b>239₽ / 239⭐</b> (тариф «Навсегда — Биология, Физика, Химия») и выше."
+        f"<b>{SUBSCRIPTION_TIERS[2]['price_rub']}₽ / {SUBSCRIPTION_TIERS[2]['price_stars']}⭐</b> "
+        f"(тариф «{SUBSCRIPTION_TIERS[2]['title']}») и выше.\n\n"
+        f"Новым пользователям раздел открыт бесплатно на пробный период (до недели)."
     )
 
 def get_histology_locked_keyboard():
@@ -4811,14 +4894,7 @@ async def render_histology_image(callback: CallbackQuery, diag_key: str, spec_id
 
 @dp.callback_query(F.data == "histology_menu")
 async def cb_histology_menu(callback: CallbackQuery):
-    if not histology_access_ok(callback.from_user.id):
-        await callback.answer()
-        await safe_edit_text(
-            callback.message,
-            get_histology_locked_text(),
-            parse_mode="HTML",
-            reply_markup=get_histology_locked_keyboard()
-        )
+    if not await histology_gate_ok(callback):
         return
     await callback.answer()
     await safe_edit_text(
@@ -4830,8 +4906,7 @@ async def cb_histology_menu(callback: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("histology_topic:"))
 async def cb_histology_topic(callback: CallbackQuery):
-    if not histology_access_ok(callback.from_user.id):
-        await callback.answer(f"🔬 Гистология открывается после {REFERRAL_FULL_ACCESS_THRESHOLD} рефералов или по подписке от 239₽/239⭐ 💎", show_alert=True)
+    if not await histology_gate_ok(callback):
         return
     diag_key = callback.data.split(":")[1]
     if diag_key not in HISTOLOGY:
@@ -4847,8 +4922,7 @@ async def cb_histology_topic(callback: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("histology_specimen:"))
 async def cb_histology_specimen(callback: CallbackQuery):
-    if not histology_access_ok(callback.from_user.id):
-        await callback.answer(f"🔬 Гистология открывается после {REFERRAL_FULL_ACCESS_THRESHOLD} рефералов или по подписке от 239₽/239⭐ 💎", show_alert=True)
+    if not await histology_gate_ok(callback):
         return
     _, diag_key, spec_id = callback.data.split(":")
     spec = get_histology_specimen(diag_key, spec_id)
@@ -4865,8 +4939,7 @@ async def cb_histology_specimen(callback: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("histology_img:"))
 async def cb_histology_img(callback: CallbackQuery):
-    if not histology_access_ok(callback.from_user.id):
-        await callback.answer(f"🔬 Гистология открывается после {REFERRAL_FULL_ACCESS_THRESHOLD} рефералов или по подписке от 239₽/239⭐ 💎", show_alert=True)
+    if not await histology_gate_ok(callback):
         return
     _, diag_key, spec_id, idx_s = callback.data.split(":")
     idx = int(idx_s)
@@ -4973,8 +5046,7 @@ async def render_histology_guess_summary(user_id: int, aborted: bool = False):
 
 @dp.callback_query(F.data.startswith("histology_guess_start:"))
 async def cb_histology_guess_start(callback: CallbackQuery):
-    if not histology_access_ok(callback.from_user.id):
-        await callback.answer(f"🔬 Гистология открывается после {REFERRAL_FULL_ACCESS_THRESHOLD} рефералов или по подписке от 239₽/239⭐ 💎", show_alert=True)
+    if not await histology_gate_ok(callback):
         return
     scope = callback.data.split(":", 1)[1]
     user_id = callback.from_user.id

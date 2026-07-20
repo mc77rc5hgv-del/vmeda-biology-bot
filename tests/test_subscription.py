@@ -386,7 +386,9 @@ async def main():
     tb.stats["referrals"].pop(str(non_admin), None)
     print("subscription button stays visible for users with free referral access (not subscribed): OK")
 
-    # 16c. Locked Histology screen: no access -> rendered message with subscription CTA
+    # 16c. Locked Histology screen: trial exhausted, no referrals/subscription -> subscription CTA
+    tb.stats["histology_temp_access"][str(non_admin)] = tb.time.time() - 1
+    tb.stats["histology_warnings"][str(non_admin)] = {"count": tb.HISTOLOGY_WARNING_THRESHOLD, "last_warn_at": 0}
     cb_hist_locked = FakeCB("histology_menu", uid=non_admin)
     await tb.cb_histology_menu(cb_hist_locked)
     assert cb_hist_locked.message.edits, "locked histology screen should render"
@@ -394,6 +396,8 @@ async def main():
     check_html(hist_locked_text)
     assert "полностью готов" in hist_locked_text and "239" in hist_locked_text
     assert any("Оформить подписку" in t for t in kb_texts(hist_locked_kb))
+    tb.stats["histology_temp_access"].pop(str(non_admin), None)
+    tb.stats["histology_warnings"].pop(str(non_admin), None)
 
     tb.grant_subscription(non_admin, 2, "stars", 239)
     cb_hist_unlocked = FakeCB("histology_menu", uid=non_admin)

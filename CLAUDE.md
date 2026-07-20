@@ -112,12 +112,26 @@ button-driven album isn't possible without losing the nav buttons).
 2. **Anatomy/Histology gates** (`anatomy_access_ok` / `histology_access_ok`): separate boolean functions, not part
    of the referral allowlist — public-flag-gated (`ANATOMY_PUBLIC` / `HISTOLOGY_PUBLIC`, both currently `False`)
    until admin flips them, bypassed by admin, by a subscription with the matching scope, or (Histology only) by
-   reaching `REFERRAL_FULL_ACCESS_THRESHOLD` referrals — same free-access rule as Biology/Physics/Chemistry.
-   Anatomy currently has no referral bypass, only admin/`scope="all"` subscription.
+   reaching `REFERRAL_FULL_ACCESS_THRESHOLD` referrals — same permanent free-access rule as Biology/Physics/
+   Chemistry. Anatomy currently has no referral bypass, only admin/`scope="all"` subscription.
+
+   **Histology also has its own trial+warning gate** (`histology_gate_ok`, called explicitly at the top of each
+   histology handler — `histology_menu`/`_topic`/`_specimen`/`_img`/`_guess_start` — not a middleware, since the
+   referral gate's `has_free_access()` can't be reused here without breaking the subscription-scope distinction
+   between "gated" and "all"/early-histology tiers). First-ever visit silently grants a `TEMP_ACCESS_GRANT_SECONDS`
+   (7-day) trial in `stats["histology_temp_access"][uid]`; subsequent visits during the trial fire up to
+   `HISTOLOGY_WARNING_THRESHOLD` (3) non-blocking nudge warnings (`stats["histology_warnings"]`, same
+   count+cooldown shape as `referral_warnings`) before falling back to the locked screen — whichever happens
+   first, the trial expiring or the 3 warnings being exhausted. `histology_access_ok(user_id)` is the pure
+   predicate (safe to call from menu labels/tests, no side effects); `histology_gate_ok(callback)` is the
+   stateful version used inside handlers (grants the trial, increments warnings, renders the block/warning
+   screens) — don't call the async gate version where you just need a boolean check.
 
 `has_free_access(user_id)` is the umbrella predicate composing: admin, referral threshold, manual grant
 (`stats["manual_access_granted"]`), temp access (`stats["temporary_access"]`), active subscription. It does not
-cover Anatomy/Histology — those check `anatomy_access_ok`/`histology_access_ok` directly.
+cover Anatomy/Histology — those check `anatomy_access_ok`/`histology_access_ok`/`histology_gate_ok` directly, and
+Histology's own trial uses a separate `stats["histology_temp_access"]` dict so it never interacts with the
+general recovery-grant `stats["temporary_access"]` used for Biology/Physics/Chemistry.
 
 **Section promos** (`start_section_promo(section, duration_seconds)` / `is_section_promo_active(section)`,
 stored in `stats["section_promos"][section] = until_ts`): a time-boxed global override that makes one section free
