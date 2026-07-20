@@ -338,6 +338,11 @@ def get_exhausted_users() -> list:
         if entry.get("count", 0) >= REFERRAL_WARNING_THRESHOLD and not has_free_access(int(uid_str))
     ]
 
+def get_below_threshold_users() -> list:
+    """ID пользователей, у которых прямо сейчас нет бесплатного доступа к предметным разделам —
+    меньше REFERRAL_FULL_ACCESS_THRESHOLD рефералов и нет подписки/ручного доступа/временного доступа."""
+    return [uid for uid in stats["total_users"] if not has_free_access(uid)]
+
 def get_subscription_scope_label(sub: dict) -> str:
     if sub.get("scope") == "all":
         return "ко всем разделам бота"
@@ -674,6 +679,24 @@ def get_access_restored_broadcast_text() -> str:
         "это правило не меняется и остаётся таким же для всех.\n\n"
         "👥 Открыть доступ насовсем можно в любой момент — кнопка «Пригласить друзей» в главном меню."
     )
+
+def get_referral_reminder_broadcast_text() -> str:
+    t1 = SUBSCRIPTION_TIERS[1]
+    return (
+        f"👋 <b>Напоминание</b>\n{DIVIDER}\n\n"
+        f"Чтобы бесплатно пользоваться разделами Биология, Физика и Химия, нужно пригласить "
+        f"{REFERRAL_FULL_ACCESS_THRESHOLD} друзей в бота — открой «👥 Пригласить друзей» в "
+        "главном меню, посмотри свой прогресс и отправь ссылку.\n\n"
+        f"💎 Не хочешь ждать друзей? Открой доступ сразу оплатой — подписки от "
+        f"{t1['price_rub']}₽/{t1['price_stars']}⭐. Жми «💎 Подписка» в главном меню."
+    )
+
+def get_referral_reminder_broadcast_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="👥 Пригласить друзей", callback_data="referral_info")
+    builder.button(text="💎 Подписка", callback_data="subscription_menu")
+    builder.adjust(1)
+    return builder.as_markup()
 
 def get_battle_results_announcement_text(winners: list) -> str:
     awarded = [(i, w) for i, w in enumerate(winners) if w is not None]
@@ -1797,6 +1820,7 @@ def get_admin_menu():
     builder.button(text="📣 Оповещение о подписке", callback_data="admin_announce_subscription_confirm")
     builder.button(text="📣 Анонс раздела поддержки", callback_data="admin_announce_support_confirm")
     builder.button(text="🎁 Восстановить доступ исчерпавшим (7 дней)", callback_data="admin_restore_access_confirm")
+    builder.button(text="📣 Напомнить о реферале/подписке (<2 реф.)", callback_data="admin_referral_reminder_confirm")
     builder.button(text="📤 Опубликовать пост в канал", callback_data="admin_channel_post_prompt")
     builder.adjust(1)
     return builder.as_markup()
@@ -2106,6 +2130,49 @@ async def cb_admin_restore_access_go(callback: CallbackQuery):
         callback.message,
         f"✅ Доступ восстановлен на 7 дней, рассылка отправлена (попытка охватить {len(cohort)} пользователей).\n\n"
         "Правило с рефералами (2 друга для доступа навсегда) для остальных не изменилось.",
+        parse_mode="HTML",
+        reply_markup=get_admin_back_keyboard()
+    )
+
+@dp.callback_query(F.data == "admin_referral_reminder_confirm")
+async def cb_admin_referral_reminder_confirm(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    cohort = get_below_threshold_users()
+    if not cohort:
+        await callback.answer("Сейчас нет пользователей без бесплатного доступа", show_alert=True)
+        return
+    await callback.answer()
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Отправить напоминание", callback_data="admin_referral_reminder_go")
+    builder.button(text="❌ Отмена", callback_data="admin_panel")
+    builder.adjust(1)
+    preview = (
+        f"👀 <b>Предпросмотр рассылки</b>\n{DIVIDER}\n\n"
+        f"{get_referral_reminder_broadcast_text()}\n\n{DIVIDER}\n"
+        f"Рассылка уйдёт {len(cohort)} пользователям, у которых меньше "
+        f"{REFERRAL_FULL_ACCESS_THRESHOLD} рефералов и нет подписки/ручного/временного доступа. "
+        "Никакой доступ не выдаётся — только напоминание пригласить друзей или оформить подписку."
+    )
+    await safe_edit_text(callback.message, preview, parse_mode="HTML", reply_markup=builder.as_markup())
+
+@dp.callback_query(F.data == "admin_referral_reminder_go")
+async def cb_admin_referral_reminder_go(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    cohort = get_below_threshold_users()
+    if not cohort:
+        await callback.answer("Сейчас нет пользователей без бесплатного доступа", show_alert=True)
+        return
+    await callback.answer("📣 Рассылка запущена!", show_alert=True)
+    stats["broadcast_count"] = stats.get("broadcast_count", 0) + 1
+    save_stats()
+    await _broadcast_to(cohort, get_referral_reminder_broadcast_text(), get_referral_reminder_broadcast_keyboard())
+    await safe_edit_text(
+        callback.message,
+        f"✅ Напоминание отправлено (попытка охватить {len(cohort)} пользователей).",
         parse_mode="HTML",
         reply_markup=get_admin_back_keyboard()
     )
