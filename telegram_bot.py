@@ -2118,6 +2118,9 @@ async def cb_admin_stats(callback: CallbackQuery):
     await callback.answer()
     total_referrals = sum(len(v) for v in stats["referrals"].values())
     exhausted_free_uses = len(get_exhausted_users())
+    below_threshold_count = sum(
+        1 for uid in stats["total_users"] if get_referral_count(uid) < REFERRAL_FULL_ACCESS_THRESHOLD
+    )
 
     subs = stats["subscriptions"]
     active_by_tier = {tier_id: 0 for tier_id in SUBSCRIPTION_TIERS}
@@ -2155,6 +2158,7 @@ async def cb_admin_stats(callback: CallbackQuery):
         f"🎲 Случайных вопросов открыто: <b>{stats['random_question_used']}</b>\n"
         f"📢 Рассылок отправлено: <b>{stats.get('broadcast_count', 0)}</b>\n"
         f"🔗 Всего рефералов: <b>{total_referrals}</b>\n"
+        f"📉 Меньше {REFERRAL_FULL_ACCESS_THRESHOLD} рефералов: <b>{below_threshold_count}</b>\n"
         f"🔓 Ручных доступов выдано: <b>{len(stats['manual_access_granted'])}</b>\n"
         f"🚫 Исчерпали бесплатные заходы без рефералов: <b>{exhausted_free_uses}</b>\n"
         f"🪪 Известно username: <b>{len(stats['usernames'])}</b>\n"
