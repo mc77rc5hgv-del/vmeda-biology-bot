@@ -14,6 +14,7 @@ GATED_EXAMPLES = [
     "physics_tasks", "phystask_topic:1", "phystask_formulas:1", "phystask_list:1", "phystask_show:1:2",
     "download_physics_full", "download_physics_ticket_tasks",
     "physics_grade45", "physics45_q:10",
+    "phys_theory_ticket:26", "phys_theory_q:26:0",
     "menu_chemistry", "chemistry_theory", "chem_theory:1", "chemistry_theory_list",
     "chemistry_tasks", "chemtask_topic:1", "chemtask_formulas:1", "chemtask_list:1", "chemtask_show:1:2",
     "chemistry_labs", "lab:1", "lab_exp:1:2", "lab_calc:1:2",
