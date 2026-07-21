@@ -23,6 +23,7 @@ from aiogram.enums import ChatMemberStatus
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.dispatcher.event.bases import SkipHandler
 from docx import Document as DocxDocument
+from docx.shared import Pt
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -1844,8 +1845,10 @@ def build_physics_full_file() -> BufferedInputFile:
 def build_physics_grade45_file() -> BufferedInputFile:
     def fill(doc):
         items = sorted(PHYSICS_GRADE45_QUESTIONS.values(), key=lambda v: v["title"])
-        for item in items:
-            doc.add_heading(item["title"], level=2)
+        for i, item in enumerate(items):
+            heading = doc.add_heading(item["title"], level=1)
+            heading.paragraph_format.space_before = Pt(0 if i == 0 else 30)
+            heading.paragraph_format.space_after = Pt(12)
             add_html_paragraphs(doc, item["answer"])
     return build_docx_file("Физика — (60 вопросов) на 4/5", fill)
 
