@@ -50,6 +50,7 @@ async def main():
     phys_kb_data = kb_data(tb.get_physics_menu())
     assert "download_physics_full" in phys_kb_data and "download_physics_ticket_tasks" in phys_kb_data
     assert "download_physics_grade45" in phys_kb_data
+    assert "download_physics_tasks_cheatsheet" in phys_kb_data
     chem_kb_data = kb_data(tb.get_chemistry_menu())
     assert "download_chemistry_labs" in chem_kb_data and "download_chemistry_tasks" in chem_kb_data
     print("menus expose download buttons: OK")
@@ -123,6 +124,24 @@ async def main():
     expected_titles = sorted((v["title"] for v in tb.PHYSICS_GRADE45_QUESTIONS.values()))
     assert heading_titles == expected_titles, "questions must be listed alphabetically by title"
     print("physics 'grade45' file: all 60 questions present, alphabetical by title, HTML-free: OK")
+
+    # physics: formulas cheat sheet has all 9 topics' formulas/units, but drops the
+    # step-by-step "Алгоритм решения" block (kept brief, per the request)
+    cb2c = FakeCB("download_physics_tasks_cheatsheet")
+    await tb.cb_download_physics_tasks_cheatsheet(cb2c)
+    doc2c, caption2c = cb2c.message.documents[0]
+    assert doc2c.data[:2] == b"PK"
+    assert doc2c.filename.endswith(".docx")
+    text2c = docx_text(doc2c)
+    assert "<b>" not in text2c
+    assert len(tb.PHYSICS_TASKS) == 9
+    assert "Алгоритм решения" not in text2c
+    for topic in tb.PHYSICS_TASKS.values():
+        assert tb.strip_html_tags(topic["title"]) in text2c
+        assert "Основные формулы" in text2c
+        assert "Единицы измерения" in text2c
+    assert caption2c and f"@{tb.BOT_USERNAME}" in caption2c
+    print("physics formulas cheat sheet: all 9 topics present, no step-by-step algorithm, HTML-free: OK")
 
     # physics: 4-ticket task answers file has all 20 solved problems
     cb3 = FakeCB("download_physics_ticket_tasks")

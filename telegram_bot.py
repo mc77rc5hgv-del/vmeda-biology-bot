@@ -1120,7 +1120,7 @@ GATED_PREFIXES_BIOLOGY = ("ticket:", "ticket_q:", "qpage:", "q:")
 GATED_CALLBACKS_PHYSICS = {
     "menu_physics", "physics_tickets", "physics_theory_tickets", "physics_test_tickets",
     "physics_test", "physics_tasks", "download_physics_full", "download_physics_ticket_tasks",
-    "physics_grade45", "download_physics_grade45",
+    "physics_grade45", "download_physics_grade45", "download_physics_tasks_cheatsheet",
 }
 GATED_PREFIXES_PHYSICS = (
     "phys_test_ticket:", "phys_test_ticket_tasks:", "phys_test_ticket_task_show:", "physics_page:", "physics_q:",
@@ -1852,6 +1852,23 @@ def build_physics_grade45_file() -> BufferedInputFile:
             add_html_paragraphs(doc, item["answer"])
     return build_docx_file("Физика — (60 вопросов) на 4/5", fill)
 
+_ALGORITHM_BLOCK_RE = re.compile(
+    r"\n\n<b>Алгоритм решения:</b>.*?(?=\n\n<b>Единицы измерения:</b>)", re.DOTALL
+)
+
+def build_physics_tasks_cheatsheet_file() -> BufferedInputFile:
+    """Краткая шпаргалка по всем типам задач по физике — только формулы и обозначения
+    (пошаговый алгоритм решения из physics_tasks.json намеренно опущен для краткости)."""
+    def fill(doc):
+        for num in sorted(PHYSICS_TASKS.keys(), key=int):
+            topic = PHYSICS_TASKS[num]
+            heading = doc.add_heading(topic["title"], level=1)
+            heading.paragraph_format.space_before = Pt(0 if num == "1" else 24)
+            heading.paragraph_format.space_after = Pt(6)
+            formulas_only = _ALGORITHM_BLOCK_RE.sub("", topic["formulas"])
+            add_html_paragraphs(doc, formulas_only)
+    return build_docx_file("Физика — шпаргалка по формулам к задачам", fill)
+
 def build_physics_ticket_tasks_file() -> BufferedInputFile:
     def fill(doc):
         for num in sorted(PHYSICS_TEST_TICKETS.keys(), key=int):
@@ -2134,6 +2151,7 @@ def get_physics_menu():
     builder.button(text="📄 186 вопросов + шаблоны задач (файл)", callback_data="download_physics_full")
     builder.button(text="📄 (60 вопросов) на 4/5 (файл)", callback_data="download_physics_grade45")
     builder.button(text="📄 Ответы на задачи билетов (файл)", callback_data="download_physics_ticket_tasks")
+    builder.button(text="📄 Шпаргалка по формулам к задачам (файл)", callback_data="download_physics_tasks_cheatsheet")
     builder.adjust(1)
     builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
     return builder.as_markup()
@@ -4275,6 +4293,14 @@ async def cb_download_physics_ticket_tasks(callback: CallbackQuery):
     await callback.message.answer_document(
         build_physics_ticket_tasks_file(),
         caption=f"📄 Ответы на задачи (Часть 2) билетов 66-69.\n\n@{BOT_USERNAME}"
+    )
+
+@dp.callback_query(F.data == "download_physics_tasks_cheatsheet")
+async def cb_download_physics_tasks_cheatsheet(callback: CallbackQuery):
+    await callback.answer()
+    await callback.message.answer_document(
+        build_physics_tasks_cheatsheet_file(),
+        caption=f"📄 Шпаргалка по всем типам задач по физике — формулы и обозначения.\n\n@{BOT_USERNAME}"
     )
 
 @dp.callback_query(F.data == "menu_chemistry")
