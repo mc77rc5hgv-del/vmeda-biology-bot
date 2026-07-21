@@ -3108,25 +3108,12 @@ async def handle_admin_pending_action(message: Message):
             )
             return
         del ADMIN_PENDING[admin_id]
-        grant_subscription(target_id, tier_id, "rubles", cfg["price_rub"])
-        sub = get_subscription(target_id)
-        scope_label = get_subscription_scope_label(sub)
         await message.answer(
             f"✅ Подписка «{cfg['title']}» выдана {target_label}.",
             parse_mode="HTML",
             reply_markup=ReplyKeyboardRemove()
         )
-        try:
-            target_text = (
-                f"🎉 <b>Подписка «{cfg['title']}» активирована!</b>\n\n"
-                f"Доступ {scope_label} открыт — {format_subscription_expiry(sub['expires'])}.\n"
-                "Правило про рефералов для тебя больше не действует. Спасибо за поддержку! 🙏😇"
-            )
-            target_text += get_tier_upsell_text(tier_id)
-            target_keyboard = get_tier_upsell_keyboard(tier_id)
-            await bot.send_message(target_id, target_text, parse_mode="HTML", reply_markup=target_keyboard)
-        except Exception:
-            logger.exception("Не удалось уведомить пользователя %s о выдаче подписки", target_id)
+        await grant_subscription_and_notify_buyer(target_id, tier_id, "rubles", cfg["price_rub"])
         return
 
     if action == "record_subscription_subject":
@@ -3147,23 +3134,12 @@ async def handle_admin_pending_action(message: Message):
             return
         cfg = SUBSCRIPTION_TIERS[tier_id]
         del ADMIN_PENDING[admin_id]
-        grant_subscription(target_id, tier_id, "rubles", cfg["price_rub"], subject)
-        sub = get_subscription(target_id)
-        scope_label = get_subscription_scope_label(sub)
         await message.answer(
             f"✅ Подписка «{cfg['title']}» ({SUBJECT_TITLES[subject]}) выдана {target_label}.",
             parse_mode="HTML",
             reply_markup=ReplyKeyboardRemove()
         )
-        try:
-            target_text = (
-                f"🎉 <b>Подписка «{cfg['title']}» активирована!</b>\n\n"
-                f"Доступ {scope_label} открыт — {format_subscription_expiry(sub['expires'])}.\n"
-                "Правило про рефералов для тебя больше не действует. Спасибо за поддержку! 🙏😇"
-            )
-            await bot.send_message(target_id, target_text, parse_mode="HTML")
-        except Exception:
-            logger.exception("Не удалось уведомить пользователя %s о выдаче подписки", target_id)
+        await grant_subscription_and_notify_buyer(target_id, tier_id, "rubles", cfg["price_rub"], subject)
         return
 
     if action == "dm_message":
@@ -3486,6 +3462,56 @@ def format_subscription_expiry(expires) -> str:
         return "навсегда"
     return f"до {date.fromtimestamp(expires).strftime('%d.%m.%Y')}"
 
+async def grant_subscription_and_notify_buyer(
+    target_id: int, tier_id: int, method: str, price: int, subject: str | None = None
+) -> None:
+    """Общая точка для всех трёх путей выдачи подписки (Stars, ручное подтверждение рублей
+    админом, быстрое подтверждение по кнопке) — выдаёт тариф и шлёт покупателю одно и то же
+    сообщение об активации + апсейл на следующий тариф."""
+    grant_subscription(target_id, tier_id, method, price, subject)
+    cfg = SUBSCRIPTION_TIERS[tier_id]
+    sub = get_subscription(target_id)
+    scope_label = get_subscription_scope_label(sub)
+    text = (
+        f"🎉 <b>Подписка «{cfg['title']}» активирована!</b>\n\n"
+        f"Доступ {scope_label} открыт — {format_subscription_expiry(sub['expires'])}.\n"
+        "Правило про рефералов для тебя больше не действует. Спасибо за поддержку! 🙏😇"
+    )
+    text += get_tier_upsell_text(tier_id)
+    keyboard = get_tier_upsell_keyboard(tier_id)
+    try:
+        await bot.send_message(target_id, text, parse_mode="HTML", reply_markup=keyboard)
+    except Exception:
+        logger.exception("Не удалось уведомить пользователя %s о выдаче подписки", target_id)
+
+def get_admin_payment_confirm_text(cfg: dict, user, subject: str | None = None) -> str:
+    subject_line = f"\nПредмет: {SUBJECT_TITLES[subject]}" if subject else ""
+    return (
+        f"💰 <b>Запрос на подтверждение оплаты</b>\n{DIVIDER}\n\n"
+        f"Тариф: «{cfg['title']}» — {cfg['price_rub']}₽{subject_line}\n"
+        f"От: {html.escape(user.full_name)} "
+        f"({f'@{user.username} ' if user.username else ''}ID <code>{user.id}</code>)\n\n"
+        "Нажми ниже, когда увидишь перевод в чате с @vmeda_helper — подписка выдастся сразу."
+    )
+
+def get_admin_payment_confirm_keyboard(tier_id: int, target_id: int, subject: str | None = None):
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="✅ Подтвердить оплату",
+        callback_data=f"admin_confirm_sub:{tier_id}:{target_id}:{subject or '-'}"
+    )
+    return builder.as_markup()
+
+async def notify_admins_of_payment_request(tier_id: int, target_id: int, user, subject: str | None = None) -> None:
+    cfg = SUBSCRIPTION_TIERS[tier_id]
+    text = get_admin_payment_confirm_text(cfg, user, subject)
+    keyboard = get_admin_payment_confirm_keyboard(tier_id, target_id, subject)
+    for admin_id in ADMIN_IDS:
+        try:
+            await bot.send_message(admin_id, text, parse_mode="HTML", reply_markup=keyboard)
+        except Exception:
+            logger.exception("Не удалось уведомить админа %s о запросе оплаты", admin_id)
+
 def get_my_subscription_status_block(user_id: int) -> str:
     sub = get_subscription(user_id)
     if not sub or not has_active_subscription(user_id):
@@ -3742,6 +3768,7 @@ async def cb_buy_sub_rubles(callback: CallbackQuery):
         reply_markup=get_sub_rubles_keyboard(tier_id),
         disable_web_page_preview=True,
     )
+    await notify_admins_of_payment_request(tier_id, callback.from_user.id, callback.from_user)
 
 @dp.callback_query(F.data.startswith("buy_sub_rubles_subj:"))
 async def cb_buy_sub_rubles_subj(callback: CallbackQuery):
@@ -3758,6 +3785,45 @@ async def cb_buy_sub_rubles_subj(callback: CallbackQuery):
         reply_markup=get_sub_rubles_keyboard(tier_id, subject),
         disable_web_page_preview=True,
     )
+    await notify_admins_of_payment_request(tier_id, callback.from_user.id, callback.from_user, subject)
+
+@dp.callback_query(F.data.startswith("admin_confirm_sub:"))
+async def cb_admin_confirm_sub(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    _, tier_id_raw, target_id_raw, subject_raw = callback.data.split(":")
+    tier_id = int(tier_id_raw)
+    target_id = int(target_id_raw)
+    subject = subject_raw if subject_raw != "-" else None
+    if tier_id not in SUBSCRIPTION_TIERS:
+        await callback.answer("Тариф не найден", show_alert=True)
+        return
+
+    existing = get_subscription(target_id)
+    already_confirmed = (
+        existing and existing.get("tier") == tier_id and existing.get("method") == "rubles"
+        and has_active_subscription(target_id)
+        and time.time() - existing.get("purchased_at", 0) < 600
+    )
+    if already_confirmed:
+        await callback.answer("Уже подтверждено (скорее всего, другим админом)", show_alert=True)
+        await safe_edit_text(
+            callback.message,
+            f"✅ Уже подтверждено — подписка «{SUBSCRIPTION_TIERS[tier_id]['title']}» "
+            f"выдана {format_admin_target_label(None, target_id)}.",
+            parse_mode="HTML"
+        )
+        return
+
+    cfg = SUBSCRIPTION_TIERS[tier_id]
+    await callback.answer("Подтверждено ✅", show_alert=True)
+    await grant_subscription_and_notify_buyer(target_id, tier_id, "rubles", cfg["price_rub"], subject)
+    await safe_edit_text(
+        callback.message,
+        f"✅ Подтверждено — подписка «{cfg['title']}» выдана {format_admin_target_label(None, target_id)}.",
+        parse_mode="HTML"
+    )
 
 @dp.pre_checkout_query()
 async def handle_pre_checkout(pre_checkout_query) -> None:
@@ -3773,18 +3839,8 @@ async def handle_successful_payment(message: Message):
         parts = payload.split("_")
         tier_id = int(parts[2])
         subject = parts[3] if len(parts) > 3 and parts[3] != "-" else None
-        grant_subscription(message.from_user.id, tier_id, "stars", stars, subject)
         cfg = SUBSCRIPTION_TIERS[tier_id]
-        sub = get_subscription(message.from_user.id)
-        scope_label = get_subscription_scope_label(sub)
-        text = (
-            f"🎉 <b>Подписка «{cfg['title']}» активирована!</b>\n\n"
-            f"Доступ {scope_label} открыт — {format_subscription_expiry(sub['expires'])}.\n"
-            "Правило про рефералов для тебя больше не действует. Спасибо за поддержку! 🙏😇"
-        )
-        text += get_tier_upsell_text(tier_id)
-        keyboard = get_tier_upsell_keyboard(tier_id)
-        await message.answer(text, parse_mode="HTML", reply_markup=keyboard)
+        await grant_subscription_and_notify_buyer(message.from_user.id, tier_id, "stars", stars, subject)
         user = message.from_user
         for admin_id in ADMIN_IDS:
             try:

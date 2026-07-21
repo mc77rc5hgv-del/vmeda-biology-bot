@@ -196,13 +196,28 @@ cheapest anatomy-granting tier for this reason, unlike the full locked-screen te
 
 Stars payments go through the real Telegram Bot API invoice flow (`send_invoice` → `pre_checkout_query` →
 `successful_payment`, `currency="XTR"`); rubles payments have no real gateway — the buyer is deep-linked to
-`@vmeda_helper` and an admin manually confirms/records the tier via the `ADMIN_PENDING` flow (`record_subscription_username`
-→ `record_subscription_tier` → `record_subscription_subject` if the chosen tier requires one). The tier-selection
-step sends a `ReplyKeyboardMarkup` (`get_admin_tier_reply_keyboard()`, one button per active tier, digit-prefixed
-so the parser can `re.match(r"\d+", raw)` out of either a tapped button or hand-typed text) instead of making the
-admin memorize/type a bare number — remember `ReplyKeyboardMarkup` can only be sent via `message.answer(...)`
-(a new message), never attached to `safe_edit_text`/`edit_text`, unlike the `InlineKeyboardBuilder` markup used
-everywhere else in the file.
+`@vmeda_helper` to pay manually. Two independent paths grant a rubles subscription, and both must keep working:
+1. **One-tap confirm** (fast path) — the moment the buyer taps "💵 Оплатить X₽" (`cb_buy_sub_rubles`/`_subj`),
+   every `ADMIN_IDS` entry immediately gets a `admin_confirm_sub:{tier}:{user_id}:{subject|-}` inline button via
+   `notify_admins_of_payment_request()` — the admin just taps it once they see the transfer land, no typing.
+   `cb_admin_confirm_sub` guards against two admins racing each other on the same request (checks whether
+   `stats["subscriptions"][uid]` already has this exact tier granted via `"rubles"` in the last 10 minutes before
+   granting again — the second tap edits its own message to "already confirmed" instead of double-granting/
+   double-notifying the buyer).
+2. **Manual flow** (unchanged, kept as a fallback) — `ADMIN_PENDING` (`record_subscription_username` →
+   `record_subscription_tier` → `record_subscription_subject` if the chosen tier requires one), for cases where
+   the admin wants to grant a subscription without the buyer having gone through the purchase flow at all (e.g.
+   an off-platform payment, a manual comp, fixing a mistake).
+
+Both paths funnel into the same `grant_subscription_and_notify_buyer()` — the single place that calls
+`grant_subscription()` and sends the buyer their "🎉 активирована" message + tier upsell, so the confirmation
+text/upsell logic never has to be kept in sync across three call sites by hand.
+
+The tier-selection step of the manual flow sends a `ReplyKeyboardMarkup` (`get_admin_tier_reply_keyboard()`, one
+button per active tier, digit-prefixed so the parser can `re.match(r"\d+", raw)` out of either a tapped button or
+hand-typed text) instead of making the admin memorize/type a bare number — remember `ReplyKeyboardMarkup` can
+only be sent via `message.answer(...)` (a new message), never attached to `safe_edit_text`/`edit_text`, unlike
+the `InlineKeyboardBuilder` markup used everywhere else in the file.
 
 ### Admin panel pending-action state machine
 

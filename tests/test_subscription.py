@@ -19,9 +19,10 @@ def check_html(text):
     assert len(text) <= 4096, len(text)
 
 class FakeUser:
-    def __init__(self, uid, full_name="Тест Юзер"):
+    def __init__(self, uid, full_name="Тест Юзер", username=None):
         self.id = uid
         self.full_name = full_name
+        self.username = username
 
 class FakeMsg:
     def __init__(self, from_user=None):
@@ -66,6 +67,14 @@ ACTIVE_TIERS = {1, 5, 6, 7, 8, 9, 10}
 async def main():
     non_admin = random.randint(10_000_000, 99_999_999)
     tb.stats["subscriptions"].pop(str(non_admin), None)
+
+    # Network-safety net: cb_buy_sub_rubles(_subj) now also pings admins via bot.send_message —
+    # install a no-op everywhere by default so any call site we don't explicitly mock for
+    # inspection never hits the real network; sections that need to inspect messages swap in
+    # a recording mock and restore this same no-op afterwards (never the real bot method).
+    async def _noop_send_message(chat_id, text, **kwargs):
+        pass
+    tb.bot.send_message = _noop_send_message
 
     # 1. Tier data integrity: 10 defined, 3 retired (kept for historical grants), 7 on sale
     assert set(tb.SUBSCRIPTION_TIERS.keys()) == RETIRED_TIERS | ACTIVE_TIERS
@@ -355,7 +364,8 @@ async def main():
     assert tb.anatomy_access_ok(non_admin)
     assert tb.get_subscription(non_admin)["tier"] == 10
     assert tb.stats["donations_stars_total"] == donations_before, "subscription payment must not be counted as a donation"
-    assert msg.answers and "активирована" in msg.answers[0][0]
+    buyer_msgs = [t for cid, t in admin_msgs if cid == non_admin]
+    assert buyer_msgs and "активирована" in buyer_msgs[0]
     print("successful_payment (subscription payload) grants tier, not counted as donation: OK")
 
     # 17b. successful_payment with an encoded subject grants a subject-restricted subscription
@@ -475,32 +485,85 @@ async def main():
     async def fake_send_invoice2(**kwargs):
         pass
     tb.bot.send_invoice = fake_send_invoice2
+    sent4 = []
     async def fake_send_message4(chat_id, text, **kwargs):
-        pass
+        sent4.append((chat_id, text, kwargs.get("reply_markup")))
     tb.bot.send_message = fake_send_message4
 
     msg_t1 = FakeMsg(from_user=FakeUser(upsell_uid))
     msg_t1.successful_payment = FakeSuccessfulPayment(89, f"sub_stars_1_-_{upsell_uid}_{int(time.time())}")
     await tb.handle_successful_payment(msg_t1)
-    assert msg_t1.answers, "expected a confirmation message"
-    t1_text, t1_kb = msg_t1.answers[0]
+    buyer_sent = [(c, t, k) for c, t, k in sent4 if c == upsell_uid]
+    assert buyer_sent, "expected a confirmation message"
+    _, t1_text, t1_kb = buyer_sent[0]
     check_html(t1_text)
     assert "активирована" in t1_text and "Выгоднее" in t1_text
     assert t1_kb is not None
     tb.stats["subscriptions"].pop(str(upsell_uid), None)
     print("tier 1 stars purchase offers an upsell to the next tier: OK")
 
+    sent4.clear()
     upsell_uid2 = random.randint(10_000_000, 99_999_999)
     msg_t10 = FakeMsg(from_user=FakeUser(upsell_uid2))
     msg_t10.successful_payment = FakeSuccessfulPayment(3899, f"sub_stars_10_-_{upsell_uid2}_{int(time.time())}")
     await tb.handle_successful_payment(msg_t10)
-    assert msg_t10.answers
-    t10_text, t10_kb = msg_t10.answers[0]
+    buyer_sent2 = [(c, t, k) for c, t, k in sent4 if c == upsell_uid2]
+    assert buyer_sent2
+    _, t10_text, t10_kb = buyer_sent2[0]
     assert "Выгоднее" not in t10_text and t10_kb is None
     tb.stats["subscriptions"].pop(str(upsell_uid2), None)
     tb.bot.send_invoice = orig_send_invoice
     tb.bot.send_message = orig_send_message
     print("top-tier (10) purchase shows no upsell: OK")
+
+    # 20b. New: buying with rubles now also pings admins with a one-tap payment-confirm request,
+    # and tapping it grants the subscription immediately (old manual admin flow still works too)
+    confirm_uid = random.randint(10_000_000, 99_999_999)
+    tb.stats["subscriptions"].pop(str(confirm_uid), None)
+    admin_sent = []
+    async def fake_send_message5(chat_id, text, **kwargs):
+        admin_sent.append((chat_id, text, kwargs.get("reply_markup")))
+    tb.bot.send_message = fake_send_message5
+
+    cb_rub = FakeCB("buy_sub_rubles:6", uid=confirm_uid)
+    await tb.cb_buy_sub_rubles(cb_rub)
+    assert cb_rub.message.edits, "buyer still sees the @vmeda_helper deep-link screen"
+    admin_requests = [(c, t, k) for c, t, k in admin_sent if c in tb.ADMIN_IDS]
+    assert len(admin_requests) == len(tb.ADMIN_IDS), "every admin should get a confirm request"
+    req_chat, req_text, req_kb = admin_requests[0]
+    check_html(req_text)
+    assert "239" in req_text and "подтверждение оплаты" in req_text
+    assert req_kb is not None
+    confirm_cb_data = req_kb.inline_keyboard[0][0].callback_data
+    assert confirm_cb_data == f"admin_confirm_sub:6:{confirm_uid}:-"
+    print("buy_sub_rubles pings every admin with a one-tap confirm request: OK")
+
+    admin_sent.clear()
+    cb_confirm = FakeCB(confirm_cb_data, uid=ADMIN_ID)
+    await tb.cb_admin_confirm_sub(cb_confirm)
+    assert tb.get_subscription(confirm_uid)["tier"] == 6
+    assert tb.get_subscription(confirm_uid)["method"] == "rubles"
+    assert cb_confirm.message.edits and "Подтверждено" in cb_confirm.message.edits[0][0]
+    buyer_notified = [(c, t) for c, t, _ in admin_sent if c == confirm_uid]
+    assert buyer_notified and "активирована" in buyer_notified[0][1]
+    print("tapping the admin confirm button grants the subscription and notifies the buyer: OK")
+
+    # tapping confirm again (e.g. the other admin) is a harmless no-op, not a duplicate grant/notify
+    admin_sent.clear()
+    cb_confirm2 = FakeCB(confirm_cb_data, uid=ADMIN_ID)
+    await tb.cb_admin_confirm_sub(cb_confirm2)
+    assert cb_confirm2.message.edits and "Уже подтверждено" in cb_confirm2.message.edits[0][0]
+    assert not [c for c, t, _ in admin_sent if c == confirm_uid], "must not re-notify the buyer"
+    print("double-confirm (race between two admins) does not re-grant or re-notify: OK")
+
+    # non-admin cannot tap the confirm button
+    tb.stats["subscriptions"].pop(str(confirm_uid), None)
+    cb_confirm_bad = FakeCB(confirm_cb_data, uid=non_admin)
+    await tb.cb_admin_confirm_sub(cb_confirm_bad)
+    assert not tb.has_active_subscription(confirm_uid), "non-admin must not be able to confirm payments"
+    tb.stats["subscriptions"].pop(str(confirm_uid), None)
+    tb.bot.send_message = orig_send_message
+    print("non-admin cannot confirm a payment: OK")
 
     # 21. Referral gate integration: get_referral_status_text shows subscription branch
     tb.grant_subscription(non_admin, 9, "stars", 1119)
