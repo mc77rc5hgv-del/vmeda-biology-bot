@@ -228,6 +228,7 @@ REFERRAL_FULL_ACCESS_THRESHOLD = 2  # столько рефералов нужн
 REFERRAL_WARNING_THRESHOLD = 3  # столько предупреждений даём, прежде чем закрыть доступ
 REFERRAL_WARNING_COOLDOWN_SECONDS = 4 * 60 * 60  # не чаще одного предупреждения раз в 4 часа
 TEMP_ACCESS_GRANT_SECONDS = 7 * 24 * 60 * 60  # длительность временного восстановления доступа
+GLOBAL_PROMO_SECONDS = 24 * 60 * 60  # длительность полного открытия всех разделов всем (раздел "global")
 
 def get_referral_link(user_id: int) -> str:
     return f"https://t.me/{BOT_USERNAME}?start=ref_{user_id}"
@@ -497,6 +498,7 @@ def has_subject_access(user_id: int, subject: str) -> bool:
     has_free_access() учитывает, что тариф «3 дня, 1 предмет» открывает только ОДИН предмет."""
     if (
         is_admin(user_id)
+        or is_section_promo_active("global")
         or get_referral_count(user_id) >= REFERRAL_FULL_ACCESS_THRESHOLD
         or user_id in stats["manual_access_granted"]
         or has_temp_access(user_id)
@@ -587,6 +589,7 @@ def grant_subscription(user_id: int, tier: int, method: str, price: int, subject
 def has_free_access(user_id: int) -> bool:
     return (
         is_admin(user_id)
+        or is_section_promo_active("global")
         or get_referral_count(user_id) >= REFERRAL_FULL_ACCESS_THRESHOLD
         or user_id in stats["manual_access_granted"]
         or has_temp_access(user_id)
@@ -915,6 +918,16 @@ async def _broadcast_to(user_ids, text: str, keyboard=None) -> None:
 
 async def _broadcast(text: str, keyboard=None) -> None:
     await _broadcast_to(stats["total_users"], text, keyboard)
+
+async def announce_global_promo_start() -> None:
+    text = (
+        "🎉🚀 <b>ВСЕ ОГРАНИЧЕНИЯ СНЯТЫ НА 24 ЧАСА!</b> 🚀🎉\n"
+        f"{DIVIDER}\n\n"
+        "Абсолютно все разделы — Биология, Физика, Химия, Анатомия, Гистология — сейчас "
+        "полностью бесплатны для всех, без рефералов и подписки.\n\n"
+        "Успей позаниматься, пока открыто — доступ вернётся к обычным правилам ровно через сутки! ⏳"
+    )
+    await _broadcast(text)
 
 async def announce_battle_start() -> None:
     builder = InlineKeyboardBuilder()
@@ -2564,6 +2577,7 @@ def get_admin_menu():
     builder.button(text="📣 Напомнить о реферале/подписке (<2 реф.)", callback_data="admin_referral_reminder_confirm")
     builder.button(text="📤 Опубликовать пост в канал", callback_data="admin_channel_post_prompt")
     builder.button(text="🔬 Открыть Гистологию всем на 24ч", callback_data="admin_histology_promo_confirm")
+    builder.button(text="🎉 Снять все ограничения всем на 24ч", callback_data="admin_global_promo_confirm")
     builder.button(text="📋 Анонс переклички групп", callback_data="admin_announce_rollcall_confirm")
     builder.adjust(1)
     return builder.as_markup()
@@ -2790,6 +2804,45 @@ async def cb_admin_histology_promo_go(callback: CallbackQuery):
     await safe_edit_text(
         callback.message,
         "✅ Гистология открыта для всех на 24 часа.",
+        parse_mode="HTML",
+        reply_markup=get_admin_back_keyboard()
+    )
+
+@dp.callback_query(F.data == "admin_global_promo_confirm")
+async def cb_admin_global_promo_confirm(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer()
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Да, открыть всё на 24ч", callback_data="admin_global_promo_go")
+    builder.button(text="❌ Отмена", callback_data="admin_panel")
+    builder.adjust(1)
+    await safe_edit_text(
+        callback.message,
+        "🎉 <b>Подтверди снятие всех ограничений</b>\n\n"
+        "Абсолютно все разделы (Биология, Физика, Химия, Анатомия, Гистология) станут бесплатными "
+        "для всех пользователей на 24 часа — без рефералов и подписки. После этого доступ вернётся "
+        "к обычным правилам каждого раздела.\n\n"
+        "Всем пользователям придёт рассылка с объявлением.",
+        parse_mode="HTML",
+        reply_markup=builder.as_markup()
+    )
+
+@dp.callback_query(F.data == "admin_global_promo_go")
+async def cb_admin_global_promo_go(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    if is_section_promo_active("global"):
+        await callback.answer("Промо уже идёт", show_alert=True)
+        return
+    await callback.answer("🚀 Все ограничения сняты на 24 часа!", show_alert=True)
+    start_section_promo("global", GLOBAL_PROMO_SECONDS)
+    asyncio.create_task(announce_global_promo_start())
+    await safe_edit_text(
+        callback.message,
+        "✅ Все ограничения сняты для всех на 24 часа.",
         parse_mode="HTML",
         reply_markup=get_admin_back_keyboard()
     )
@@ -4819,7 +4872,10 @@ ANATOMY_FLASH_SESSIONS: dict[int, dict] = {}
 ANATOMY_MATCH_SESSIONS: dict[int, dict] = {}
 
 def anatomy_access_ok(user_id: int) -> bool:
-    return ANATOMY_PUBLIC or is_admin(user_id) or has_subscription_anatomy_access(user_id)
+    return (
+        ANATOMY_PUBLIC or is_admin(user_id) or is_section_promo_active("global")
+        or has_subscription_anatomy_access(user_id)
+    )
 
 def get_anatomy_dev_alert_text() -> str:
     # Telegram ограничивает текст всплывающего алерта ~200 символами — показываем только
@@ -5579,7 +5635,8 @@ def has_histology_temp_access(user_id: int) -> bool:
 def histology_permanently_unlocked(user_id: int) -> bool:
     """Доступ, не зависящий от тающего пробного окна (в отличие от has_histology_temp_access)."""
     return (
-        HISTOLOGY_PUBLIC or is_admin(user_id) or is_section_promo_active("histology")
+        HISTOLOGY_PUBLIC or is_admin(user_id)
+        or is_section_promo_active("histology") or is_section_promo_active("global")
         or has_subscription_histology_access(user_id)
         or get_referral_count(user_id) >= REFERRAL_FULL_ACCESS_THRESHOLD
     )

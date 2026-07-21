@@ -145,7 +145,12 @@ stored in `stats["section_promos"][section] = until_ts`): a time-boxed global ov
 for everyone regardless of referrals/subscription, e.g. "open Histology to all for 24h" via the admin panel
 (`admin_histology_promo_confirm` → `admin_histology_promo_go`, mirrors the referral-battle start pattern and
 broadcasts an announcement). Self-expires — no timer task needed, the access check just compares against
-`time.time()`.
+`time.time()`. The section key `"global"` is special-cased: it's checked (in addition to each subject's own
+promo key) inside `has_free_access()`, `has_subject_access()`, `anatomy_access_ok()`, and
+`histology_permanently_unlocked()` — so activating it (admin panel → "🎉 Снять все ограничения всем на 24ч",
+`admin_global_promo_confirm` → `admin_global_promo_go`, `GLOBAL_PROMO_SECONDS`) opens Biology/Physics/Chemistry/
+Anatomy/Histology simultaneously with one broadcast (`announce_global_promo_start()`), unlike the single-section
+Histology promo above.
 
 ### Subscriptions (`SUBSCRIPTION_TIERS`)
 
