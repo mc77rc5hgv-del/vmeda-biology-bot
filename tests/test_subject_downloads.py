@@ -118,7 +118,11 @@ async def main():
     for num, item in tb.PHYSICS_GRADE45_QUESTIONS.items():
         assert tb.strip_html_tags(item["title"]) in text2b
     assert caption2b and f"@{tb.BOT_USERNAME}" in caption2b
-    print("physics 'grade45' file: all 60 questions present, HTML-free: OK")
+    reloaded2b = DocxDocument(io.BytesIO(doc2b.data))
+    heading_titles = [p.text for p in reloaded2b.paragraphs if p.style.name.startswith("Heading")]
+    expected_titles = sorted((v["title"] for v in tb.PHYSICS_GRADE45_QUESTIONS.values()))
+    assert heading_titles == expected_titles, "questions must be listed alphabetically by title"
+    print("physics 'grade45' file: all 60 questions present, alphabetical by title, HTML-free: OK")
 
     # physics: 4-ticket task answers file has all 20 solved problems
     cb3 = FakeCB("download_physics_ticket_tasks")

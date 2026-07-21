@@ -1843,9 +1843,9 @@ def build_physics_full_file() -> BufferedInputFile:
 
 def build_physics_grade45_file() -> BufferedInputFile:
     def fill(doc):
-        for num in sorted(PHYSICS_GRADE45_QUESTIONS.keys(), key=int):
-            item = PHYSICS_GRADE45_QUESTIONS[num]
-            doc.add_heading(f"{num}. {item['title']}", level=2)
+        items = sorted(PHYSICS_GRADE45_QUESTIONS.values(), key=lambda v: v["title"])
+        for item in items:
+            doc.add_heading(item["title"], level=2)
             add_html_paragraphs(doc, item["answer"])
     return build_docx_file("Физика — (60 вопросов) на 4/5", fill)
 
