@@ -146,11 +146,14 @@ for everyone regardless of referrals/subscription, e.g. "open Histology to all f
 (`admin_histology_promo_confirm` → `admin_histology_promo_go`, mirrors the referral-battle start pattern and
 broadcasts an announcement). Self-expires — no timer task needed, the access check just compares against
 `time.time()`. The section key `"global"` is special-cased: it's checked (in addition to each subject's own
-promo key) inside `has_free_access()`, `has_subject_access()`, `anatomy_access_ok()`, and
-`histology_permanently_unlocked()` — so activating it (admin panel → "🎉 Снять все ограничения всем на 24ч",
-`admin_global_promo_confirm` → `admin_global_promo_go`, `GLOBAL_PROMO_SECONDS`) opens Biology/Physics/Chemistry/
-Anatomy/Histology simultaneously with one broadcast (`announce_global_promo_start()`), unlike the single-section
-Histology promo above.
+promo key) inside `has_free_access()`, `has_subject_access()`, and `histology_permanently_unlocked()` — so
+activating it (admin panel → "🎉 Снять все ограничения всем на 24ч", `admin_global_promo_confirm` →
+`admin_global_promo_go`, `GLOBAL_PROMO_SECONDS`) opens Biology/Physics/Chemistry/Histology simultaneously with
+one broadcast (`announce_global_promo_start()`), unlike the single-section Histology promo above.
+**Deliberately excluded**: `anatomy_access_ok()` does NOT check `"global"` — Anatomy stays admin/subscription-only
+even during a global promo, since the section is still `ANATOMY_PUBLIC = False` ("in development"), not merely
+gated like the other subjects. Likewise `biology_tickets_download_ok()` never checks any promo/referral state at
+all (subscription or admin only) — biology ticket *downloads* are always paid, independent of any promo.
 
 ### Subscriptions (`SUBSCRIPTION_TIERS`)
 

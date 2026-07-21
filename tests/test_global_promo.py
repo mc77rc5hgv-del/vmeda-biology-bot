@@ -117,14 +117,20 @@ async def main():
     assert len(broadcast_calls) == 1, "second start attempt must not broadcast again"
     print("double-start blocked OK")
 
-    # 8. while active, an ordinary (no-referral, no-subscription) user has access everywhere
+    # 8. while active, an ordinary (no-referral, no-subscription) user has access to every
+    #    gated subject EXCEPT Anatomy, which stays admin/subscription-only even during a
+    #    global promo (still ANATOMY_PUBLIC = False, "in development", not merely gated).
     assert tb.has_free_access(uid)
     assert tb.has_subject_access(uid, "biology")
     assert tb.has_subject_access(uid, "physics")
     assert tb.has_subject_access(uid, "chemistry")
-    assert tb.anatomy_access_ok(uid)
+    assert not tb.anatomy_access_ok(uid), "Anatomy must stay closed even during a global promo"
     assert tb.histology_access_ok(uid)
-    print("promo active: full access to all 5 subjects OK")
+    print("promo active: full access to Biology/Physics/Chemistry/Histology, Anatomy stays closed OK")
+
+    # 8b. biology ticket downloads stay subscription-only regardless of any promo
+    assert not tb.biology_tickets_download_ok(uid), "biology ticket downloads must always require a subscription"
+    print("biology ticket downloads stay subscription-only during promo OK")
 
     # 9. the referral gate middleware itself lets a gated callback through during the promo
     class FakeUpdate:
