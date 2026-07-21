@@ -107,6 +107,7 @@ def load_stats() -> dict:
             data.setdefault("section_promos", {})
             data.setdefault("histology_warnings", {})
             data.setdefault("histology_temp_access", {})
+            data.setdefault("rollcall_confirmed", {})
             return data
         except (json.JSONDecodeError, OSError):
             logger.exception("Не удалось прочитать %s, статистика будет создана заново", STATS_FILE)
@@ -136,6 +137,7 @@ def load_stats() -> dict:
         "section_promos": {},
         "histology_warnings": {},
         "histology_temp_access": {},
+        "rollcall_confirmed": {},
     }
 
 # Один воркер сериализует записи на диск и не даёт им блокировать event loop бота.
@@ -1213,6 +1215,200 @@ async def referral_gate_middleware(handler, event: Update, data):
 
     return await handler(event, data)
 
+# ==================== ПЕРЕКЛИЧКА ГРУПП ====================
+# Собираем по одному представителю от каждой группы, чтобы быть с ними на связи. Список
+# групп генерируется по шаблону, не хранится в JSON — сами группы никогда не меняются местами.
+ROLLCALL_GROUP_COUNT = 45
+
+def rollcall_group_name(n: int) -> str:
+    return f"25-ЛД/СТ-{n}"
+
+def get_rollcall_menu_text() -> str:
+    confirmed = len(stats["rollcall_confirmed"])
+    return (
+        f"📋 <b>Перекличка групп</b>\n{DIVIDER}\n\n"
+        "Собираем по одному представителю от каждой группы, чтобы быть на связи.\n\n"
+        "⚡ <b>ПЕРВЫМ ВЫБЕРИ СВОЮ ГРУППУ</b> и получи бонусную подписку на неделю!\n\n"
+        f"Подтверждено представителей: <b>{confirmed}</b> из {ROLLCALL_GROUP_COUNT}\n\n"
+        "Выбери номер своей группы:"
+    )
+
+def get_rollcall_menu_keyboard():
+    builder = InlineKeyboardBuilder()
+    for n in range(1, ROLLCALL_GROUP_COUNT + 1):
+        group = rollcall_group_name(n)
+        if group in stats["rollcall_confirmed"]:
+            builder.button(text=f"✅ {group}", callback_data="rollcall_taken")
+        else:
+            builder.button(text=group, callback_data=f"rollcall_group:{n}")
+    builder.adjust(3)
+    builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
+    return builder.as_markup()
+
+def get_rollcall_group_text(n: int) -> str:
+    group = rollcall_group_name(n)
+    return (
+        f"👥 <b>Группа {group}</b>\n{DIVIDER}\n\n"
+        "Нажми на кнопку ниже — откроется чат с @vmeda_helper, сообщение с номером твоей "
+        "группы уже будет готово. Напиши его и подтверди, что ты из этой группы — как только "
+        "это проверят, тебе включат бонусную подписку на неделю.\n\n"
+        "Спасибо, что будешь на связи! 🙏"
+    )
+
+def get_rollcall_group_keyboard(n: int):
+    group = rollcall_group_name(n)
+    template = f"Привет! Я представитель группы {group}, хочу подтвердить участие в перекличке."
+    url = f"{HELPER_ACCOUNT_URL}?text={urllib.parse.quote(template)}"
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="💬 Написать @vmeda_helper", url=url))
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="rollcall_menu"))
+    return builder.as_markup()
+
+async def notify_admins_of_rollcall_request(n: int, user) -> None:
+    group = rollcall_group_name(n)
+    text = (
+        f"📋 <b>Отклик на перекличку</b>\n{DIVIDER}\n\n"
+        f"Группа: <b>{group}</b>\n"
+        f"От: {html.escape(user.full_name)} "
+        f"({f'@{user.username} ' if user.username else ''}ID <code>{user.id}</code>)\n\n"
+        "Проверь в чате с @vmeda_helper, что это правда представитель этой группы, и подтверди:"
+    )
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Подтвердить — выдать бонус", callback_data=f"rollcall_confirm:{n}:{user.id}")
+    keyboard = builder.as_markup()
+    for admin_id in ADMIN_IDS:
+        try:
+            await bot.send_message(admin_id, text, parse_mode="HTML", reply_markup=keyboard)
+        except Exception:
+            logger.exception("Не удалось уведомить админа %s о перекличке", admin_id)
+
+def get_rollcall_announcement_text() -> str:
+    return (
+        f"📋 <b>Перекличка групп!</b>\n{DIVIDER}\n\n"
+        "Собираем по одному представителю от каждой группы, чтобы быть на связи с курсом.\n\n"
+        "⚡ <b>ПЕРВЫМ ВЫБЕРИ СВОЮ ГРУППУ</b> и получи бонусную подписку на неделю!\n\n"
+        "Жми «📋 Перекличка» в главном меню и выбирай номер своей группы."
+    )
+
+def get_rollcall_announcement_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="📋 Перекличка", callback_data="rollcall_menu")
+    return builder.as_markup()
+
+@dp.callback_query(F.data == "rollcall_menu")
+async def cb_rollcall_menu(callback: CallbackQuery):
+    await callback.answer()
+    await safe_edit_text(
+        callback.message,
+        get_rollcall_menu_text(),
+        parse_mode="HTML",
+        reply_markup=get_rollcall_menu_keyboard()
+    )
+
+@dp.callback_query(F.data == "rollcall_taken")
+async def cb_rollcall_taken(callback: CallbackQuery):
+    await callback.answer("У этой группы уже есть подтверждённый представитель. Спасибо! 🙏", show_alert=True)
+
+@dp.callback_query(F.data.startswith("rollcall_group:"))
+async def cb_rollcall_group(callback: CallbackQuery):
+    n = int(callback.data.split(":")[1])
+    if not (1 <= n <= ROLLCALL_GROUP_COUNT):
+        await callback.answer("Группа не найдена", show_alert=True)
+        return
+    group = rollcall_group_name(n)
+    if group in stats["rollcall_confirmed"]:
+        await callback.answer("У этой группы уже есть подтверждённый представитель. Спасибо! 🙏", show_alert=True)
+        await safe_edit_text(
+            callback.message, get_rollcall_menu_text(), parse_mode="HTML", reply_markup=get_rollcall_menu_keyboard()
+        )
+        return
+    await callback.answer()
+    await safe_edit_text(
+        callback.message,
+        get_rollcall_group_text(n),
+        parse_mode="HTML",
+        reply_markup=get_rollcall_group_keyboard(n),
+        disable_web_page_preview=True,
+    )
+    await notify_admins_of_rollcall_request(n, callback.from_user)
+
+@dp.callback_query(F.data.startswith("rollcall_confirm:"))
+async def cb_rollcall_confirm(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    _, n_raw, target_id_raw = callback.data.split(":")
+    n = int(n_raw)
+    target_id = int(target_id_raw)
+    if not (1 <= n <= ROLLCALL_GROUP_COUNT):
+        await callback.answer("Группа не найдена", show_alert=True)
+        return
+    group = rollcall_group_name(n)
+    existing = stats["rollcall_confirmed"].get(group)
+    if existing:
+        await callback.answer("У этой группы уже есть подтверждённый представитель", show_alert=True)
+        await safe_edit_text(
+            callback.message,
+            f"✅ Уже подтверждено — представитель группы {group}: "
+            f"{format_admin_target_label(None, existing['user_id'])}.",
+            parse_mode="HTML"
+        )
+        return
+
+    stats["rollcall_confirmed"][group] = {"user_id": target_id, "confirmed_at": time.time()}
+    stats["temporary_access"][str(target_id)] = time.time() + TEMP_ACCESS_GRANT_SECONDS
+    save_stats()
+    await callback.answer("Подтверждено ✅", show_alert=True)
+    await safe_edit_text(
+        callback.message,
+        f"✅ Подтверждено — {format_admin_target_label(None, target_id)} представитель группы {group}. Бонус выдан.",
+        parse_mode="HTML"
+    )
+    try:
+        await bot.send_message(
+            target_id,
+            f"🎉 <b>Ты подтверждён как представитель группы {group}!</b>\n\n"
+            "Бонусная подписка на неделю активирована — доступ к Биологии, Физике и Химии "
+            "открыт на 7 дней без рефералов. Спасибо, что будешь на связи! 🙏",
+            parse_mode="HTML"
+        )
+    except Exception:
+        logger.exception("Не удалось уведомить пользователя %s о подтверждении переклички", target_id)
+
+@dp.callback_query(F.data == "admin_announce_rollcall_confirm")
+async def cb_admin_announce_rollcall_confirm(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer()
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Отправить всем", callback_data="admin_announce_rollcall_go")
+    builder.button(text="❌ Отмена", callback_data="admin_panel")
+    builder.adjust(1)
+    preview = (
+        f"👀 <b>Предпросмотр анонса</b>\n{DIVIDER}\n\n"
+        f"{get_rollcall_announcement_text()}\n\n{DIVIDER}\n"
+        f"Отправить это всем {len(stats['total_users'])} пользователям?"
+    )
+    await safe_edit_text(callback.message, preview, parse_mode="HTML", reply_markup=builder.as_markup())
+
+@dp.callback_query(F.data == "admin_announce_rollcall_go")
+async def cb_admin_announce_rollcall_go(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer("📣 Рассылка запущена!", show_alert=True)
+    recipients = len(stats["total_users"])
+    stats["broadcast_count"] = stats.get("broadcast_count", 0) + 1
+    save_stats()
+    await _broadcast(get_rollcall_announcement_text(), get_rollcall_announcement_keyboard())
+    await safe_edit_text(
+        callback.message,
+        f"✅ Анонс переклички отправлен (попытка охватить {recipients} пользователей).",
+        parse_mode="HTML",
+        reply_markup=get_admin_back_keyboard()
+    )
+
 # ==================== ПОДДЕРЖКА АВТОРА ====================
 DONATION_PENDING: dict[int, dict] = {}
 STARS_MIN, STARS_MAX = 1, 2500
@@ -1702,6 +1898,11 @@ def get_main_menu(user_id: int = None):
     builder.button(text=histology_label, callback_data="histology_menu")
     builder.button(text="👥 Пригласить друзей", callback_data="referral_info")
     builder.button(text="🏆 Рейтинг", callback_data="referral_leaderboard")
+    rollcall_confirmed_count = len(stats["rollcall_confirmed"])
+    builder.button(
+        text=f"📋 Перекличка ({rollcall_confirmed_count}/{ROLLCALL_GROUP_COUNT})",
+        callback_data="rollcall_menu"
+    )
     battle_label = "⚔️ Битва рефералов 🔥" if is_battle_active() else "⚔️ Битва рефералов"
     builder.button(text=battle_label, callback_data="referral_battle")
     if user_id is not None and has_active_subscription(user_id):
@@ -2300,6 +2501,7 @@ def get_admin_menu():
     builder.button(text="📣 Напомнить о реферале/подписке (<2 реф.)", callback_data="admin_referral_reminder_confirm")
     builder.button(text="📤 Опубликовать пост в канал", callback_data="admin_channel_post_prompt")
     builder.button(text="🔬 Открыть Гистологию всем на 24ч", callback_data="admin_histology_promo_confirm")
+    builder.button(text="📋 Анонс переклички групп", callback_data="admin_announce_rollcall_confirm")
     builder.adjust(1)
     return builder.as_markup()
 

@@ -35,6 +35,8 @@ EXEMPT_EXAMPLES = [
     "admin_grant_prompt", "admin_revoke_prompt", "admin_dm_prompt", "admin_donation_prompt",
     "admin_announce_support_confirm", "admin_announce_support_go",
     "admin_channel_post_prompt", "admin_channel_post_go", "admin_channel_post_cancel",
+    "rollcall_menu", "rollcall_group:1", "rollcall_taken", "rollcall_confirm:1:123",
+    "admin_announce_rollcall_confirm", "admin_announce_rollcall_go",
     "anatomy_menu", "anatomy_osteology", "anatomy_topic:skull", "anatomy_bones:skull",
     "anatomy_bone_hub:skull:frontal", "anatomy_bone_material:skull:frontal:0",
     "anatomy_bone_img:skull:frontal:0", "anatomy_bone_flash_start:skull:frontal",

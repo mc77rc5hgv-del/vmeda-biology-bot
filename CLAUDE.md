@@ -244,6 +244,20 @@ shows a preview + confirm button, a `_go` handler re-validates the cohort (it ma
 `_broadcast()` (all users) or `_broadcast_to(cohort, text, keyboard=None)` (a filtered list), then increments
 `stats["broadcast_count"]`. Reuse this shape for new admin broadcasts rather than inventing a new one.
 
+### Group roll-call (перекличка)
+
+Recruits one point-of-contact per group. `ROLLCALL_GROUP_COUNT` (45) generates group names on the fly via
+`rollcall_group_name(n) -> "25-ЛД/СТ-{n}"` — group names are never stored, only `stats["rollcall_confirmed"][group]
+= {"user_id", "confirmed_at"}` once an admin has confirmed one. Tapping an unclaimed group does **not** lock it —
+multiple people can tap the same group and get the `@vmeda_helper` deep-link screen; the group only locks (button
+becomes `"✅ {group}"` / `callback_data="rollcall_taken"`) once an admin taps confirm, mirroring the one-tap
+payment-confirm pattern (`notify_admins_of_rollcall_request()` pings every `ADMIN_IDS` entry the moment someone
+taps a group, `cb_rollcall_confirm` grants and guards against two admins racing the same group the same way
+`cb_admin_confirm_sub` does for payments). The reward is a flat `TEMP_ACCESS_GRANT_SECONDS` (7-day) blanket grant
+via `stats["temporary_access"]` — the same mechanism the referral-exhausted recovery broadcast uses — not a real
+`SUBSCRIPTION_TIERS` entry, since it's promotional and unlocks only Biology/Physics/Chemistry (not
+Histology/Anatomy, which check their own subscription-specific flags, not `has_temp_access()`).
+
 ## Known pitfalls (bug classes that have already recurred)
 
 - **Per-topic keyboard labels hardcoded to one topic.** `get_anatomy_topic_keyboard()`'s bones-list button was
