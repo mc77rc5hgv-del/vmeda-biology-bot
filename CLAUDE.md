@@ -105,15 +105,22 @@ button-driven album isn't possible without losing the nav buttons).
 ### Access control (two independent gates)
 
 1. **Referral gate** (`referral_gate_middleware`, an `@dp.update.outer_middleware()`): gates only Biology/Physics/
-   Chemistry via an allowlist (`GATED_CALLBACKS` + `GATED_PREFIXES`, checked by `is_gated_callback`) — anything not
-   explicitly listed there passes through ungated by default. Free access requires
+   Chemistry via an allowlist split per subject (`GATED_CALLBACKS_BIOLOGY`/`_PHYSICS`/`_CHEMISTRY` +
+   matching `GATED_PREFIXES_*`), classified by `get_gated_subject(data) -> "biology"|"physics"|"chemistry"|None`;
+   `is_gated_callback` is just `get_gated_subject(data) is not None`. Anything not listed there passes through
+   ungated by default. For callback events the middleware checks `has_subject_access(user_id, subject)` — NOT the
+   blanket `has_free_access()` — because the cheapest tariff (49₽, "3 дня — один предмет") only grants access to
+   ONE chosen subject (`stats["subscriptions"][uid]["restricted_subject"]`); every other tier leaves
+   `restricted_subject = None`, which `has_subject_access` treats as "all three". For plain message events (not
+   tied to one subject) it falls back to the blanket `has_free_access()`. Free access requires
    `REFERRAL_FULL_ACCESS_THRESHOLD` (2) referrals; below that, `REFERRAL_WARNING_THRESHOLD` (3) free attempts (one
    warning per `REFERRAL_WARNING_COOLDOWN_SECONDS`, 4h) before a hard block.
 2. **Anatomy/Histology gates** (`anatomy_access_ok` / `histology_access_ok`): separate boolean functions, not part
    of the referral allowlist — public-flag-gated (`ANATOMY_PUBLIC` / `HISTOLOGY_PUBLIC`, both currently `False`)
-   until admin flips them, bypassed by admin, by a subscription with the matching scope, or (Histology only) by
-   reaching `REFERRAL_FULL_ACCESS_THRESHOLD` referrals — same permanent free-access rule as Biology/Physics/
-   Chemistry. Anatomy currently has no referral bypass, only admin/`scope="all"` subscription.
+   until admin flips them, bypassed by admin, by `has_subscription_anatomy_access()`/`has_subscription_histology_access()`
+   (per-tier `anatomy`/`histology_until_rule` flags — see Subscriptions below), or (Histology only) by reaching
+   `REFERRAL_FULL_ACCESS_THRESHOLD` referrals — same permanent free-access rule as Biology/Physics/Chemistry.
+   Anatomy currently has no referral bypass, only admin/a subscription tier with `anatomy: True`.
 
    **Histology also has its own trial+warning gate** (`histology_gate_ok`, called explicitly at the top of each
    histology handler — `histology_menu`/`_topic`/`_specimen`/`_img`/`_guess_start` — not a middleware, since the
@@ -142,12 +149,60 @@ broadcasts an announcement). Self-expires — no timer task needed, the access c
 
 ### Subscriptions (`SUBSCRIPTION_TIERS`)
 
-Four tiers keyed 1-4, each a dict of `title/short/scope/duration_days/price_rub/price_stars/emoji/benefits/...`
-(`scope` is `"gated"` — Biology/Physics/Chemistry only — or `"all"` — also unlocks Anatomy/Histology early).
-Stars payments go through the real Telegram Bot API invoice flow (`send_invoice` → `pre_checkout_query` → 
+Ten dict entries keyed 1-10. **Tiers 2/3/4 are retired** (`"retired": True`) — the original 239₽/899₽/2499₽
+lineup, kept in the dict forever so historical buyers' grants still resolve to the correct title/price/benefits,
+but excluded from every purchase-facing surface (`ACTIVE_SUBSCRIPTION_TIERS = {t: cfg for t, cfg in
+SUBSCRIPTION_TIERS.items() if not cfg.get("retired")}`, iterated by all menus/keyboards/announcements instead of
+the raw dict). **Never repurpose a retired tier's numeric key for a different product** — `stats["subscriptions"]`
+only stores the tier id, and some display paths re-derive text by looking the id back up in `SUBSCRIPTION_TIERS`
+live, so reusing an id would silently reinterpret what an existing payer already bought. Tier 1 (89₽, unchanged
+from the original lineup) is the one exception that stayed in place because its price/scope didn't change — only
+its Histology bonus window did (see below). Active tiers today: 1 (89₽), 5 (49₽), 6 (239₽), 7 (389₽), 8 (749₽), 9
+(1119₽), 10 (3899₽, `"badge": "🔥 HOT 🔥"`) — add a new one with a fresh unused key, never reuse a retired one.
+
+Each tier is a dict of `title/short/price_rub/price_stars/emoji/benefits/...` plus:
+- **Expiry** — `duration_days` (relative, from purchase) XOR `expires_at` (a fixed absolute timestamp constant —
+  `OCT_2026_CUTOFF`, `NOV_END_2026_CUTOFF`, `FEB_2027_CUTOFF`, `SECOND_YEAR_END_2027` — for the tiers priced
+  around "до октября/до конца ноября/до февраля/до конца 2 курса"). `grant_subscription()` resolves whichever is
+  set into the stored `sub["expires"]`; `format_subscription_expiry()` doesn't care which path produced it.
+- **`subject_choice_required`** — only tier 5 (49₽, 3 days). The buyer picks exactly one of biology/physics/
+  chemistry before paying (`sub_subject:{tier}:{subject}` → `buy_sub_stars_subj:`/`buy_sub_rubles_subj:`, the
+  Stars invoice payload becomes `sub_stars_{tier}_{subject|-}_{chat_id}_{ts}`); the choice is stored as
+  `sub["restricted_subject"]`. This is why the referral gate had to become subject-aware (see above) — it's the
+  only tier that doesn't unlock all three gated subjects at once.
+- **`histology_until_rule`** — `None` (no Histology), `"expiry"` (Histology lasts exactly as long as the
+  subscription itself), or a literal timestamp (an independent, possibly-earlier cutoff — tier 1 uses
+  `JULY_END_2026` for new purchases). `grant_subscription()` snapshots this into `sub["histology_access"]` (bool)
+  + `sub["histology_until"]` (timestamp or `None` = "tied to the subscription's own `expires`") **at grant time**
+  — never re-derive it from a live global constant, or changing that constant later would retroactively shrink a
+  promise already sold to existing payers. (`TIER1_HISTOLOGY_DEADLINE`, end of 2026, is kept only as a read-only
+  fallback for tier-1 grants made *before* this snapshot field existed — `_sub_has_histology()` checks
+  `"histology_access" in sub` first and only falls back to the legacy `scope`/`early_histology`/`tier==1` fields
+  when it's missing.)
+- **`anatomy`** / **`biology_download`** / **`cheat_sheets`** — plain bools, also snapshotted onto the sub record
+  at grant time (`_sub_has_anatomy()`/`_sub_has_biology_download()` fall back to legacy `scope == "all"` for
+  pre-migration grants, same reasoning as Histology above). `cheat_sheets` only gates a menu entry/flag so far —
+  the actual printable-cheat-sheet *content* doesn't exist yet, that's a separate content-authoring task.
+
+Never hardcode a price/tier list in marketing copy — use `cheapest_active_tier(predicate)` (and its shortcuts
+`cheapest_gated3_tier()`/`cheapest_histology_tier()`/`cheapest_anatomy_tier()`/`cheapest_biology_download_tier()`)
+or iterate `ACTIVE_SUBSCRIPTION_TIERS` directly, same reasoning as the "values duplicated out of
+SUBSCRIPTION_TIERS" pitfall below. `get_tier_upsell_text(tier_id)`/`get_tier_upsell_keyboard(tier_id)` show
+whichever active tier is next-cheapest-above the given one (empty string / `None` if `tier_id` is already the
+most expensive) — shown both on the pre-payment tier detail screen and on the post-purchase confirmation
+(Stars and admin-rubles paths). Telegram caps `callback.answer(..., show_alert=True)` text at ~200 characters —
+`get_anatomy_dev_alert_text()` (used by the 15 in-handler "Anatomy still locked" alerts) mentions only the single
+cheapest anatomy-granting tier for this reason, unlike the full locked-screen text which lists all of them.
+
+Stars payments go through the real Telegram Bot API invoice flow (`send_invoice` → `pre_checkout_query` →
 `successful_payment`, `currency="XTR"`); rubles payments have no real gateway — the buyer is deep-linked to
-`@vmeda_helper` and an admin manually confirms/records the tier via the `ADMIN_PENDING` flow. Adding a 5th tier or
-changing prices only requires editing the `SUBSCRIPTION_TIERS` dict — the UI/keyboards iterate it dynamically.
+`@vmeda_helper` and an admin manually confirms/records the tier via the `ADMIN_PENDING` flow (`record_subscription_username`
+→ `record_subscription_tier` → `record_subscription_subject` if the chosen tier requires one). The tier-selection
+step sends a `ReplyKeyboardMarkup` (`get_admin_tier_reply_keyboard()`, one button per active tier, digit-prefixed
+so the parser can `re.match(r"\d+", raw)` out of either a tapped button or hand-typed text) instead of making the
+admin memorize/type a bare number — remember `ReplyKeyboardMarkup` can only be sent via `message.answer(...)`
+(a new message), never attached to `safe_edit_text`/`edit_text`, unlike the `InlineKeyboardBuilder` markup used
+everywhere else in the file.
 
 ### Admin panel pending-action state machine
 

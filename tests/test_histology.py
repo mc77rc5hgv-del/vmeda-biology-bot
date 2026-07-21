@@ -156,7 +156,7 @@ async def main():
     assert cb3.message.edits, "locked screen should render"
     locked_text, locked_kb = cb3.message.edits[0]
     check_html(locked_text)
-    assert "по подписке" in locked_text and "239" in locked_text
+    assert "по подписке" in locked_text and str(tb.cheapest_histology_tier()["price_rub"]) in locked_text
     assert str(tb.REFERRAL_FULL_ACCESS_THRESHOLD) in locked_text
     assert any("Оформить подписку" in t for t in kb_texts(locked_kb))
     assert any("Пригласить друзей" in t for t in kb_texts(locked_kb))

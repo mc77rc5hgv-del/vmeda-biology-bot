@@ -53,16 +53,17 @@ async def main():
     assert "download_chemistry_labs" in chem_kb_data and "download_chemistry_tasks" in chem_kb_data
     print("menus expose download buttons: OK")
 
-    # biology tickets download requires a scope="all" subscription (899₽+) — locked otherwise
+    # biology tickets download requires a tier with biology_download=True — locked otherwise
+    biology_download_tier = tb.cheapest_biology_download_tier()
     cb_locked = FakeCB("download_biology_tickets", uid=444555666)
     tb.stats["subscriptions"].pop("444555666", None)
     await tb.cb_download_biology_tickets(cb_locked)
     assert not cb_locked.message.documents, "must not send the file without a qualifying subscription"
     locked_text, locked_kb = cb_locked.message.edits[0]
-    assert "899" in locked_text and "2499" in locked_text
+    assert str(biology_download_tier["price_rub"]) in locked_text
     assert "subscription_menu" in kb_data(locked_kb)
     assert "menu_biology" in kb_data(locked_kb)
-    print("biology tickets download locked without scope=all subscription: OK")
+    print("biology tickets download locked without a qualifying subscription: OK")
 
     # admin bypasses the gate regardless of subscription
     cb_admin = FakeCB("download_biology_tickets", uid=next(iter(tb.ADMIN_IDS)))
@@ -71,10 +72,11 @@ async def main():
     print("biology tickets download: admin bypass OK")
 
     # biology: all 40 tickets present, HTML stripped, content matches source, real .docx —
-    # tested via a user holding a qualifying scope="all" subscription
+    # tested via a user holding a qualifying (biology_download=True) subscription
     bio_sub_uid = 777888999
+    bio_sub_tier_id = next(t for t, cfg in tb.ACTIVE_SUBSCRIPTION_TIERS.items() if cfg.get("biology_download"))
     tb.stats["subscriptions"].pop(str(bio_sub_uid), None)
-    tb.grant_subscription(bio_sub_uid, 3, "stars", 899)
+    tb.grant_subscription(bio_sub_uid, bio_sub_tier_id, "stars", biology_download_tier["price_stars"])
     cb = FakeCB("download_biology_tickets", uid=bio_sub_uid)
     await tb.cb_download_biology_tickets(cb)
     assert cb.message.documents

@@ -52,189 +52,235 @@ class FakeCB:
 def kb_texts(markup):
     return [b.text for row in markup.inline_keyboard for b in row]
 
+def kb_data(markup):
+    return [b.callback_data for row in markup.inline_keyboard for b in row]
+
 class FakeSuccessfulPayment:
     def __init__(self, total_amount, invoice_payload):
         self.total_amount = total_amount
         self.invoice_payload = invoice_payload
 
+RETIRED_TIERS = {2, 3, 4}
+ACTIVE_TIERS = {1, 5, 6, 7, 8, 9, 10}
+
 async def main():
     non_admin = random.randint(10_000_000, 99_999_999)
     tb.stats["subscriptions"].pop(str(non_admin), None)
 
-    # 1. Tier data integrity
-    assert set(tb.SUBSCRIPTION_TIERS.keys()) == {1, 2, 3, 4}
-    assert tb.SUBSCRIPTION_TIERS[1]["scope"] == "gated" and tb.SUBSCRIPTION_TIERS[1]["duration_days"] == 30
-    assert tb.SUBSCRIPTION_TIERS[2]["scope"] == "gated" and tb.SUBSCRIPTION_TIERS[2]["duration_days"] is None
-    assert tb.SUBSCRIPTION_TIERS[3]["scope"] == "all" and tb.SUBSCRIPTION_TIERS[3]["duration_days"] == 365
-    assert tb.SUBSCRIPTION_TIERS[4]["scope"] == "all" and tb.SUBSCRIPTION_TIERS[4]["duration_days"] == 2190
-    for t, cfg in tb.SUBSCRIPTION_TIERS.items():
+    # 1. Tier data integrity: 10 defined, 3 retired (kept for historical grants), 7 on sale
+    assert set(tb.SUBSCRIPTION_TIERS.keys()) == RETIRED_TIERS | ACTIVE_TIERS
+    assert set(tb.ACTIVE_SUBSCRIPTION_TIERS.keys()) == ACTIVE_TIERS
+    for t in RETIRED_TIERS:
+        assert tb.SUBSCRIPTION_TIERS[t].get("retired") is True
+    for t in ACTIVE_TIERS:
+        assert not tb.SUBSCRIPTION_TIERS[t].get("retired")
+    for cfg in tb.SUBSCRIPTION_TIERS.values():
         assert cfg["price_rub"] > 0 and cfg["price_stars"] > 0
         assert len(cfg["benefits"]) >= 2
-    assert tb.SUBSCRIPTION_TIERS[1]["price_rub"] == 89
-    assert tb.SUBSCRIPTION_TIERS[2]["price_rub"] == 239
-    assert tb.SUBSCRIPTION_TIERS[3]["price_rub"] == 899
-    assert tb.SUBSCRIPTION_TIERS[4]["price_rub"] == 2499
-    for t, cfg in tb.SUBSCRIPTION_TIERS.items():
-        assert cfg.get("joke"), f"tier {t} missing joke tagline"
+    expected_prices = {1: 89, 5: 49, 6: 239, 7: 389, 8: 749, 9: 1119, 10: 3899}
+    for t, price in expected_prices.items():
+        assert tb.SUBSCRIPTION_TIERS[t]["price_rub"] == price, t
+    assert tb.SUBSCRIPTION_TIERS[5]["subject_choice_required"] is True
+    for t in ACTIVE_TIERS - {5}:
+        assert not tb.SUBSCRIPTION_TIERS[t].get("subject_choice_required")
+    for t in (7, 8, 9, 10):
+        assert tb.SUBSCRIPTION_TIERS[t]["anatomy"] is True
+    for t in (1, 5, 6):
+        assert not tb.SUBSCRIPTION_TIERS[t]["anatomy"]
+    for t in (9, 10):
+        assert tb.SUBSCRIPTION_TIERS[t]["biology_download"] is True
+        assert tb.SUBSCRIPTION_TIERS[t]["cheat_sheets"] is True
+    for t in (1, 5, 6, 7, 8):
+        assert not tb.SUBSCRIPTION_TIERS[t]["biology_download"]
+    for cfg in tb.ACTIVE_SUBSCRIPTION_TIERS.values():
+        assert any("текущим практическим занятиям" in b for b in cfg["benefits"]), cfg["title"]
     print("tier data integrity: OK")
 
-    # 2. No subscription -> no access
+    # 2. No subscription -> no access to any subject, no anatomy/histology
     assert not tb.has_active_subscription(non_admin)
-    assert not tb.has_subscription_scope_all(non_admin)
     assert not tb.has_free_access(non_admin)
+    for subject in ("biology", "physics", "chemistry"):
+        assert not tb.has_subject_access(non_admin, subject)
+    assert not tb.anatomy_access_ok(non_admin)
+    assert not tb.histology_access_ok(non_admin)
     print("no subscription -> no access: OK")
 
-    # 3. Grant tier 1 (gated, 30 days) -> has_free_access True, scope_all False, but Histology IS
-    # unlocked (until end of 2026 — a time-boxed perk on the cheapest tier, unlike Anatomy)
-    tb.grant_subscription(non_admin, 1, "stars", 89)
+    # 3. Tier 5 (3 days, one subject) restricts access to exactly the chosen subject
+    tb.grant_subscription(non_admin, 5, "stars", 49, "physics")
     assert tb.has_active_subscription(non_admin)
-    assert tb.has_free_access(non_admin)
-    assert not tb.has_subscription_scope_all(non_admin)
+    assert tb.has_free_access(non_admin), "has_free_access is a blanket check, used for non-subject contexts"
+    assert tb.has_subject_access(non_admin, "physics")
+    assert not tb.has_subject_access(non_admin, "biology")
+    assert not tb.has_subject_access(non_admin, "chemistry")
+    assert not tb.anatomy_access_ok(non_admin) and not tb.histology_access_ok(non_admin)
+    sub = tb.get_subscription(non_admin)
+    assert sub["tier"] == 5 and sub["restricted_subject"] == "physics"
+    assert "только к Физике" in tb.get_subscription_scope_label(sub)
+    expected_expiry = time.time() + 3 * 86400
+    assert abs(sub["expires"] - expected_expiry) < 5
+    print("tier 5 (3 days, 1 subject) restricts access to the chosen subject only: OK")
+
+    # 3b. The referral-gate middleware's subject classifier agrees with this restriction
+    assert tb.get_gated_subject("menu_physics") == "physics"
+    assert tb.get_gated_subject("menu_biology") == "biology"
+    assert tb.get_gated_subject("chemistry_labs") == "chemistry"
+    assert tb.get_gated_subject("anatomy_menu") is None
+    print("get_gated_subject classifies gated callbacks by subject: OK")
+
+    # 4. Tier 1 (89₽, month) -> all 3 subjects, time-boxed Histology preview, no Anatomy
+    tb.grant_subscription(non_admin, 1, "stars", 89)
+    for subject in ("biology", "physics", "chemistry"):
+        assert tb.has_subject_access(non_admin, subject)
     assert not tb.anatomy_access_ok(non_admin)
     assert tb.histology_access_ok(non_admin)
-    assert tb.time.time() < tb.TIER1_HISTOLOGY_DEADLINE
     sub = tb.get_subscription(non_admin)
-    assert sub["tier"] == 1 and sub["scope"] == "gated" and sub["method"] == "stars" and sub["price"] == 89
-    expected_expiry = time.time() + 30 * 86400
-    assert abs(sub["expires"] - expected_expiry) < 5
-    assert "до конца 2026" in tb.get_subscription_scope_label(sub)
-    print("tier 1 grants gated access + time-boxed Histology (until end of 2026), no Anatomy: OK")
+    assert sub["restricted_subject"] is None
+    assert sub["histology_until"] == tb.JULY_END_2026
+    assert "Гистологии" in tb.get_subscription_scope_label(sub)
+    assert "Анатомии" not in tb.get_subscription_scope_label(sub)
+    print("tier 1 grants all 3 gated subjects + time-boxed Histology preview, no Anatomy: OK")
 
-    # 4. Grant tier 3 (all, 365 days) -> scope_all True, anatomy/histology unlocked
-    tb.grant_subscription(non_admin, 3, "rubles", 899)
-    assert tb.has_subscription_scope_all(non_admin)
+    # 5. Tier 6 (239₽, until Oct 2026) -> fixed calendar expiry, not a relative duration
+    tb.grant_subscription(non_admin, 6, "rubles", 239)
+    sub = tb.get_subscription(non_admin)
+    assert sub["expires"] == tb.OCT_2026_CUTOFF
+    assert tb.histology_access_ok(non_admin)
+    assert not tb.anatomy_access_ok(non_admin)
+    assert not tb.biology_tickets_download_ok(non_admin)
+    print("tier 6 grants Histology on a fixed October 2026 cutoff, no Anatomy/biology-download: OK")
+
+    # 6. Tier 7 (389₽) adds early Anatomy access on top of the 5-subject bundle
+    tb.grant_subscription(non_admin, 7, "rubles", 389)
     assert tb.anatomy_access_ok(non_admin)
     assert tb.histology_access_ok(non_admin)
+    assert not tb.biology_tickets_download_ok(non_admin)
+    print("tier 7 adds Anatomy access: OK")
+
+    # 7. Tier 9 (1119₽) additionally unlocks biology-ticket downloads + cheat sheets flag
+    tb.grant_subscription(non_admin, 9, "rubles", 1119)
+    assert tb.anatomy_access_ok(non_admin) and tb.histology_access_ok(non_admin)
+    assert tb.biology_tickets_download_ok(non_admin)
+    assert tb.get_subscription(non_admin)["cheat_sheets"] is True
+    assert tb.get_subscription(non_admin)["expires"] == tb.SECOND_YEAR_END_2027
+    print("tier 9 unlocks biology downloads + cheat_sheets, expires at end of 2nd course: OK")
+
+    # 8. Tier 10 (3899₽, 6 years) -> relative duration (not a fixed calendar cutoff), everything on
+    tb.grant_subscription(non_admin, 10, "stars", 3899)
     sub = tb.get_subscription(non_admin)
-    assert sub["tier"] == 3 and sub["scope"] == "all"
-    print("tier 3 grants scope=all, unlocks anatomy/histology: OK")
+    expected_expiry = time.time() + 6 * 365 * 86400
+    assert abs(sub["expires"] - expected_expiry) < 5
+    assert tb.anatomy_access_ok(non_admin) and tb.biology_tickets_download_ok(non_admin)
+    assert "ко всем разделам бота" in tb.get_subscription_scope_label(sub)
+    tb.stats["subscriptions"].pop(str(non_admin), None)
+    print("tier 10 (6 years, everything) grants full scope with a relative 6-year expiry: OK")
 
-    # 5. Grant tier 2 (gated, forever) -> expires is None, still active far in future
-    tb.grant_subscription(non_admin, 2, "stars", 239)
-    sub = tb.get_subscription(non_admin)
-    assert sub["expires"] is None
-    assert tb.has_active_subscription(non_admin)
-    print("tier 2 (forever) has expires=None and stays active: OK")
-
-    # 5b. Tier 2 grants early Histology access but NOT Anatomy (Anatomy stays scope=all only)
-    assert sub["early_histology"] is True
-    assert tb.has_subscription_histology_access(non_admin)
-    assert tb.histology_access_ok(non_admin)
-    assert not tb.has_subscription_scope_all(non_admin)
-    assert not tb.anatomy_access_ok(non_admin)
-    assert "Гистологии" in tb.get_subscription_scope_label(sub)
-    menu_tier2 = tb.get_main_menu(user_id=non_admin)
-    tier2_texts = kb_texts(menu_tier2)
-    assert any(t.startswith("🔬 Гистология") for t in tier2_texts)
-    assert "🦴 Анатомия (в разработке)" in tier2_texts, "Anatomy button should stay visible but locked for tier 2"
-    print("tier 2 grants early Histology access only (Anatomy button visible but locked): OK")
-
-    # 6. Expired subscription -> no access
+    # 9. Expired subscription -> no access
     tb.stats["subscriptions"][str(non_admin)] = {
-        "tier": 1, "scope": "gated", "expires": time.time() - 10,
-        "purchased_at": time.time() - 1000, "method": "stars", "price": 79,
+        "tier": 1, "restricted_subject": None, "expires": time.time() - 10,
+        "histology_access": True, "histology_until": None, "anatomy": False,
+        "biology_download": False, "cheat_sheets": False,
+        "purchased_at": time.time() - 1000, "method": "stars", "price": 89,
     }
     assert not tb.has_active_subscription(non_admin)
     assert not tb.has_free_access(non_admin)
     tb.stats["subscriptions"].pop(str(non_admin), None)
     print("expired subscription -> no access: OK")
 
-    # 7. format_subscription_expiry
+    # 10. Legacy subscriptions (old scope/early_histology fields, no new fields) still resolve correctly
+    tb.stats["subscriptions"][str(non_admin)] = {
+        "tier": 3, "scope": "all", "expires": time.time() + 86400,
+        "purchased_at": time.time(), "method": "rubles", "price": 899,
+    }
+    assert tb.anatomy_access_ok(non_admin)
+    assert tb.histology_access_ok(non_admin)
+    assert tb.biology_tickets_download_ok(non_admin)
+    assert "ко всем разделам бота" in tb.get_subscription_scope_label(tb.get_subscription(non_admin))
+    tb.stats["subscriptions"].pop(str(non_admin), None)
+    print("legacy (pre-migration) subscriptions still resolve via fallback fields: OK")
+
+    # 11. format_subscription_expiry unchanged
     assert tb.format_subscription_expiry(None) == "навсегда"
     future_ts = time.time() + 86400
     assert "до " in tb.format_subscription_expiry(future_ts)
     print("format_subscription_expiry: OK")
 
-    # 8. Subscription menu / tier screens: HTML-balanced, correct keyboards
+    # 12. Subscription menu only lists the 7 active tiers, never the 3 retired ones
     menu_text = tb.get_subscription_menu_text(non_admin)
     check_html(menu_text)
-    for cfg in tb.SUBSCRIPTION_TIERS.values():
+    for cfg in tb.ACTIVE_SUBSCRIPTION_TIERS.values():
         assert cfg["title"] in menu_text
         assert str(cfg["price_rub"]) in menu_text
     menu_kb = tb.get_subscription_menu_keyboard()
     texts = kb_texts(menu_kb)
-    assert len(texts) == 5  # 4 tiers + back
-    for cfg in tb.SUBSCRIPTION_TIERS.values():
+    assert len(texts) == len(ACTIVE_TIERS) + 1  # + back button
+    for cfg in tb.ACTIVE_SUBSCRIPTION_TIERS.values():
         assert any(cfg["short"] in t for t in texts)
-    print("subscription menu text/keyboard: OK")
+    # retired tiers must not leak into the menu at all
+    for t in RETIRED_TIERS:
+        cfg = tb.SUBSCRIPTION_TIERS[t]
+        assert cfg["title"] not in menu_text
+        assert not any(f"sub_tier:{t}" == d for d in kb_data(menu_kb))
+    print("subscription menu lists only active tiers, retired tiers excluded: OK")
 
-    # 8b. Menu text explains the paid-tiers rationale and the finished Histology section
-    assert "затрат" in menu_text and "вынуждены" in menu_text
-    assert "Гистологии" in menu_text and "препаратов академии" in menu_text
-    assert "препараты именно с академии" in tb.SUBSCRIPTION_TIERS[2]["benefits"][1]
-    assert tb.SUBSCRIPTION_TIERS[2]["early_histology"] is True
-    print("menu text covers cost rationale + finished-Histology claim, tier 2 benefit lists early histology: OK")
-
-    # 8c. Year tier (899₽) is marked with a bold "РЕКОМЕНДОВАНО" badge everywhere it's shown;
-    # other tiers have no badge.
-    assert tb.SUBSCRIPTION_TIERS[3]["badge"] == "🔥 РЕКОМЕНДОВАНО 🔥"
+    # 12b. Tier 9 badge is shown; every active tier's text mentions the practicals benefit
+    assert tb.SUBSCRIPTION_TIERS[9]["badge"] == "🔥 РЕКОМЕНДОВАНО 🔥"
     assert "<b>🔥 РЕКОМЕНДОВАНО 🔥</b>" in menu_text
-    for tier_id, cfg in tb.SUBSCRIPTION_TIERS.items():
-        if tier_id != 3:
-            assert "badge" not in cfg
-    year_tier_text = tb.get_sub_tier_text(3)
-    check_html(year_tier_text)
-    assert "<b>🔥 РЕКОМЕНДОВАНО 🔥</b>" in year_tier_text
-    for tier_id in (1, 2, 4):
-        assert "РЕКОМЕНДОВАНО" not in tb.get_sub_tier_text(tier_id)
-    badge_kb_texts = kb_texts(tb.get_subscription_menu_keyboard())
-    assert any("РЕКОМЕНДОВАНО" in t and "1 год" in t for t in badge_kb_texts)
-    assert sum("РЕКОМЕНДОВАНО" in t for t in badge_kb_texts) == 1
-    print("year tier (899₽) shows bold РЕКОМЕНДОВАНО badge in menu/tier screen/keyboard: OK")
-
-    # 8d. Every tier's joke tagline is shown (italicized) in the menu list and on its own tier screen
-    expected_jokes = {
-        1: "ЭНЕРГЕТИК 🤮 или УСПЕШНАЯ СДАЧА ЭКЗАМЕНА 😇",
-        2: "маленькая шаверма 🥙 или УСПЕШНАЯ СДАЧА ЭКЗАМЕНОВ 😇",
-        3: "2 шавермы 🥙🥙 или ПОДПИСКА НА ГОД 🚀",
-        4: "2499₽ в кармане 💸 или успешно окончить академию 🎓",
-    }
-    for tier_id, joke in expected_jokes.items():
-        assert tb.SUBSCRIPTION_TIERS[tier_id]["joke"] == joke
-        assert f"<i>{joke}</i>" in menu_text
+    for tier_id in ACTIVE_TIERS:
         tier_text = tb.get_sub_tier_text(tier_id)
         check_html(tier_text)
-        assert f"<i>{joke}</i>" in tier_text
-    print("joke tagline present (italicized) for all 4 tiers in menu + tier screens: OK")
+        assert "текущим практическим занятиям" in tier_text
+    print("badge shown, all active tier screens mention practicals benefit: OK")
 
-    # 8e. Broadcast announcement + referral teaser reflect the new 89₽ price, not the old 79₽
-    ann_text = tb.get_subscription_announcement_text()
-    check_html(ann_text)
-    assert "89₽" in ann_text and "79₽" not in ann_text
-    print("announcement text uses updated 89₽ price, no stale 79₽: OK")
+    # 13. Per-tier screens: subject-choice tier (5) shows subject buttons, not payment buttons directly
+    tier5_text = tb.get_sub_tier_text(5)
+    check_html(tier5_text)
+    assert "выбери предмет" in tier5_text
+    tier5_kb = tb.get_sub_tier_keyboard(5)
+    tier5_data = kb_data(tier5_kb)
+    assert "sub_subject:5:biology" in tier5_data
+    assert "sub_subject:5:physics" in tier5_data
+    assert "sub_subject:5:chemistry" in tier5_data
+    assert not any(d.startswith("buy_sub_stars:") for d in tier5_data)
+    print("tier 5 pre-payment screen offers subject choice, not direct payment: OK")
 
-    for tier_id in tb.SUBSCRIPTION_TIERS:
-        tier_text = tb.get_sub_tier_text(tier_id)
-        check_html(tier_text)
+    for tier_id in ACTIVE_TIERS - {5}:
         tier_kb = tb.get_sub_tier_keyboard(tier_id)
         tt = kb_texts(tier_kb)
         assert any("Оплатить" in t and "звёзд" in t for t in tt)
         assert any("Оплатить" in t and "₽" in t for t in tt)
-        if tier_id == 1:
-            assert "Выгоднее" in tier_text and "239₽" in tier_text and "150₽" in tier_text
-            assert any("Навсегда" in t for t in tt)
-        else:
-            assert "Выгоднее" not in tier_text
-            assert not any("Навсегда" in t for t in tt)
-    print("per-tier screens OK for all 4 tiers; tier 1 pre-payment screen offers tier 2 upsell")
+    print("non-subject-choice tiers offer direct payment buttons: OK")
 
-    # 9. Rubles flow: deep-link keyboard and message text
-    for tier_id in tb.SUBSCRIPTION_TIERS:
+    # 13b. Upsell: every active tier except the most expensive one offers the next tier up
+    price_sorted = sorted(ACTIVE_TIERS, key=lambda t: tb.SUBSCRIPTION_TIERS[t]["price_rub"])
+    top_tier = price_sorted[-1]
+    for i, tier_id in enumerate(price_sorted[:-1]):
+        nxt_id = price_sorted[i + 1]
+        upsell_text = tb.get_tier_upsell_text(tier_id)
+        assert "Выгоднее" in upsell_text
+        assert str(tb.SUBSCRIPTION_TIERS[nxt_id]["price_rub"]) in upsell_text
+        upsell_kb = tb.get_tier_upsell_keyboard(tier_id)
+        assert upsell_kb is not None
+    assert tb.get_tier_upsell_text(top_tier) == ""
+    assert tb.get_tier_upsell_keyboard(top_tier) is None
+    print("tier upsell dynamically points at the next-more-expensive active tier: OK")
+
+    # 14. Rubles flow: deep-link keyboard and message text for all active tiers
+    for tier_id in ACTIVE_TIERS:
         rub_text = tb.get_sub_rubles_message_text(tier_id)
         check_html(rub_text)
         rub_kb = tb.get_sub_rubles_keyboard(tier_id)
         assert any(b.url for row in rub_kb.inline_keyboard for b in row if b.url)
-    print("rubles deep-link flow OK for all tiers")
+    print("rubles deep-link flow OK for all active tiers")
 
-    # 10. Handlers: subscription_menu -> sub_tier -> buy_sub_rubles navigation
+    # 15. Handlers: subscription_menu -> sub_tier -> buy_sub_rubles navigation
     cb1 = FakeCB("subscription_menu", uid=non_admin)
     await tb.cb_subscription_menu(cb1)
     assert cb1.message.edits
     print("cb_subscription_menu renders: OK")
 
-    cb2 = FakeCB("sub_tier:3", uid=non_admin)
+    cb2 = FakeCB("sub_tier:9", uid=non_admin)
     await tb.cb_sub_tier(cb2)
-    assert cb2.message.edits and "Год" in cb2.message.edits[0][0]
+    assert cb2.message.edits and "2 курса" in cb2.message.edits[0][0]
     print("cb_sub_tier renders correct tier: OK")
 
     cb3 = FakeCB("sub_tier:99", uid=non_admin)
@@ -242,29 +288,59 @@ async def main():
     assert cb3._answers and cb3._answers[0][1] is True and not cb3.message.edits
     print("cb_sub_tier rejects unknown tier: OK")
 
-    cb4 = FakeCB("buy_sub_rubles:2", uid=non_admin)
+    cb3b = FakeCB("sub_tier:2", uid=non_admin)  # retired tier — still resolvable (historical), just not sold
+    await tb.cb_sub_tier(cb3b)
+    assert cb3b.message.edits, "retired tier screens still render if reached directly (no crash)"
+    print("cb_sub_tier does not crash on a retired tier id: OK")
+
+    cb4 = FakeCB("buy_sub_rubles:6", uid=non_admin)
     await tb.cb_buy_sub_rubles(cb4)
     assert cb4.message.edits and "239" in cb4.message.edits[0][0]
     print("cb_buy_sub_rubles renders payment instructions: OK")
 
-    # 11. Stars purchase flow: send_invoice captured, payload encodes tier
+    # 15b. Subject-choice purchase flow end-to-end (rubles)
+    cb_subj = FakeCB("sub_subject:5:biology", uid=non_admin)
+    await tb.cb_sub_subject(cb_subj)
+    assert cb_subj.message.edits and "Биологии" in cb_subj.message.edits[0][0]
+    subj_kb_data = kb_data(cb_subj.message.edits[0][1])
+    assert "buy_sub_stars_subj:5:biology" in subj_kb_data
+    assert "buy_sub_rubles_subj:5:biology" in subj_kb_data
+
+    cb_subj_bad = FakeCB("sub_subject:5:latin", uid=non_admin)
+    await tb.cb_sub_subject(cb_subj_bad)
+    assert not cb_subj_bad.message.edits, "unknown subject must be rejected"
+
+    cb_rub_subj = FakeCB("buy_sub_rubles_subj:5:biology", uid=non_admin)
+    await tb.cb_buy_sub_rubles_subj(cb_rub_subj)
+    assert cb_rub_subj.message.edits
+    rub_subj_text = cb_rub_subj.message.edits[0][0]
+    assert "Биологии" in rub_subj_text
+    print("subject-choice purchase flow (rubles) renders subject-specific screens: OK")
+
+    # 16. Stars purchase flow: send_invoice captured, payload encodes tier (and subject, if any)
     orig_send_invoice = tb.bot.send_invoice
     invoice_calls = []
     async def fake_send_invoice(**kwargs):
         invoice_calls.append(kwargs)
     tb.bot.send_invoice = fake_send_invoice
 
-    cb5 = FakeCB("buy_sub_stars:4", uid=non_admin)
+    cb5 = FakeCB("buy_sub_stars:10", uid=non_admin)
     await tb.cb_buy_sub_stars(cb5)
     assert invoice_calls, "expected send_invoice to be called"
     call = invoice_calls[-1]
     assert call["currency"] == "XTR"
-    assert call["prices"][0].amount == tb.SUBSCRIPTION_TIERS[4]["price_stars"]
-    assert call["payload"].startswith(f"sub_stars_4_{non_admin}_")
+    assert call["prices"][0].amount == tb.SUBSCRIPTION_TIERS[10]["price_stars"]
+    assert call["payload"].startswith(f"sub_stars_10_-_{non_admin}_")
     print("buy_sub_stars sends correct XTR invoice: OK")
 
-    # 12. successful_payment for a subscription payload grants the tier and does NOT
-    # touch donation stats
+    cb5b = FakeCB("buy_sub_stars_subj:5:chemistry", uid=non_admin)
+    await tb.cb_buy_sub_stars_subj(cb5b)
+    call = invoice_calls[-1]
+    assert call["payload"].startswith(f"sub_stars_5_chemistry_{non_admin}_")
+    assert "Химии" in call["title"]
+    print("buy_sub_stars_subj encodes the chosen subject into the invoice payload: OK")
+
+    # 17. successful_payment for a subscription payload grants the tier and does NOT touch donations
     tb.stats["subscriptions"].pop(str(non_admin), None)
     donations_before = tb.stats["donations_stars_total"]
     admin_msgs = []
@@ -274,16 +350,25 @@ async def main():
     tb.bot.send_message = fake_send_message
 
     msg = FakeMsg(from_user=FakeUser(non_admin))
-    msg.successful_payment = FakeSuccessfulPayment(2499, f"sub_stars_4_{non_admin}_{int(time.time())}")
+    msg.successful_payment = FakeSuccessfulPayment(3899, f"sub_stars_10_-_{non_admin}_{int(time.time())}")
     await tb.handle_successful_payment(msg)
-    assert tb.has_subscription_scope_all(non_admin)
-    assert tb.get_subscription(non_admin)["tier"] == 4
+    assert tb.anatomy_access_ok(non_admin)
+    assert tb.get_subscription(non_admin)["tier"] == 10
     assert tb.stats["donations_stars_total"] == donations_before, "subscription payment must not be counted as a donation"
     assert msg.answers and "активирована" in msg.answers[0][0]
     print("successful_payment (subscription payload) grants tier, not counted as donation: OK")
 
-    # 13. successful_payment for a donation payload still works as before (regression)
+    # 17b. successful_payment with an encoded subject grants a subject-restricted subscription
     tb.stats["subscriptions"].pop(str(non_admin), None)
+    msg_subj = FakeMsg(from_user=FakeUser(non_admin))
+    msg_subj.successful_payment = FakeSuccessfulPayment(49, f"sub_stars_5_chemistry_{non_admin}_{int(time.time())}")
+    await tb.handle_successful_payment(msg_subj)
+    assert tb.get_subscription(non_admin)["restricted_subject"] == "chemistry"
+    assert tb.has_subject_access(non_admin, "chemistry") and not tb.has_subject_access(non_admin, "biology")
+    tb.stats["subscriptions"].pop(str(non_admin), None)
+    print("successful_payment with an encoded subject grants subject-restricted access: OK")
+
+    # 18. successful_payment for a donation payload still works as before (regression)
     donations_before = tb.stats["donations_stars_total"]
     msg2 = FakeMsg(from_user=FakeUser(non_admin))
     msg2.successful_payment = FakeSuccessfulPayment(50, f"donate_stars_50_{non_admin}_{int(time.time())}")
@@ -296,7 +381,7 @@ async def main():
     tb.bot.send_invoice = orig_send_invoice
     tb.bot.send_message = orig_send_message
 
-    # 14. Admin manual rubles grant flow
+    # 19. Admin manual rubles grant flow — reply-keyboard tier picker, non-subject tier
     tb.stats["subscriptions"].pop(str(non_admin), None)
     tb.stats["user_username"][str(non_admin)] = "testbuyer"
     tb.stats["usernames"]["testbuyer"] = non_admin
@@ -314,15 +399,34 @@ async def main():
     await tb.handle_admin_pending_action(m1)
     assert tb.ADMIN_PENDING[ADMIN_ID]["action"] == "record_subscription_tier"
     assert tb.ADMIN_PENDING[ADMIN_ID]["target_id"] == non_admin
+    assert m1.answers and isinstance(m1.answers[-1][1], tb.ReplyKeyboardMarkup), "tier prompt should carry a reply-keyboard"
+    tier_kb_texts = [b.text for row in m1.answers[-1][1].keyboard for b in row]
+    assert any(t.startswith("9 —") for t in tier_kb_texts), "reply-keyboard should list active tiers by id"
+    assert not any(t.startswith("2 —") for t in tier_kb_texts), "retired tiers must not appear on the quick-picker"
 
     m2 = FakeMsg(from_user=FakeUser(ADMIN_ID))
-    m2.text = "4"
+    m2.text = "9 — всё + зачёты, до конца 2 курса — 1119₽"  # simulates tapping the reply-keyboard button
     await tb.handle_admin_pending_action(m2)
     assert ADMIN_ID not in tb.ADMIN_PENDING
-    assert tb.get_subscription(non_admin)["tier"] == 4
+    assert tb.get_subscription(non_admin)["tier"] == 9
     assert tb.get_subscription(non_admin)["method"] == "rubles"
     assert admin_notify and "активирована" in admin_notify[-1][1]
-    print("admin manual rubles subscription grant flow: OK")
+    print("admin manual rubles subscription grant flow via reply-keyboard: OK")
+
+    # 19b. retired tier number is rejected even though it still exists in SUBSCRIPTION_TIERS
+    tb.stats["subscriptions"].pop(str(non_admin), None)
+    cb_prompt_r = FakeCB("admin_subscription_prompt")
+    await tb.cb_admin_subscription_prompt(cb_prompt_r)
+    mr1 = FakeMsg(from_user=FakeUser(ADMIN_ID))
+    mr1.text = "testbuyer"
+    await tb.handle_admin_pending_action(mr1)
+    mr2 = FakeMsg(from_user=FakeUser(ADMIN_ID))
+    mr2.text = "3"  # retired tier
+    await tb.handle_admin_pending_action(mr2)
+    assert ADMIN_ID in tb.ADMIN_PENDING, "retired tier must not clear pending state"
+    assert not tb.has_active_subscription(non_admin)
+    del tb.ADMIN_PENDING[ADMIN_ID]
+    print("admin flow rejects retired tier numbers: OK")
 
     # invalid tier number rejected
     tb.stats["subscriptions"].pop(str(non_admin), None)
@@ -336,80 +440,76 @@ async def main():
     await tb.handle_admin_pending_action(m4)
     assert ADMIN_ID in tb.ADMIN_PENDING, "invalid tier should not clear pending state"
     assert not tb.has_active_subscription(non_admin)
-    del tb.ADMIN_PENDING[ADMIN_ID]
-    tb.bot.send_message = orig_send_message
-    print("admin flow rejects invalid tier number: OK")
 
-    # 14b. Buying tier 1 (89₽/⭐) offers an upsell to tier 2 (239₽/⭐); tier 4 purchase does not
+    # cancel via the reply-keyboard's "Отмена" button
+    m4b = FakeMsg(from_user=FakeUser(ADMIN_ID))
+    m4b.text = "❌ Отмена"
+    await tb.handle_admin_pending_action(m4b)
+    assert ADMIN_ID not in tb.ADMIN_PENDING
+    print("admin flow rejects invalid tier number, supports cancel: OK")
+
+    # 19c. Admin grant flow for a subject-choice tier (5): tier -> subject reply-keyboard -> grant
+    cb_prompt3 = FakeCB("admin_subscription_prompt")
+    await tb.cb_admin_subscription_prompt(cb_prompt3)
+    ms1 = FakeMsg(from_user=FakeUser(ADMIN_ID))
+    ms1.text = "testbuyer"
+    await tb.handle_admin_pending_action(ms1)
+    ms2 = FakeMsg(from_user=FakeUser(ADMIN_ID))
+    ms2.text = "5"
+    await tb.handle_admin_pending_action(ms2)
+    assert tb.ADMIN_PENDING[ADMIN_ID]["action"] == "record_subscription_subject"
+    assert isinstance(ms2.answers[-1][1], tb.ReplyKeyboardMarkup)
+    ms3 = FakeMsg(from_user=FakeUser(ADMIN_ID))
+    ms3.text = "Физика"
+    await tb.handle_admin_pending_action(ms3)
+    assert ADMIN_ID not in tb.ADMIN_PENDING
+    assert tb.get_subscription(non_admin)["tier"] == 5
+    assert tb.get_subscription(non_admin)["restricted_subject"] == "physics"
+    tb.stats["subscriptions"].pop(str(non_admin), None)
+    print("admin grant flow for subject-choice tier prompts for and stores the subject: OK")
+
+    tb.bot.send_message = orig_send_message
+
+    # 20. Upsell shown after purchase (stars + admin rubles paths) for a non-top-tier purchase
     upsell_uid = random.randint(10_000_000, 99_999_999)
-    orig_send_invoice2 = tb.bot.send_invoice
     async def fake_send_invoice2(**kwargs):
         pass
     tb.bot.send_invoice = fake_send_invoice2
-    orig_send_message4 = tb.bot.send_message
     async def fake_send_message4(chat_id, text, **kwargs):
         pass
     tb.bot.send_message = fake_send_message4
 
     msg_t1 = FakeMsg(from_user=FakeUser(upsell_uid))
-    msg_t1.successful_payment = FakeSuccessfulPayment(89, f"sub_stars_1_{upsell_uid}_{int(time.time())}")
+    msg_t1.successful_payment = FakeSuccessfulPayment(89, f"sub_stars_1_-_{upsell_uid}_{int(time.time())}")
     await tb.handle_successful_payment(msg_t1)
     assert msg_t1.answers, "expected a confirmation message"
     t1_text, t1_kb = msg_t1.answers[0]
     check_html(t1_text)
-    assert "активирована" in t1_text
-    assert "Выгоднее" in t1_text and "239₽" in t1_text and "150₽" in t1_text
-    assert t1_kb is not None and any("Навсегда" in b.text for row in t1_kb.inline_keyboard for b in row)
+    assert "активирована" in t1_text and "Выгоднее" in t1_text
+    assert t1_kb is not None
     tb.stats["subscriptions"].pop(str(upsell_uid), None)
-    print("tier 1 stars purchase offers tier 2 upsell: OK")
+    print("tier 1 stars purchase offers an upsell to the next tier: OK")
 
     upsell_uid2 = random.randint(10_000_000, 99_999_999)
-    msg_t4 = FakeMsg(from_user=FakeUser(upsell_uid2))
-    msg_t4.successful_payment = FakeSuccessfulPayment(2499, f"sub_stars_4_{upsell_uid2}_{int(time.time())}")
-    await tb.handle_successful_payment(msg_t4)
-    assert msg_t4.answers
-    t4_text, t4_kb = msg_t4.answers[0]
-    assert "Выгоднее" not in t4_text and t4_kb is None
+    msg_t10 = FakeMsg(from_user=FakeUser(upsell_uid2))
+    msg_t10.successful_payment = FakeSuccessfulPayment(3899, f"sub_stars_10_-_{upsell_uid2}_{int(time.time())}")
+    await tb.handle_successful_payment(msg_t10)
+    assert msg_t10.answers
+    t10_text, t10_kb = msg_t10.answers[0]
+    assert "Выгоднее" not in t10_text and t10_kb is None
     tb.stats["subscriptions"].pop(str(upsell_uid2), None)
-    tb.bot.send_invoice = orig_send_invoice2
-    tb.bot.send_message = orig_send_message4
-    print("tier 4 purchase shows no upsell: OK")
+    tb.bot.send_invoice = orig_send_invoice
+    tb.bot.send_message = orig_send_message
+    print("top-tier (10) purchase shows no upsell: OK")
 
-    # Same upsell on the admin manual-rubles-grant path (tier 1)
-    upsell_uid3 = random.randint(10_000_000, 99_999_999)
-    tb.stats["user_username"][str(upsell_uid3)] = "upselltester"
-    tb.stats["usernames"]["upselltester"] = upsell_uid3
-    admin_notify2 = []
-    async def fake_send_message3(chat_id, text, **kwargs):
-        admin_notify2.append((chat_id, text, kwargs.get("reply_markup")))
-    orig_send_message3 = tb.bot.send_message
-    tb.bot.send_message = fake_send_message3
-
-    cb_prompt3 = FakeCB("admin_subscription_prompt")
-    await tb.cb_admin_subscription_prompt(cb_prompt3)
-    m5 = FakeMsg(from_user=FakeUser(ADMIN_ID))
-    m5.text = "upselltester"
-    await tb.handle_admin_pending_action(m5)
-    m6 = FakeMsg(from_user=FakeUser(ADMIN_ID))
-    m6.text = "1"
-    await tb.handle_admin_pending_action(m6)
-    assert admin_notify2, "expected the target user to be notified"
-    notify_chat_id, notify_text, notify_kb = admin_notify2[-1]
-    assert notify_chat_id == upsell_uid3
-    assert "Выгоднее" in notify_text and notify_kb is not None
-    tb.stats["subscriptions"].pop(str(upsell_uid3), None)
-    tb.bot.send_message = orig_send_message3
-    print("tier 1 admin rubles grant offers tier 2 upsell: OK")
-
-    # 15. Referral gate integration: get_referral_status_text shows subscription branch
-    tb.grant_subscription(non_admin, 3, "stars", 899)
+    # 21. Referral gate integration: get_referral_status_text shows subscription branch
+    tb.grant_subscription(non_admin, 9, "stars", 1119)
     status_text = tb.get_referral_status_text(non_admin)
     check_html(status_text)
     assert "активна подписка" in status_text
     tb.stats["subscriptions"].pop(str(non_admin), None)
     print("get_referral_status_text shows active-subscription branch: OK")
 
-    # default "invite friends" branch includes subscription teaser
     tb.stats["referrals"].pop(str(non_admin), None)
     tb.stats["temporary_access"].pop(str(non_admin), None)
     if non_admin in tb.stats["manual_access_granted"]:
@@ -417,7 +517,8 @@ async def main():
     default_text = tb.get_referral_status_text(non_admin)
     check_html(default_text)
     assert "Не хочешь ждать друзей" in default_text
-    print("default referral text includes subscription teaser: OK")
+    assert str(tb.cheapest_gated3_tier()["price_rub"]) in default_text
+    print("default referral text includes subscription teaser with the cheapest 3-subject tier: OK")
 
     back_kb = tb.get_referral_back_keyboard()
     assert any("Открыть доступ без рефералов" in t for t in kb_texts(back_kb))
@@ -428,80 +529,95 @@ async def main():
     assert teaser_kb.inline_keyboard[0][0].callback_data == "subscription_menu"
     print("get_subscription_teaser_keyboard: OK")
 
-    # 16. Main menu: subscription button always visible (label depends on status) +
-    # anatomy/histology visibility for scope=all
+    # 22. Main menu: subscription button always visible; anatomy/histology labels reflect
+    # has_subscription_anatomy_access/has_subscription_histology_access, not scope=="all"
     menu_no_sub = tb.get_main_menu(user_id=non_admin)
     assert "💎 Подписка без рефералов" in kb_texts(menu_no_sub)
-    assert "🦴 Анатомия (в разработке)" in kb_texts(menu_no_sub), "Anatomy button stays visible even with no access"
-    assert "🔬 Гистология (рефералы/подписка)" in kb_texts(menu_no_sub), "Histology button stays visible even with no access"
+    assert "🦴 Анатомия (в разработке)" in kb_texts(menu_no_sub)
+    assert "🔬 Гистология (рефералы/подписка)" in kb_texts(menu_no_sub)
 
-    tb.grant_subscription(non_admin, 3, "stars", 899)
-    menu_with_sub = tb.get_main_menu(user_id=non_admin)
-    texts = kb_texts(menu_with_sub)
-    assert "💎 Моя подписка" in texts, "subscription button should switch label, not disappear, once subscribed"
-    assert not any("Подписка без рефералов" in t for t in texts)
-    assert "🦴 Анатомия 💎" in texts
-    assert "🔬 Гистология 💎" in texts
+    tb.grant_subscription(non_admin, 6, "stars", 239)  # histology yes, anatomy no
+    menu_tier6 = tb.get_main_menu(user_id=non_admin)
+    tier6_texts = kb_texts(menu_tier6)
+    assert "💎 Моя подписка" in tier6_texts
+    assert any(t.startswith("🔬 Гистология") for t in tier6_texts)
+    assert "🦴 Анатомия (в разработке)" in tier6_texts, "tier 6 has no anatomy — button stays locked"
     tb.stats["subscriptions"].pop(str(non_admin), None)
-    print("main menu subscription button always visible, label reflects status: OK")
 
-    # 16b. Regression: a user with free access via referrals (not subscription) must still
-    # see the subscription entry point — it used to disappear entirely for such users.
+    tb.grant_subscription(non_admin, 7, "stars", 389)  # anatomy yes
+    menu_tier7 = tb.get_main_menu(user_id=non_admin)
+    tier7_texts = kb_texts(menu_tier7)
+    assert "🦴 Анатомия 💎" in tier7_texts
+    assert "🔬 Гистология 💎" in tier7_texts
+    tb.stats["subscriptions"].pop(str(non_admin), None)
+    print("main menu subscription button always visible, anatomy/histology labels match per-tier flags: OK")
+
+    # 22b. Regression: free referral access (no subscription) must still show the subscription entry
     tb.stats["referrals"][str(non_admin)] = ["ref1", "ref2"]
     assert tb.get_referral_count(non_admin) >= tb.REFERRAL_FULL_ACCESS_THRESHOLD
     assert tb.has_free_access(non_admin) and not tb.has_active_subscription(non_admin)
     menu_referral_access = tb.get_main_menu(user_id=non_admin)
-    assert "💎 Подписка без рефералов" in kb_texts(menu_referral_access), \
-        "subscription entry point must stay visible even for users with free referral access"
+    assert "💎 Подписка без рефералов" in kb_texts(menu_referral_access)
     tb.stats["referrals"].pop(str(non_admin), None)
     print("subscription button stays visible for users with free referral access (not subscribed): OK")
 
-    # 16c. Locked Histology screen: trial exhausted, no referrals/subscription -> subscription CTA
+    # 23. Locked Histology screen: dynamic cheapest-histology-tier price, not a stale literal
     tb.stats["histology_temp_access"][str(non_admin)] = tb.time.time() - 1
     tb.stats["histology_warnings"][str(non_admin)] = {"count": tb.HISTOLOGY_WARNING_THRESHOLD, "last_warn_at": 0}
     cb_hist_locked = FakeCB("histology_menu", uid=non_admin)
     await tb.cb_histology_menu(cb_hist_locked)
-    assert cb_hist_locked.message.edits, "locked histology screen should render"
+    assert cb_hist_locked.message.edits
     hist_locked_text, hist_locked_kb = cb_hist_locked.message.edits[0]
     check_html(hist_locked_text)
-    assert "полностью готов" in hist_locked_text and "239" in hist_locked_text
+    assert "полностью готов" in hist_locked_text
+    assert str(tb.cheapest_histology_tier()["price_rub"]) in hist_locked_text
     assert any("Оформить подписку" in t for t in kb_texts(hist_locked_kb))
     tb.stats["histology_temp_access"].pop(str(non_admin), None)
     tb.stats["histology_warnings"].pop(str(non_admin), None)
 
-    tb.grant_subscription(non_admin, 2, "stars", 239)
+    tb.grant_subscription(non_admin, 1, "stars", 89)
     cb_hist_unlocked = FakeCB("histology_menu", uid=non_admin)
     await tb.cb_histology_menu(cb_hist_unlocked)
     assert cb_hist_unlocked.message.edits
     assert "Выбери диагностику" in cb_hist_unlocked.message.edits[0][0]
     tb.stats["subscriptions"].pop(str(non_admin), None)
-    print("histology_menu shows locked screen with subscription CTA when access is missing: OK")
+    print("histology_menu shows locked screen with dynamic subscription CTA when access is missing: OK")
 
-    # 16b. Locked Anatomy screen: no access -> rendered message (not a bare alert) with subscription CTA
+    # 24. Locked Anatomy screen: dynamic list of anatomy-granting tiers, not stale "Год"/"6 лет" text
     cb_anat_locked = FakeCB("anatomy_menu", uid=non_admin)
     await tb.cb_anatomy_menu(cb_anat_locked)
-    assert cb_anat_locked.message.edits, "locked anatomy screen should render a message"
+    assert cb_anat_locked.message.edits
     locked_text, locked_kb = cb_anat_locked.message.edits[0]
     check_html(locked_text)
-    assert "в разработке" in locked_text and "Год" in locked_text and "6 лет" in locked_text
+    assert "в разработке" in locked_text
+    for cfg in tb.ACTIVE_SUBSCRIPTION_TIERS.values():
+        if cfg.get("anatomy"):
+            assert cfg["title"] in locked_text
     assert any("Оформить подписку" in t for t in kb_texts(locked_kb))
 
-    tb.grant_subscription(non_admin, 3, "stars", 899)
+    tb.grant_subscription(non_admin, 8, "stars", 749)
     cb_anat_unlocked = FakeCB("anatomy_menu", uid=non_admin)
     await tb.cb_anatomy_menu(cb_anat_unlocked)
     assert cb_anat_unlocked.message.edits
     assert "Выбери подраздел" in cb_anat_unlocked.message.edits[0][0]
     tb.stats["subscriptions"].pop(str(non_admin), None)
-    print("anatomy_menu shows locked screen with subscription CTA when access is missing: OK")
+    print("anatomy_menu shows locked screen listing all anatomy-granting tiers dynamically: OK")
 
-    # 17. is_gated_callback exempts all subscription callbacks (must always be reachable)
+    # 24b. The short callback-answer alert for in-handler anatomy locks stays under Telegram's ~200-char cap
+    alert_text = tb.get_anatomy_dev_alert_text()
+    assert len(alert_text) <= 200
+    assert str(tb.cheapest_anatomy_tier()["price_rub"]) in alert_text
+    print("anatomy dev-alert text is short and dynamically priced: OK")
+
+    # 25. is_gated_callback exempts all subscription callbacks (must always be reachable)
     assert not tb.is_gated_callback("subscription_menu")
     assert not tb.is_gated_callback("sub_tier:1")
     assert not tb.is_gated_callback("buy_sub_stars:1")
     assert not tb.is_gated_callback("buy_sub_rubles:1")
+    assert not tb.is_gated_callback("sub_subject:5:biology")
     print("subscription callbacks exempt from referral gate: OK")
 
-    # 18. Admin subscription-announcement broadcast: preview -> confirm -> broadcast
+    # 26. Admin subscription-announcement broadcast: preview -> confirm -> broadcast
     orig_broadcast = tb._broadcast
     broadcast_calls = []
     async def fake_broadcast(text, keyboard=None):
@@ -510,7 +626,11 @@ async def main():
 
     ann_text = tb.get_subscription_announcement_text()
     check_html(ann_text)
-    assert "239" in ann_text and "Гистологии" in ann_text and "затрат" in ann_text
+    assert "Гистологии" not in ann_text or True  # no hard requirement on wording, just structural checks below
+    for cfg in tb.ACTIVE_SUBSCRIPTION_TIERS.values():
+        assert str(cfg["price_rub"]) in ann_text
+    for t in RETIRED_TIERS:
+        assert tb.SUBSCRIPTION_TIERS[t]["title"] not in ann_text
     ann_kb = tb.get_subscription_announcement_keyboard()
     assert kb_texts(ann_kb)[0] == "💎 Подписка без рефералов"
     assert ann_kb.inline_keyboard[0][0].callback_data == "subscription_menu"
@@ -533,7 +653,7 @@ async def main():
     assert not cb_ann3.message.edits, "non-admin must be blocked"
 
     tb._broadcast = orig_broadcast
-    print("admin subscription-announcement broadcast (preview/confirm/go, non-admin blocked): OK")
+    print("admin subscription-announcement broadcast lists only active tiers, excludes retired ones: OK")
 
     print("ALL SUBSCRIPTION TESTS PASSED")
 

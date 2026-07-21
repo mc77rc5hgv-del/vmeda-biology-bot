@@ -15,6 +15,7 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.types import (
     Message, CallbackQuery, InlineKeyboardButton, FSInputFile, BufferedInputFile, Update,
     BotCommand, BotCommandScopeDefault, BotCommandScopeChat, LabeledPrice,
+    ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove,
 )
 from aiogram.filters import CommandStart, Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -233,25 +234,42 @@ def has_temp_access(user_id: int) -> bool:
     return time.time() < get_temp_access_expiry(user_id)
 
 # ==================== ПЛАТНАЯ ПОДПИСКА ====================
-# scope "gated" — только Биология/Физика/Химия (то, что вообще закрывает реферальный гейт).
-# scope "all"  — то же плюс досрочный доступ к Анатомии/Гистологии и любым новым разделам,
-# которые появятся, пока подписка активна (даже если раздел ещё не открыт всем через *_PUBLIC).
-TIER1_HISTOLOGY_DEADLINE = time.mktime(date(2027, 1, 1).timetuple())  # доступ к Гистологии по тарифу 1 — до конца 2026 года
+# Тарифы 1-4 — старая линейка (историческая). Тариф 1 остаётся в продаже (тариф «Месяц»),
+# тарифы 2/3/4 сняты с продажи ("retired": True) — их условия НЕ меняются задним числом,
+# они просто больше не показываются в меню покупки. У уже купивших их людей доступ
+# продолжает работать ровно как был обещан на момент покупки.
+# Тарифы 5-10 — новая линейка (актуальный прайс-лист).
+TIER1_HISTOLOGY_DEADLINE = time.mktime(date(2027, 1, 1).timetuple())  # легаси: гистология по СТАРЫМ выдачам тарифа 1 — до конца 2026 года
+JULY_END_2026 = time.mktime(date(2026, 8, 1).timetuple())  # тариф «Месяц» — предпросмотр Гистологии до конца июля 2026
+OCT_2026_CUTOFF = time.mktime(date(2026, 10, 1).timetuple())  # тариф 239₽ — до 1 октября 2026
+NOV_END_2026_CUTOFF = time.mktime(date(2026, 12, 1).timetuple())  # тариф 389₽ — до конца ноября 2026
+FEB_2027_CUTOFF = time.mktime(date(2027, 2, 1).timetuple())  # тариф 749₽ — до февраля 2027
+# «До конца второго курса» — точная дата учебного календаря не была уточнена, взята оценка
+# (конец лета 2027). Поправь SECOND_YEAR_END_2027, если известна точная дата окончания 2 курса.
+SECOND_YEAR_END_2027 = time.mktime(date(2027, 9, 1).timetuple())
+
 SUBSCRIPTION_TIERS = {
     1: {
         "title": "Месяц — Биология, Физика, Химия",
         "short": "1 месяц, 3 экзамена",
-        "scope": "gated",
-        "duration_days": 30,
+        "emoji": "🔓",
         "price_rub": 89,
         "price_stars": 89,
-        "emoji": "🔓",
+        "duration_days": 30,
+        "expires_at": None,
+        "subject_choice_required": False,
+        "histology_until_rule": JULY_END_2026,
+        "anatomy": False,
+        "biology_download": False,
+        "cheat_sheets": False,
+        "menu_number": 2,
         "joke": "ЭНЕРГЕТИК 🤮 или УСПЕШНАЯ СДАЧА ЭКЗАМЕНА 😇",
         "benefits": [
             "Полный доступ к Биологии, Физике и Химии на 30 дней",
-            "🔬 Плюс доступ к Гистологии — действует до конца 2026 года",
+            "🔬 Плюс предпросмотр Гистологии — доступен сейчас, до конца июля 2026 года",
+            "Скачивание файлов с ответами — по Физике и Химии",
             "Не нужно ждать и звать друзей — доступ открывается сразу после оплаты",
-            "Идеально, если экзамен уже скоро и нужно готовиться прямо сейчас",
+            "Подходит и для подготовки к текущим практическим занятиям",
         ],
     },
     2: {
@@ -263,13 +281,12 @@ SUBSCRIPTION_TIERS = {
         "price_stars": 239,
         "emoji": "♾️",
         "early_histology": True,
+        "retired": True,
         "joke": "маленькая шаверма 🥙 или УСПЕШНАЯ СДАЧА ЭКЗАМЕНОВ 😇",
         "benefits": [
             "Полный доступ к Биологии, Физике и Химии — один раз и навсегда",
-            "🔬 Плюс ранний доступ к разделу Гистологии — она уже полностью готова: "
-            "препараты именно с академии, все протоколы сверены преподавателями",
+            "🔬 Плюс ранний доступ к разделу Гистологии — она уже полностью готова",
             "Дешевле, чем 3 месячные подписки, а действует бессрочно",
-            "Больше никогда не думать о рефералах и ограничениях",
         ],
     },
     3: {
@@ -280,14 +297,11 @@ SUBSCRIPTION_TIERS = {
         "price_rub": 899,
         "price_stars": 899,
         "emoji": "🚀",
-        "badge": "🔥 РЕКОМЕНДОВАНО 🔥",
+        "retired": True,
         "joke": "2 шавермы 🥙🥙 или ПОДПИСКА НА ГОД 🚀",
         "benefits": [
             "Доступ вообще ко всем разделам бота на целый год",
-            "Плюс Анатомия и уже полностью готовая Гистология (препараты с академии, "
-            "протоколы сверены преподавателями) — уже сейчас, до их открытия всем остальным",
-            "Все новые разделы и предметы, которые добавятся в течение года — уже включены",
-            "Меньше 2.5₽ в день за полную подготовку по всем предметам",
+            "Плюс Анатомия и уже полностью готовая Гистология — уже сейчас, до их открытия всем остальным",
         ],
     },
     4: {
@@ -298,16 +312,167 @@ SUBSCRIPTION_TIERS = {
         "price_rub": 2499,
         "price_stars": 2499,
         "emoji": "👑",
+        "retired": True,
         "joke": "2499₽ в кармане 💸 или успешно окончить академию 🎓",
         "benefits": [
             "Доступ ко всем разделам бота на весь срок обучения в академии",
-            "Анатомия и уже полностью готовая Гистология (препараты с академии, "
-            "протоколы сверены преподавателями), а также все будущие разделы — сразу, без ожиданий",
-            "Один платёж на все 6 лет учёбы — и больше никаких трат на подготовку",
-            "Меньше 35₽ в месяц — дешевле, чем что угодно другое",
+            "Анатомия и уже полностью готовая Гистология, а также все будущие разделы — сразу, без ожиданий",
+        ],
+    },
+    5: {
+        "title": "3 дня — один предмет на выбор",
+        "short": "3 дня, 1 предмет",
+        "emoji": "⚡",
+        "price_rub": 49,
+        "price_stars": 49,
+        "duration_days": 3,
+        "expires_at": None,
+        "subject_choice_required": True,
+        "histology_until_rule": None,
+        "anatomy": False,
+        "biology_download": False,
+        "cheat_sheets": False,
+        "menu_number": 1,
+        "joke": "Меньше стакана кофе ☕ — но хватит ровно на один экзамен",
+        "benefits": [
+            "Доступ только к ОДНОМУ предмету на выбор — Биология, Физика или Химия — на 3 дня",
+            "Идеально, если один-два экзамена уже сдал и остался последний рывок",
+            "Не нужно ждать и звать друзей — доступ открывается сразу после оплаты",
+            "Подходит и для подготовки к текущим практическим занятиям",
+        ],
+    },
+    6: {
+        "title": "До октября — Биология, Физика, Химия + Гистология",
+        "short": "4 экзамена, до окт. 2026",
+        "emoji": "🔬",
+        "price_rub": 239,
+        "price_stars": 239,
+        "duration_days": None,
+        "expires_at": OCT_2026_CUTOFF,
+        "subject_choice_required": False,
+        "histology_until_rule": "expiry",
+        "anatomy": False,
+        "biology_download": False,
+        "cheat_sheets": False,
+        "menu_number": 3,
+        "benefits": [
+            "Полный доступ к Биологии, Физике, Химии и уже готовой Гистологии — все 4 экзамена сразу",
+            "Действует до 1 октября 2026 года",
+            "Скачивание файлов с ответами — по Физике и Химии (кроме Биологии)",
+            "Подходит и для подготовки к текущим практическим занятиям",
+        ],
+    },
+    7: {
+        "title": "До конца ноября — все 5 экзаменов",
+        "short": "5 экзаменов, до нояб. 2026",
+        "emoji": "🚀",
+        "price_rub": 389,
+        "price_stars": 389,
+        "duration_days": None,
+        "expires_at": NOV_END_2026_CUTOFF,
+        "subject_choice_required": False,
+        "histology_until_rule": "expiry",
+        "anatomy": True,
+        "biology_download": False,
+        "cheat_sheets": False,
+        "menu_number": 4,
+        "benefits": [
+            "Полный доступ ко всем 5 предметам — Биология, Физика, Химия, Гистология и досрочно Анатомия",
+            "Действует до конца ноября 2026 года",
+            "Скачивание файлов с ответами — по Физике и Химии (кроме Биологии)",
+            "Подходит и для подготовки к текущим практическим занятиям",
+        ],
+    },
+    8: {
+        "title": "До февраля 2027 — все 5 экзаменов",
+        "short": "5 экзаменов, до февр. 2027",
+        "emoji": "🎯",
+        "price_rub": 749,
+        "price_stars": 749,
+        "duration_days": None,
+        "expires_at": FEB_2027_CUTOFF,
+        "subject_choice_required": False,
+        "histology_until_rule": "expiry",
+        "anatomy": True,
+        "biology_download": False,
+        "cheat_sheets": False,
+        "menu_number": 5,
+        "benefits": [
+            "Полный доступ ко всем 5 предметам — Биология, Физика, Химия, Гистология и досрочно Анатомия",
+            "Действует до февраля 2027 года — хватит на весь учебный год без повторной оплаты",
+            "Скачивание файлов с ответами — по Физике и Химии (кроме Биологии)",
+            "Подходит и для подготовки к текущим практическим занятиям",
+        ],
+    },
+    9: {
+        "title": "До конца 2 курса — всё, включая зачёты и диагностики",
+        "short": "всё + зачёты, до конца 2 курса",
+        "emoji": "👑",
+        "price_rub": 1119,
+        "price_stars": 1119,
+        "duration_days": None,
+        "expires_at": SECOND_YEAR_END_2027,
+        "subject_choice_required": False,
+        "histology_until_rule": "expiry",
+        "anatomy": True,
+        "biology_download": True,
+        "cheat_sheets": True,
+        "badge": "🔥 РЕКОМЕНДОВАНО 🔥",
+        "menu_number": 6,
+        "benefits": [
+            "Полный доступ ко всем предметам — Биология, Физика, Химия, Гистология, Анатомия",
+            "Плюс текущие зачёты, контрольные и диагностики по мере их появления в боте",
+            "Скачивание файлов с ответами — включая Биологию — и готовых шпаргалок для распечатки",
+            "Действует до конца второго курса",
+            "Подходит и для подготовки к текущим практическим занятиям",
+        ],
+    },
+    10: {
+        "title": "6 лет — абсолютно всё",
+        "short": "6 лет, абсолютно всё",
+        "emoji": "💎",
+        "price_rub": 3899,
+        "price_stars": 3899,
+        "duration_days": 6 * 365,
+        "expires_at": None,
+        "subject_choice_required": False,
+        "histology_until_rule": "expiry",
+        "anatomy": True,
+        "biology_download": True,
+        "cheat_sheets": True,
+        "badge": "🔥 HOT 🔥",
+        "joke": "Дальше будет только дороже — бери, пока не подняли цену",
+        "menu_number": 7,
+        "benefits": [
+            "АБСОЛЮТНО ПОЛНЫЙ и РАННИЙ доступ ко всем зачётам, экзаменам и контрольным по всем предметам",
+            "Один платёж на все 6 лет учёбы в академии — включая всё, что появится в боте позже",
+            "Скачивание всех файлов с ответами и шпаргалок для распечатки",
+            "Подходит и для подготовки к текущим практическим занятиям",
+            "⏫ Цена вырастет позже — сейчас это самая низкая стоимость этого тарифа",
         ],
     },
 }
+ACTIVE_SUBSCRIPTION_TIERS = {t: cfg for t, cfg in SUBSCRIPTION_TIERS.items() if not cfg.get("retired")}
+
+def cheapest_active_tier(predicate=lambda cfg: True) -> dict:
+    """Самый дешёвый тариф из числа продающихся сейчас, подходящий под predicate — чтобы не
+    хардкодить цены/тарифы в текстах отдельно от SUBSCRIPTION_TIERS (см. CLAUDE.md pitfalls)."""
+    candidates = [cfg for cfg in ACTIVE_SUBSCRIPTION_TIERS.values() if predicate(cfg)]
+    return min(candidates, key=lambda c: c["price_rub"])
+
+def cheapest_gated3_tier() -> dict:
+    """Самый дешёвый тариф, открывающий все три предмета Био/Физ/Хим (не тариф с выбором
+    одного предмета)."""
+    return cheapest_active_tier(lambda cfg: not cfg.get("subject_choice_required"))
+
+def cheapest_histology_tier() -> dict:
+    return cheapest_active_tier(lambda cfg: cfg.get("histology_until_rule") is not None)
+
+def cheapest_anatomy_tier() -> dict:
+    return cheapest_active_tier(lambda cfg: cfg.get("anatomy"))
+
+def cheapest_biology_download_tier() -> dict:
+    return cheapest_active_tier(lambda cfg: cfg.get("biology_download"))
 
 def get_subscription(user_id: int) -> dict:
     return stats["subscriptions"].get(str(user_id))
@@ -319,30 +484,93 @@ def has_active_subscription(user_id: int) -> bool:
     expires = sub.get("expires")
     return expires is None or time.time() < expires
 
+def has_subject_access(user_id: int, subject: str) -> bool:
+    """Доступ к конкретному гейтящемуся предмету (biology/physics/chemistry) — в отличие от
+    has_free_access() учитывает, что тариф «3 дня, 1 предмет» открывает только ОДИН предмет."""
+    if (
+        is_admin(user_id)
+        or get_referral_count(user_id) >= REFERRAL_FULL_ACCESS_THRESHOLD
+        or user_id in stats["manual_access_granted"]
+        or has_temp_access(user_id)
+    ):
+        return True
+    sub = get_subscription(user_id)
+    if not sub or not has_active_subscription(user_id):
+        return False
+    restricted = sub.get("restricted_subject")
+    return restricted is None or restricted == subject
+
+def _sub_has_histology(sub: dict) -> bool:
+    if "histology_access" in sub:
+        if not sub["histology_access"]:
+            return False
+        until = sub.get("histology_until")
+        return until is None or time.time() < until
+    # легаси-подписки, выданные до введения этого поля
+    if sub.get("scope") == "all" or sub.get("early_histology", False):
+        return True
+    return sub.get("tier") == 1 and time.time() < TIER1_HISTOLOGY_DEADLINE
+
+def _sub_has_anatomy(sub: dict) -> bool:
+    if "anatomy" in sub:
+        return bool(sub["anatomy"])
+    return sub.get("scope") == "all"
+
+def _sub_has_biology_download(sub: dict) -> bool:
+    if "biology_download" in sub:
+        return bool(sub["biology_download"])
+    return sub.get("scope") == "all"
+
 def has_subscription_scope_all(user_id: int) -> bool:
+    """Легаси-предикат для старых подписок (scope="all"). Новый код использует
+    has_subscription_anatomy_access()/biology_tickets_download_ok() напрямую."""
     sub = get_subscription(user_id)
     return bool(sub) and sub.get("scope") == "all" and has_active_subscription(user_id)
-
-def biology_tickets_download_ok(user_id: int) -> bool:
-    return is_admin(user_id) or has_subscription_scope_all(user_id)
 
 def has_subscription_histology_access(user_id: int) -> bool:
     sub = get_subscription(user_id)
     if not sub or not has_active_subscription(user_id):
         return False
-    if sub.get("scope") == "all" or sub.get("early_histology", False):
-        return True
-    return sub.get("tier") == 1 and time.time() < TIER1_HISTOLOGY_DEADLINE
+    return _sub_has_histology(sub)
 
-def grant_subscription(user_id: int, tier: int, method: str, price: int) -> None:
+def has_subscription_anatomy_access(user_id: int) -> bool:
+    sub = get_subscription(user_id)
+    if not sub or not has_active_subscription(user_id):
+        return False
+    return _sub_has_anatomy(sub)
+
+def biology_tickets_download_ok(user_id: int) -> bool:
+    if is_admin(user_id):
+        return True
+    sub = get_subscription(user_id)
+    if not sub or not has_active_subscription(user_id):
+        return False
+    return _sub_has_biology_download(sub)
+
+def grant_subscription(user_id: int, tier: int, method: str, price: int, subject: str | None = None) -> None:
     cfg = SUBSCRIPTION_TIERS[tier]
-    expires = None if cfg["duration_days"] is None else time.time() + cfg["duration_days"] * 86400
+    now = time.time()
+    if cfg.get("expires_at") is not None:
+        expires = cfg["expires_at"]
+    elif cfg.get("duration_days") is not None:
+        expires = now + cfg["duration_days"] * 86400
+    else:
+        expires = None
+
+    rule = cfg.get("histology_until_rule")
+    histology_access = rule is not None
+    histology_until = None if rule in (None, "expiry") else rule
+
     stats["subscriptions"][str(user_id)] = {
         "tier": tier,
-        "scope": cfg["scope"],
-        "early_histology": cfg.get("early_histology", False),
+        "restricted_subject": subject if cfg.get("subject_choice_required") else None,
         "expires": expires,
-        "purchased_at": time.time(),
+        "histology_access": histology_access,
+        "histology_until": histology_until,
+        "anatomy": cfg.get("anatomy", False),
+        "biology_download": cfg.get("biology_download", False),
+        "cheat_sheets": cfg.get("cheat_sheets", False),
+        "purchased_at": now,
         "method": method,
         "price": price,
     }
@@ -369,14 +597,39 @@ def get_below_threshold_users() -> list:
     меньше REFERRAL_FULL_ACCESS_THRESHOLD рефералов и нет подписки/ручного доступа/временного доступа."""
     return [uid for uid in stats["total_users"] if not has_free_access(uid)]
 
+SUBJECT_TITLES = {"biology": "Биологии", "physics": "Физике", "chemistry": "Химии"}
+ADMIN_SUBJECT_LABELS_RU = {"Биология": "biology", "Физика": "physics", "Химия": "chemistry"}
+
+def get_admin_tier_reply_keyboard() -> ReplyKeyboardMarkup:
+    rows = [[KeyboardButton(text=f"{t} — {cfg['short']} — {cfg['price_rub']}₽")] for t, cfg in ACTIVE_SUBSCRIPTION_TIERS.items()]
+    rows.append([KeyboardButton(text="❌ Отмена")])
+    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, one_time_keyboard=True)
+
+def get_admin_subject_reply_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Биология")],
+            [KeyboardButton(text="Физика")],
+            [KeyboardButton(text="Химия")],
+            [KeyboardButton(text="❌ Отмена")],
+        ],
+        resize_keyboard=True, one_time_keyboard=True
+    )
+
 def get_subscription_scope_label(sub: dict) -> str:
+    restricted = sub.get("restricted_subject")
+    if restricted:
+        return f"только к {SUBJECT_TITLES[restricted]}"
     if sub.get("scope") == "all":
         return "ко всем разделам бота"
-    if sub.get("early_histology"):
-        return "к Биологии, Физике, Химии и Гистологии"
-    if sub.get("tier") == 1 and time.time() < TIER1_HISTOLOGY_DEADLINE:
-        return "к Биологии, Физике, Химии и Гистологии (до конца 2026 года)"
-    return "к Биологии, Физике и Химии"
+    parts = ["Биологии, Физике и Химии"]
+    if _sub_has_histology(sub):
+        parts.append("Гистологии")
+    if _sub_has_anatomy(sub):
+        parts.append("Анатомии")
+    if len(parts) == 3:
+        return "ко всем разделам бота"
+    return "к " + ", ".join(parts)
 
 def get_referral_status_text(user_id: int) -> str:
     count = get_referral_count(user_id)
@@ -434,7 +687,7 @@ def get_referral_status_text(user_id: int) -> str:
         f"Приглашено друзей: <b>{count}</b> из {REFERRAL_FULL_ACCESS_THRESHOLD}\n"
         f"Осталось бесплатных заходов без рефералов: <b>{remaining_free}</b>\n\n"
         f"💎 Не хочешь ждать друзей? Открой доступ сразу оплатой — подписки от "
-        f"{SUBSCRIPTION_TIERS[1]['price_rub']}₽. Жми «💎 Открыть доступ без рефералов» ниже."
+        f"{cheapest_gated3_tier()['price_rub']}₽. Жми «💎 Открыть доступ без рефералов» ниже."
     )
 
 RANK_MEDALS = ["🥇", "🥈", "🥉"]
@@ -709,14 +962,14 @@ def get_access_restored_broadcast_text() -> str:
     )
 
 def get_referral_reminder_broadcast_text() -> str:
-    t1 = SUBSCRIPTION_TIERS[1]
+    cheapest = cheapest_gated3_tier()
     return (
         f"👋 <b>Напоминание</b>\n{DIVIDER}\n\n"
         f"Чтобы бесплатно пользоваться разделами Биология, Физика и Химия, нужно пригласить "
         f"{REFERRAL_FULL_ACCESS_THRESHOLD} друзей в бота — открой «👥 Пригласить друзей» в "
         "главном меню, посмотри свой прогресс и отправь ссылку.\n\n"
         f"💎 Не хочешь ждать друзей? Открой доступ сразу оплатой — подписки от "
-        f"{t1['price_rub']}₽/{t1['price_stars']}⭐. Жми «💎 Подписка» в главном меню."
+        f"{cheapest['price_rub']}₽/{cheapest['price_stars']}⭐. Жми «💎 Подписка» в главном меню."
     )
 
 def get_referral_reminder_broadcast_keyboard():
@@ -831,33 +1084,51 @@ def track_user_identity(user) -> None:
 
 # Без нужного числа рефералов закрыты только 3 раздела — Биология, Физика, Химия.
 # Всё остальное (админка, рефералы, битва, поддержка автора, анатомия) доступно всегда.
-GATED_CALLBACKS = {
-    # Биология
+# Разбито по предметам (а не одним плоским множеством) — с тарифа «3 дня, один предмет»
+# подписка может закрывать доступ только к одному конкретному предмету, и гейту нужно знать,
+# какому именно предмету принадлежит каждый callback, а не просто «гейтится ли он вообще».
+GATED_CALLBACKS_BIOLOGY = {
     "menu_biology", "menu_tickets", "menu_questions",
     "quiz_start", "quiz_show_answer", "quiz_know", "quiz_dont_know", "quiz_stop",
     "random_ticket", "question_random", "question_by_number", "question_search",
-    # download_biology_tickets гейтится отдельно, biology_tickets_download_ok() —
-    # требует подписку scope="all" (899₽+), а не общий реферальный порог.
-    # Физика
+    # download_biology_tickets гейтится отдельно, biology_tickets_download_ok().
+}
+GATED_PREFIXES_BIOLOGY = ("ticket:", "ticket_q:", "qpage:", "q:")
+
+GATED_CALLBACKS_PHYSICS = {
     "menu_physics", "physics_tickets", "physics_theory_tickets", "physics_test_tickets",
     "physics_test", "physics_tasks", "download_physics_full", "download_physics_ticket_tasks",
-    # Химия
+}
+GATED_PREFIXES_PHYSICS = (
+    "phys_test_ticket:", "phys_test_ticket_tasks:", "phys_test_ticket_task_show:", "physics_page:", "physics_q:",
+    "phystask_topic:", "phystask_formulas:", "phystask_list:", "phystask_show:",
+)
+
+GATED_CALLBACKS_CHEMISTRY = {
     "menu_chemistry", "chemistry_theory", "chemistry_theory_list",
     "chemistry_tasks", "chemistry_labs", "download_chemistry_labs", "download_chemistry_tasks",
 }
-GATED_PREFIXES = (
-    # Биология
-    "ticket:", "ticket_q:", "qpage:", "q:",
-    # Физика
-    "phys_test_ticket:", "phys_test_ticket_tasks:", "phys_test_ticket_task_show:", "physics_page:", "physics_q:",
-    "phystask_topic:", "phystask_formulas:", "phystask_list:", "phystask_show:",
-    # Химия
+GATED_PREFIXES_CHEMISTRY = (
     "chem_theory:", "chemtask_topic:", "chemtask_formulas:", "chemtask_list:", "chemtask_show:",
     "lab:", "lab_exp:", "lab_calc:",
 )
 
+GATED_CALLBACKS = GATED_CALLBACKS_BIOLOGY | GATED_CALLBACKS_PHYSICS | GATED_CALLBACKS_CHEMISTRY
+GATED_PREFIXES = GATED_PREFIXES_BIOLOGY + GATED_PREFIXES_PHYSICS + GATED_PREFIXES_CHEMISTRY
+
+def get_gated_subject(data: str) -> str | None:
+    """Возвращает 'biology'/'physics'/'chemistry', если callback относится к одному из закрытых
+    разделов, иначе None (раздел не гейтится вообще)."""
+    if data in GATED_CALLBACKS_BIOLOGY or data.startswith(GATED_PREFIXES_BIOLOGY):
+        return "biology"
+    if data in GATED_CALLBACKS_PHYSICS or data.startswith(GATED_PREFIXES_PHYSICS):
+        return "physics"
+    if data in GATED_CALLBACKS_CHEMISTRY or data.startswith(GATED_PREFIXES_CHEMISTRY):
+        return "chemistry"
+    return None
+
 def is_gated_callback(data: str) -> bool:
-    return data in GATED_CALLBACKS or data.startswith(GATED_PREFIXES)
+    return get_gated_subject(data) is not None
 
 @dp.update.outer_middleware()
 async def referral_gate_middleware(handler, event: Update, data):
@@ -883,10 +1154,17 @@ async def referral_gate_middleware(handler, event: Update, data):
 
     # гейт касается только разделов Биология/Физика/Химия — остальные кнопки
     # (админка, рефералы, битва, поддержка автора, анатомия) доступны всегда
-    if event.callback_query and not is_gated_callback(event.callback_query.data or ""):
+    subject = get_gated_subject(event.callback_query.data or "") if event.callback_query else None
+    if event.callback_query and subject is None:
         return await handler(event, data)
 
-    if has_free_access(user.id):
+    # у callback'ов проверяем доступ именно к ЭТОМУ предмету (тариф «3 дня, 1 предмет» открывает
+    # только один) — у обычных сообщений (не привязаны к конкретному предмету) достаточно
+    # любого действующего доступа вообще.
+    if event.callback_query:
+        if has_subject_access(user.id, subject):
+            return await handler(event, data)
+    elif has_free_access(user.id):
         return await handler(event, data)
 
     user_id_str = str(user.id)
@@ -989,18 +1267,15 @@ def get_support_announcement_keyboard():
     return builder.as_markup()
 
 def get_subscription_announcement_text() -> str:
-    t1, t2, t3, t4 = (SUBSCRIPTION_TIERS[i] for i in (1, 2, 3, 4))
+    tier_lines = "\n".join(
+        f"{cfg['emoji']} <b>{cfg['price_rub']}₽ / {cfg['price_stars']}⭐</b> — {cfg['short']}"
+        for cfg in ACTIVE_SUBSCRIPTION_TIERS.values()
+    )
     return (
         f"💎 <b>Новое в боте — платная подписка без рефералов!</b>\n{DIVIDER}\n\n"
         "Разработка и содержание бота требуют серьёзных затрат — поэтому в дополнение "
         "к бесплатному доступу за 2 рефералов теперь можно открыть доступ сразу оплатой:\n\n"
-        f"🔓 <b>{t1['price_rub']}₽ / {t1['price_stars']}⭐</b> — месяц: Биология, Физика, Химия\n"
-        f"♾️ <b>{t2['price_rub']}₽ / {t2['price_stars']}⭐</b> — навсегда: Биология, Физика, Химия + ранний доступ к "
-        "полностью готовой Гистологии (препараты именно с академии, протоколы сверены "
-        "преподавателями)\n"
-        f"🚀 <b>{t3['price_rub']}₽ / {t3['price_stars']}⭐</b> — год: вообще все разделы бота, включая Анатомию и Гистологию, "
-        "плюс всё новое, что добавится за год\n"
-        f"👑 <b>{t4['price_rub']}₽ / {t4['price_stars']}⭐</b> — 6 лет: все разделы на весь срок учёбы в академии\n\n"
+        f"{tier_lines}\n\n"
         "После оплаты правило с рефералами для тебя больше не действует — доступ "
         "открывается сразу и держится всё оплаченное время.\n\n"
         "Загляни в «💎 Подписка» в главном меню, чтобы посмотреть плюсы каждого тарифа 👇"
@@ -1399,13 +1674,13 @@ def get_main_menu(user_id: int = None):
     builder.button(text="🧬 Биология", callback_data="menu_biology")
     builder.button(text="⚛️ Физика", callback_data="menu_physics")
     builder.button(text="🧪 Химия", callback_data="menu_chemistry")
-    sub_all = user_id is not None and has_subscription_scope_all(user_id)
+    sub_anatomy = user_id is not None and has_subscription_anatomy_access(user_id)
     sub_histology = user_id is not None and has_subscription_histology_access(user_id)
     if ANATOMY_PUBLIC:
         anatomy_label = "🦴 Анатомия"
     elif user_id is not None and is_admin(user_id):
         anatomy_label = "🦴 Анатомия (админ)"
-    elif sub_all:
+    elif sub_anatomy:
         anatomy_label = "🦴 Анатомия 💎"
     else:
         anatomy_label = "🦴 Анатомия (в разработке)"
@@ -2781,11 +3056,12 @@ async def handle_admin_pending_action(message: Message):
         elif action == "record_subscription_username":
             ADMIN_PENDING[admin_id] = {"action": "record_subscription_tier", "target_id": target_id, "target_label": label}
             tier_lines = "\n".join(
-                f"{t} — {cfg['title']} ({cfg['price_rub']}₽)" for t, cfg in SUBSCRIPTION_TIERS.items()
+                f"{t} — {cfg['title']} ({cfg['price_rub']}₽)" for t, cfg in ACTIVE_SUBSCRIPTION_TIERS.items()
             )
             await message.answer(
-                f"✅ Нашёл {label}. Теперь пришли номер тарифа:\n\n{tier_lines}",
-                parse_mode="HTML"
+                f"✅ Нашёл {label}. Выбери тариф кнопкой ниже или пришли номер:\n\n{tier_lines}",
+                parse_mode="HTML",
+                reply_markup=get_admin_tier_reply_keyboard()
             )
         return
 
@@ -2808,21 +3084,37 @@ async def handle_admin_pending_action(message: Message):
         target_id = pending["target_id"]
         target_label = pending["target_label"]
         raw = message.text.strip()
-        if not raw.isdigit() or int(raw) not in SUBSCRIPTION_TIERS:
-            tier_lines = "\n".join(
-                f"{t} — {cfg['title']}" for t, cfg in SUBSCRIPTION_TIERS.items()
-            )
-            await message.answer(f"⚠️ Введи номер тарифа из списка:\n\n{tier_lines}")
+        if raw in ("❌ Отмена", "Отмена"):
+            del ADMIN_PENDING[admin_id]
+            await message.answer("Отменено.", reply_markup=ReplyKeyboardRemove())
             return
-        tier_id = int(raw)
-        cfg = SUBSCRIPTION_TIERS[tier_id]
+        tier_match = re.match(r"\d+", raw)
+        tier_id = int(tier_match.group()) if tier_match else None
+        if tier_id not in ACTIVE_SUBSCRIPTION_TIERS:
+            tier_lines = "\n".join(
+                f"{t} — {cfg['title']}" for t, cfg in ACTIVE_SUBSCRIPTION_TIERS.items()
+            )
+            await message.answer(f"⚠️ Введи номер тарифа из списка:\n\n{tier_lines}", reply_markup=get_admin_tier_reply_keyboard())
+            return
+        cfg = ACTIVE_SUBSCRIPTION_TIERS[tier_id]
+        if cfg.get("subject_choice_required"):
+            ADMIN_PENDING[admin_id] = {
+                "action": "record_subscription_subject",
+                "target_id": target_id, "target_label": target_label, "tier_id": tier_id,
+            }
+            await message.answer(
+                f"✅ Тариф «{cfg['title']}». Какой предмет выбрать?",
+                reply_markup=get_admin_subject_reply_keyboard()
+            )
+            return
         del ADMIN_PENDING[admin_id]
         grant_subscription(target_id, tier_id, "rubles", cfg["price_rub"])
         sub = get_subscription(target_id)
         scope_label = get_subscription_scope_label(sub)
         await message.answer(
             f"✅ Подписка «{cfg['title']}» выдана {target_label}.",
-            parse_mode="HTML"
+            parse_mode="HTML",
+            reply_markup=ReplyKeyboardRemove()
         )
         try:
             target_text = (
@@ -2830,11 +3122,46 @@ async def handle_admin_pending_action(message: Message):
                 f"Доступ {scope_label} открыт — {format_subscription_expiry(sub['expires'])}.\n"
                 "Правило про рефералов для тебя больше не действует. Спасибо за поддержку! 🙏😇"
             )
-            target_keyboard = None
-            if tier_id == 1:
-                target_text += get_tier1_upsell_text()
-                target_keyboard = get_tier1_upsell_keyboard()
+            target_text += get_tier_upsell_text(tier_id)
+            target_keyboard = get_tier_upsell_keyboard(tier_id)
             await bot.send_message(target_id, target_text, parse_mode="HTML", reply_markup=target_keyboard)
+        except Exception:
+            logger.exception("Не удалось уведомить пользователя %s о выдаче подписки", target_id)
+        return
+
+    if action == "record_subscription_subject":
+        target_id = pending["target_id"]
+        target_label = pending["target_label"]
+        tier_id = pending["tier_id"]
+        raw = message.text.strip()
+        if raw in ("❌ Отмена", "Отмена"):
+            del ADMIN_PENDING[admin_id]
+            await message.answer("Отменено.", reply_markup=ReplyKeyboardRemove())
+            return
+        subject = ADMIN_SUBJECT_LABELS_RU.get(raw)
+        if not subject:
+            await message.answer(
+                "⚠️ Выбери предмет кнопкой ниже.",
+                reply_markup=get_admin_subject_reply_keyboard()
+            )
+            return
+        cfg = SUBSCRIPTION_TIERS[tier_id]
+        del ADMIN_PENDING[admin_id]
+        grant_subscription(target_id, tier_id, "rubles", cfg["price_rub"], subject)
+        sub = get_subscription(target_id)
+        scope_label = get_subscription_scope_label(sub)
+        await message.answer(
+            f"✅ Подписка «{cfg['title']}» ({SUBJECT_TITLES[subject]}) выдана {target_label}.",
+            parse_mode="HTML",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        try:
+            target_text = (
+                f"🎉 <b>Подписка «{cfg['title']}» активирована!</b>\n\n"
+                f"Доступ {scope_label} открыт — {format_subscription_expiry(sub['expires'])}.\n"
+                "Правило про рефералов для тебя больше не действует. Спасибо за поддержку! 🙏😇"
+            )
+            await bot.send_message(target_id, target_text, parse_mode="HTML")
         except Exception:
             logger.exception("Не удалось уведомить пользователя %s о выдаче подписки", target_id)
         return
@@ -2907,7 +3234,7 @@ async def cb_menu_biology(callback: CallbackQuery):
 def get_biology_tickets_locked_text() -> str:
     tier_lines = "\n".join(
         f"«{cfg['emoji']} {cfg['title']}» ({cfg['price_rub']}₽ / {cfg['price_stars']}⭐)"
-        for cfg in SUBSCRIPTION_TIERS.values() if cfg["scope"] == "all"
+        for cfg in ACTIVE_SUBSCRIPTION_TIERS.values() if cfg.get("biology_download")
     )
     return (
         f"📄 <b>Билеты по биологии — файл с ответами</b>\n{DIVIDER}\n\n"
@@ -3170,24 +3497,35 @@ def get_my_subscription_status_block(user_id: int) -> str:
         f"Доступ {scope_label} — {format_subscription_expiry(sub['expires'])}.\n\n"
     )
 
-def get_tier1_upsell_text() -> str:
-    t1 = SUBSCRIPTION_TIERS[1]
-    t2 = SUBSCRIPTION_TIERS[2]
-    diff_rub = t2["price_rub"] - t1["price_rub"]
-    diff_stars = t2["price_stars"] - t1["price_stars"]
+def _next_upsell_tier_id(tier_id: int) -> int | None:
+    cfg = SUBSCRIPTION_TIERS[tier_id]
+    candidates = sorted(
+        (t for t, c in ACTIVE_SUBSCRIPTION_TIERS.items() if c["price_rub"] > cfg["price_rub"]),
+        key=lambda t: ACTIVE_SUBSCRIPTION_TIERS[t]["price_rub"]
+    )
+    return candidates[0] if candidates else None
+
+def get_tier_upsell_text(tier_id: int) -> str:
+    cfg = SUBSCRIPTION_TIERS[tier_id]
+    nxt_id = _next_upsell_tier_id(tier_id)
+    if nxt_id is None:
+        return ""
+    nxt = SUBSCRIPTION_TIERS[nxt_id]
+    diff_rub = nxt["price_rub"] - cfg["price_rub"]
+    diff_stars = nxt["price_stars"] - cfg["price_stars"]
     return (
-        f"\n\n💡 <b>Выгоднее:</b> тариф «{t2['emoji']} {t2['title']}» — всего на <b>{diff_rub}₽ / {diff_stars}⭐</b> "
-        f"дороже (<b>{t2['price_rub']}₽ / {t2['price_stars']}⭐</b> вместо {t1['price_rub']}₽), а доступ не "
-        "закончится через 30 дней, а останется навсегда — включая Гистологию, которая по этому тарифу "
-        "не ограничена концом 2026 года."
+        f"\n\n💡 <b>Выгоднее:</b> тариф «{nxt['emoji']} {nxt['title']}» — всего на "
+        f"<b>{diff_rub}₽ / {diff_stars}⭐</b> дороже (<b>{nxt['price_rub']}₽ / {nxt['price_stars']}⭐</b> "
+        f"вместо {cfg['price_rub']}₽), а даёт: {nxt['benefits'][0].lower()}."
     )
 
-def get_tier1_upsell_keyboard():
+def get_tier_upsell_keyboard(tier_id: int):
+    nxt_id = _next_upsell_tier_id(tier_id)
+    if nxt_id is None:
+        return None
+    nxt = SUBSCRIPTION_TIERS[nxt_id]
     builder = InlineKeyboardBuilder()
-    builder.button(
-        text=f"♾️ Перейти на «Навсегда» за {SUBSCRIPTION_TIERS[2]['price_rub']}₽",
-        callback_data="sub_tier:2"
-    )
+    builder.button(text=f"⬆️ Перейти на «{nxt['short']}» за {nxt['price_rub']}₽", callback_data=f"sub_tier:{nxt_id}")
     return builder.as_markup()
 
 def get_subscription_menu_text(user_id: int) -> str:
@@ -3209,7 +3547,7 @@ def get_subscription_menu_text(user_id: int) -> str:
         "Не хочешь ждать или звать друзей? Открой доступ сразу оплатой — без рефералов "
         "и ограничений. Выбери вариант:\n"
     )
-    for tier_id, cfg in SUBSCRIPTION_TIERS.items():
+    for tier_id, cfg in ACTIVE_SUBSCRIPTION_TIERS.items():
         if cfg.get("badge"):
             lines.append(f"<b>{cfg['badge']}</b>")
         lines.append(f"{cfg['emoji']} <b>{cfg['title']}</b> — {cfg['price_rub']}₽ / {cfg['price_stars']} ⭐")
@@ -3226,7 +3564,7 @@ def get_subscription_menu_text(user_id: int) -> str:
 
 def get_subscription_menu_keyboard():
     builder = InlineKeyboardBuilder()
-    for tier_id, cfg in SUBSCRIPTION_TIERS.items():
+    for tier_id, cfg in ACTIVE_SUBSCRIPTION_TIERS.items():
         badge = f"{cfg['badge']} — " if cfg.get("badge") else ""
         builder.button(
             text=f"{badge}{cfg['emoji']} {cfg['short']} — {cfg['price_rub']}₽/{cfg['price_stars']}⭐",
@@ -3247,54 +3585,79 @@ def get_sub_tier_text(tier_id: int) -> str:
     for b in cfg["benefits"]:
         lines.append(f"• {b}")
     lines.append(f"\nЦена: <b>{cfg['price_rub']}₽</b> или <b>{cfg['price_stars']} ⭐</b>")
-    if tier_id == 1:
-        lines.append(get_tier1_upsell_text())
-    lines.append("\nВыбери способ оплаты:")
+    lines.append(get_tier_upsell_text(tier_id))
+    if cfg.get("subject_choice_required"):
+        lines.append("\nСначала выбери предмет, потом способ оплаты:")
+    else:
+        lines.append("\nВыбери способ оплаты:")
     return "\n".join(lines)
 
 def get_sub_tier_keyboard(tier_id: int):
     cfg = SUBSCRIPTION_TIERS[tier_id]
     builder = InlineKeyboardBuilder()
-    builder.button(text=f"⭐ Оплатить {cfg['price_stars']} звёзд", callback_data=f"buy_sub_stars:{tier_id}")
-    builder.button(text=f"💵 Оплатить {cfg['price_rub']}₽", callback_data=f"buy_sub_rubles:{tier_id}")
-    builder.adjust(1)
-    if tier_id == 1:
-        builder.row(InlineKeyboardButton(
-            text=f"♾️ Лучше взять «Навсегда» за {SUBSCRIPTION_TIERS[2]['price_rub']}₽",
-            callback_data="sub_tier:2"
-        ))
+    if cfg.get("subject_choice_required"):
+        builder.button(text="🧬 Биология", callback_data=f"sub_subject:{tier_id}:biology")
+        builder.button(text="⚛️ Физика", callback_data=f"sub_subject:{tier_id}:physics")
+        builder.button(text="🧪 Химия", callback_data=f"sub_subject:{tier_id}:chemistry")
+        builder.adjust(1)
+    else:
+        builder.button(text=f"⭐ Оплатить {cfg['price_stars']} звёзд", callback_data=f"buy_sub_stars:{tier_id}")
+        builder.button(text=f"💵 Оплатить {cfg['price_rub']}₽", callback_data=f"buy_sub_rubles:{tier_id}")
+        builder.adjust(1)
+    nxt_kb = get_tier_upsell_keyboard(tier_id)
+    if nxt_kb:
+        builder.row(nxt_kb.inline_keyboard[0][0])
     builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="subscription_menu"))
     return builder.as_markup()
 
-def get_sub_rubles_message_text(tier_id: int) -> str:
+def get_sub_subject_keyboard(tier_id: int, subject: str):
     cfg = SUBSCRIPTION_TIERS[tier_id]
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text=f"⭐ Оплатить {cfg['price_stars']} звёзд",
+        callback_data=f"buy_sub_stars_subj:{tier_id}:{subject}"
+    )
+    builder.button(
+        text=f"💵 Оплатить {cfg['price_rub']}₽",
+        callback_data=f"buy_sub_rubles_subj:{tier_id}:{subject}"
+    )
+    builder.adjust(1)
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data=f"sub_tier:{tier_id}"))
+    return builder.as_markup()
+
+def get_sub_rubles_message_text(tier_id: int, subject: str | None = None) -> str:
+    cfg = SUBSCRIPTION_TIERS[tier_id]
+    subject_line = f" ({SUBJECT_TITLES[subject]})" if subject else ""
     return (
-        f"💵 <b>Оплата подписки «{cfg['title']}» — {cfg['price_rub']}₽</b>\n{DIVIDER}\n\n"
+        f"💵 <b>Оплата подписки «{cfg['title']}»{subject_line} — {cfg['price_rub']}₽</b>\n{DIVIDER}\n\n"
         f'Нажми на кнопку ниже — откроется чат с <a href="{HELPER_ACCOUNT_URL}">@vmeda_helper</a>, '
         "сообщение с тарифом уже будет готово. Отправь его и переведи по присланным реквизитам — "
         "как только оплата подтвердится, подписка будет включена вручную.\n\n"
         "Спасибо, что поддерживаешь бота! 🙏"
     )
 
-def get_sub_rubles_keyboard(tier_id: int):
+def get_sub_rubles_keyboard(tier_id: int, subject: str | None = None):
     cfg = SUBSCRIPTION_TIERS[tier_id]
+    subject_line = f" ({SUBJECT_TITLES[subject]})" if subject else ""
     template = (
-        f"Привет! Хочу оформить подписку «{cfg['title']}» за {cfg['price_rub']}₽ в боте "
+        f"Привет! Хочу оформить подписку «{cfg['title']}»{subject_line} за {cfg['price_rub']}₽ в боте "
         "VMEDA_examen_bot. Подскажи, пожалуйста, реквизиты для перевода."
     )
     url = f"{HELPER_ACCOUNT_URL}?text={urllib.parse.quote(template)}"
+    back_data = f"sub_subject:{tier_id}:{subject}" if subject else f"sub_tier:{tier_id}"
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text="💸 Написать @vmeda_helper", url=url))
-    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data=f"sub_tier:{tier_id}"))
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data=back_data))
     return builder.as_markup()
 
-async def send_subscription_stars_invoice(chat_id: int, tier_id: int) -> None:
+async def send_subscription_stars_invoice(chat_id: int, tier_id: int, subject: str | None = None) -> None:
     cfg = SUBSCRIPTION_TIERS[tier_id]
+    subject_line = f" ({SUBJECT_TITLES[subject]})" if subject else ""
     await bot.send_invoice(
         chat_id=chat_id,
-        title=f"Подписка: {cfg['title']}",
-        description=f"VMEDA_examen_bot — подписка «{cfg['title']}». Доступ откроется сразу после оплаты.",
-        payload=f"sub_stars_{tier_id}_{chat_id}_{int(time.time())}",
+        title=f"Подписка: {cfg['title']}{subject_line}",
+        description=f"VMEDA_examen_bot — подписка «{cfg['title']}»{subject_line}. Доступ откроется сразу после оплаты.",
+        payload=f"sub_stars_{tier_id}_{subject or '-'}_{chat_id}_{int(time.time())}",
         provider_token="",
         currency="XTR",
         prices=[LabeledPrice(label=cfg["title"], amount=cfg["price_stars"])],
@@ -3330,6 +3693,22 @@ async def cb_sub_tier(callback: CallbackQuery):
         reply_markup=get_sub_tier_keyboard(tier_id)
     )
 
+@dp.callback_query(F.data.startswith("sub_subject:"))
+async def cb_sub_subject(callback: CallbackQuery):
+    _, tier_id_raw, subject = callback.data.split(":")
+    tier_id = int(tier_id_raw)
+    if tier_id not in SUBSCRIPTION_TIERS or subject not in SUBJECT_TITLES:
+        await callback.answer("Тариф не найден", show_alert=True)
+        return
+    await callback.answer()
+    cfg = SUBSCRIPTION_TIERS[tier_id]
+    text = (
+        f"{cfg['emoji']} <b>{cfg['title']}</b> — {SUBJECT_TITLES[subject]}\n{DIVIDER}\n\n"
+        f"Цена: <b>{cfg['price_rub']}₽</b> или <b>{cfg['price_stars']} ⭐</b>\n\n"
+        "Выбери способ оплаты:"
+    )
+    await safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=get_sub_subject_keyboard(tier_id, subject))
+
 @dp.callback_query(F.data.startswith("buy_sub_stars:"))
 async def cb_buy_sub_stars(callback: CallbackQuery):
     tier_id = int(callback.data.split(":")[1])
@@ -3338,6 +3717,16 @@ async def cb_buy_sub_stars(callback: CallbackQuery):
         return
     await callback.answer()
     await send_subscription_stars_invoice(callback.from_user.id, tier_id)
+
+@dp.callback_query(F.data.startswith("buy_sub_stars_subj:"))
+async def cb_buy_sub_stars_subj(callback: CallbackQuery):
+    _, tier_id_raw, subject = callback.data.split(":")
+    tier_id = int(tier_id_raw)
+    if tier_id not in SUBSCRIPTION_TIERS or subject not in SUBJECT_TITLES:
+        await callback.answer("Тариф не найден", show_alert=True)
+        return
+    await callback.answer()
+    await send_subscription_stars_invoice(callback.from_user.id, tier_id, subject)
 
 @dp.callback_query(F.data.startswith("buy_sub_rubles:"))
 async def cb_buy_sub_rubles(callback: CallbackQuery):
@@ -3354,6 +3743,22 @@ async def cb_buy_sub_rubles(callback: CallbackQuery):
         disable_web_page_preview=True,
     )
 
+@dp.callback_query(F.data.startswith("buy_sub_rubles_subj:"))
+async def cb_buy_sub_rubles_subj(callback: CallbackQuery):
+    _, tier_id_raw, subject = callback.data.split(":")
+    tier_id = int(tier_id_raw)
+    if tier_id not in SUBSCRIPTION_TIERS or subject not in SUBJECT_TITLES:
+        await callback.answer("Тариф не найден", show_alert=True)
+        return
+    await callback.answer()
+    await safe_edit_text(
+        callback.message,
+        get_sub_rubles_message_text(tier_id, subject),
+        parse_mode="HTML",
+        reply_markup=get_sub_rubles_keyboard(tier_id, subject),
+        disable_web_page_preview=True,
+    )
+
 @dp.pre_checkout_query()
 async def handle_pre_checkout(pre_checkout_query) -> None:
     await pre_checkout_query.answer(ok=True)
@@ -3365,8 +3770,10 @@ async def handle_successful_payment(message: Message):
     payload = payment.invoice_payload or ""
 
     if payload.startswith("sub_stars_"):
-        tier_id = int(payload.split("_")[2])
-        grant_subscription(message.from_user.id, tier_id, "stars", stars)
+        parts = payload.split("_")
+        tier_id = int(parts[2])
+        subject = parts[3] if len(parts) > 3 and parts[3] != "-" else None
+        grant_subscription(message.from_user.id, tier_id, "stars", stars, subject)
         cfg = SUBSCRIPTION_TIERS[tier_id]
         sub = get_subscription(message.from_user.id)
         scope_label = get_subscription_scope_label(sub)
@@ -3375,10 +3782,8 @@ async def handle_successful_payment(message: Message):
             f"Доступ {scope_label} открыт — {format_subscription_expiry(sub['expires'])}.\n"
             "Правило про рефералов для тебя больше не действует. Спасибо за поддержку! 🙏😇"
         )
-        keyboard = None
-        if tier_id == 1:
-            text += get_tier1_upsell_text()
-            keyboard = get_tier1_upsell_keyboard()
+        text += get_tier_upsell_text(tier_id)
+        keyboard = get_tier_upsell_keyboard(tier_id)
         await message.answer(text, parse_mode="HTML", reply_markup=keyboard)
         user = message.from_user
         for admin_id in ADMIN_IDS:
@@ -4033,7 +4438,16 @@ ANATOMY_FLASH_SESSIONS: dict[int, dict] = {}
 ANATOMY_MATCH_SESSIONS: dict[int, dict] = {}
 
 def anatomy_access_ok(user_id: int) -> bool:
-    return ANATOMY_PUBLIC or is_admin(user_id) or has_subscription_scope_all(user_id)
+    return ANATOMY_PUBLIC or is_admin(user_id) or has_subscription_anatomy_access(user_id)
+
+def get_anatomy_dev_alert_text() -> str:
+    # Telegram ограничивает текст всплывающего алерта ~200 символами — показываем только
+    # самый дешёвый подходящий тариф, полный список смотрят в «💎 Подписка».
+    cheapest = cheapest_anatomy_tier()
+    return (
+        f"🦴 Анатомия ещё в разработке. Доступна по подписке от «{cheapest['short']}» "
+        f"({cheapest['price_rub']}₽/{cheapest['price_stars']}⭐) — полный список в «💎 Подписка» 💎"
+    )
 
 def get_anatomy_topic_data(topic_key: str):
     for section in ANATOMY.values():
@@ -4049,12 +4463,15 @@ def get_topic_section_key(topic_key: str) -> str:
     return next(iter(ANATOMY), "osteology")
 
 def get_anatomy_locked_text() -> str:
+    tier_lines = " или ".join(
+        f"«{cfg['emoji']} {cfg['title']}» ({cfg['price_rub']}₽ / {cfg['price_stars']}⭐)"
+        for cfg in ACTIVE_SUBSCRIPTION_TIERS.values() if cfg.get("anatomy")
+    )
     return (
         f"🦴 <b>Анатомия</b>\n{DIVIDER}\n\n"
         "🚧 Раздел ещё в разработке — сейчас идёт работа над материалом.\n\n"
-        "Уже сейчас можно получить ранний доступ по подписке «🚀 Год — все экзамены» "
-        "(899₽ / 899⭐) или «👑 6 лет — все экзамены» (2499₽ / 2499⭐) — подписчики этих "
-        "тарифов откроют раздел раньше всех, как только он будет готов.\n\n"
+        f"Уже сейчас можно получить ранний доступ по подписке {tier_lines} — подписчики "
+        "этих тарифов откроют раздел раньше всех, как только он будет готов.\n\n"
         "А пока доступны Биология, Физика, Химия и полностью готовая Гистология."
     )
 
@@ -4454,7 +4871,7 @@ async def cb_anatomy_menu(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("anatomy_section:"))
 async def cb_anatomy_section(callback: CallbackQuery):
     if not anatomy_access_ok(callback.from_user.id):
-        await callback.answer("🦴 Анатомия ещё в разработке. Доступна по подписке «Год» (899₽/899⭐) или «6 лет» (2499₽/2499⭐) 💎", show_alert=True)
+        await callback.answer(get_anatomy_dev_alert_text(), show_alert=True)
         return
     section_key = callback.data.split(":")[1]
     section = ANATOMY.get(section_key)
@@ -4472,7 +4889,7 @@ async def cb_anatomy_section(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("anatomy_topic:"))
 async def cb_anatomy_topic(callback: CallbackQuery):
     if not anatomy_access_ok(callback.from_user.id):
-        await callback.answer("🦴 Анатомия ещё в разработке. Доступна по подписке «Год» (899₽/899⭐) или «6 лет» (2499₽/2499⭐) 💎", show_alert=True)
+        await callback.answer(get_anatomy_dev_alert_text(), show_alert=True)
         return
     topic_key = callback.data.split(":")[1]
     topic = get_anatomy_topic_data(topic_key)
@@ -4494,7 +4911,7 @@ async def cb_anatomy_topic(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("anatomy_bones:"))
 async def cb_anatomy_bones(callback: CallbackQuery):
     if not anatomy_access_ok(callback.from_user.id):
-        await callback.answer("🦴 Анатомия ещё в разработке. Доступна по подписке «Год» (899₽/899⭐) или «6 лет» (2499₽/2499⭐) 💎", show_alert=True)
+        await callback.answer(get_anatomy_dev_alert_text(), show_alert=True)
         return
     topic_key = callback.data.split(":")[1]
     topic = get_anatomy_topic_data(topic_key)
@@ -4512,7 +4929,7 @@ async def cb_anatomy_bones(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("anatomy_bone_hub:"))
 async def cb_anatomy_bone_hub(callback: CallbackQuery):
     if not anatomy_access_ok(callback.from_user.id):
-        await callback.answer("🦴 Анатомия ещё в разработке. Доступна по подписке «Год» (899₽/899⭐) или «6 лет» (2499₽/2499⭐) 💎", show_alert=True)
+        await callback.answer(get_anatomy_dev_alert_text(), show_alert=True)
         return
     _, topic_key, bone_id = callback.data.split(":")
     topic = get_anatomy_topic_data(topic_key)
@@ -4530,7 +4947,7 @@ async def cb_anatomy_bone_hub(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("anatomy_bone_material:"))
 async def cb_anatomy_bone_material(callback: CallbackQuery):
     if not anatomy_access_ok(callback.from_user.id):
-        await callback.answer("🦴 Анатомия ещё в разработке. Доступна по подписке «Год» (899₽/899⭐) или «6 лет» (2499₽/2499⭐) 💎", show_alert=True)
+        await callback.answer(get_anatomy_dev_alert_text(), show_alert=True)
         return
     _, topic_key, bone_id, idx_s = callback.data.split(":")
     idx = int(idx_s)
@@ -4549,7 +4966,7 @@ async def cb_anatomy_bone_material(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("anatomy_bone_img:"))
 async def cb_anatomy_bone_img(callback: CallbackQuery):
     if not anatomy_access_ok(callback.from_user.id):
-        await callback.answer("🦴 Анатомия ещё в разработке. Доступна по подписке «Год» (899₽/899⭐) или «6 лет» (2499₽/2499⭐) 💎", show_alert=True)
+        await callback.answer(get_anatomy_dev_alert_text(), show_alert=True)
         return
     _, topic_key, bone_id, idx_s = callback.data.split(":")
     idx = int(idx_s)
@@ -4563,7 +4980,7 @@ async def cb_anatomy_bone_img(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("anatomy_bone_flash_start:"))
 async def cb_anatomy_bone_flash_start(callback: CallbackQuery):
     if not anatomy_access_ok(callback.from_user.id):
-        await callback.answer("🦴 Анатомия ещё в разработке. Доступна по подписке «Год» (899₽/899⭐) или «6 лет» (2499₽/2499⭐) 💎", show_alert=True)
+        await callback.answer(get_anatomy_dev_alert_text(), show_alert=True)
         return
     _, topic_key, bone_id = callback.data.split(":")
     topic = get_anatomy_topic_data(topic_key)
@@ -4577,7 +4994,7 @@ async def cb_anatomy_bone_flash_start(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("anatomy_bone_match_start:"))
 async def cb_anatomy_bone_match_start(callback: CallbackQuery):
     if not anatomy_access_ok(callback.from_user.id):
-        await callback.answer("🦴 Анатомия ещё в разработке. Доступна по подписке «Год» (899₽/899⭐) или «6 лет» (2499₽/2499⭐) 💎", show_alert=True)
+        await callback.answer(get_anatomy_dev_alert_text(), show_alert=True)
         return
     _, topic_key, bone_id = callback.data.split(":")
     topic = get_anatomy_topic_data(topic_key)
@@ -4591,7 +5008,7 @@ async def cb_anatomy_bone_match_start(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("anatomy_bone_mnemonics:"))
 async def cb_anatomy_bone_mnemonics(callback: CallbackQuery):
     if not anatomy_access_ok(callback.from_user.id):
-        await callback.answer("🦴 Анатомия ещё в разработке. Доступна по подписке «Год» (899₽/899⭐) или «6 лет» (2499₽/2499⭐) 💎", show_alert=True)
+        await callback.answer(get_anatomy_dev_alert_text(), show_alert=True)
         return
     _, topic_key, bone_id, idx_s = callback.data.split(":")
     idx = int(idx_s)
@@ -4610,7 +5027,7 @@ async def cb_anatomy_bone_mnemonics(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("anatomy_material_list:"))
 async def cb_anatomy_material_list(callback: CallbackQuery):
     if not anatomy_access_ok(callback.from_user.id):
-        await callback.answer("🦴 Анатомия ещё в разработке. Доступна по подписке «Год» (899₽/899⭐) или «6 лет» (2499₽/2499⭐) 💎", show_alert=True)
+        await callback.answer(get_anatomy_dev_alert_text(), show_alert=True)
         return
     await callback.answer()
     topic_key = callback.data.split(":")[1]
@@ -4625,7 +5042,7 @@ async def cb_anatomy_material_list(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("anatomy_material:"))
 async def cb_anatomy_material(callback: CallbackQuery):
     if not anatomy_access_ok(callback.from_user.id):
-        await callback.answer("🦴 Анатомия ещё в разработке. Доступна по подписке «Год» (899₽/899⭐) или «6 лет» (2499₽/2499⭐) 💎", show_alert=True)
+        await callback.answer(get_anatomy_dev_alert_text(), show_alert=True)
         return
     _, topic_key, idx_s = callback.data.split(":")
     idx = int(idx_s)
@@ -4644,7 +5061,7 @@ async def cb_anatomy_material(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("anatomy_flash_start:"))
 async def cb_anatomy_flash_start(callback: CallbackQuery):
     if not anatomy_access_ok(callback.from_user.id):
-        await callback.answer("🦴 Анатомия ещё в разработке. Доступна по подписке «Год» (899₽/899⭐) или «6 лет» (2499₽/2499⭐) 💎", show_alert=True)
+        await callback.answer(get_anatomy_dev_alert_text(), show_alert=True)
         return
     topic_key = callback.data.split(":")[1]
     topic = get_anatomy_topic_data(topic_key)
@@ -4691,7 +5108,7 @@ async def cb_anatomy_flash_stop(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("anatomy_match_start:"))
 async def cb_anatomy_match_start(callback: CallbackQuery):
     if not anatomy_access_ok(callback.from_user.id):
-        await callback.answer("🦴 Анатомия ещё в разработке. Доступна по подписке «Год» (899₽/899⭐) или «6 лет» (2499₽/2499⭐) 💎", show_alert=True)
+        await callback.answer(get_anatomy_dev_alert_text(), show_alert=True)
         return
     topic_key = callback.data.split(":")[1]
     topic = get_anatomy_topic_data(topic_key)
@@ -4733,7 +5150,7 @@ async def cb_anatomy_match_stop(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("anatomy_mnemonics:"))
 async def cb_anatomy_mnemonics(callback: CallbackQuery):
     if not anatomy_access_ok(callback.from_user.id):
-        await callback.answer("🦴 Анатомия ещё в разработке. Доступна по подписке «Год» (899₽/899⭐) или «6 лет» (2499₽/2499⭐) 💎", show_alert=True)
+        await callback.answer(get_anatomy_dev_alert_text(), show_alert=True)
         return
     _, topic_key, idx_s = callback.data.split(":")
     idx = int(idx_s)
@@ -4752,7 +5169,7 @@ async def cb_anatomy_mnemonics(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("anatomy_picture:"))
 async def cb_anatomy_picture(callback: CallbackQuery):
     if not anatomy_access_ok(callback.from_user.id):
-        await callback.answer("🦴 Анатомия ещё в разработке. Доступна по подписке «Год» (899₽/899⭐) или «6 лет» (2499₽/2499⭐) 💎", show_alert=True)
+        await callback.answer(get_anatomy_dev_alert_text(), show_alert=True)
         return
     await callback.answer()
     topic_key = callback.data.split(":")[1]
@@ -4829,8 +5246,9 @@ async def histology_gate_ok(callback: CallbackQuery) -> bool:
         save_stats()
         remaining = HISTOLOGY_WARNING_THRESHOLD - entry["count"]
         days_left = max(int((get_histology_temp_expiry(user_id) - now) // 86400), 0)
-        price_rub = SUBSCRIPTION_TIERS[2]["price_rub"]
-        price_stars = SUBSCRIPTION_TIERS[2]["price_stars"]
+        cheapest_histology = cheapest_histology_tier()
+        price_rub = cheapest_histology["price_rub"]
+        price_stars = cheapest_histology["price_stars"]
         if remaining > 0:
             warn_text = (
                 "⚠️❗️ <b>Гистология скоро закроется!</b> ❗️⚠️\n\n"
@@ -4862,6 +5280,7 @@ def get_histology_specimen(diag_key: str, spec_id: str):
     return None
 
 def get_histology_locked_text() -> str:
+    cheapest = cheapest_histology_tier()
     return (
         f"🔬 <b>Гистология</b>\n{DIVIDER}\n\n"
         "✅ Раздел уже полностью готов и проработан: все микрофотографии и "
@@ -4869,8 +5288,8 @@ def get_histology_locked_text() -> str:
         "сверено с преподавателями.\n\n"
         f"Открывается бесплатно — как Биология, Физика и Химия — после "
         f"<b>{REFERRAL_FULL_ACCESS_THRESHOLD}</b> приглашённых друзей, либо сразу по подписке от "
-        f"<b>{SUBSCRIPTION_TIERS[2]['price_rub']}₽ / {SUBSCRIPTION_TIERS[2]['price_stars']}⭐</b> "
-        f"(тариф «{SUBSCRIPTION_TIERS[2]['title']}») и выше.\n\n"
+        f"<b>{cheapest['price_rub']}₽ / {cheapest['price_stars']}⭐</b> "
+        f"(тариф «{cheapest['title']}») и выше.\n\n"
         f"Новым пользователям раздел открыт бесплатно на пробный период (до недели)."
     )
 
