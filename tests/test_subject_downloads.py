@@ -49,6 +49,7 @@ async def main():
     assert "download_biology_tickets" in bio_kb_data
     phys_kb_data = kb_data(tb.get_physics_menu())
     assert "download_physics_full" in phys_kb_data and "download_physics_ticket_tasks" in phys_kb_data
+    assert "download_physics_grade45" in phys_kb_data
     chem_kb_data = kb_data(tb.get_chemistry_menu())
     assert "download_chemistry_labs" in chem_kb_data and "download_chemistry_tasks" in chem_kb_data
     print("menus expose download buttons: OK")
@@ -104,6 +105,20 @@ async def main():
         assert tb.strip_html_tags(topic["title"]) in text2
     assert caption2 and f"@{tb.BOT_USERNAME}" in caption2
     print("physics full file: 186 questions + all task topics present, HTML-free: OK")
+
+    # physics: "(60 вопросов) на 4/5" file has all 60 questions
+    cb2b = FakeCB("download_physics_grade45")
+    await tb.cb_download_physics_grade45(cb2b)
+    doc2b, caption2b = cb2b.message.documents[0]
+    assert doc2b.data[:2] == b"PK"
+    assert doc2b.filename.endswith(".docx")
+    text2b = docx_text(doc2b)
+    assert "<b>" not in text2b
+    assert len(tb.PHYSICS_GRADE45_QUESTIONS) == 60
+    for num, item in tb.PHYSICS_GRADE45_QUESTIONS.items():
+        assert tb.strip_html_tags(item["title"]) in text2b
+    assert caption2b and f"@{tb.BOT_USERNAME}" in caption2b
+    print("physics 'grade45' file: all 60 questions present, HTML-free: OK")
 
     # physics: 4-ticket task answers file has all 20 solved problems
     cb3 = FakeCB("download_physics_ticket_tasks")

@@ -1119,7 +1119,7 @@ GATED_PREFIXES_BIOLOGY = ("ticket:", "ticket_q:", "qpage:", "q:")
 GATED_CALLBACKS_PHYSICS = {
     "menu_physics", "physics_tickets", "physics_theory_tickets", "physics_test_tickets",
     "physics_test", "physics_tasks", "download_physics_full", "download_physics_ticket_tasks",
-    "physics_grade45",
+    "physics_grade45", "download_physics_grade45",
 }
 GATED_PREFIXES_PHYSICS = (
     "phys_test_ticket:", "phys_test_ticket_tasks:", "phys_test_ticket_task_show:", "physics_page:", "physics_q:",
@@ -1841,6 +1841,14 @@ def build_physics_full_file() -> BufferedInputFile:
             add_topic_block(doc, topic)
     return build_docx_file("Физика — тестовая часть и шаблоны решения задач", fill)
 
+def build_physics_grade45_file() -> BufferedInputFile:
+    def fill(doc):
+        for num in sorted(PHYSICS_GRADE45_QUESTIONS.keys(), key=int):
+            item = PHYSICS_GRADE45_QUESTIONS[num]
+            doc.add_heading(f"{num}. {item['title']}", level=2)
+            add_html_paragraphs(doc, item["answer"])
+    return build_docx_file("Физика — (60 вопросов) на 4/5", fill)
+
 def build_physics_ticket_tasks_file() -> BufferedInputFile:
     def fill(doc):
         for num in sorted(PHYSICS_TEST_TICKETS.keys(), key=int):
@@ -2121,6 +2129,7 @@ def get_physics_menu():
     builder.button(text="🧮 Задачи", callback_data="physics_tasks")
     builder.button(text="❓ (60 вопросов) на 4/5", callback_data="physics_grade45")
     builder.button(text="📄 186 вопросов + шаблоны задач (файл)", callback_data="download_physics_full")
+    builder.button(text="📄 (60 вопросов) на 4/5 (файл)", callback_data="download_physics_grade45")
     builder.button(text="📄 Ответы на задачи билетов (файл)", callback_data="download_physics_ticket_tasks")
     builder.adjust(1)
     builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
@@ -4247,6 +4256,14 @@ async def cb_download_physics_full(callback: CallbackQuery):
     await callback.message.answer_document(
         build_physics_full_file(),
         caption=f"📄 Физика: тестовая часть (186 вопросов) + шаблоны решения задач по всем темам.\n\n@{BOT_USERNAME}"
+    )
+
+@dp.callback_query(F.data == "download_physics_grade45")
+async def cb_download_physics_grade45(callback: CallbackQuery):
+    await callback.answer()
+    await callback.message.answer_document(
+        build_physics_grade45_file(),
+        caption=f"📄 Физика — «(60 вопросов) на 4/5», все вопросы и ответы.\n\n@{BOT_USERNAME}"
     )
 
 @dp.callback_query(F.data == "download_physics_ticket_tasks")

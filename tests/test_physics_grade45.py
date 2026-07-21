@@ -48,15 +48,16 @@ def kb_data(markup):
 
 async def main():
     nums = sorted(tb.PHYSICS_GRADE45_QUESTIONS.keys(), key=int)
-    assert len(nums) >= 50, f"expected roughly 60 questions, got {len(nums)}"
+    assert len(nums) == 60, f"expected exactly 60 questions, got {len(nums)}"
     print(f"loaded {len(nums)} questions for the 4/5 section")
 
-    # 1. menu button present on the Physics menu
+    # 1. menu buttons present on the Physics menu (list screen + docx download)
     menu = tb.get_physics_menu()
     assert "physics_grade45" in kb_data(menu), "menu_physics должен вести к новому разделу"
     idx = kb_data(menu).index("physics_grade45")
     assert kb_texts(menu)[idx] == "❓ (60 вопросов) на 4/5"
-    print("physics menu button OK")
+    assert "download_physics_grade45" in kb_data(menu), "menu_physics должен предлагать файл со всеми вопросами"
+    print("physics menu buttons OK")
 
     # 2. list screen renders a button for every question, each with correct callback_data
     cb = FakeCB("physics_grade45")
