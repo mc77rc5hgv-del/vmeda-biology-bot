@@ -48,7 +48,7 @@ def kb_data(markup):
 
 async def main():
     labs = {lab["number"]: lab for lab in tb.CHEMISTRY_LABS["labs"]}
-    labs_with_summary = [1, 2, 3, 4, 5]
+    labs_with_summary = [1, 2, 3, 4, 5, 6]
     for n in labs_with_summary:
         assert labs[n].get("summary"), f"lab {n} must have a summary"
     print(f"{len(labs_with_summary)} labs carry a 'summary' field")
@@ -81,14 +81,7 @@ async def main():
         assert kb_data(kb) == [f"lab:{n}"]
     print(f"all {len(labs_with_summary)} lab summaries render OK (HTML-balanced, under 4096 chars)")
 
-    # 3. lab without a summary (lab 6) -> alert, no crash
-    cb = FakeCB("lab_summary:6")
-    await tb.cb_lab_summary(cb)
-    assert not cb.message.edits
-    assert cb._answers and cb._answers[-1][1] is True
-    print("lab without summary -> alert OK")
-
-    # 4. unknown lab number -> alert, no crash
+    # 3. unknown lab number -> alert, no crash
     cb = FakeCB("lab_summary:999")
     await tb.cb_lab_summary(cb)
     assert not cb.message.edits
