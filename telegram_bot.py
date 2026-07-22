@@ -15,7 +15,7 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.types import (
     Message, CallbackQuery, InlineKeyboardButton, FSInputFile, BufferedInputFile, Update,
     BotCommand, BotCommandScopeDefault, BotCommandScopeChat, LabeledPrice,
-    ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove,
+    ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, InputMediaPhoto,
 )
 from aiogram.filters import CommandStart, Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -5052,14 +5052,29 @@ def get_bone_mnemonics(topic_key: str, bone_id: str) -> list:
     topic = get_anatomy_topic_data(topic_key)
     return [mn for mn in topic["mnemonics"] if mn.get("bone") == bone_id]
 
-def get_bone_images(topic_key: str, bone_id: str) -> list:
+ANATOMY_ATLAS_CREDITS = {"Ф. Неттер, Атлас анатомии человека", "И.В. Гайворонский, Нормальная анатомия человека"}
+ANATOMY_ALBUM_PAGE_SIZE = 10  # sendMediaGroup hard cap
+
+def anatomy_page_count(n_images: int) -> int:
+    return max(1, (n_images + ANATOMY_ALBUM_PAGE_SIZE - 1) // ANATOMY_ALBUM_PAGE_SIZE)
+
+def get_bone_images(topic_key: str, bone_id: str, kind: str | None = None) -> list:
+    """kind=None -> all; 'slides' -> ВМедА lecture-presentation photos; 'atlas' -> Неттер/Гайворонский."""
     topic = get_anatomy_topic_data(topic_key)
-    return topic.get("bone_images", {}).get(bone_id, [])
+    images = topic.get("bone_images", {}).get(bone_id, [])
+    if kind == "atlas":
+        return [i for i in images if i.get("credit") in ANATOMY_ATLAS_CREDITS]
+    if kind == "slides":
+        return [i for i in images if i.get("credit") not in ANATOMY_ATLAS_CREDITS]
+    return images
 
 def get_anatomy_bone_hub_keyboard(topic_key: str, bone_id: str):
     builder = InlineKeyboardBuilder()
     builder.button(text="📖 Материал", callback_data=f"anatomy_bone_material:{topic_key}:{bone_id}:0")
-    builder.button(text="🖼 Фото и схемы", callback_data=f"anatomy_bone_img:{topic_key}:{bone_id}:0")
+    if get_bone_images(topic_key, bone_id, kind="slides"):
+        builder.button(text="📽 Слайды (презентация)", callback_data=f"anatomy_bone_slides:{topic_key}:{bone_id}:0")
+    if get_bone_images(topic_key, bone_id, kind="atlas"):
+        builder.button(text="🖼 Атлас (Неттер/Гайворонский)", callback_data=f"anatomy_bone_atlas:{topic_key}:{bone_id}:0")
     builder.button(text="🎴 Флэш-карточки", callback_data=f"anatomy_bone_flash_start:{topic_key}:{bone_id}")
     builder.button(text="🔗 Сопоставление", callback_data=f"anatomy_bone_match_start:{topic_key}:{bone_id}")
     builder.button(text="🧠 Мнемоники", callback_data=f"anatomy_bone_mnemonics:{topic_key}:{bone_id}:0")
@@ -5070,74 +5085,60 @@ def get_anatomy_bone_hub_keyboard(topic_key: str, bone_id: str):
 def get_anatomy_bone_hub_text(topic_key: str, bone_id: str) -> str:
     title = get_bone_title(topic_key, bone_id)
     n_material = len(get_bone_material_list(topic_key, bone_id))
-    n_images = len(get_bone_images(topic_key, bone_id))
+    n_slides = len(get_bone_images(topic_key, bone_id, kind="slides"))
+    n_atlas = len(get_bone_images(topic_key, bone_id, kind="atlas"))
     n_flash = len(get_bone_flashcards(topic_key, bone_id))
     n_pairs = len(get_bone_pairs(topic_key, bone_id))
     n_mnemo = len(get_bone_mnemonics(topic_key, bone_id))
     return (
         f"🦴 <b>{title}</b>\n{DIVIDER}\n\n"
         f"📖 Материал: {n_material} стр.\n"
-        f"🖼 Фото и схем: {n_images}\n"
+        f"📽 Слайдов презентации: {n_slides}\n"
+        f"🖼 Атлас (Неттер/Гайворонский): {n_atlas}\n"
         f"🎴 Флэш-карточек: {n_flash}\n"
         f"🔗 Пар для сопоставления: {n_pairs}\n"
         f"🧠 Мнемоник: {n_mnemo}\n\n"
         "Выбери формат подготовки:"
     )
 
-def get_bone_image_keyboard(topic_key: str, bone_id: str, idx: int, total: int):
+def build_input_media_photo(img: dict) -> InputMediaPhoto:
+    media = img["url"] if "url" in img else FSInputFile(os.path.join(ANATOMY_IMAGES_DIR, img["path"]))
+    return InputMediaPhoto(media=media, caption=f"{img['caption']}\n\nИсточник: {img['credit']}", parse_mode="HTML")
+
+async def send_anatomy_album(callback: CallbackQuery, images: list, page: int, header: str, nav_prefix: str, back_callback: str):
+    """Sends up to ANATOMY_ALBUM_PAGE_SIZE photos as one native Telegram album — swipeable
+    in-place by the user with no further bot round-trips, unlike the old delete-and-resend
+    single-photo carousel. sendMediaGroup itself can't carry a reply_markup, so a separate
+    small text message follows with prev/next-page and back buttons."""
+    total_pages = anatomy_page_count(len(images))
+    start = page * ANATOMY_ALBUM_PAGE_SIZE
+    chunk = images[start:start + ANATOMY_ALBUM_PAGE_SIZE]
+    await callback.message.delete()
+    if len(chunk) == 1:
+        # Telegram's sendMediaGroup requires 2-10 items — a lone photo must go through
+        # answer_photo instead, or the real API call fails outright.
+        img = chunk[0]
+        photo = img["url"] if "url" in img else FSInputFile(os.path.join(ANATOMY_IMAGES_DIR, img["path"]))
+        await callback.message.answer_photo(photo, caption=f"{img['caption']}\n\nИсточник: {img['credit']}", parse_mode="HTML")
+    else:
+        media = [build_input_media_photo(img) for img in chunk]
+        await callback.message.answer_media_group(media=media)
     builder = InlineKeyboardBuilder()
     nav = []
-    if idx > 0:
-        nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"anatomy_bone_img:{topic_key}:{bone_id}:{idx-1}"))
-    if idx < total - 1:
-        nav.append(InlineKeyboardButton(text="➡️", callback_data=f"anatomy_bone_img:{topic_key}:{bone_id}:{idx+1}"))
+    if page > 0:
+        nav.append(InlineKeyboardButton(text="⬅️ Ещё фото", callback_data=f"{nav_prefix}:{page-1}"))
+    if page < total_pages - 1:
+        nav.append(InlineKeyboardButton(text="Ещё фото ➡️", callback_data=f"{nav_prefix}:{page+1}"))
     if nav:
         builder.row(*nav)
-    builder.row(InlineKeyboardButton(text="🔙 К кости", callback_data=f"anatomy_bone_hub:{topic_key}:{bone_id}"))
-    return builder.as_markup()
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data=back_callback))
+    page_info = f" (стр. {page + 1}/{total_pages})" if total_pages > 1 else ""
+    await callback.message.answer(f"{header}{page_info}", parse_mode="HTML", reply_markup=builder.as_markup())
 
-async def render_bone_image(callback: CallbackQuery, topic_key: str, bone_id: str, idx: int):
-    images = get_bone_images(topic_key, bone_id)
-    title = get_bone_title(topic_key, bone_id)
-    img = images[idx]
-    caption = (
-        f"🖼 {title}\n\n{img['caption']}\n\n"
-        f"Источник: {img['credit']}\n\n{idx + 1}/{len(images)}"
-    )
-    keyboard = get_bone_image_keyboard(topic_key, bone_id, idx, len(images))
-    photo = img["url"] if "url" in img else FSInputFile(os.path.join(ANATOMY_IMAGES_DIR, img["path"]))
-    await callback.message.delete()
-    await callback.message.answer_photo(photo, caption=caption, reply_markup=keyboard)
-
-# ---- Атлас темы (для тем без разбора по костям — артрология/миология) ----
+# ---- Атлас темы (для тем без разбора по костям — артрология/миология/спланхнология/...) ----
 def get_topic_atlas_images(topic_key: str) -> list:
     topic = get_anatomy_topic_data(topic_key)
     return topic.get("atlas_images", []) if topic else []
-
-def get_topic_atlas_keyboard(topic_key: str, idx: int, total: int):
-    builder = InlineKeyboardBuilder()
-    nav = []
-    if idx > 0:
-        nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"anatomy_atlas:{topic_key}:{idx-1}"))
-    if idx < total - 1:
-        nav.append(InlineKeyboardButton(text="➡️", callback_data=f"anatomy_atlas:{topic_key}:{idx+1}"))
-    if nav:
-        builder.row(*nav)
-    builder.row(InlineKeyboardButton(text="🔙 К теме", callback_data=f"anatomy_topic:{topic_key}"))
-    return builder.as_markup()
-
-async def render_topic_atlas_image(callback: CallbackQuery, topic_key: str, idx: int):
-    images = get_topic_atlas_images(topic_key)
-    title = get_anatomy_topic_data(topic_key).get("title", "")
-    img = images[idx]
-    caption = (
-        f"🖼 {title}\n\n{img['caption']}\n\n"
-        f"Источник: {img['credit']}\n\n{idx + 1}/{len(images)}"
-    )
-    keyboard = get_topic_atlas_keyboard(topic_key, idx, len(images))
-    photo = FSInputFile(os.path.join(ANATOMY_IMAGES_DIR, img["path"]))
-    await callback.message.delete()
-    await callback.message.answer_photo(photo, caption=caption, reply_markup=keyboard)
 
 def get_bone_material_keyboard(topic_key: str, bone_id: str, idx: int):
     pages = get_bone_material_list(topic_key, bone_id)
@@ -5494,33 +5495,65 @@ async def cb_anatomy_bone_material(callback: CallbackQuery):
         reply_markup=get_bone_material_keyboard(topic_key, bone_id, idx)
     )
 
-@dp.callback_query(F.data.startswith("anatomy_bone_img:"))
-async def cb_anatomy_bone_img(callback: CallbackQuery):
+@dp.callback_query(F.data.startswith("anatomy_bone_slides:"))
+async def cb_anatomy_bone_slides(callback: CallbackQuery):
     if not anatomy_access_ok(callback.from_user.id):
         await callback.answer(get_anatomy_dev_alert_text(), show_alert=True)
         return
-    _, topic_key, bone_id, idx_s = callback.data.split(":")
-    idx = int(idx_s)
-    images = get_bone_images(topic_key, bone_id)
-    if not images or not (0 <= idx < len(images)):
-        await callback.answer("Фото для этой кости пока нет", show_alert=True)
+    _, topic_key, bone_id, page_s = callback.data.split(":")
+    page = int(page_s)
+    images = get_bone_images(topic_key, bone_id, kind="slides")
+    if not images or not (0 <= page < anatomy_page_count(len(images))):
+        await callback.answer("Слайдов для этой кости пока нет", show_alert=True)
         return
     await callback.answer()
-    await render_bone_image(callback, topic_key, bone_id, idx)
+    title = get_bone_title(topic_key, bone_id)
+    await send_anatomy_album(
+        callback, images, page,
+        header=f"📽 <b>{title} — слайды презентации</b>",
+        nav_prefix=f"anatomy_bone_slides:{topic_key}:{bone_id}",
+        back_callback=f"anatomy_bone_hub:{topic_key}:{bone_id}",
+    )
+
+@dp.callback_query(F.data.startswith("anatomy_bone_atlas:"))
+async def cb_anatomy_bone_atlas(callback: CallbackQuery):
+    if not anatomy_access_ok(callback.from_user.id):
+        await callback.answer(get_anatomy_dev_alert_text(), show_alert=True)
+        return
+    _, topic_key, bone_id, page_s = callback.data.split(":")
+    page = int(page_s)
+    images = get_bone_images(topic_key, bone_id, kind="atlas")
+    if not images or not (0 <= page < anatomy_page_count(len(images))):
+        await callback.answer("Атласных иллюстраций для этой кости пока нет", show_alert=True)
+        return
+    await callback.answer()
+    title = get_bone_title(topic_key, bone_id)
+    await send_anatomy_album(
+        callback, images, page,
+        header=f"🖼 <b>{title} — атлас (Неттер/Гайворонский)</b>",
+        nav_prefix=f"anatomy_bone_atlas:{topic_key}:{bone_id}",
+        back_callback=f"anatomy_bone_hub:{topic_key}:{bone_id}",
+    )
 
 @dp.callback_query(F.data.startswith("anatomy_atlas:"))
 async def cb_anatomy_atlas(callback: CallbackQuery):
     if not anatomy_access_ok(callback.from_user.id):
         await callback.answer(get_anatomy_dev_alert_text(), show_alert=True)
         return
-    _, topic_key, idx_s = callback.data.split(":")
-    idx = int(idx_s)
+    _, topic_key, page_s = callback.data.split(":")
+    page = int(page_s)
     images = get_topic_atlas_images(topic_key)
-    if not images or not (0 <= idx < len(images)):
+    if not images or not (0 <= page < anatomy_page_count(len(images))):
         await callback.answer("Фото для этой темы пока нет", show_alert=True)
         return
     await callback.answer()
-    await render_topic_atlas_image(callback, topic_key, idx)
+    title = get_anatomy_topic_data(topic_key).get("title", "")
+    await send_anatomy_album(
+        callback, images, page,
+        header=f"🖼 <b>{title} — атлас (Неттер/Гайворонский)</b>",
+        nav_prefix=f"anatomy_atlas:{topic_key}",
+        back_callback=f"anatomy_topic:{topic_key}",
+    )
 
 @dp.callback_query(F.data.startswith("anatomy_bone_flash_start:"))
 async def cb_anatomy_bone_flash_start(callback: CallbackQuery):

@@ -93,10 +93,15 @@ async def main():
 
     # 5. no images/flashcards/mnemonics/pairs -> graceful alert, not a crash
     # (patella still has no photos yet, unlike femur/pelvis/hip_bone/foot_bones)
-    cb_img = FakeCB("anatomy_bone_img:lower_limb_bones:patella:0")
-    await tb.cb_anatomy_bone_img(cb_img)
-    assert not cb_img.message.edits
-    assert cb_img._answers and "нет" in (cb_img._answers[0][0] or "")
+    cb_slides = FakeCB("anatomy_bone_slides:lower_limb_bones:patella:0")
+    await tb.cb_anatomy_bone_slides(cb_slides)
+    assert not cb_slides.message.edits
+    assert cb_slides._answers and "нет" in (cb_slides._answers[0][0] or "")
+
+    cb_atlas = FakeCB("anatomy_bone_atlas:lower_limb_bones:patella:0")
+    await tb.cb_anatomy_bone_atlas(cb_atlas)
+    assert not cb_atlas.message.edits
+    assert cb_atlas._answers and "нет" in (cb_atlas._answers[0][0] or "")
 
     cb_flash = FakeCB("anatomy_bone_flash_start:lower_limb_bones:femur")
     await tb.cb_anatomy_bone_flash_start(cb_flash)

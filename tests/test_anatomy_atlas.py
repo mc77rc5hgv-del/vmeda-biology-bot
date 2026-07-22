@@ -11,6 +11,7 @@ class FakeUser:
 class FakeMsg:
     def __init__(self):
         self.edits = []
+        self.media_groups = []
         self.photos = []
         self.deleted = False
     async def edit_text(self, text, **kwargs):
@@ -21,8 +22,11 @@ class FakeMsg:
     async def answer(self, text, **kwargs):
         self.edits.append((text, kwargs.get("reply_markup")))
         return self
+    async def answer_media_group(self, media, **kwargs):
+        self.media_groups.append(media)
+        return self
     async def answer_photo(self, photo, **kwargs):
-        self.photos.append((photo, kwargs.get("caption"), kwargs.get("reply_markup")))
+        self.photos.append((photo, kwargs.get("caption")))
         return self
 
 class FakeCB:
@@ -36,6 +40,9 @@ class FakeCB:
 
 def kb_data(markup):
     return [b.callback_data for row in markup.inline_keyboard for b in row]
+
+def n_pages(n_images):
+    return max(1, (n_images + tb.ANATOMY_ALBUM_PAGE_SIZE - 1) // tb.ANATOMY_ALBUM_PAGE_SIZE)
 
 async def main():
     errors = []
@@ -64,44 +71,69 @@ async def main():
         assert not any(d and d.startswith(f"anatomy_atlas:{topic_key}:") for d in kb_data(kb)), topic_key
     print("atlas button presence matches atlas_images content: OK")
 
-    # 2. every atlas image renders: real file, caption, credit, correct nav
+    # 2. every atlas page renders as a native album: real files, captions with credit, correct nav
     for section_key, topic_key in topics_with_atlas:
         images = tb.get_topic_atlas_images(topic_key)
-        for idx in range(len(images)):
-            cb = FakeCB(f"anatomy_atlas:{topic_key}:{idx}")
+        pages = n_pages(len(images))
+        for page in range(pages):
+            cb = FakeCB(f"anatomy_atlas:{topic_key}:{page}")
             await tb.cb_anatomy_atlas(cb)
-            if not cb.message.deleted or not cb.message.photos:
-                errors.append(f"{topic_key} idx={idx}: no photo sent")
+            expected = min(tb.ANATOMY_ALBUM_PAGE_SIZE, len(images) - page * tb.ANATOMY_ALBUM_PAGE_SIZE)
+            if not cb.message.deleted or not (cb.message.media_groups or cb.message.photos):
+                errors.append(f"{topic_key} page={page}: no photo(s) sent")
                 continue
-            photo, caption, kb = cb.message.photos[0]
-            if isinstance(photo, tb.FSInputFile):
-                if not os.path.exists(photo.path):
-                    errors.append(f"{topic_key} idx={idx}: file missing: {photo.path}")
+            if expected == 1:
+                # Telegram's sendMediaGroup needs >=2 items — a lone photo on a page
+                # goes through answer_photo instead.
+                if not cb.message.photos:
+                    errors.append(f"{topic_key} page={page}: single-image page must use answer_photo")
+                    continue
+                photo, caption = cb.message.photos[0]
+                if isinstance(photo, tb.FSInputFile):
+                    if not os.path.exists(photo.path):
+                        errors.append(f"{topic_key} page={page}: file missing: {photo.path}")
+                elif not (isinstance(photo, str) and photo.startswith("http")):
+                    errors.append(f"{topic_key} page={page}: unexpected photo type: {type(photo)}")
+                if not caption or "Источник:" not in caption:
+                    errors.append(f"{topic_key} page={page}: caption missing credit line")
             else:
-                errors.append(f"{topic_key} idx={idx}: unexpected photo type: {type(photo)}")
-            if not caption or "Источник:" not in caption:
-                errors.append(f"{topic_key} idx={idx}: caption missing credit line")
+                if not cb.message.media_groups:
+                    errors.append(f"{topic_key} page={page}: no album sent")
+                    continue
+                media = cb.message.media_groups[0]
+                if len(media) != expected:
+                    errors.append(f"{topic_key} page={page}: expected {expected} photos, got {len(media)}")
+                for m in media:
+                    photo = m.media
+                    if isinstance(photo, tb.FSInputFile):
+                        if not os.path.exists(photo.path):
+                            errors.append(f"{topic_key} page={page}: file missing: {photo.path}")
+                    elif not (isinstance(photo, str) and photo.startswith("http")):
+                        errors.append(f"{topic_key} page={page}: unexpected photo type: {type(photo)}")
+                    if not m.caption or "Источник:" not in m.caption:
+                        errors.append(f"{topic_key} page={page}: caption missing credit line")
+            assert cb.message.edits, f"{topic_key} page={page}: missing nav message"
+            nav_text, kb = cb.message.edits[-1]
             data = kb_data(kb)
-            if idx > 0:
-                assert f"anatomy_atlas:{topic_key}:{idx-1}" in data, f"{topic_key} idx={idx}: missing prev button"
-            else:
-                assert not any(d and d.startswith(f"anatomy_atlas:{topic_key}:") and d.endswith(":-1") for d in data)
-            if idx < len(images) - 1:
-                assert f"anatomy_atlas:{topic_key}:{idx+1}" in data, f"{topic_key} idx={idx}: missing next button"
+            if page > 0:
+                assert f"anatomy_atlas:{topic_key}:{page-1}" in data, f"{topic_key} page={page}: missing prev button"
+            if page < pages - 1:
+                assert f"anatomy_atlas:{topic_key}:{page+1}" in data, f"{topic_key} page={page}: missing next button"
             assert f"anatomy_topic:{topic_key}" in data
-            total_images_tested += 1
-        print(f"{topic_key}: {len(images)} atlas images OK")
+            total_images_tested += len(media)
+        print(f"{topic_key}: {len(images)} atlas images across {pages} page(s) OK")
 
-    # 3. out-of-range / missing index -> alert, no crash
+    # 3. out-of-range page -> alert, no crash
     cb = FakeCB("anatomy_atlas:trunk_joints:999")
     await tb.cb_anatomy_atlas(cb)
-    assert not cb.message.photos
+    assert not cb.message.media_groups
     assert cb._answers and cb._answers[-1][1] is True
-    print("out-of-range index -> alert OK")
+    print("out-of-range page -> alert OK")
 
+    # 4. topic without atlas_images -> alert, no crash
     cb = FakeCB("anatomy_atlas:general_joints:0")
     await tb.cb_anatomy_atlas(cb)
-    assert not cb.message.photos
+    assert not cb.message.media_groups
     assert cb._answers and cb._answers[-1][1] is True
     print("topic without atlas_images -> alert OK")
 

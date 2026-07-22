@@ -11,7 +11,7 @@ class FakeUser:
 class FakeMsg:
     def __init__(self):
         self.edits = []
-        self.photos = []
+        self.media_groups = []
         self.message_id = 1
         self.chat = type("C", (), {"id": 1})()
     async def edit_text(self, text, **kwargs):
@@ -19,8 +19,8 @@ class FakeMsg:
         return self
     async def delete(self):
         pass
-    async def answer_photo(self, photo, **kwargs):
-        self.photos.append((photo, kwargs.get("caption")))
+    async def answer_media_group(self, media, **kwargs):
+        self.media_groups.append(media)
         return self
     async def answer(self, text, **kwargs):
         self.edits.append(text)
@@ -60,10 +60,10 @@ async def main():
         else:
             assert cb._answers and cb._answers[0][1] is True
 
-        # images (real photos now)
-        cb = FakeCB(f"anatomy_bone_img:{topic_key}:{bid}:0")
-        await tb.cb_anatomy_bone_img(cb)
-        assert cb.message.photos
+        # images (real photos now, sent as a native Telegram album)
+        cb = FakeCB(f"anatomy_bone_slides:{topic_key}:{bid}:0")
+        await tb.cb_anatomy_bone_slides(cb)
+        assert cb.message.media_groups, f"{bid} should have at least one slide"
 
         # flashcards
         fcards = tb.get_bone_flashcards(topic_key, bid)

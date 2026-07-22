@@ -43,7 +43,7 @@ EXEMPT_EXAMPLES = [
     "admin_global_promo_confirm", "admin_global_promo_go",
     "anatomy_menu", "anatomy_osteology", "anatomy_topic:skull", "anatomy_bones:skull",
     "anatomy_bone_hub:skull:frontal", "anatomy_bone_material:skull:frontal:0",
-    "anatomy_bone_img:skull:frontal:0", "anatomy_bone_flash_start:skull:frontal",
+    "anatomy_bone_slides:skull:frontal:0", "anatomy_bone_atlas:skull:frontal:0", "anatomy_bone_flash_start:skull:frontal",
     "anatomy_bone_match_start:skull:frontal", "anatomy_bone_mnemonics:skull:frontal:0",
     "anatomy_material_list:skull", "anatomy_material:skull:0", "anatomy_flash_start:skull",
     "anatomy_flash_show_answer", "anatomy_flash_know", "anatomy_flash_dont_know", "anatomy_flash_stop",

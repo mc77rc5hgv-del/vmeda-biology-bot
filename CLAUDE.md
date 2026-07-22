@@ -93,11 +93,17 @@ automatically apply to another.
 bone_material_ids, bone_images, atlas_images}`. `bones_list`/`bone_material_ids`/`bone_images` let a topic be
 browsed either as one continuous `material` sequence or broken down per named bone/structure ("hub" screens) —
 see `get_anatomy_bone_hub_*` / `get_bone_*` helpers; only osteology topics (`skull`, `trunk_bones`,
-`upper_limb_bones`, `lower_limb_bones`) use this hub structure. Topics with no natural per-bone breakdown
-(arthrology, myology, and the whole of `splanchnology`/`angiology`/`neurology`/`sense_organs`) instead carry a flat
-`atlas_images: [{path, caption, credit}]` list, shown via a "🖼 Атлас" button (`anatomy_atlas:{topic}:{idx}`,
-`get_topic_atlas_images`/`render_topic_atlas_image`) — a smaller, self-contained carousel mirroring
-`render_bone_image` rather than retrofitting the bone-hub code onto non-bone topics. **`ANATOMY`'s top-level
+`upper_limb_bones`, `lower_limb_bones`) use this hub structure. Each bone's `bone_images` list mixes two photo
+sources under one JSON array, distinguished only by their `credit` string — `get_bone_images(topic_key, bone_id,
+kind=None|"slides"|"atlas")` filters at query time (`kind="atlas"` keeps only `ANATOMY_ATLAS_CREDITS` — Неттер/
+Гайворонский; `kind="slides"` keeps everything else, i.e. the older "ВМедА, кафедра нормальной анатомии — учебная
+презентация" lecture photos) rather than the JSON ever storing them as two separate lists. The bone hub shows a
+"📽 Слайды (презентация)" and/or "🖼 Атлас (Неттер/Гайворонский)" button, each only when that bone actually has
+images of that kind. Topics with no natural per-bone breakdown (arthrology, myology, and the whole of
+`splanchnology`/`angiology`/`neurology`/`sense_organs`) instead carry a flat `atlas_images: [{path, caption,
+credit}]` list on the topic dict, shown via a "🖼 Атлас" button (`anatomy_atlas:{topic}:{page}`,
+`get_topic_atlas_images`) — same album mechanism as the bone hub's atlas/slides buttons, just keyed by topic
+instead of by bone. **`ANATOMY`'s top-level
 section dict and topic dict are the only source of truth for navigation** — `get_anatomy_menu_keyboard`,
 `get_topic_section_key`, `get_anatomy_topic_data` all iterate `ANATOMY.items()` directly, so adding a whole new
 section (e.g. `splanchnology`) is a pure content change, zero code changes, as long as the topic dict shape
@@ -112,9 +118,15 @@ source material were never filled with a real photo) — always discover real fi
 than assuming `range(1, count+1)`.
 
 Images referenced by content JSON live under `images/<subject>/...` and are resolved relative to `IMAGES_DIR`
-(`ANATOMY_IMAGES_DIR`, `HISTOLOGY_IMAGES_DIR`). Photo carousels are hand-rolled per section (delete-and-resend a
-new photo message on ⬅️/➡️, not Telegram media groups — `sendMediaGroup` doesn't support `reply_markup`, so a
-button-driven album isn't possible without losing the nav buttons).
+(`ANATOMY_IMAGES_DIR`, `HISTOLOGY_IMAGES_DIR`). Anatomy photos are sent as native Telegram albums
+(`send_anatomy_album`, via `Message.answer_media_group`) — up to `ANATOMY_ALBUM_PAGE_SIZE` (10, Telegram's
+`sendMediaGroup` cap) photos per message, swipeable in place with no further bot round-trips, instead of the
+older delete-and-resend single-photo carousel. `sendMediaGroup` itself can't carry a `reply_markup`, so
+`send_anatomy_album` follows the album with a small separate text message carrying the prev/next-page and back
+buttons. `sendMediaGroup` also requires 2-10 items, not 1-10 — a page whose remaining images total exactly 1 is
+sent via plain `answer_photo` instead of a one-item album (`build_input_media_photo` builds the `InputMediaPhoto`
+items for the multi-photo case). Other subjects' photo carousels (Biology/Physics/Histology) are unaffected by
+this and still hand-roll delete-and-resend on ⬅️/➡️.
 
 ### Access control (two independent gates)
 
