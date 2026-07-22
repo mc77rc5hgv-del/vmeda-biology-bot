@@ -137,9 +137,9 @@ async def main():
     await tb.cb_anatomy_match_stop(cb3)
     print("pooled-mode-handlers OK")
 
-    # latin terms trainer (skull only, for now)
+    # latin terms trainer (pooled, whole-topic)
     latin_terms = tb.get_topic_latin_terms(topic_key)
-    assert len(latin_terms) >= 30, "skull should have a sizable latin term bank"
+    assert len(latin_terms) >= 100, "skull should have a large per-bone latin term bank"
     cb = FakeCB(f"anatomy_latin_start:{topic_key}")
     await tb.cb_anatomy_latin_start(cb)
     assert cb.message.edits
@@ -162,9 +162,28 @@ async def main():
     assert uid not in tb.ANATOMY_LATIN_SESSIONS
 
     # topic with no latin_terms -> graceful alert, not a crash
-    cb4 = FakeCB("anatomy_latin_start:trunk_bones")
+    cb4 = FakeCB("anatomy_latin_start:general_joints")
     await tb.cb_anatomy_latin_start(cb4)
     assert cb4._answers and cb4._answers[0][1] is True
+
+    # per-bone latin trainer
+    bone_latin_terms = tb.get_bone_latin_terms(topic_key, "frontal")
+    assert bone_latin_terms, "frontal bone should have its own latin terms"
+    cb5 = FakeCB(f"anatomy_bone_latin_start:{topic_key}:frontal")
+    await tb.cb_anatomy_bone_latin_start(cb5)
+    assert cb5.message.edits
+    uid5 = cb5.from_user.id
+    sess5 = tb.ANATOMY_LATIN_SESSIONS.get(uid5)
+    assert sess5 is not None and sess5["bone_id"] == "frontal"
+    assert all(term["bone"] == "frontal" for term in sess5["queue"])
+    cb6 = FakeCB("anatomy_latin_stop", uid5)
+    await tb.cb_anatomy_latin_stop(cb6)
+    assert uid5 not in tb.ANATOMY_LATIN_SESSIONS
+
+    # bone with no latin terms -> graceful alert, not a crash
+    cb7 = FakeCB(f"anatomy_bone_latin_start:{topic_key}:general")
+    await tb.cb_anatomy_bone_latin_start(cb7)
+    assert cb7._answers and cb7._answers[0][1] is True
     print("latin terms trainer OK")
 
     print("ALL HANDLER TESTS PASSED")

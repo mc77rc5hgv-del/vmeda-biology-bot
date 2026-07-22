@@ -5121,6 +5121,10 @@ def get_bone_mnemonics(topic_key: str, bone_id: str) -> list:
     topic = get_anatomy_topic_data(topic_key)
     return [mn for mn in topic["mnemonics"] if mn.get("bone") == bone_id]
 
+def get_bone_latin_terms(topic_key: str, bone_id: str) -> list:
+    topic = get_anatomy_topic_data(topic_key)
+    return [t for t in topic.get("latin_terms", []) if t.get("bone") == bone_id]
+
 ANATOMY_ATLAS_CREDITS = {"Ф. Неттер, Атлас анатомии человека", "И.В. Гайворонский, Нормальная анатомия человека"}
 ANATOMY_ALBUM_PAGE_SIZE = 10  # sendMediaGroup hard cap
 
@@ -5147,6 +5151,8 @@ def get_anatomy_bone_hub_keyboard(topic_key: str, bone_id: str):
     builder.button(text="🎴 Флэш-карточки", callback_data=f"anatomy_bone_flash_start:{topic_key}:{bone_id}")
     builder.button(text="🔗 Сопоставление", callback_data=f"anatomy_bone_match_start:{topic_key}:{bone_id}")
     builder.button(text="🧠 Мнемоники", callback_data=f"anatomy_bone_mnemonics:{topic_key}:{bone_id}:0")
+    if get_bone_latin_terms(topic_key, bone_id):
+        builder.button(text="🏛 Латинские термины", callback_data=f"anatomy_bone_latin_start:{topic_key}:{bone_id}")
     builder.adjust(1)
     builder.row(InlineKeyboardButton(text="🔙 К списку костей", callback_data=f"anatomy_bones:{topic_key}"))
     return builder.as_markup()
@@ -5159,6 +5165,7 @@ def get_anatomy_bone_hub_text(topic_key: str, bone_id: str) -> str:
     n_flash = len(get_bone_flashcards(topic_key, bone_id))
     n_pairs = len(get_bone_pairs(topic_key, bone_id))
     n_mnemo = len(get_bone_mnemonics(topic_key, bone_id))
+    n_latin = len(get_bone_latin_terms(topic_key, bone_id))
     return (
         f"🦴 <b>{title}</b>\n{DIVIDER}\n\n"
         f"📖 Материал: {n_material} стр.\n"
@@ -5166,7 +5173,8 @@ def get_anatomy_bone_hub_text(topic_key: str, bone_id: str) -> str:
         f"🖼 Атлас (Неттер/Гайворонский): {n_atlas}\n"
         f"🎴 Флэш-карточек: {n_flash}\n"
         f"🔗 Пар для сопоставления: {n_pairs}\n"
-        f"🧠 Мнемоник: {n_mnemo}\n\n"
+        f"🧠 Мнемоник: {n_mnemo}\n"
+        f"🏛 Латинских терминов: {n_latin}\n\n"
         "Выбери формат подготовки:"
     )
 
@@ -5268,13 +5276,15 @@ def get_topic_latin_terms(topic_key: str) -> list:
     topic = get_anatomy_topic_data(topic_key)
     return topic.get("latin_terms", []) if topic else []
 
-def start_anatomy_latin_session(user_id: int, topic_key: str):
+def start_anatomy_latin_session(user_id: int, topic_key: str, bone_id: str = None):
     all_terms = get_topic_latin_terms(topic_key)
-    size = min(ANATOMY_LATIN_SESSION_SIZE, len(all_terms))
+    queue_terms = get_bone_latin_terms(topic_key, bone_id) if bone_id else all_terms
+    size = min(ANATOMY_LATIN_SESSION_SIZE, len(queue_terms))
     ANATOMY_LATIN_SESSIONS[user_id] = {
         "topic_key": topic_key,
+        "bone_id": bone_id,
         "all_terms": all_terms,
-        "queue": random.sample(all_terms, size),
+        "queue": random.sample(queue_terms, size),
         "index": 0,
         "correct": 0,
         "wrong": 0,
@@ -5315,6 +5325,7 @@ async def render_anatomy_latin_summary(message, user_id: int, aborted: bool = Fa
     if not session:
         return
     topic_key = session["topic_key"]
+    bone_id = session.get("bone_id")
     answered = session["correct"] + session["wrong"]
     title = "🛑 <b>Прервано</b>" if aborted else "🏁 <b>Тренажёр пройден!</b>"
     text = (
@@ -5322,8 +5333,12 @@ async def render_anatomy_latin_summary(message, user_id: int, aborted: bool = Fa
         f"Отвечено: <b>{answered}</b>\n✅ Верно: <b>{session['correct']}</b>\n❌ Неверно: <b>{session['wrong']}</b>"
     )
     builder = InlineKeyboardBuilder()
-    builder.button(text="🔁 Пройти ещё раз", callback_data=f"anatomy_latin_start:{topic_key}")
-    builder.button(text="🔙 К разделу", callback_data=f"anatomy_topic:{topic_key}")
+    if bone_id:
+        builder.button(text="🔁 Пройти ещё раз", callback_data=f"anatomy_bone_latin_start:{topic_key}:{bone_id}")
+        builder.button(text="🔙 К кости", callback_data=f"anatomy_bone_hub:{topic_key}:{bone_id}")
+    else:
+        builder.button(text="🔁 Пройти ещё раз", callback_data=f"anatomy_latin_start:{topic_key}")
+        builder.button(text="🔙 К разделу", callback_data=f"anatomy_topic:{topic_key}")
     builder.adjust(1)
     await safe_edit_text(message, text, parse_mode="HTML", reply_markup=builder.as_markup())
 
@@ -5769,6 +5784,20 @@ async def cb_anatomy_bone_match_start(callback: CallbackQuery):
     await callback.answer()
     start_anatomy_match_session(callback.from_user.id, topic_key, bone_id=bone_id)
     await render_anatomy_match_question(callback.message, callback.from_user.id)
+
+@dp.callback_query(F.data.startswith("anatomy_bone_latin_start:"))
+async def cb_anatomy_bone_latin_start(callback: CallbackQuery):
+    if not anatomy_access_ok(callback.from_user.id):
+        await callback.answer(get_anatomy_dev_alert_text(), show_alert=True)
+        return
+    _, topic_key, bone_id = callback.data.split(":")
+    topic = get_anatomy_topic_data(topic_key)
+    if not topic or not get_bone_latin_terms(topic_key, bone_id):
+        await callback.answer("Термины для этой кости ещё не добавлены", show_alert=True)
+        return
+    await callback.answer()
+    start_anatomy_latin_session(callback.from_user.id, topic_key, bone_id=bone_id)
+    await render_anatomy_latin_question(callback.message, callback.from_user.id)
 
 @dp.callback_query(F.data.startswith("anatomy_bone_mnemonics:"))
 async def cb_anatomy_bone_mnemonics(callback: CallbackQuery):

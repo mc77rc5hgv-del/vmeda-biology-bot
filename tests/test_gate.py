@@ -50,6 +50,7 @@ EXEMPT_EXAMPLES = [
     "anatomy_match_start:skull", "anatomy_match_answer:0", "anatomy_match_stop",
     "anatomy_mnemonics:skull:0", "anatomy_picture:skull",
     "anatomy_latin_start:skull", "anatomy_latin_answer:0", "anatomy_latin_stop",
+    "anatomy_bone_latin_start:skull:frontal",
 ]
 
 fail = False

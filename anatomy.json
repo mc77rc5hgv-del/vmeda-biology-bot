@@ -1354,316 +1354,624 @@
         "icon": "💀",
         "latin_terms": [
           {
-            "la": "cranium",
-            "ru": "Череп"
+            "la": "Squama occipitalis",
+            "ru": "чешуя затылочной кости",
+            "bone": "occipital"
           },
           {
-            "la": "cranium cerebrale",
-            "ru": "мозговой череп"
+            "la": "Pars basilaris",
+            "ru": "базилярная часть",
+            "bone": "occipital"
           },
           {
-            "la": "neurocranium",
-            "ru": "мозговой череп"
+            "la": "Partes laterales",
+            "ru": "латеральные части",
+            "bone": "occipital"
           },
           {
-            "la": "cranium viscerale",
-            "ru": "лицевой череп"
+            "la": "Foramen magnum",
+            "ru": "большое (затылочное) отверстие",
+            "bone": "occipital"
           },
           {
-            "la": "splanchnocranium",
-            "ru": "лицевой череп"
+            "la": "Condylus occipitalis",
+            "ru": "затылочный мыщелок",
+            "bone": "occipital"
           },
           {
-            "la": "basis cranii externa",
-            "ru": "наружное основание"
+            "la": "Protuberantia occipitalis externa",
+            "ru": "наружный затылочный выступ",
+            "bone": "occipital"
           },
           {
-            "la": "norma verticalis",
-            "ru": "вертикальная норма"
+            "la": "Protuberantia occipitalis interna",
+            "ru": "внутренний затылочный выступ",
+            "bone": "occipital"
           },
           {
-            "la": "norma basilaris",
-            "ru": "базилярная норма"
+            "la": "Lineae nuchae superiores",
+            "ru": "верхние выйные линии",
+            "bone": "occipital"
           },
           {
-            "la": "norma facialis",
-            "ru": "лицевая норма"
+            "la": "Lineae nuchae inferiores",
+            "ru": "нижние выйные линии",
+            "bone": "occipital"
           },
           {
-            "la": "norma occipitalis",
-            "ru": "затылочная норма"
+            "la": "Linea nuchae suprema",
+            "ru": "наивысшая выйная линия",
+            "bone": "occipital"
           },
           {
-            "la": "norma lateralis",
-            "ru": "латеральная норма"
+            "la": "Sulcus sinus transversi",
+            "ru": "борозда поперечного синуса",
+            "bone": "occipital"
           },
           {
-            "la": "calvaria",
-            "ru": "свод (крыша) черепа"
+            "la": "Sulcus sinus sagittalis superior",
+            "ru": "борозда верхнего сагиттального синуса",
+            "bone": "occipital"
           },
           {
-            "la": "basis cranii",
-            "ru": "основание черепа"
+            "la": "Canalis condylaris",
+            "ru": "мыщелковый канал",
+            "bone": "occipital"
           },
           {
-            "la": "os frontale",
-            "ru": "Лобная кость"
+            "la": "Canalis hypoglossi",
+            "ru": "подъязычный канал",
+            "bone": "occipital"
           },
           {
-            "la": "squama frontalis",
-            "ru": "Лобная чешуя"
+            "la": "Fossa condylaris",
+            "ru": "мыщелковая ямка",
+            "bone": "occipital"
           },
           {
-            "la": "pars nasalis",
-            "ru": "Носовая часть"
+            "la": "Tuber parietale",
+            "ru": "теменной бугор",
+            "bone": "parietal"
           },
           {
-            "la": "os occipitale",
-            "ru": "Затылочная кость"
+            "la": "Linea temporalis superior",
+            "ru": "верхняя височная линия",
+            "bone": "parietal"
           },
           {
-            "la": "foramen magnum",
-            "ru": "большое (затылочное) отверстие"
+            "la": "Linea temporalis inferior",
+            "ru": "нижняя височная линия",
+            "bone": "parietal"
           },
           {
-            "la": "pars basilaris",
-            "ru": "Базилярная часть"
+            "la": "Sulcus sinus sagittalis superior",
+            "ru": "борозда верхнего сагиттального синуса",
+            "bone": "parietal"
           },
           {
-            "la": "clivus",
-            "ru": "скат"
+            "la": "Foveolae granulares",
+            "ru": "ямочки грануляций",
+            "bone": "parietal"
           },
           {
-            "la": "tuberculum pharyngeum",
-            "ru": "глоточный бугорок"
+            "la": "Sulcus arteriae meningeae mediae",
+            "ru": "борозда средней менингеальной артерии",
+            "bone": "parietal"
           },
           {
-            "la": "condylus occipitalis",
-            "ru": "затылочный мыщелок"
+            "la": "Squama frontalis",
+            "ru": "лобная чешуя",
+            "bone": "frontal"
           },
           {
-            "la": "fossa condylaris",
-            "ru": "мыщелковая ямка"
+            "la": "Pars orbitalis",
+            "ru": "глазничная часть",
+            "bone": "frontal"
           },
           {
-            "la": "canalis condylaris",
-            "ru": "мыщелковый канал"
+            "la": "Pars nasalis",
+            "ru": "носовая часть",
+            "bone": "frontal"
           },
           {
-            "la": "canalis nervi hypoglossi",
-            "ru": "канал подъязычного нерва"
+            "la": "Tuber frontale",
+            "ru": "лобный бугор",
+            "bone": "frontal"
           },
           {
-            "la": "incisura jugularis",
-            "ru": "яремная вырезка"
+            "la": "Arcus superciliaris",
+            "ru": "надбровная дуга",
+            "bone": "frontal"
           },
           {
-            "la": "processus jugularis",
-            "ru": "яремный отросток"
+            "la": "Glabella",
+            "ru": "глабелла",
+            "bone": "frontal"
           },
           {
-            "la": "tuberculum jugulare",
-            "ru": "яремный бугорок"
+            "la": "Incisura supraorbitalis",
+            "ru": "надглазничная вырезка",
+            "bone": "frontal"
           },
           {
-            "la": "squama occipitalis",
-            "ru": "Затылочная чешуя"
+            "la": "Foramen supraorbitale",
+            "ru": "надглазничное отверстие",
+            "bone": "frontal"
           },
           {
-            "la": "eminentia cruciformis",
-            "ru": "крестообразное возвышение"
+            "la": "Margo supraorbitalis",
+            "ru": "надглазничный край",
+            "bone": "frontal"
           },
           {
-            "la": "os sphenoidale",
-            "ru": "Клиновидная кость"
+            "la": "Spina frontalis",
+            "ru": "лобная ость",
+            "bone": "frontal"
           },
           {
-            "la": "corpus",
-            "ru": "Тело"
+            "la": "Crista frontalis",
+            "ru": "лобный гребень",
+            "bone": "frontal"
           },
           {
-            "la": "sella turcica",
-            "ru": "турецкое седло"
+            "la": "Sinus frontalis",
+            "ru": "лобная пазуха",
+            "bone": "frontal"
           },
           {
-            "la": "rostrum sphenoidale",
-            "ru": "клиновидный киль/клюв"
+            "la": "Lamina cribrosa",
+            "ru": "решётчатая пластинка",
+            "bone": "ethmoid"
           },
           {
-            "la": "os ethmoidale",
-            "ru": "Решётчатая кость"
+            "la": "Crista galli",
+            "ru": "петушиный гребень",
+            "bone": "ethmoid"
           },
           {
-            "la": "lamina cribrosa",
-            "ru": "Решётчатая (продырявленная) пластинка"
+            "la": "Ala cristae galli",
+            "ru": "крыло петушиного гребня",
+            "bone": "ethmoid"
           },
           {
-            "la": "lamina perpendicularis",
-            "ru": "Перпендикулярная пластинка"
+            "la": "Lamina perpendicularis",
+            "ru": "перпендикулярная пластинка",
+            "bone": "ethmoid"
           },
           {
-            "la": "pars petrosa",
-            "ru": "Каменистая часть/пирамида"
+            "la": "Labyrinthus ethmoidalis",
+            "ru": "решётчатый лабиринт",
+            "bone": "ethmoid"
           },
           {
-            "la": "pyramis",
-            "ru": "Каменистая часть/пирамида"
+            "la": "Cellulae ethmoidales",
+            "ru": "решётчатые ячейки",
+            "bone": "ethmoid"
           },
           {
-            "la": "pars tympanica",
-            "ru": "Барабанная часть"
+            "la": "Concha nasalis superior",
+            "ru": "верхняя носовая раковина",
+            "bone": "ethmoid"
           },
           {
-            "la": "pars mastoidea",
-            "ru": "Сосцевидная часть"
+            "la": "Concha nasalis media",
+            "ru": "средняя носовая раковина",
+            "bone": "ethmoid"
           },
           {
-            "la": "pars squamosa",
-            "ru": "Чешуйчатая часть"
+            "la": "Pars squamosa",
+            "ru": "чешуйчатая часть",
+            "bone": "temporal"
           },
           {
-            "la": "canalis nervi facialis",
-            "ru": "Канал лицевого нерва"
+            "la": "Pars petrosa (pyramis)",
+            "ru": "каменистая часть (пирамида)",
+            "bone": "temporal"
           },
           {
-            "la": "geniculum canalis nervi facialis",
-            "ru": "коленце"
+            "la": "Pars tympanica",
+            "ru": "барабанная часть",
+            "bone": "temporal"
           },
           {
-            "la": "canalis caroticus",
-            "ru": "Сонный канал"
+            "la": "Pars mastoidea",
+            "ru": "сосцевидная часть",
+            "bone": "temporal"
           },
           {
-            "la": "mandibula",
-            "ru": "Нижняя челюсть"
+            "la": "Meatus acusticus externus",
+            "ru": "наружный слуховой проход",
+            "bone": "temporal"
           },
           {
-            "la": "corpus mandibulae",
-            "ru": "тело нижней челюсти"
+            "la": "Cavitas tympani",
+            "ru": "барабанная полость",
+            "bone": "temporal"
           },
           {
-            "la": "ramus mandibulae",
-            "ru": "ветвь нижней челюсти"
+            "la": "Canalis caroticus",
+            "ru": "сонный канал",
+            "bone": "temporal"
           },
           {
-            "la": "crista lacrimalis posterior",
-            "ru": "Задний слёзный гребень"
+            "la": "Canalis facialis",
+            "ru": "канал лицевого нерва",
+            "bone": "temporal"
           },
           {
-            "la": "hamulus lacrimalis",
-            "ru": "слёзный крючок"
+            "la": "Foramen stylomastoideum",
+            "ru": "шилососцевидное отверстие",
+            "bone": "temporal"
           },
           {
-            "la": "fossa sacci lacrimalis",
-            "ru": "ямка слёзного мешка"
+            "la": "Processus styloideus",
+            "ru": "шиловидный отросток",
+            "bone": "temporal"
           },
           {
-            "la": "canalis nasolacrimalis",
-            "ru": "носослёзный канал"
+            "la": "Processus mastoideus",
+            "ru": "сосцевидный отросток",
+            "bone": "temporal"
           },
           {
-            "la": "sulcus ethmoidalis",
-            "ru": "решётчатая борозда"
+            "la": "Fossa mandibularis",
+            "ru": "нижнечелюстная ямка",
+            "bone": "temporal"
           },
           {
-            "la": "foramen nasale",
-            "ru": "носовое отверстие"
+            "la": "Tuberculum articulare",
+            "ru": "суставной бугорок",
+            "bone": "temporal"
           },
           {
-            "la": "lamina vomeris",
-            "ru": "пластинка сошника"
+            "la": "Tegmen tympani",
+            "ru": "крыша барабанной полости",
+            "bone": "temporal"
           },
           {
-            "la": "alae vomeris",
-            "ru": "крылья сошника"
+            "la": "Aqueductus vestibuli",
+            "ru": "водопровод преддверия",
+            "bone": "temporal"
           },
           {
-            "la": "os hyoideum",
-            "ru": "Подъязычная кость"
+            "la": "Aqueductus cochleae",
+            "ru": "водопровод улитки",
+            "bone": "temporal"
           },
           {
-            "la": "corpus ossis hyoidei",
-            "ru": "тело подъязычной кости"
+            "la": "Sulcus sinus sigmoidei",
+            "ru": "борозда сигмовидного синуса",
+            "bone": "temporal"
           },
           {
-            "la": "sutura sagittalis",
-            "ru": "сагиттальный шов"
+            "la": "Malleus",
+            "ru": "молоточек",
+            "bone": "temporal"
           },
           {
-            "la": "sutura coronalis",
-            "ru": "венечный шов"
+            "la": "Incus",
+            "ru": "наковальня",
+            "bone": "temporal"
           },
           {
-            "la": "sutura lambdoidea",
-            "ru": "ламбдовидный шов"
+            "la": "Stapes",
+            "ru": "стремя",
+            "bone": "temporal"
           },
           {
-            "la": "suturae serratae",
-            "ru": "зубчатые швы"
+            "la": "Corpus",
+            "ru": "тело",
+            "bone": "sphenoid"
           },
           {
-            "la": "basis cranii interna",
-            "ru": "Внутреннее основание черепа"
+            "la": "Alae majores",
+            "ru": "большие крылья",
+            "bone": "sphenoid"
           },
           {
-            "la": "fossa cranii anterior",
-            "ru": "Передняя черепная ямка"
+            "la": "Alae minores",
+            "ru": "малые крылья",
+            "bone": "sphenoid"
           },
           {
-            "la": "canalis opticus",
-            "ru": "зрительный канал"
+            "la": "Processus pterygoidei",
+            "ru": "крыловидные отростки",
+            "bone": "sphenoid"
           },
           {
-            "la": "fossa cranii media",
-            "ru": "Средняя черепная ямка"
+            "la": "Sella turcica",
+            "ru": "турецкое седло",
+            "bone": "sphenoid"
           },
           {
-            "la": "ganglion trigeminale",
-            "ru": "тройничный узел"
+            "la": "Fossa hypophysialis",
+            "ru": "гипофизарная ямка",
+            "bone": "sphenoid"
           },
           {
-            "la": "fossa cranii posterior",
-            "ru": "Задняя черепная ямка"
+            "la": "Dorsum sellae",
+            "ru": "спинка турецкого седла",
+            "bone": "sphenoid"
           },
           {
-            "la": "orbita",
-            "ru": "Глазница"
+            "la": "Processus clinoidei anteriores",
+            "ru": "передние наклонённые отростки",
+            "bone": "sphenoid"
           },
           {
-            "la": "cavitas nasi",
-            "ru": "Полость носа"
+            "la": "Processus clinoidei posteriores",
+            "ru": "задние наклонённые отростки",
+            "bone": "sphenoid"
           },
           {
-            "la": "septum nasi osseum",
-            "ru": "костная перегородка носа"
+            "la": "Foramen rotundum",
+            "ru": "круглое отверстие",
+            "bone": "sphenoid"
           },
           {
-            "la": "palatum osseum",
-            "ru": "Костное нёбо"
+            "la": "Foramen ovale",
+            "ru": "овальное отверстие",
+            "bone": "sphenoid"
           },
           {
-            "la": "palatum fissum",
-            "ru": "расщелина нёба («волчья пасть»)"
+            "la": "Foramen spinosum",
+            "ru": "остистое отверстие",
+            "bone": "sphenoid"
           },
           {
-            "la": "fossa temporalis",
-            "ru": "Височная ямка"
+            "la": "Fissura orbitalis superior",
+            "ru": "верхняя глазничная щель",
+            "bone": "sphenoid"
           },
           {
-            "la": "fossa infratemporalis",
-            "ru": "Подвисочная ямка"
+            "la": "Canalis pterygoideus",
+            "ru": "крыловидный канал",
+            "bone": "sphenoid"
           },
           {
-            "la": "fossa pterygopalatina",
-            "ru": "Крыловидно-нёбная ямка"
+            "la": "Corpus maxillae",
+            "ru": "тело верхней челюсти",
+            "bone": "maxilla"
           },
           {
-            "la": "fonticuli",
-            "ru": "Роднички"
+            "la": "Processus frontalis",
+            "ru": "лобный отросток",
+            "bone": "maxilla"
           },
           {
-            "la": "lamina vitrea",
-            "ru": "стекловидная пластинка"
+            "la": "Processus zygomaticus",
+            "ru": "скуловой отросток",
+            "bone": "maxilla"
+          },
+          {
+            "la": "Processus palatinus",
+            "ru": "нёбный отросток",
+            "bone": "maxilla"
+          },
+          {
+            "la": "Processus alveolaris",
+            "ru": "альвеолярный отросток",
+            "bone": "maxilla"
+          },
+          {
+            "la": "Sinus maxillaris",
+            "ru": "верхнечелюстная (гайморова) пазуха",
+            "bone": "maxilla"
+          },
+          {
+            "la": "Fossa canina",
+            "ru": "клыковая ямка",
+            "bone": "maxilla"
+          },
+          {
+            "la": "Foramen infraorbitale",
+            "ru": "подглазничное отверстие",
+            "bone": "maxilla"
+          },
+          {
+            "la": "Tuber maxillae",
+            "ru": "бугор верхней челюсти",
+            "bone": "maxilla"
+          },
+          {
+            "la": "Crista zygomaticoalveolaris",
+            "ru": "скулоальвеолярный гребень",
+            "bone": "maxilla"
+          },
+          {
+            "la": "Alveoli dentales",
+            "ru": "зубные альвеолы",
+            "bone": "maxilla"
+          },
+          {
+            "la": "Corpus mandibulae",
+            "ru": "тело нижней челюсти",
+            "bone": "mandible"
+          },
+          {
+            "la": "Ramus mandibulae",
+            "ru": "ветвь нижней челюсти",
+            "bone": "mandible"
+          },
+          {
+            "la": "Angulus mandibulae",
+            "ru": "угол нижней челюсти",
+            "bone": "mandible"
+          },
+          {
+            "la": "Basis mandibulae",
+            "ru": "основание нижней челюсти",
+            "bone": "mandible"
+          },
+          {
+            "la": "Pars alveolaris",
+            "ru": "альвеолярная часть",
+            "bone": "mandible"
+          },
+          {
+            "la": "Foramen mentale",
+            "ru": "подбородочное отверстие",
+            "bone": "mandible"
+          },
+          {
+            "la": "Foramen mandibulae",
+            "ru": "нижнечелюстное отверстие",
+            "bone": "mandible"
+          },
+          {
+            "la": "Canalis mandibulae",
+            "ru": "нижнечелюстной канал",
+            "bone": "mandible"
+          },
+          {
+            "la": "Processus coronoideus",
+            "ru": "венечный отросток",
+            "bone": "mandible"
+          },
+          {
+            "la": "Processus condylaris",
+            "ru": "мыщелковый отросток",
+            "bone": "mandible"
+          },
+          {
+            "la": "Caput mandibulae",
+            "ru": "головка нижней челюсти",
+            "bone": "mandible"
+          },
+          {
+            "la": "Incisura mandibulae",
+            "ru": "вырезка нижней челюсти",
+            "bone": "mandible"
+          },
+          {
+            "la": "Linea mylohyoidea",
+            "ru": "челюстно-подъязычная линия",
+            "bone": "mandible"
+          },
+          {
+            "la": "Fovea submandibularis",
+            "ru": "поднижнечелюстная ямка",
+            "bone": "mandible"
+          },
+          {
+            "la": "Fovea sublingualis",
+            "ru": "подъязычная ямка",
+            "bone": "mandible"
+          },
+          {
+            "la": "Tuberositas masseterica",
+            "ru": "жевательная бугристость",
+            "bone": "mandible"
+          },
+          {
+            "la": "Tuberositas pterygoidea",
+            "ru": "крыловидная бугристость",
+            "bone": "mandible"
+          },
+          {
+            "la": "Spina mentalis superior",
+            "ru": "верхняя подбородочная ость",
+            "bone": "mandible"
+          },
+          {
+            "la": "Spina mentalis inferior",
+            "ru": "нижняя подбородочная ость",
+            "bone": "mandible"
+          },
+          {
+            "la": "Protuberantia mentalis",
+            "ru": "подбородочный выступ",
+            "bone": "mandible"
+          },
+          {
+            "la": "Processus temporalis",
+            "ru": "височный отросток",
+            "bone": "zygomatic_bone"
+          },
+          {
+            "la": "Processus frontalis",
+            "ru": "лобный отросток",
+            "bone": "zygomatic_bone"
+          },
+          {
+            "la": "Processus maxillaris",
+            "ru": "верхнечелюстной отросток",
+            "bone": "zygomatic_bone"
+          },
+          {
+            "la": "Facies orbitalis",
+            "ru": "глазничная поверхность",
+            "bone": "zygomatic_bone"
+          },
+          {
+            "la": "Facies temporalis",
+            "ru": "височная поверхность",
+            "bone": "zygomatic_bone"
+          },
+          {
+            "la": "Facies malaris",
+            "ru": "скуловая поверхность",
+            "bone": "zygomatic_bone"
+          },
+          {
+            "la": "Os nasale",
+            "ru": "носовая кость",
+            "bone": "nasal_bone"
+          },
+          {
+            "la": "Sulcus lacrimalis",
+            "ru": "слёзная борозда",
+            "bone": "lacrimal"
+          },
+          {
+            "la": "Crista lacrimalis posterior",
+            "ru": "задний слёзный гребень",
+            "bone": "lacrimal"
+          },
+          {
+            "la": "Lamina horizontalis",
+            "ru": "горизонтальная пластинка",
+            "bone": "palatine"
+          },
+          {
+            "la": "Lamina perpendicularis",
+            "ru": "перпендикулярная пластинка",
+            "bone": "palatine"
+          },
+          {
+            "la": "Processus pyramidalis",
+            "ru": "пирамидальный отросток",
+            "bone": "palatine"
+          },
+          {
+            "la": "Crista conchalis",
+            "ru": "раковинный гребень",
+            "bone": "palatine"
+          },
+          {
+            "la": "Vomer",
+            "ru": "сошник",
+            "bone": "vomer_bone"
+          },
+          {
+            "la": "Concha nasalis inferior",
+            "ru": "нижняя носовая раковина",
+            "bone": "inferior_concha"
+          },
+          {
+            "la": "Corpus ossis hyoidei",
+            "ru": "тело подъязычной кости",
+            "bone": "hyoid_bone"
+          },
+          {
+            "la": "Cornu majus",
+            "ru": "большой рог",
+            "bone": "hyoid_bone"
+          },
+          {
+            "la": "Cornu minus",
+            "ru": "малый рог",
+            "bone": "hyoid_bone"
           }
         ]
       },
@@ -2027,7 +2335,364 @@
               "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
             }
           ]
-        }
+        },
+        "latin_terms": [
+          {
+            "la": "Corpus vertebrae",
+            "ru": "тело позвонка",
+            "bone": "vertebra_general"
+          },
+          {
+            "la": "Arcus vertebrae",
+            "ru": "дуга позвонка",
+            "bone": "vertebra_general"
+          },
+          {
+            "la": "Pediculus arcus vertebrae",
+            "ru": "ножка дуги позвонка",
+            "bone": "vertebra_general"
+          },
+          {
+            "la": "Lamina arcus vertebrae",
+            "ru": "пластинка дуги позвонка",
+            "bone": "vertebra_general"
+          },
+          {
+            "la": "Foramen vertebrale",
+            "ru": "позвоночное отверстие",
+            "bone": "vertebra_general"
+          },
+          {
+            "la": "Processus spinosus",
+            "ru": "остистый отросток",
+            "bone": "vertebra_general"
+          },
+          {
+            "la": "Processus transversi",
+            "ru": "поперечные отростки",
+            "bone": "vertebra_general"
+          },
+          {
+            "la": "Processus articulares superiores",
+            "ru": "верхние суставные отростки",
+            "bone": "vertebra_general"
+          },
+          {
+            "la": "Processus articulares inferiores",
+            "ru": "нижние суставные отростки",
+            "bone": "vertebra_general"
+          },
+          {
+            "la": "Atlas (C I)",
+            "ru": "атлант (I шейный позвонок)",
+            "bone": "atlas_axis"
+          },
+          {
+            "la": "Arcus anterior",
+            "ru": "передняя дуга (атланта)",
+            "bone": "atlas_axis"
+          },
+          {
+            "la": "Arcus posterior",
+            "ru": "задняя дуга (атланта)",
+            "bone": "atlas_axis"
+          },
+          {
+            "la": "Massa lateralis",
+            "ru": "латеральная масса",
+            "bone": "atlas_axis"
+          },
+          {
+            "la": "Fovea dentis",
+            "ru": "ямка зуба",
+            "bone": "atlas_axis"
+          },
+          {
+            "la": "Foramen transversarium",
+            "ru": "поперечное отверстие (атланта)",
+            "bone": "atlas_axis"
+          },
+          {
+            "la": "Tuberculum anterius (atlantis)",
+            "ru": "передний бугорок атланта",
+            "bone": "atlas_axis"
+          },
+          {
+            "la": "Tuberculum posterius (atlantis)",
+            "ru": "задний бугорок атланта",
+            "bone": "atlas_axis"
+          },
+          {
+            "la": "Axis (C II)",
+            "ru": "осевой позвонок (II шейный позвонок)",
+            "bone": "atlas_axis"
+          },
+          {
+            "la": "Dens axis",
+            "ru": "зуб осевого позвонка",
+            "bone": "atlas_axis"
+          },
+          {
+            "la": "Apex dentis",
+            "ru": "верхушка зуба",
+            "bone": "atlas_axis"
+          },
+          {
+            "la": "Facies articularis anterior dentis",
+            "ru": "передняя суставная поверхность зуба",
+            "bone": "atlas_axis"
+          },
+          {
+            "la": "Facies articularis posterior dentis",
+            "ru": "задняя суставная поверхность зуба",
+            "bone": "atlas_axis"
+          },
+          {
+            "la": "Processus spinosus bifidus",
+            "ru": "раздвоенный остистый отросток (осевого позвонка)",
+            "bone": "atlas_axis"
+          },
+          {
+            "la": "Foramen transversarium",
+            "ru": "поперечное отверстие",
+            "bone": "cervical_vertebra"
+          },
+          {
+            "la": "Tuberculum anterius processus transversi",
+            "ru": "передний бугорок поперечного отростка",
+            "bone": "cervical_vertebra"
+          },
+          {
+            "la": "Tuberculum posterius processus transversi",
+            "ru": "задний бугорок поперечного отростка",
+            "bone": "cervical_vertebra"
+          },
+          {
+            "la": "Processus spinosus bifidus",
+            "ru": "раздвоенный остистый отросток",
+            "bone": "cervical_vertebra"
+          },
+          {
+            "la": "Vertebra prominens (C VII)",
+            "ru": "выдающийся позвонок (VII шейный)",
+            "bone": "cervical_vertebra"
+          },
+          {
+            "la": "Fovea costalis superior",
+            "ru": "верхняя рёберная ямка",
+            "bone": "thoracic_vertebra"
+          },
+          {
+            "la": "Fovea costalis inferior",
+            "ru": "нижняя рёберная ямка",
+            "bone": "thoracic_vertebra"
+          },
+          {
+            "la": "Fovea costalis processus transversi",
+            "ru": "рёберная ямка поперечного отростка",
+            "bone": "thoracic_vertebra"
+          },
+          {
+            "la": "Processus spinosus (thoracicus)",
+            "ru": "остистый отросток (направлен вниз и назад)",
+            "bone": "thoracic_vertebra"
+          },
+          {
+            "la": "Corpus vertebrae (massivum)",
+            "ru": "тело позвонка (массивное)",
+            "bone": "lumbar_vertebra"
+          },
+          {
+            "la": "Processus mamillares",
+            "ru": "сосцевидные отростки",
+            "bone": "lumbar_vertebra"
+          },
+          {
+            "la": "Processus accessorii",
+            "ru": "добавочные отростки",
+            "bone": "lumbar_vertebra"
+          },
+          {
+            "la": "Processus spinosus (lumbalis)",
+            "ru": "остистый отросток (короткий, направлен назад)",
+            "bone": "lumbar_vertebra"
+          },
+          {
+            "la": "Basis ossis sacri",
+            "ru": "основание крестца",
+            "bone": "sacrum_coccyx"
+          },
+          {
+            "la": "Apex ossis sacri",
+            "ru": "верхушка крестца",
+            "bone": "sacrum_coccyx"
+          },
+          {
+            "la": "Promontorium",
+            "ru": "мыс",
+            "bone": "sacrum_coccyx"
+          },
+          {
+            "la": "Ala sacralis",
+            "ru": "крыло крестца",
+            "bone": "sacrum_coccyx"
+          },
+          {
+            "la": "Facies auricularis",
+            "ru": "ушковидная поверхность",
+            "bone": "sacrum_coccyx"
+          },
+          {
+            "la": "Tuberositas sacralis",
+            "ru": "крестцовая бугристость",
+            "bone": "sacrum_coccyx"
+          },
+          {
+            "la": "Foramina sacralia anteriora (pelvina)",
+            "ru": "передние (тазовые) крестцовые отверстия",
+            "bone": "sacrum_coccyx"
+          },
+          {
+            "la": "Foramina sacralia posteriora (dorsalia)",
+            "ru": "задние (спинные) крестцовые отверстия",
+            "bone": "sacrum_coccyx"
+          },
+          {
+            "la": "Canalis sacralis",
+            "ru": "крестцовый канал",
+            "bone": "sacrum_coccyx"
+          },
+          {
+            "la": "Hiatus sacralis",
+            "ru": "крестцовая щель",
+            "bone": "sacrum_coccyx"
+          },
+          {
+            "la": "Crista sacralis mediana",
+            "ru": "срединный крестцовый гребень",
+            "bone": "sacrum_coccyx"
+          },
+          {
+            "la": "Crista sacralis intermedia",
+            "ru": "промежуточный крестцовый гребень",
+            "bone": "sacrum_coccyx"
+          },
+          {
+            "la": "Crista sacralis lateralis",
+            "ru": "латеральный крестцовый гребень",
+            "bone": "sacrum_coccyx"
+          },
+          {
+            "la": "Cornua sacralia",
+            "ru": "крестцовые рога",
+            "bone": "sacrum_coccyx"
+          },
+          {
+            "la": "Cornua coccygea",
+            "ru": "копчиковые рога",
+            "bone": "sacrum_coccyx"
+          },
+          {
+            "la": "Facies articularis (coccygis)",
+            "ru": "суставная поверхность копчика",
+            "bone": "sacrum_coccyx"
+          },
+          {
+            "la": "Manubrium sterni",
+            "ru": "рукоятка грудины",
+            "bone": "sternum"
+          },
+          {
+            "la": "Corpus sterni",
+            "ru": "тело грудины",
+            "bone": "sternum"
+          },
+          {
+            "la": "Processus xiphoideus",
+            "ru": "мечевидный отросток",
+            "bone": "sternum"
+          },
+          {
+            "la": "Incisura jugularis",
+            "ru": "яремная вырезка",
+            "bone": "sternum"
+          },
+          {
+            "la": "Incisurae claviculares",
+            "ru": "ключичные вырезки",
+            "bone": "sternum"
+          },
+          {
+            "la": "Incisurae costales I–VII",
+            "ru": "рёберные вырезки I–VII",
+            "bone": "sternum"
+          },
+          {
+            "la": "Caput costae",
+            "ru": "головка ребра",
+            "bone": "ribs"
+          },
+          {
+            "la": "Crista capitis costae",
+            "ru": "гребень головки ребра",
+            "bone": "ribs"
+          },
+          {
+            "la": "Collum costae",
+            "ru": "шейка ребра",
+            "bone": "ribs"
+          },
+          {
+            "la": "Corpus costae",
+            "ru": "тело ребра",
+            "bone": "ribs"
+          },
+          {
+            "la": "Angulus costae",
+            "ru": "угол ребра",
+            "bone": "ribs"
+          },
+          {
+            "la": "Sulcus costae",
+            "ru": "борозда ребра",
+            "bone": "ribs"
+          },
+          {
+            "la": "Tuberculum musculi scaleni anterioris",
+            "ru": "бугорок передней лестничной мышцы (I ребро)",
+            "bone": "ribs"
+          },
+          {
+            "la": "Sulcus arteriae subclaviae",
+            "ru": "борозда подключичной артерии (I ребро)",
+            "bone": "ribs"
+          },
+          {
+            "la": "Sulcus venae subclaviae",
+            "ru": "борозда подключичной вены (I ребро)",
+            "bone": "ribs"
+          },
+          {
+            "la": "Tuberositas musculi serrati anterioris",
+            "ru": "бугристость передней зубчатой мышцы (II ребро)",
+            "bone": "ribs"
+          },
+          {
+            "la": "Costae verae",
+            "ru": "истинные рёбра (I–VII)",
+            "bone": "ribs"
+          },
+          {
+            "la": "Costae spuriae",
+            "ru": "ложные рёбра (VIII–X)",
+            "bone": "ribs"
+          },
+          {
+            "la": "Costae fluctuantes",
+            "ru": "колеблющиеся рёбра (XI–XII)",
+            "bone": "ribs"
+          }
+        ]
       },
       "upper_limb_bones": {
         "title": "Кости верхней конечности",
@@ -2272,7 +2937,344 @@
               "credit": "Ф. Неттер, Атлас анатомии человека"
             }
           ]
-        }
+        },
+        "latin_terms": [
+          {
+            "la": "Extremitas sternalis",
+            "ru": "грудинный конец",
+            "bone": "clavicle"
+          },
+          {
+            "la": "Extremitas acromialis",
+            "ru": "акромиальный конец",
+            "bone": "clavicle"
+          },
+          {
+            "la": "Corpus claviculae",
+            "ru": "тело ключицы",
+            "bone": "clavicle"
+          },
+          {
+            "la": "Tuberositas deltoidea",
+            "ru": "дельтовидная бугристость (ключицы)",
+            "bone": "clavicle"
+          },
+          {
+            "la": "Linea trapezoidea",
+            "ru": "трапециевидная линия",
+            "bone": "clavicle"
+          },
+          {
+            "la": "Corpus scapulae",
+            "ru": "тело лопатки",
+            "bone": "scapula"
+          },
+          {
+            "la": "Margo medialis",
+            "ru": "медиальный край",
+            "bone": "scapula"
+          },
+          {
+            "la": "Margo lateralis",
+            "ru": "латеральный край",
+            "bone": "scapula"
+          },
+          {
+            "la": "Margo superior",
+            "ru": "верхний край",
+            "bone": "scapula"
+          },
+          {
+            "la": "Angulus superior",
+            "ru": "верхний угол",
+            "bone": "scapula"
+          },
+          {
+            "la": "Angulus inferior",
+            "ru": "нижний угол",
+            "bone": "scapula"
+          },
+          {
+            "la": "Angulus lateralis",
+            "ru": "латеральный угол",
+            "bone": "scapula"
+          },
+          {
+            "la": "Spina scapulae",
+            "ru": "ость лопатки",
+            "bone": "scapula"
+          },
+          {
+            "la": "Acromion",
+            "ru": "акромион",
+            "bone": "scapula"
+          },
+          {
+            "la": "Processus coracoideus",
+            "ru": "клювовидный отросток",
+            "bone": "scapula"
+          },
+          {
+            "la": "Fossa supraspinata",
+            "ru": "надостная ямка",
+            "bone": "scapula"
+          },
+          {
+            "la": "Fossa infraspinata",
+            "ru": "подостная ямка",
+            "bone": "scapula"
+          },
+          {
+            "la": "Fossa subscapularis",
+            "ru": "подлопаточная ямка",
+            "bone": "scapula"
+          },
+          {
+            "la": "Cavitas glenoidalis",
+            "ru": "суставная впадина",
+            "bone": "scapula"
+          },
+          {
+            "la": "Incisura scapulae (suprascapularis)",
+            "ru": "вырезка лопатки (надлопаточная)",
+            "bone": "scapula"
+          },
+          {
+            "la": "Caput humeri",
+            "ru": "головка плечевой кости",
+            "bone": "humerus"
+          },
+          {
+            "la": "Collum anatomicum",
+            "ru": "анатомическая шейка",
+            "bone": "humerus"
+          },
+          {
+            "la": "Collum chirurgicum",
+            "ru": "хирургическая шейка",
+            "bone": "humerus"
+          },
+          {
+            "la": "Tuberculum majus",
+            "ru": "большой бугорок",
+            "bone": "humerus"
+          },
+          {
+            "la": "Tuberculum minus",
+            "ru": "малый бугорок",
+            "bone": "humerus"
+          },
+          {
+            "la": "Sulcus intertubercularis",
+            "ru": "межбугорковая борозда",
+            "bone": "humerus"
+          },
+          {
+            "la": "Corpus humeri",
+            "ru": "тело плечевой кости",
+            "bone": "humerus"
+          },
+          {
+            "la": "Crista tuberculi majoris",
+            "ru": "гребень большого бугорка",
+            "bone": "humerus"
+          },
+          {
+            "la": "Crista tuberculi minoris",
+            "ru": "гребень малого бугорка",
+            "bone": "humerus"
+          },
+          {
+            "la": "Epicondylus medialis",
+            "ru": "медиальный надмыщелок",
+            "bone": "humerus"
+          },
+          {
+            "la": "Epicondylus lateralis",
+            "ru": "латеральный надмыщелок",
+            "bone": "humerus"
+          },
+          {
+            "la": "Fossa olecrani",
+            "ru": "локтевая ямка",
+            "bone": "humerus"
+          },
+          {
+            "la": "Fossa coronoidea",
+            "ru": "венечная ямка",
+            "bone": "humerus"
+          },
+          {
+            "la": "Fossa radialis",
+            "ru": "лучевая ямка",
+            "bone": "humerus"
+          },
+          {
+            "la": "Capitulum humeri",
+            "ru": "головка мыщелка плечевой кости",
+            "bone": "humerus"
+          },
+          {
+            "la": "Trochlea humeri",
+            "ru": "блок плечевой кости",
+            "bone": "humerus"
+          },
+          {
+            "la": "Caput radii",
+            "ru": "головка лучевой кости",
+            "bone": "radius"
+          },
+          {
+            "la": "Collum radii",
+            "ru": "шейка лучевой кости",
+            "bone": "radius"
+          },
+          {
+            "la": "Tuberositas radii",
+            "ru": "бугристость лучевой кости",
+            "bone": "radius"
+          },
+          {
+            "la": "Corpus radii",
+            "ru": "тело лучевой кости",
+            "bone": "radius"
+          },
+          {
+            "la": "Processus styloideus radii",
+            "ru": "шиловидный отросток лучевой кости",
+            "bone": "radius"
+          },
+          {
+            "la": "Incisura ulnaris",
+            "ru": "локтевая вырезка (лучевой кости)",
+            "bone": "radius"
+          },
+          {
+            "la": "Circumferentia articularis",
+            "ru": "суставная окружность",
+            "bone": "radius"
+          },
+          {
+            "la": "Olecranon",
+            "ru": "локтевой отросток",
+            "bone": "ulna"
+          },
+          {
+            "la": "Processus coronoideus (ulnae)",
+            "ru": "венечный отросток (локтевой кости)",
+            "bone": "ulna"
+          },
+          {
+            "la": "Incisura trochlearis",
+            "ru": "блоковидная вырезка",
+            "bone": "ulna"
+          },
+          {
+            "la": "Incisura radialis",
+            "ru": "лучевая вырезка",
+            "bone": "ulna"
+          },
+          {
+            "la": "Tuberositas ulnae",
+            "ru": "бугристость локтевой кости",
+            "bone": "ulna"
+          },
+          {
+            "la": "Corpus ulnae",
+            "ru": "тело локтевой кости",
+            "bone": "ulna"
+          },
+          {
+            "la": "Processus styloideus ulnae",
+            "ru": "шиловидный отросток локтевой кости",
+            "bone": "ulna"
+          },
+          {
+            "la": "Caput ulnae",
+            "ru": "головка локтевой кости",
+            "bone": "ulna"
+          },
+          {
+            "la": "Os scaphoideum",
+            "ru": "ладьевидная кость",
+            "bone": "hand_bones"
+          },
+          {
+            "la": "Os lunatum",
+            "ru": "полулунная кость",
+            "bone": "hand_bones"
+          },
+          {
+            "la": "Os triquetrum",
+            "ru": "трёхгранная кость",
+            "bone": "hand_bones"
+          },
+          {
+            "la": "Os pisiforme",
+            "ru": "гороховидная кость",
+            "bone": "hand_bones"
+          },
+          {
+            "la": "Os trapezium",
+            "ru": "трапециевидная кость (большая)",
+            "bone": "hand_bones"
+          },
+          {
+            "la": "Os trapezoideum",
+            "ru": "трапециевидная кость (малая)",
+            "bone": "hand_bones"
+          },
+          {
+            "la": "Os capitatum",
+            "ru": "головчатая кость",
+            "bone": "hand_bones"
+          },
+          {
+            "la": "Os hamatum",
+            "ru": "крючковидная кость",
+            "bone": "hand_bones"
+          },
+          {
+            "la": "Hamulus ossis hamati",
+            "ru": "крючок крючковидной кости",
+            "bone": "hand_bones"
+          },
+          {
+            "la": "Ossa metacarpi I–V",
+            "ru": "пястные кости I–V",
+            "bone": "hand_bones"
+          },
+          {
+            "la": "Basis (metacarpi)",
+            "ru": "основание (пястной кости)",
+            "bone": "hand_bones"
+          },
+          {
+            "la": "Corpus (metacarpi)",
+            "ru": "тело (пястной кости)",
+            "bone": "hand_bones"
+          },
+          {
+            "la": "Caput (metacarpi)",
+            "ru": "головка (пястной кости)",
+            "bone": "hand_bones"
+          },
+          {
+            "la": "Phalanx proximalis",
+            "ru": "проксимальная фаланга",
+            "bone": "hand_bones"
+          },
+          {
+            "la": "Phalanx media",
+            "ru": "средняя фаланга",
+            "bone": "hand_bones"
+          },
+          {
+            "la": "Phalanx distalis",
+            "ru": "дистальная фаланга",
+            "bone": "hand_bones"
+          }
+        ]
       },
       "lower_limb_bones": {
         "title": "Кости нижней конечности",
@@ -2404,7 +3406,389 @@
               "credit": "Ф. Неттер, Атлас анатомии человека"
             }
           ]
-        }
+        },
+        "latin_terms": [
+          {
+            "la": "Os ilium",
+            "ru": "подвздошная кость",
+            "bone": "hip_bone"
+          },
+          {
+            "la": "Ala ossis ilii",
+            "ru": "крыло подвздошной кости",
+            "bone": "hip_bone"
+          },
+          {
+            "la": "Crista iliaca",
+            "ru": "подвздошный гребень",
+            "bone": "hip_bone"
+          },
+          {
+            "la": "Spina iliaca anterior superior",
+            "ru": "передняя верхняя подвздошная ость",
+            "bone": "hip_bone"
+          },
+          {
+            "la": "Spina iliaca anterior inferior",
+            "ru": "передняя нижняя подвздошная ость",
+            "bone": "hip_bone"
+          },
+          {
+            "la": "Spina iliaca posterior superior",
+            "ru": "задняя верхняя подвздошная ость",
+            "bone": "hip_bone"
+          },
+          {
+            "la": "Spina iliaca posterior inferior",
+            "ru": "задняя нижняя подвздошная ость",
+            "bone": "hip_bone"
+          },
+          {
+            "la": "Fossa iliaca",
+            "ru": "подвздошная ямка",
+            "bone": "hip_bone"
+          },
+          {
+            "la": "Linea arcuata",
+            "ru": "дугообразная линия",
+            "bone": "hip_bone"
+          },
+          {
+            "la": "Os ischii",
+            "ru": "седалищная кость",
+            "bone": "hip_bone"
+          },
+          {
+            "la": "Corpus ossis ischii",
+            "ru": "тело седалищной кости",
+            "bone": "hip_bone"
+          },
+          {
+            "la": "Ramus ossis ischii",
+            "ru": "ветвь седалищной кости",
+            "bone": "hip_bone"
+          },
+          {
+            "la": "Tuber ischiadicum",
+            "ru": "седалищный бугор",
+            "bone": "hip_bone"
+          },
+          {
+            "la": "Spina ischiadica",
+            "ru": "седалищная ость",
+            "bone": "hip_bone"
+          },
+          {
+            "la": "Incisura ischiadica major",
+            "ru": "большая седалищная вырезка",
+            "bone": "hip_bone"
+          },
+          {
+            "la": "Incisura ischiadica minor",
+            "ru": "малая седалищная вырезка",
+            "bone": "hip_bone"
+          },
+          {
+            "la": "Os pubis",
+            "ru": "лобковая кость",
+            "bone": "hip_bone"
+          },
+          {
+            "la": "Corpus ossis pubis",
+            "ru": "тело лобковой кости",
+            "bone": "hip_bone"
+          },
+          {
+            "la": "Ramus superior ossis pubis",
+            "ru": "верхняя ветвь лобковой кости",
+            "bone": "hip_bone"
+          },
+          {
+            "la": "Ramus inferior ossis pubis",
+            "ru": "нижняя ветвь лобковой кости",
+            "bone": "hip_bone"
+          },
+          {
+            "la": "Pecten ossis pubis",
+            "ru": "гребень лобковой кости",
+            "bone": "hip_bone"
+          },
+          {
+            "la": "Tuberculum pubicum",
+            "ru": "лобковый бугорок",
+            "bone": "hip_bone"
+          },
+          {
+            "la": "Acetabulum",
+            "ru": "вертлужная впадина",
+            "bone": "hip_bone"
+          },
+          {
+            "la": "Foramen obturatum",
+            "ru": "запирательное отверстие",
+            "bone": "hip_bone"
+          },
+          {
+            "la": "Caput femoris",
+            "ru": "головка бедренной кости",
+            "bone": "femur"
+          },
+          {
+            "la": "Collum femoris",
+            "ru": "шейка бедренной кости",
+            "bone": "femur"
+          },
+          {
+            "la": "Fovea capitis femoris",
+            "ru": "ямка головки бедренной кости",
+            "bone": "femur"
+          },
+          {
+            "la": "Trochanter major",
+            "ru": "большой вертел",
+            "bone": "femur"
+          },
+          {
+            "la": "Trochanter minor",
+            "ru": "малый вертел",
+            "bone": "femur"
+          },
+          {
+            "la": "Linea intertrochanterica",
+            "ru": "межвертельная линия",
+            "bone": "femur"
+          },
+          {
+            "la": "Corpus femoris",
+            "ru": "тело бедренной кости",
+            "bone": "femur"
+          },
+          {
+            "la": "Linea aspera",
+            "ru": "шероховатая линия",
+            "bone": "femur"
+          },
+          {
+            "la": "Labium mediale",
+            "ru": "медиальная губа",
+            "bone": "femur"
+          },
+          {
+            "la": "Labium laterale",
+            "ru": "латеральная губа",
+            "bone": "femur"
+          },
+          {
+            "la": "Condylus medialis",
+            "ru": "медиальный мыщелок (бедренной кости)",
+            "bone": "femur"
+          },
+          {
+            "la": "Condylus lateralis",
+            "ru": "латеральный мыщелок (бедренной кости)",
+            "bone": "femur"
+          },
+          {
+            "la": "Epicondylus medialis",
+            "ru": "медиальный надмыщелок (бедренной кости)",
+            "bone": "femur"
+          },
+          {
+            "la": "Epicondylus lateralis",
+            "ru": "латеральный надмыщелок (бедренной кости)",
+            "bone": "femur"
+          },
+          {
+            "la": "Fossa intercondylaris",
+            "ru": "межмыщелковая ямка",
+            "bone": "femur"
+          },
+          {
+            "la": "Facies patellaris",
+            "ru": "надколенниковая поверхность",
+            "bone": "femur"
+          },
+          {
+            "la": "Basis patellae",
+            "ru": "основание надколенника",
+            "bone": "patella"
+          },
+          {
+            "la": "Apex patellae",
+            "ru": "верхушка надколенника",
+            "bone": "patella"
+          },
+          {
+            "la": "Facies articularis (patellae)",
+            "ru": "суставная поверхность надколенника",
+            "bone": "patella"
+          },
+          {
+            "la": "Condylus medialis (tibiae)",
+            "ru": "медиальный мыщелок (большеберцовой кости)",
+            "bone": "leg_bones"
+          },
+          {
+            "la": "Condylus lateralis (tibiae)",
+            "ru": "латеральный мыщелок (большеберцовой кости)",
+            "bone": "leg_bones"
+          },
+          {
+            "la": "Tuberositas tibiae",
+            "ru": "бугристость большеберцовой кости",
+            "bone": "leg_bones"
+          },
+          {
+            "la": "Margo anterior",
+            "ru": "передний край (большеберцовой кости)",
+            "bone": "leg_bones"
+          },
+          {
+            "la": "Corpus tibiae",
+            "ru": "тело большеберцовой кости",
+            "bone": "leg_bones"
+          },
+          {
+            "la": "Malleolus medialis",
+            "ru": "медиальная лодыжка",
+            "bone": "leg_bones"
+          },
+          {
+            "la": "Incisura fibularis",
+            "ru": "малоберцовая вырезка",
+            "bone": "leg_bones"
+          },
+          {
+            "la": "Caput fibulae",
+            "ru": "головка малоберцовой кости",
+            "bone": "leg_bones"
+          },
+          {
+            "la": "Collum fibulae",
+            "ru": "шейка малоберцовой кости",
+            "bone": "leg_bones"
+          },
+          {
+            "la": "Corpus fibulae",
+            "ru": "тело малоберцовой кости",
+            "bone": "leg_bones"
+          },
+          {
+            "la": "Malleolus lateralis",
+            "ru": "латеральная лодыжка",
+            "bone": "leg_bones"
+          },
+          {
+            "la": "Talus",
+            "ru": "таранная кость",
+            "bone": "foot_bones"
+          },
+          {
+            "la": "Trochlea tali",
+            "ru": "блок таранной кости",
+            "bone": "foot_bones"
+          },
+          {
+            "la": "Collum tali",
+            "ru": "шейка таранной кости",
+            "bone": "foot_bones"
+          },
+          {
+            "la": "Caput tali",
+            "ru": "головка таранной кости",
+            "bone": "foot_bones"
+          },
+          {
+            "la": "Processus posterior tali",
+            "ru": "задний отросток таранной кости",
+            "bone": "foot_bones"
+          },
+          {
+            "la": "Tuberculum mediale/laterale",
+            "ru": "медиальный/латеральный бугорок (таранной кости)",
+            "bone": "foot_bones"
+          },
+          {
+            "la": "Calcaneus",
+            "ru": "пяточная кость",
+            "bone": "foot_bones"
+          },
+          {
+            "la": "Tuber calcanei",
+            "ru": "пяточный бугор",
+            "bone": "foot_bones"
+          },
+          {
+            "la": "Sustentaculum tali",
+            "ru": "опора таранной кости",
+            "bone": "foot_bones"
+          },
+          {
+            "la": "Processus lateralis (calcanei)",
+            "ru": "латеральный отросток (пяточной кости)",
+            "bone": "foot_bones"
+          },
+          {
+            "la": "Os naviculare",
+            "ru": "ладьевидная кость (стопы)",
+            "bone": "foot_bones"
+          },
+          {
+            "la": "Os cuneiforme mediale",
+            "ru": "медиальная клиновидная кость",
+            "bone": "foot_bones"
+          },
+          {
+            "la": "Os cuneiforme intermedium",
+            "ru": "промежуточная клиновидная кость",
+            "bone": "foot_bones"
+          },
+          {
+            "la": "Os cuneiforme laterale",
+            "ru": "латеральная клиновидная кость",
+            "bone": "foot_bones"
+          },
+          {
+            "la": "Os cuboideum",
+            "ru": "кубовидная кость",
+            "bone": "foot_bones"
+          },
+          {
+            "la": "Ossa metatarsi I–V",
+            "ru": "плюсневые кости I–V",
+            "bone": "foot_bones"
+          },
+          {
+            "la": "Basis (metatarsi)",
+            "ru": "основание (плюсневой кости)",
+            "bone": "foot_bones"
+          },
+          {
+            "la": "Corpus (metatarsi)",
+            "ru": "тело (плюсневой кости)",
+            "bone": "foot_bones"
+          },
+          {
+            "la": "Caput (metatarsi)",
+            "ru": "головка (плюсневой кости)",
+            "bone": "foot_bones"
+          },
+          {
+            "la": "Phalanx proximalis (pedis)",
+            "ru": "проксимальная фаланга (стопы)",
+            "bone": "foot_bones"
+          },
+          {
+            "la": "Phalanx media (pedis)",
+            "ru": "средняя фаланга (стопы)",
+            "bone": "foot_bones"
+          },
+          {
+            "la": "Phalanx distalis (pedis)",
+            "ru": "дистальная фаланга (стопы)",
+            "bone": "foot_bones"
+          }
+        ]
       }
     },
     "menu_title": "🦴 Остеология (кости)"
