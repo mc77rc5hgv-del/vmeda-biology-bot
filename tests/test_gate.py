@@ -49,6 +49,7 @@ EXEMPT_EXAMPLES = [
     "anatomy_flash_show_answer", "anatomy_flash_know", "anatomy_flash_dont_know", "anatomy_flash_stop",
     "anatomy_match_start:skull", "anatomy_match_answer:0", "anatomy_match_stop",
     "anatomy_mnemonics:skull:0", "anatomy_picture:skull",
+    "anatomy_latin_start:skull", "anatomy_latin_answer:0", "anatomy_latin_stop",
 ]
 
 fail = False

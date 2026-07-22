@@ -103,6 +103,7 @@ def load_stats() -> dict:
             data.setdefault("user_username", {})
             data.setdefault("usernames", {})
             data.setdefault("manual_access_granted", [])
+            data.setdefault("manual_anatomy_demo_granted", [])
             data.setdefault("referral_battle", None)
             data.setdefault("donations_stars_total", 0)
             data.setdefault("donations_stars_count", 0)
@@ -133,6 +134,7 @@ def load_stats() -> dict:
         "user_username": {},
         "usernames": {},
         "manual_access_granted": [],
+        "manual_anatomy_demo_granted": [],
         "referral_battle": None,
         "donations_stars_total": 0,
         "donations_stars_count": 0,
@@ -2597,6 +2599,8 @@ def get_admin_menu():
     builder.button(text="👥 Список пользователей", callback_data="admin_userlist:0")
     builder.button(text="🔓 Дать доступ по username/ID", callback_data="admin_grant_prompt")
     builder.button(text="🚫 Отозвать доступ по username/ID", callback_data="admin_revoke_prompt")
+    builder.button(text="🦴 Дать демо-доступ к Анатомии", callback_data="admin_grant_anatomy_demo_prompt")
+    builder.button(text="🦴🚫 Забрать демо-доступ к Анатомии", callback_data="admin_revoke_anatomy_demo_prompt")
     builder.button(text="✉️ Написать пользователю", callback_data="admin_dm_prompt")
     builder.button(text="⚔️ Битва рефералов", callback_data="admin_battle_menu")
     builder.button(text="💰 Записать донат рублями", callback_data="admin_donation_prompt")
@@ -2682,7 +2686,8 @@ def format_user_line(user_id: int) -> str:
     name = stats["user_names"].get(uid_str, "—")
     refs = len(stats["referrals"].get(uid_str, []))
     granted = " 🔓" if user_id in stats["manual_access_granted"] else ""
-    return f"<code>{user_id}</code> — {handle} — {name} — реф: {refs}{granted}"
+    anatomy_demo = " 🦴" if user_id in stats["manual_anatomy_demo_granted"] else ""
+    return f"<code>{user_id}</code> — {handle} — {name} — реф: {refs}{granted}{anatomy_demo}"
 
 def get_admin_userlist_page(page: int):
     all_ids = sorted(stats["total_users"])
@@ -3092,6 +3097,7 @@ async def cb_admin_stats(callback: CallbackQuery):
         f"🔗 Всего рефералов: <b>{total_referrals}</b>\n"
         f"📉 Меньше {REFERRAL_FULL_ACCESS_THRESHOLD} рефералов: <b>{below_threshold_count}</b>\n"
         f"🔓 Ручных доступов выдано: <b>{len(stats['manual_access_granted'])}</b>\n"
+        f"🦴 Демо-доступов к Анатомии выдано: <b>{len(stats['manual_anatomy_demo_granted'])}</b>\n"
         f"🚫 Исчерпали бесплатные заходы без рефералов: <b>{exhausted_free_uses}</b>\n"
         f"🪪 Известно username: <b>{len(stats['usernames'])}</b>\n"
         f"\n💎 <b>Подписки</b>\n"
@@ -3154,6 +3160,35 @@ async def cb_admin_revoke_prompt(callback: CallbackQuery):
     await safe_edit_text(
         callback.message,
         "🚫 <b>Отозвать ручной доступ</b>\n\nОтправь username пользователя (с @ или без) или его числовой ID",
+        parse_mode="HTML",
+        reply_markup=get_admin_back_keyboard()
+    )
+
+@dp.callback_query(F.data == "admin_grant_anatomy_demo_prompt")
+async def cb_admin_grant_anatomy_demo_prompt(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer()
+    ADMIN_PENDING[callback.from_user.id] = {"action": "grant_anatomy_demo"}
+    await safe_edit_text(
+        callback.message,
+        "🦴 <b>Дать демо-доступ к Анатомии</b>\n\nОтправь username пользователя (с @ или без, например <code>@ivanov</code>) "
+        "или его числовой ID",
+        parse_mode="HTML",
+        reply_markup=get_admin_back_keyboard()
+    )
+
+@dp.callback_query(F.data == "admin_revoke_anatomy_demo_prompt")
+async def cb_admin_revoke_anatomy_demo_prompt(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer()
+    ADMIN_PENDING[callback.from_user.id] = {"action": "revoke_anatomy_demo"}
+    await safe_edit_text(
+        callback.message,
+        "🦴🚫 <b>Забрать демо-доступ к Анатомии</b>\n\nОтправь username пользователя (с @ или без) или его числовой ID",
         parse_mode="HTML",
         reply_markup=get_admin_back_keyboard()
     )
@@ -3346,7 +3381,10 @@ async def handle_admin_pending_action(message: Message):
     pending = ADMIN_PENDING[admin_id]
     action = pending["action"]
 
-    if action in ("grant", "revoke", "dm_username", "record_donation_username", "record_subscription_username"):
+    if action in (
+        "grant", "revoke", "grant_anatomy_demo", "revoke_anatomy_demo",
+        "dm_username", "record_donation_username", "record_subscription_username",
+    ):
         raw_input = message.text.strip()
         username, target_id = resolve_user_by_username(raw_input)
         if not target_id:
@@ -3393,6 +3431,28 @@ async def handle_admin_pending_action(message: Message):
                 "Если у пользователя уже есть свои рефералы, доступ всё равно останется открытым.",
                 parse_mode="HTML"
             )
+
+        elif action == "grant_anatomy_demo":
+            if target_id not in stats["manual_anatomy_demo_granted"]:
+                stats["manual_anatomy_demo_granted"].append(target_id)
+                save_stats()
+            del ADMIN_PENDING[admin_id]
+            await message.answer(f"✅ Демо-доступ к Анатомии выдан {label}.", parse_mode="HTML")
+            try:
+                await bot.send_message(
+                    target_id,
+                    "🦴 Администратор открыл тебе демо-доступ к разделу «Анатомия»!",
+                    parse_mode="HTML"
+                )
+            except Exception:
+                logger.exception("Не удалось уведомить пользователя %s о выдаче демо-доступа к анатомии", target_id)
+
+        elif action == "revoke_anatomy_demo":
+            if target_id in stats["manual_anatomy_demo_granted"]:
+                stats["manual_anatomy_demo_granted"].remove(target_id)
+                save_stats()
+            del ADMIN_PENDING[admin_id]
+            await message.answer(f"✅ Демо-доступ к Анатомии для {label} отозван.", parse_mode="HTML")
 
         elif action == "dm_username":
             ADMIN_PENDING[admin_id] = {"action": "dm_message", "target_id": target_id, "target_label": label}
@@ -4929,15 +4989,22 @@ ANATOMY_PUBLIC = False  # когда раздел будет готов для �
 
 ANATOMY_FLASH_SESSION_SIZE = 10
 ANATOMY_MATCH_SESSION_SIZE = 10
+ANATOMY_LATIN_SESSION_SIZE = 15
 
 ANATOMY_FLASH_SESSIONS: dict[int, dict] = {}
 ANATOMY_MATCH_SESSIONS: dict[int, dict] = {}
+ANATOMY_LATIN_SESSIONS: dict[int, dict] = {}
 
 def anatomy_access_ok(user_id: int) -> bool:
     # Раздел ещё в разработке — глобальное промо ("снять все ограничения") намеренно
     # его не открывает, в отличие от остальных предметов; только явный ANATOMY_PUBLIC,
-    # админ или подписка с anatomy=True.
-    return ANATOMY_PUBLIC or is_admin(user_id) or has_subscription_anatomy_access(user_id)
+    # админ, подписка с anatomy=True, либо ручной демо-доступ по username.
+    return (
+        ANATOMY_PUBLIC
+        or is_admin(user_id)
+        or has_subscription_anatomy_access(user_id)
+        or user_id in stats["manual_anatomy_demo_granted"]
+    )
 
 def get_anatomy_dev_alert_text() -> str:
     # Telegram ограничивает текст всплывающего алерта ~200 символами — показываем только
@@ -5007,6 +5074,8 @@ def get_anatomy_topic_keyboard(topic_key: str):
     builder.button(text="🎴 Флэш-карточки (все)", callback_data=f"anatomy_flash_start:{topic_key}")
     builder.button(text="🔗 Сопоставление (все)", callback_data=f"anatomy_match_start:{topic_key}")
     builder.button(text="🧠 Мнемоники (все)", callback_data=f"anatomy_mnemonics:{topic_key}:0")
+    if topic and topic.get("latin_terms"):
+        builder.button(text="🏛 Тренажёр латинских терминов", callback_data=f"anatomy_latin_start:{topic_key}")
     builder.button(text="🖼 Найди на картинке", callback_data=f"anatomy_picture:{topic_key}")
     if topic and topic.get("atlas_images"):
         builder.button(text="🖼 Атлас (Неттер/Гайворонский)", callback_data=f"anatomy_atlas:{topic_key}:0")
@@ -5101,9 +5170,55 @@ def get_anatomy_bone_hub_text(topic_key: str, bone_id: str) -> str:
         "Выбери формат подготовки:"
     )
 
+# ---- Кэш Telegram file_id для фото анатомии: без него каждый повторный показ той же
+# фотографии заново читает файл с диска и заливает его в Telegram — с кэшем повторные показы
+# используют уже загруженный file_id и приходят почти мгновенно.
+ANATOMY_FILE_ID_CACHE_PATH = os.path.join(STATS_DIR, "anatomy_file_id_cache.json")
+
+def _load_anatomy_file_id_cache() -> dict:
+    try:
+        with open(ANATOMY_FILE_ID_CACHE_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+
+ANATOMY_FILE_ID_CACHE: dict[str, str] = _load_anatomy_file_id_cache()
+
+def _write_anatomy_file_id_cache(data: dict) -> None:
+    tmp_path = f"{ANATOMY_FILE_ID_CACHE_PATH}.tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp_path, ANATOMY_FILE_ID_CACHE_PATH)
+
+def save_anatomy_file_id_cache() -> None:
+    data = dict(ANATOMY_FILE_ID_CACHE)
+    future = _stats_executor.submit(_write_anatomy_file_id_cache, data)
+    future.add_done_callback(_log_stats_write_result)
+
+def _anatomy_image_key(img: dict) -> str:
+    return img["url"] if "url" in img else img["path"]
+
+def _anatomy_image_media(img: dict):
+    cached = ANATOMY_FILE_ID_CACHE.get(_anatomy_image_key(img))
+    if cached:
+        return cached
+    return img["url"] if "url" in img else FSInputFile(os.path.join(ANATOMY_IMAGES_DIR, img["path"]))
+
+def _cache_anatomy_file_id(img: dict, sent_message) -> bool:
+    """Remembers the file_id Telegram assigned on first upload so later sends of the same
+    image reuse it instead of re-reading the file from disk. Safe no-op if sent_message
+    doesn't carry a real Telegram photo (e.g. test mocks)."""
+    key = _anatomy_image_key(img)
+    if key in ANATOMY_FILE_ID_CACHE:
+        return False
+    photo_sizes = getattr(sent_message, "photo", None)
+    if not photo_sizes:
+        return False
+    ANATOMY_FILE_ID_CACHE[key] = photo_sizes[-1].file_id
+    return True
+
 def build_input_media_photo(img: dict) -> InputMediaPhoto:
-    media = img["url"] if "url" in img else FSInputFile(os.path.join(ANATOMY_IMAGES_DIR, img["path"]))
-    return InputMediaPhoto(media=media, caption=f"{img['caption']}\n\nИсточник: {img['credit']}", parse_mode="HTML")
+    return InputMediaPhoto(media=_anatomy_image_media(img), caption=f"{img['caption']}\n\nИсточник: {img['credit']}", parse_mode="HTML")
 
 async def send_anatomy_album(callback: CallbackQuery, images: list, page: int, header: str, nav_prefix: str, back_callback: str):
     """Sends up to ANATOMY_ALBUM_PAGE_SIZE photos as one native Telegram album — swipeable
@@ -5114,15 +5229,23 @@ async def send_anatomy_album(callback: CallbackQuery, images: list, page: int, h
     start = page * ANATOMY_ALBUM_PAGE_SIZE
     chunk = images[start:start + ANATOMY_ALBUM_PAGE_SIZE]
     await callback.message.delete()
+    cache_changed = False
     if len(chunk) == 1:
         # Telegram's sendMediaGroup requires 2-10 items — a lone photo must go through
         # answer_photo instead, or the real API call fails outright.
         img = chunk[0]
-        photo = img["url"] if "url" in img else FSInputFile(os.path.join(ANATOMY_IMAGES_DIR, img["path"]))
-        await callback.message.answer_photo(photo, caption=f"{img['caption']}\n\nИсточник: {img['credit']}", parse_mode="HTML")
+        sent = await callback.message.answer_photo(
+            _anatomy_image_media(img), caption=f"{img['caption']}\n\nИсточник: {img['credit']}", parse_mode="HTML"
+        )
+        cache_changed = _cache_anatomy_file_id(img, sent)
     else:
         media = [build_input_media_photo(img) for img in chunk]
-        await callback.message.answer_media_group(media=media)
+        sent_list = await callback.message.answer_media_group(media=media)
+        for img, sent in zip(chunk, sent_list or []):
+            if _cache_anatomy_file_id(img, sent):
+                cache_changed = True
+    if cache_changed:
+        save_anatomy_file_id_cache()
     builder = InlineKeyboardBuilder()
     nav = []
     if page > 0:
@@ -5139,6 +5262,70 @@ async def send_anatomy_album(callback: CallbackQuery, images: list, page: int, h
 def get_topic_atlas_images(topic_key: str) -> list:
     topic = get_anatomy_topic_data(topic_key)
     return topic.get("atlas_images", []) if topic else []
+
+# ---- Тренажёр латинских терминов (тест с вариантами: термин -> перевод) ----
+def get_topic_latin_terms(topic_key: str) -> list:
+    topic = get_anatomy_topic_data(topic_key)
+    return topic.get("latin_terms", []) if topic else []
+
+def start_anatomy_latin_session(user_id: int, topic_key: str):
+    all_terms = get_topic_latin_terms(topic_key)
+    size = min(ANATOMY_LATIN_SESSION_SIZE, len(all_terms))
+    ANATOMY_LATIN_SESSIONS[user_id] = {
+        "topic_key": topic_key,
+        "all_terms": all_terms,
+        "queue": random.sample(all_terms, size),
+        "index": 0,
+        "correct": 0,
+        "wrong": 0,
+        "current_correct_idx": None,
+        "current_options": None,
+    }
+
+def get_anatomy_latin_keyboard(options: list):
+    builder = InlineKeyboardBuilder()
+    for i in range(len(options)):
+        builder.button(text=str(i + 1), callback_data=f"anatomy_latin_answer:{i}")
+    builder.adjust(len(options))
+    builder.row(InlineKeyboardButton(text="🛑 Закончить", callback_data="anatomy_latin_stop"))
+    return builder.as_markup()
+
+async def render_anatomy_latin_question(message, user_id: int):
+    session = ANATOMY_LATIN_SESSIONS[user_id]
+    term = session["queue"][session["index"]]
+    correct_ru = term["ru"]
+    distractor_pool = [t["ru"] for t in session["all_terms"] if t["ru"] != correct_ru]
+    distractors = random.sample(distractor_pool, min(3, len(distractor_pool)))
+    options = distractors + [correct_ru]
+    random.shuffle(options)
+    session["current_correct_idx"] = options.index(correct_ru)
+    session["current_options"] = options
+    lines = [
+        f"🏛 <b>Латинские термины — {session['index'] + 1}/{len(session['queue'])}</b>\n{DIVIDER}\n",
+        f"<i>{term['la']}</i>\n",
+        "Выбери правильный перевод:",
+        "",
+    ]
+    for i, opt in enumerate(options):
+        lines.append(f"{i + 1}. {opt}")
+    await safe_edit_text(message, "\n".join(lines), parse_mode="HTML", reply_markup=get_anatomy_latin_keyboard(options))
+
+async def render_anatomy_latin_summary(message, user_id: int, aborted: bool = False):
+    session = ANATOMY_LATIN_SESSIONS.pop(user_id, None)
+    if not session:
+        return
+    topic_key = session["topic_key"]
+    answered = session["correct"] + session["wrong"]
+    title = "🛑 <b>Прервано</b>" if aborted else "🏁 <b>Тренажёр пройден!</b>"
+    text = (
+        f"{title}\n{DIVIDER}\n\n"
+        f"Отвечено: <b>{answered}</b>\n✅ Верно: <b>{session['correct']}</b>\n❌ Неверно: <b>{session['wrong']}</b>"
+    )
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔁 Пройти ещё раз", callback_data=f"anatomy_latin_start:{topic_key}")
+    builder.button(text="🔙 К разделу", callback_data=f"anatomy_topic:{topic_key}")
+    builder.adjust(1)
+    await safe_edit_text(message, text, parse_mode="HTML", reply_markup=builder.as_markup())
 
 def get_bone_material_keyboard(topic_key: str, bone_id: str, idx: int):
     pages = get_bone_material_list(topic_key, bone_id)
@@ -5724,6 +5911,47 @@ async def cb_anatomy_match_stop(callback: CallbackQuery):
     await callback.answer()
     if callback.from_user.id in ANATOMY_MATCH_SESSIONS:
         await render_anatomy_match_summary(callback.message, callback.from_user.id, aborted=True)
+
+@dp.callback_query(F.data.startswith("anatomy_latin_start:"))
+async def cb_anatomy_latin_start(callback: CallbackQuery):
+    if not anatomy_access_ok(callback.from_user.id):
+        await callback.answer(get_anatomy_dev_alert_text(), show_alert=True)
+        return
+    topic_key = callback.data.split(":")[1]
+    if not get_topic_latin_terms(topic_key):
+        await callback.answer("Термины ещё не добавлены", show_alert=True)
+        return
+    await callback.answer()
+    start_anatomy_latin_session(callback.from_user.id, topic_key)
+    await render_anatomy_latin_question(callback.message, callback.from_user.id)
+
+@dp.callback_query(F.data.startswith("anatomy_latin_answer:"))
+async def cb_anatomy_latin_answer(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    session = ANATOMY_LATIN_SESSIONS.get(user_id)
+    if not session:
+        await callback.answer("Сессия истекла, начни заново", show_alert=True)
+        return
+    chosen = int(callback.data.split(":")[1])
+    correct_idx = session["current_correct_idx"]
+    if chosen == correct_idx:
+        session["correct"] += 1
+        await callback.answer("✅ Верно!")
+    else:
+        session["wrong"] += 1
+        correct_text = session["current_options"][correct_idx]
+        await callback.answer(f"❌ Неверно. Правильно: {correct_text}", show_alert=True)
+    session["index"] += 1
+    if session["index"] >= len(session["queue"]):
+        await render_anatomy_latin_summary(callback.message, user_id)
+    else:
+        await render_anatomy_latin_question(callback.message, user_id)
+
+@dp.callback_query(F.data == "anatomy_latin_stop")
+async def cb_anatomy_latin_stop(callback: CallbackQuery):
+    await callback.answer()
+    if callback.from_user.id in ANATOMY_LATIN_SESSIONS:
+        await render_anatomy_latin_summary(callback.message, callback.from_user.id, aborted=True)
 
 @dp.callback_query(F.data.startswith("anatomy_mnemonics:"))
 async def cb_anatomy_mnemonics(callback: CallbackQuery):

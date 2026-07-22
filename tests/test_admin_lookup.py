@@ -83,6 +83,39 @@ async def main():
     tb.bot.send_message = orig_send_message
     print("grant access by raw numeric ID (no username needed) works end-to-end: OK")
 
+    # ==================== end-to-end: grant/revoke Anatomy demo access ====================
+    if uid_no_username in tb.stats["manual_anatomy_demo_granted"]:
+        tb.stats["manual_anatomy_demo_granted"].remove(uid_no_username)
+    assert not tb.anatomy_access_ok(uid_no_username)
+
+    orig_send_message4 = tb.bot.send_message
+    sent4 = []
+    async def fake_send_message4(chat_id, text, **kwargs):
+        sent4.append((chat_id, text))
+    tb.bot.send_message = fake_send_message4
+
+    tb.ADMIN_PENDING[ADMIN_ID] = {"action": "grant_anatomy_demo"}
+    m5 = FakeMsg(from_user=FakeUser(ADMIN_ID))
+    m5.text = str(uid_no_username)
+    await tb.handle_admin_pending_action(m5)
+    assert uid_no_username in tb.stats["manual_anatomy_demo_granted"]
+    assert ADMIN_ID not in tb.ADMIN_PENDING
+    assert m5.answers and f"ID {uid_no_username}" in m5.answers[0]
+    assert sent4 and sent4[0][0] == uid_no_username
+    assert tb.anatomy_access_ok(uid_no_username)
+    assert uid_no_username not in tb.stats["manual_access_granted"], "anatomy demo grant must not unlock other subjects"
+
+    tb.ADMIN_PENDING[ADMIN_ID] = {"action": "revoke_anatomy_demo"}
+    m6 = FakeMsg(from_user=FakeUser(ADMIN_ID))
+    m6.text = str(uid_no_username)
+    await tb.handle_admin_pending_action(m6)
+    assert uid_no_username not in tb.stats["manual_anatomy_demo_granted"]
+    assert ADMIN_ID not in tb.ADMIN_PENDING
+    assert not tb.anatomy_access_ok(uid_no_username)
+
+    tb.bot.send_message = orig_send_message4
+    print("grant/revoke Anatomy demo access by raw numeric ID works end-to-end: OK")
+
     # ==================== end-to-end: DM a user by raw numeric ID ====================
     orig_send_message2 = tb.bot.send_message
     sent2 = []

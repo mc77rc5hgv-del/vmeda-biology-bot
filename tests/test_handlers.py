@@ -21,7 +21,7 @@ class FakeMsg:
         pass
     async def answer_media_group(self, media, **kwargs):
         self.media_groups.append(media)
-        return self
+        return [self] * len(media)
     async def answer(self, text, **kwargs):
         self.edits.append(text)
         return self
@@ -136,6 +136,36 @@ async def main():
     cb3 = FakeCB("anatomy_match_stop", uid)
     await tb.cb_anatomy_match_stop(cb3)
     print("pooled-mode-handlers OK")
+
+    # latin terms trainer (skull only, for now)
+    latin_terms = tb.get_topic_latin_terms(topic_key)
+    assert len(latin_terms) >= 30, "skull should have a sizable latin term bank"
+    cb = FakeCB(f"anatomy_latin_start:{topic_key}")
+    await tb.cb_anatomy_latin_start(cb)
+    assert cb.message.edits
+    uid = cb.from_user.id
+    sess = tb.ANATOMY_LATIN_SESSIONS.get(uid)
+    assert sess is not None
+    correct_idx = sess["current_correct_idx"]
+    correct_term = sess["queue"][sess["index"]]
+    assert sess["current_options"][correct_idx] == correct_term["ru"]
+
+    # wrong answer -> alert with correct translation, session continues
+    wrong_idx = (correct_idx + 1) % len(sess["current_options"])
+    cb2 = FakeCB(f"anatomy_latin_answer:{wrong_idx}", uid)
+    await tb.cb_anatomy_latin_answer(cb2)
+    assert cb2._answers and cb2._answers[0][1] is True and "Неверно" in cb2._answers[0][0]
+    assert sess["wrong"] == 1
+
+    cb3 = FakeCB("anatomy_latin_stop", uid)
+    await tb.cb_anatomy_latin_stop(cb3)
+    assert uid not in tb.ANATOMY_LATIN_SESSIONS
+
+    # topic with no latin_terms -> graceful alert, not a crash
+    cb4 = FakeCB("anatomy_latin_start:trunk_bones")
+    await tb.cb_anatomy_latin_start(cb4)
+    assert cb4._answers and cb4._answers[0][1] is True
+    print("latin terms trainer OK")
 
     print("ALL HANDLER TESTS PASSED")
 

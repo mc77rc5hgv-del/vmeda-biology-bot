@@ -24,7 +24,7 @@ class FakeMsg:
         return self
     async def answer_media_group(self, media, **kwargs):
         self.media_groups.append(media)
-        return self
+        return [self] * len(media)
     async def answer_photo(self, photo, **kwargs):
         self.photos.append((photo, kwargs.get("caption")))
         return self

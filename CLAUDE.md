@@ -128,6 +128,13 @@ sent via plain `answer_photo` instead of a one-item album (`build_input_media_ph
 items for the multi-photo case). Other subjects' photo carousels (Biology/Physics/Histology) are unaffected by
 this and still hand-roll delete-and-resend on ⬅️/➡️.
 
+Every local-`path` anatomy image is cached by Telegram `file_id` after its first upload
+(`ANATOMY_FILE_ID_CACHE`, persisted to `anatomy_file_id_cache.json` under `STATS_DIR`, same async-write pattern as
+`save_stats()`) — `_anatomy_image_media(img)` returns the cached `file_id` string instead of a fresh `FSInputFile`
+once one exists, so repeat views of the same photo skip re-reading the file from disk and re-uploading it.
+`_cache_anatomy_file_id(img, sent_message)` populates the cache from the real `Message.photo` Telegram returns;
+it's a safe no-op when `sent_message` has no `.photo` (e.g. test mocks), so tests never need to simulate the cache.
+
 ### Access control (two independent gates)
 
 1. **Referral gate** (`referral_gate_middleware`, an `@dp.update.outer_middleware()`): gates only Biology/Physics/
@@ -146,7 +153,10 @@ this and still hand-roll delete-and-resend on ⬅️/➡️.
    until admin flips them, bypassed by admin, by `has_subscription_anatomy_access()`/`has_subscription_histology_access()`
    (per-tier `anatomy`/`histology_until_rule` flags — see Subscriptions below), or (Histology only) by reaching
    `REFERRAL_FULL_ACCESS_THRESHOLD` referrals — same permanent free-access rule as Biology/Physics/Chemistry.
-   Anatomy currently has no referral bypass, only admin/a subscription tier with `anatomy: True`.
+   Anatomy currently has no referral bypass, only admin/a subscription tier with `anatomy: True`, or a manual
+   per-user demo grant (`stats["manual_anatomy_demo_granted"]`, a plain list of IDs mirroring
+   `manual_access_granted`'s shape but scoped to Anatomy only — granted/revoked from the admin panel by username/ID,
+   same `ADMIN_PENDING` prompt pattern as the blanket grant/revoke, actions `grant_anatomy_demo`/`revoke_anatomy_demo`).
 
    **Histology also has its own trial+warning gate** (`histology_gate_ok`, called explicitly at the top of each
    histology handler — `histology_menu`/`_topic`/`_specimen`/`_img`/`_guess_start` — not a middleware, since the
