@@ -92,7 +92,8 @@ async def main():
     print("every bone hub (7) + material page renders correctly: OK")
 
     # 5. no images/flashcards/mnemonics/pairs -> graceful alert, not a crash
-    cb_img = FakeCB("anatomy_bone_img:lower_limb_bones:femur:0")
+    # (patella still has no photos yet, unlike femur/pelvis/hip_bone/foot_bones)
+    cb_img = FakeCB("anatomy_bone_img:lower_limb_bones:patella:0")
     await tb.cb_anatomy_bone_img(cb_img)
     assert not cb_img.message.edits
     assert cb_img._answers and "нет" in (cb_img._answers[0][0] or "")

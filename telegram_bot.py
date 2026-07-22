@@ -5008,6 +5008,8 @@ def get_anatomy_topic_keyboard(topic_key: str):
     builder.button(text="🔗 Сопоставление (все)", callback_data=f"anatomy_match_start:{topic_key}")
     builder.button(text="🧠 Мнемоники (все)", callback_data=f"anatomy_mnemonics:{topic_key}:0")
     builder.button(text="🖼 Найди на картинке", callback_data=f"anatomy_picture:{topic_key}")
+    if topic and topic.get("atlas_images"):
+        builder.button(text="🖼 Атлас (Неттер/Гайворонский)", callback_data=f"anatomy_atlas:{topic_key}:0")
     builder.adjust(1)
     builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data=f"anatomy_section:{get_topic_section_key(topic_key)}"))
     return builder.as_markup()
@@ -5104,6 +5106,36 @@ async def render_bone_image(callback: CallbackQuery, topic_key: str, bone_id: st
     )
     keyboard = get_bone_image_keyboard(topic_key, bone_id, idx, len(images))
     photo = img["url"] if "url" in img else FSInputFile(os.path.join(ANATOMY_IMAGES_DIR, img["path"]))
+    await callback.message.delete()
+    await callback.message.answer_photo(photo, caption=caption, reply_markup=keyboard)
+
+# ---- Атлас темы (для тем без разбора по костям — артрология/миология) ----
+def get_topic_atlas_images(topic_key: str) -> list:
+    topic = get_anatomy_topic_data(topic_key)
+    return topic.get("atlas_images", []) if topic else []
+
+def get_topic_atlas_keyboard(topic_key: str, idx: int, total: int):
+    builder = InlineKeyboardBuilder()
+    nav = []
+    if idx > 0:
+        nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"anatomy_atlas:{topic_key}:{idx-1}"))
+    if idx < total - 1:
+        nav.append(InlineKeyboardButton(text="➡️", callback_data=f"anatomy_atlas:{topic_key}:{idx+1}"))
+    if nav:
+        builder.row(*nav)
+    builder.row(InlineKeyboardButton(text="🔙 К теме", callback_data=f"anatomy_topic:{topic_key}"))
+    return builder.as_markup()
+
+async def render_topic_atlas_image(callback: CallbackQuery, topic_key: str, idx: int):
+    images = get_topic_atlas_images(topic_key)
+    title = get_anatomy_topic_data(topic_key).get("title", "")
+    img = images[idx]
+    caption = (
+        f"🖼 {title}\n\n{img['caption']}\n\n"
+        f"Источник: {img['credit']}\n\n{idx + 1}/{len(images)}"
+    )
+    keyboard = get_topic_atlas_keyboard(topic_key, idx, len(images))
+    photo = FSInputFile(os.path.join(ANATOMY_IMAGES_DIR, img["path"]))
     await callback.message.delete()
     await callback.message.answer_photo(photo, caption=caption, reply_markup=keyboard)
 
@@ -5475,6 +5507,20 @@ async def cb_anatomy_bone_img(callback: CallbackQuery):
         return
     await callback.answer()
     await render_bone_image(callback, topic_key, bone_id, idx)
+
+@dp.callback_query(F.data.startswith("anatomy_atlas:"))
+async def cb_anatomy_atlas(callback: CallbackQuery):
+    if not anatomy_access_ok(callback.from_user.id):
+        await callback.answer(get_anatomy_dev_alert_text(), show_alert=True)
+        return
+    _, topic_key, idx_s = callback.data.split(":")
+    idx = int(idx_s)
+    images = get_topic_atlas_images(topic_key)
+    if not images or not (0 <= idx < len(images)):
+        await callback.answer("Фото для этой темы пока нет", show_alert=True)
+        return
+    await callback.answer()
+    await render_topic_atlas_image(callback, topic_key, idx)
 
 @dp.callback_query(F.data.startswith("anatomy_bone_flash_start:"))
 async def cb_anatomy_bone_flash_start(callback: CallbackQuery):

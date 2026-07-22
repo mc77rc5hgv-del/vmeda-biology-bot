@@ -67,10 +67,10 @@ async def main():
 
     # bone hub text should reflect image counts correctly
     hub_text = tb.get_anatomy_bone_hub_text("trunk_bones", "columna_vertebralis")
-    assert "Фото и схем: 2" in hub_text, hub_text
+    assert "Фото и схем: 3" in hub_text, hub_text
 
     hub_text2 = tb.get_anatomy_bone_hub_text("skull", "whole_skull")
-    assert "Фото и схем: 20" in hub_text2, hub_text2
+    assert "Фото и схем: 24" in hub_text2, hub_text2
 
     print(f"\nTotal images functionally tested: {total_images_tested}")
     if errors:

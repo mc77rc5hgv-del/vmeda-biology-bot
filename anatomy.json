@@ -1007,6 +1007,11 @@
               "path": "skull/mandible/pdf03-22.jpg",
               "caption": "Возрастные изменения нижней челюсти",
               "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "atlas/viscerocranium-2.jpg",
+              "caption": "Нижняя челюсть (mandibula)",
+              "credit": "Ф. Неттер, Атлас анатомии человека"
             }
           ],
           "maxilla": [
@@ -1195,6 +1200,31 @@
               "path": "skull/general/pdf04-03.jpg",
               "caption": "Cranium — лицевой и мозговой отделы",
               "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "atlas/neurocranium-1.jpg",
+              "caption": "Свод черепа (calvaria)",
+              "credit": "Ф. Неттер, Атлас анатомии человека"
+            },
+            {
+              "path": "atlas/viscerocranium-1.jpg",
+              "caption": "Скелет головы и шеи",
+              "credit": "Ф. Неттер, Атлас анатомии человека"
+            },
+            {
+              "path": "atlas/cranium-whole-1.jpg",
+              "caption": "Череп (cranium): вид спереди (norma facialis)",
+              "credit": "Ф. Неттер, Атлас анатомии человека"
+            },
+            {
+              "path": "atlas/cranium-whole-2.jpg",
+              "caption": "Череп: вид сбоку (norma lateralis)",
+              "credit": "Ф. Неттер, Атлас анатомии человека"
+            },
+            {
+              "path": "atlas/cranium-whole-4.jpg",
+              "caption": "Череп новорождённого",
+              "credit": "Ф. Неттер, Атлас анатомии человека"
             }
           ],
           "whole_skull": [
@@ -1297,6 +1327,26 @@
               "path": "skull/whole_skull/pdf04-18.jpg",
               "caption": "Фронтальный распил черепа",
               "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "atlas/neurocranium-2.jpg",
+              "caption": "Наружное основание черепа (basis cranii externa)",
+              "credit": "Ф. Неттер, Атлас анатомии человека"
+            },
+            {
+              "path": "atlas/neurocranium-3.jpg",
+              "caption": "Внутреннее основание черепа (basis cranii interna)",
+              "credit": "Ф. Неттер, Атлас анатомии человека"
+            },
+            {
+              "path": "atlas/neurocranium-4.jpg",
+              "caption": "Отверстия внутреннего основания черепа",
+              "credit": "Ф. Неттер, Атлас анатомии человека"
+            },
+            {
+              "path": "atlas/cranium-whole-3.jpg",
+              "caption": "Череп: срединный сагиттальный распил",
+              "credit": "Ф. Неттер, Атлас анатомии человека"
             }
           ]
         },
@@ -1485,6 +1535,11 @@
               "path": "trunk_bones/columna_vertebralis/pdf01-21.jpg",
               "caption": "Позвоночный столб — изгибы",
               "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "atlas/vertebra-9.jpg",
+              "caption": "Позвоночный столб (columna vertebralis)",
+              "credit": "Ф. Неттер, Атлас анатомии человека"
             }
           ],
           "vertebra_general": [
@@ -1507,6 +1562,16 @@
               "path": "trunk_bones/vertebra_general/pdf01-19.jpg",
               "caption": "Рёберные элементы и добавочные рёбра",
               "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "atlas/vertebra-1.jpg",
+              "caption": "Типичный позвонок сверху и сбоку — тело, дуга, отростки",
+              "credit": "Ф. Неттер, Атлас анатомии человека"
+            },
+            {
+              "path": "atlas/vertebra-3.jpg",
+              "caption": "Сравнительная таблица шейного, грудного и поясничного позвонков",
+              "credit": "И.В. Гайворонский, Нормальная анатомия человека"
             }
           ],
           "cervical_vertebra": [
@@ -1519,6 +1584,11 @@
               "path": "trunk_bones/cervical_vertebra/pdf01-13.jpg",
               "caption": "Шейные позвонки, vertebrae cervicales",
               "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "atlas/vertebra-5.jpg",
+              "caption": "Шейные позвонки (vertebrae cervicales), продолжение",
+              "credit": "Ф. Неттер, Атлас анатомии человека"
             }
           ],
           "atlas_axis": [
@@ -1536,6 +1606,16 @@
               "path": "trunk_bones/atlas_axis/pdf01-16.jpg",
               "caption": "Осевой позвонок, axis",
               "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "atlas/vertebra-2.jpg",
+              "caption": "Атлант и осевой позвонок в сочленении",
+              "credit": "Ф. Неттер, Атлас анатомии человека"
+            },
+            {
+              "path": "atlas/vertebra-4.jpg",
+              "caption": "Шейные позвонки: атлант (atlas) и осевой позвонок (axis)",
+              "credit": "Ф. Неттер, Атлас анатомии человека"
             }
           ],
           "thoracic_vertebra": [
@@ -1543,6 +1623,11 @@
               "path": "trunk_bones/thoracic_vertebra/pdf01-17.jpg",
               "caption": "Грудные позвонки, vertebrae thoracicae",
               "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "atlas/vertebra-10.jpg",
+              "caption": "Грудные позвонки (vertebrae thoracicae)",
+              "credit": "Ф. Неттер, Атлас анатомии человека"
             }
           ],
           "lumbar_vertebra": [
@@ -1550,6 +1635,11 @@
               "path": "trunk_bones/lumbar_vertebra/pdf01-18.jpg",
               "caption": "Поясничные позвонки, vertebrae lumbales",
               "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "atlas/vertebra-11.jpg",
+              "caption": "Поясничные позвонки (vertebrae lumbales)",
+              "credit": "Ф. Неттер, Атлас анатомии человека"
             }
           ],
           "sacrum_coccyx": [
@@ -1557,6 +1647,21 @@
               "path": "trunk_bones/sacrum_coccyx/pdf01-20.jpg",
               "caption": "Сросшиеся позвонки — крестец и копчик",
               "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "atlas/vertebra-12.jpg",
+              "caption": "Крестец (os sacrum) и копчик (os coccygis)",
+              "credit": "Ф. Неттер, Атлас анатомии человека"
+            },
+            {
+              "path": "atlas/vertebra-13.jpg",
+              "caption": "Крестец и копчик (продолжение)",
+              "credit": "Ф. Неттер, Атлас анатомии человека"
+            },
+            {
+              "path": "atlas/vertebra-14.jpg",
+              "caption": "Живот: крестцовый выступ (горизонтальный срез)",
+              "credit": "Ф. Неттер, Атлас анатомии человека"
             }
           ],
           "ribs": [
@@ -1584,6 +1689,21 @@
               "path": "trunk_bones/ribs/pdf01-26.jpg",
               "caption": "I ребро, costa prima",
               "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "atlas/thorax-bones-3.jpg",
+              "caption": "Кости грудной клетки и пояса верхних конечностей",
+              "credit": "Ф. Неттер, Атлас анатомии человека"
+            },
+            {
+              "path": "atlas/thorax-bones-4.jpg",
+              "caption": "Рёбра (costae) и грудино-рёберные суставы",
+              "credit": "Ф. Неттер, Атлас анатомии человека"
+            },
+            {
+              "path": "atlas/thorax-bones-5.jpg",
+              "caption": "Шейные рёбра и другие отклонения от нормы",
+              "credit": "Ф. Неттер, Атлас анатомии человека"
             }
           ],
           "sternum": [
@@ -1721,6 +1841,16 @@
               "path": "upper_limb_bones/scapula/pdf05-05.jpg",
               "caption": "Лопатка, scapula",
               "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "atlas/upper-limb-bones-4.jpg",
+              "caption": "Лопатка (scapula) и плечевая кость: вид спереди",
+              "credit": "Ф. Неттер, Атлас анатомии человека"
+            },
+            {
+              "path": "atlas/upper-limb-bones-5.jpg",
+              "caption": "Лопатка и плечевая кость: вид сзади",
+              "credit": "Ф. Неттер, Атлас анатомии человека"
             }
           ],
           "clavicle": [
@@ -1757,6 +1887,11 @@
               "path": "upper_limb_bones/ulna/pdf05-11.jpg",
               "caption": "Плечевая кость и кости предплечья — локтевой сустав",
               "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "atlas/upper-limb-bones-6.jpg",
+              "caption": "Кости предплечья",
+              "credit": "Ф. Неттер, Атлас анатомии человека"
             }
           ],
           "radius": [
@@ -1774,6 +1909,11 @@
               "path": "upper_limb_bones/radius/pdf05-11.jpg",
               "caption": "Плечевая кость и кости предплечья — локтевой сустав",
               "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "atlas/upper-limb-bones-6.jpg",
+              "caption": "Кости предплечья",
+              "credit": "Ф. Неттер, Атлас анатомии человека"
             }
           ],
           "hand_bones": [
@@ -1806,6 +1946,16 @@
               "path": "upper_limb_bones/hand_bones/pdf05-17.jpg",
               "caption": "Фаланги пальцев кисти",
               "credit": "ВМедА, кафедра нормальной анатомии — учебная презентация"
+            },
+            {
+              "path": "atlas/upper-limb-bones-7.jpg",
+              "caption": "Кости запястья (ossa carpi)",
+              "credit": "Ф. Неттер, Атлас анатомии человека"
+            },
+            {
+              "path": "atlas/upper-limb-bones-8.jpg",
+              "caption": "Кости кисти",
+              "credit": "Ф. Неттер, Атлас анатомии человека"
             }
           ]
         }
@@ -1908,7 +2058,39 @@
             "foot_bones"
           ]
         },
-        "bone_images": {}
+        "bone_images": {
+          "pelvis": [
+            {
+              "path": "atlas/lower-limb-bones-4.jpg",
+              "caption": "Кости и связки таза",
+              "credit": "Ф. Неттер, Атлас анатомии человека"
+            },
+            {
+              "path": "atlas/lower-limb-bones-5.jpg",
+              "caption": "Кости и связки таза (продолжение)",
+              "credit": "Ф. Неттер, Атлас анатомии человека"
+            },
+            {
+              "path": "atlas/lower-limb-bones-6.jpg",
+              "caption": "Половые различия таза и измерение размеров",
+              "credit": "Ф. Неттер, Атлас анатомии человека"
+            }
+          ],
+          "hip_bone": [
+            {
+              "path": "atlas/lower-limb-bones-7.jpg",
+              "caption": "Тазовая кость (os coxae)",
+              "credit": "Ф. Неттер, Атлас анатомии человека"
+            }
+          ],
+          "femur": [
+            {
+              "path": "atlas/lower-limb-bones-8.jpg",
+              "caption": "Бедренная кость (femur)",
+              "credit": "Ф. Неттер, Атлас анатомии человека"
+            }
+          ]
+        }
       }
     },
     "menu_title": "🦴 Остеология (кости)"
@@ -1967,7 +2149,19 @@
         "flashcards": [],
         "matching_sets": [],
         "mnemonics": [],
-        "picture_quiz": []
+        "picture_quiz": [],
+        "atlas_images": [
+          {
+            "path": "atlas/trunk-joints-3.jpg",
+            "caption": "Связки пояснично-крестцового отдела позвоночного столба",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/trunk-joints-4.jpg",
+            "caption": "Рёберно-позвоночные суставы (articulationes costovertebrales)",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          }
+        ]
       },
       "skull_joints": {
         "title": "Соединения костей черепа",
@@ -1988,7 +2182,14 @@
         "flashcards": [],
         "matching_sets": [],
         "mnemonics": [],
-        "picture_quiz": []
+        "picture_quiz": [],
+        "atlas_images": [
+          {
+            "path": "atlas/tmj-1.jpg",
+            "caption": "Височно-нижнечелюстной сустав (articulatio temporomandibularis)",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          }
+        ]
       },
       "upper_limb_joints": {
         "title": "Соединения костей верхней конечности",
@@ -2014,7 +2215,54 @@
         "flashcards": [],
         "matching_sets": [],
         "mnemonics": [],
-        "picture_quiz": []
+        "picture_quiz": [],
+        "atlas_images": [
+          {
+            "path": "atlas/upper-limb-joints-3.jpg",
+            "caption": "Ключица и грудино-ключичный сустав",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/upper-limb-joints-4.jpg",
+            "caption": "Плечевой сустав (articulatio humeri)",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/upper-limb-joints-5.jpg",
+            "caption": "Мышцы и связки плечевого сустава",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/upper-limb-joints-6.jpg",
+            "caption": "Локтевой сустав (articulatio cubiti)",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/upper-limb-joints-7.jpg",
+            "caption": "Связки локтевого сустава",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/upper-limb-joints-8.jpg",
+            "caption": "Движения запястья",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/upper-limb-joints-9.jpg",
+            "caption": "Связки запястья",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/upper-limb-joints-10.jpg",
+            "caption": "Связки запястья (продолжение)",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/upper-limb-joints-11.jpg",
+            "caption": "Пястные и межфаланговые связки",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          }
+        ]
       },
       "lower_limb_joints": {
         "title": "Соединения костей нижней конечности",
@@ -2040,7 +2288,29 @@
         "flashcards": [],
         "matching_sets": [],
         "mnemonics": [],
-        "picture_quiz": []
+        "picture_quiz": [],
+        "atlas_images": [
+          {
+            "path": "atlas/lower-limb-joints-3.jpg",
+            "caption": "Тазобедренный сустав (articulatio coxae)",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/lower-limb-joints-4.jpg",
+            "caption": "Колено: вид спереди",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/lower-limb-joints-5.jpg",
+            "caption": "Коленный сустав: крестообразные и коллатеральные связки",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/lower-limb-joints-6.jpg",
+            "caption": "Коленный сустав: вид сзади и сагиттальный срез",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          }
+        ]
       }
     }
   },
@@ -2098,7 +2368,44 @@
         "flashcards": [],
         "matching_sets": [],
         "mnemonics": [],
-        "picture_quiz": []
+        "picture_quiz": [],
+        "atlas_images": [
+          {
+            "path": "atlas/back-muscles-3.jpg",
+            "caption": "Мышцы спины (musculi dorsi): поверхностные слои",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/back-muscles-4.jpg",
+            "caption": "Мышцы спины: средние слои",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/back-muscles-5.jpg",
+            "caption": "Мышцы спины: глубокие слои",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/back-muscles-6.jpg",
+            "caption": "Задняя область шеи (regio cervicalis posterior)",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/back-muscles-7.jpg",
+            "caption": "Поясничная область: горизонтальный срез",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/back-muscles-8.jpg",
+            "caption": "Задняя и боковые стенки грудной клетки",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/back-muscles-9.jpg",
+            "caption": "Спина (dorsum)",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          }
+        ]
       },
       "chest_muscles": {
         "title": "Мышцы груди",
@@ -2119,7 +2426,34 @@
         "flashcards": [],
         "matching_sets": [],
         "mnemonics": [],
-        "picture_quiz": []
+        "picture_quiz": [],
+        "atlas_images": [
+          {
+            "path": "atlas/thorax-abdomen-muscles-3.jpg",
+            "caption": "Передняя стенка грудной клетки",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/thorax-abdomen-muscles-4.jpg",
+            "caption": "Передняя стенка грудной клетки (продолжение)",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/thorax-abdomen-muscles-5.jpg",
+            "caption": "Передняя стенка грудной клетки: вид изнутри",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/thorax-abdomen-muscles-6.jpg",
+            "caption": "Межрёберные нервы и артерии",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/thorax-abdomen-muscles-10.jpg",
+            "caption": "Дыхательные мышцы",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          }
+        ]
       },
       "abdomen_muscles": {
         "title": "Мышцы живота",
@@ -2145,7 +2479,64 @@
         "flashcards": [],
         "matching_sets": [],
         "mnemonics": [],
-        "picture_quiz": []
+        "picture_quiz": [],
+        "atlas_images": [
+          {
+            "path": "atlas/thorax-abdomen-muscles-11.jpg",
+            "caption": "Передняя брюшная стенка: поверхностные слои",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/thorax-abdomen-muscles-12.jpg",
+            "caption": "Передняя брюшная стенка: промежуточные слои",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/thorax-abdomen-muscles-13.jpg",
+            "caption": "Передняя брюшная стенка: глубокие слои",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/thorax-abdomen-muscles-14.jpg",
+            "caption": "Влагалище прямой мышцы живота: поперечные срезы",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/thorax-abdomen-muscles-15.jpg",
+            "caption": "Передняя стенка брюшной полости: вид изнутри",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/thorax-abdomen-muscles-16.jpg",
+            "caption": "Боковая стенка брюшной полости",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/thorax-abdomen-muscles-17.jpg",
+            "caption": "Иннервация передней брюшной стенки",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/thorax-abdomen-muscles-18.jpg",
+            "caption": "Паховая область",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/thorax-abdomen-muscles-19.jpg",
+            "caption": "Паховая область (продолжение)",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/thorax-abdomen-muscles-20.jpg",
+            "caption": "Паховый канал (canalis inguinalis)",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/thorax-abdomen-muscles-21.jpg",
+            "caption": "Паховый канал и семенной канатик",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          }
+        ]
       },
       "diaphragm": {
         "title": "Диафрагма",
@@ -2166,7 +2557,24 @@
         "flashcards": [],
         "matching_sets": [],
         "mnemonics": [],
-        "picture_quiz": []
+        "picture_quiz": [],
+        "atlas_images": [
+          {
+            "path": "atlas/thorax-abdomen-muscles-7.jpg",
+            "caption": "Диафрагма (diaphragma): вид сверху",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/thorax-abdomen-muscles-8.jpg",
+            "caption": "Диафрагма (diaphragma): вид снизу",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/thorax-abdomen-muscles-9.jpg",
+            "caption": "Диафрагмальный нерв (nervus phrenicus)",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          }
+        ]
       },
       "neck_muscles": {
         "title": "Мышцы шеи",
@@ -2197,7 +2605,29 @@
         "flashcards": [],
         "matching_sets": [],
         "mnemonics": [],
-        "picture_quiz": []
+        "picture_quiz": [],
+        "atlas_images": [
+          {
+            "path": "atlas/head-neck-muscles-3.jpg",
+            "caption": "Мышцы шеи (musculi colli), вид сбоку",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/head-neck-muscles-4.jpg",
+            "caption": "Мышцы, лежащие ниже и выше подъязычной кости",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/head-neck-muscles-5.jpg",
+            "caption": "Лестничные и предпозвоночные мышцы",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/head-neck-muscles-6.jpg",
+            "caption": "Фасции шеи",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          }
+        ]
       },
       "head_muscles": {
         "title": "Мышцы головы",
@@ -2228,7 +2658,29 @@
         "flashcards": [],
         "matching_sets": [],
         "mnemonics": [],
-        "picture_quiz": []
+        "picture_quiz": [],
+        "atlas_images": [
+          {
+            "path": "atlas/head-neck-muscles-1.jpg",
+            "caption": "Мимические мышцы (musculi faciei), вид спереди",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/head-neck-muscles-2.jpg",
+            "caption": "Мимические мышцы (musculi faciei), вид сбоку",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/head-neck-muscles-7.jpg",
+            "caption": "Жевательные (mm. masticatorii) и мимические мышцы",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/head-neck-muscles-8.jpg",
+            "caption": "Жевательные мышцы, mm. masticatorii (продолжение)",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          }
+        ]
       },
       "upper_limb_muscles": {
         "title": "Мышцы верхней конечности",
@@ -2269,7 +2721,124 @@
         "flashcards": [],
         "matching_sets": [],
         "mnemonics": [],
-        "picture_quiz": []
+        "picture_quiz": [],
+        "atlas_images": [
+          {
+            "path": "atlas/upper-limb-muscles-4.jpg",
+            "caption": "Мышцы пояса верхних конечностей",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/upper-limb-muscles-5.jpg",
+            "caption": "Мышцы, вращающие плечо",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/upper-limb-muscles-6.jpg",
+            "caption": "Мышцы плеча: вид спереди",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/upper-limb-muscles-7.jpg",
+            "caption": "Мышцы плеча: вид сзади",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/upper-limb-muscles-8.jpg",
+            "caption": "Мышцы предплечья: вращатели лучевой кости",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/upper-limb-muscles-9.jpg",
+            "caption": "Мышцы предплечья: разгибатели кисти и пальцев",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/upper-limb-muscles-10.jpg",
+            "caption": "Мышцы предплечья: сгибатели запястья",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/upper-limb-muscles-11.jpg",
+            "caption": "Мышцы предплечья: сгибатели пальцев",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/upper-limb-muscles-12.jpg",
+            "caption": "Мышцы предплечья (поверхностный слой): вид сзади",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/upper-limb-muscles-13.jpg",
+            "caption": "Мышцы предплечья (глубокий слой): вид сзади",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/upper-limb-muscles-14.jpg",
+            "caption": "Мышцы предплечья (поверхностный слой): вид спереди",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/upper-limb-muscles-15.jpg",
+            "caption": "Мышцы предплечья (средний слой): вид спереди",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/upper-limb-muscles-16.jpg",
+            "caption": "Мышцы предплечья (глубокий слой): вид спереди",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/upper-limb-muscles-17.jpg",
+            "caption": "Ладонная поверхность кисти: поверхностное препарирование",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/upper-limb-muscles-18.jpg",
+            "caption": "Ладонная поверхность кисти: глубокие структуры",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/upper-limb-muscles-19.jpg",
+            "caption": "Синовиальные влагалища и сухожилия кисти",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/upper-limb-muscles-20.jpg",
+            "caption": "Червеобразные мышцы, пространства и синовиальные влагалища кисти",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/upper-limb-muscles-21.jpg",
+            "caption": "Сухожилия сгибателей и разгибателей пальцев",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/upper-limb-muscles-22.jpg",
+            "caption": "Глубокие мышцы кисти",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/upper-limb-muscles-23.jpg",
+            "caption": "Кисть: тыльная сторона",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/upper-limb-muscles-24.jpg",
+            "caption": "Кисть: глубокие структуры",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/upper-limb-muscles-25.jpg",
+            "caption": "Сухожилия разгибателей на тыльной стороне кисти",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/upper-limb-muscles-26.jpg",
+            "caption": "Пальцы (digiti)",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          }
+        ]
       },
       "lower_limb_muscles": {
         "title": "Мышцы нижней конечности",
@@ -2325,7 +2894,124 @@
         "flashcards": [],
         "matching_sets": [],
         "mnemonics": [],
-        "picture_quiz": []
+        "picture_quiz": [],
+        "atlas_images": [
+          {
+            "path": "atlas/lower-limb-muscles-4.jpg",
+            "caption": "Прикрепление мышц нижних конечностей: вид спереди",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/lower-limb-muscles-5.jpg",
+            "caption": "Прикрепление мышц нижних конечностей: вид сзади",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/lower-limb-muscles-6.jpg",
+            "caption": "Мышцы бедра: вид спереди",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/lower-limb-muscles-7.jpg",
+            "caption": "Мышцы бедра: вид спереди (продолжение)",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/lower-limb-muscles-8.jpg",
+            "caption": "Мышцы бедра: вид с латеральной стороны",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/lower-limb-muscles-9.jpg",
+            "caption": "Мышцы таза и бедра: вид сзади",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/lower-limb-muscles-10.jpg",
+            "caption": "Поясничная и подвздошная мышцы",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/lower-limb-muscles-11.jpg",
+            "caption": "Прикрепление мышц на голени и стопе",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/lower-limb-muscles-12.jpg",
+            "caption": "Мышцы голени: задняя группа",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/lower-limb-muscles-13.jpg",
+            "caption": "Мышцы голени: задняя группа (продолжение)",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/lower-limb-muscles-14.jpg",
+            "caption": "Мышцы голени: задняя группа, глубокие слои",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/lower-limb-muscles-15.jpg",
+            "caption": "Мышцы голени: передняя группа",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/lower-limb-muscles-16.jpg",
+            "caption": "Мышцы голени: передняя группа (глубокие слои)",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/lower-limb-muscles-17.jpg",
+            "caption": "Мышцы голени: вид с латеральной стороны",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/lower-limb-muscles-18.jpg",
+            "caption": "Поперечный срез голени: фасциальные влагалища",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/lower-limb-muscles-19.jpg",
+            "caption": "Поверхностные мышцы тыльной поверхности стопы",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/lower-limb-muscles-20.jpg",
+            "caption": "Глубокие мышцы тыльной поверхности стопы",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/lower-limb-muscles-21.jpg",
+            "caption": "Поверхностные структуры подошвы стопы",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/lower-limb-muscles-22.jpg",
+            "caption": "Поверхностный слой мышц стопы",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/lower-limb-muscles-23.jpg",
+            "caption": "Мышцы стопы (второй слой)",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/lower-limb-muscles-24.jpg",
+            "caption": "Мышцы стопы (третий слой)",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/lower-limb-muscles-25.jpg",
+            "caption": "Межкостные мышцы и глубокие артерии стопы",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/lower-limb-muscles-26.jpg",
+            "caption": "Межкостные мышцы стопы",
+            "credit": "Ф. Неттер, Атлас анатомии человека"
+          }
+        ]
       }
     }
   }
