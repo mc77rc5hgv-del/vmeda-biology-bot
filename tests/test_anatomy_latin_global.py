@@ -65,6 +65,27 @@ async def main():
     assert sections_covered, "expected at least one section with latin_terms"
     print(f"get_all_latin_terms(): {len(all_terms)} terms from sections {sorted(sections_covered)}")
 
+    # ---- distractors prefer same-bone terms (harder to tell apart than a random pick) ----
+    bone_counts = {}
+    for term in all_terms:
+        bone_counts[term.get("bone")] = bone_counts.get(term.get("bone"), 0) + 1
+    rich_bone = max(bone_counts, key=lambda b: bone_counts[b])
+    assert bone_counts[rich_bone] >= 4, "need a bone with enough terms to test same-bone distractor preference"
+    sample_term = next(t for t in all_terms if t.get("bone") == rich_bone)
+    for _ in range(20):
+        distractors = tb.pick_anatomy_latin_distractors(sample_term, all_terms)
+        assert len(distractors) == 3
+        chosen_bones = {t.get("bone") for t in all_terms if t["ru"] in distractors}
+        assert chosen_bones == {rich_bone}, f"expected all distractors from {rich_bone}, got {chosen_bones}"
+    print(f"distractors preferentially drawn from the same bone ({rich_bone}): OK")
+
+    # ---- falls back to the wider pool when a bone has too few terms for 3 distractors ----
+    sparse_bone = min(bone_counts, key=lambda b: bone_counts[b])
+    sparse_term = next(t for t in all_terms if t.get("bone") == sparse_bone)
+    distractors = tb.pick_anatomy_latin_distractors(sparse_term, all_terms)
+    assert len(distractors) == 3, "must still produce 3 distractors via fallback"
+    print(f"distractor fallback for a sparse bone ({sparse_bone}, {bone_counts[sparse_bone]} terms): OK")
+
     # ---- anatomy_menu shows both the quiz and leaderboard buttons ----
     kb = tb.get_anatomy_menu_keyboard()
     data = [b.callback_data for row in kb.inline_keyboard for b in row]
