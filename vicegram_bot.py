@@ -173,6 +173,16 @@ def build_manual_payment_url(plan: dict) -> str:
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
+
+@dp.errors()
+async def on_dispatcher_error(event) -> bool:
+    """Ловит исключения, вылетевшие из обработчиков апдейтов. Без этого
+    необработанная ошибка в одном хэндлере может уронить весь polling —
+    здесь она просто логируется, и бот продолжает работать дальше."""
+    logger.exception("Необработанная ошибка при обработке апдейта: %s", event.exception)
+    return True
+
+
 # ==================== БАЗА ДАННЫХ ====================
 def db_connect() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH, timeout=10)
@@ -2794,7 +2804,12 @@ async def handle_business_message(message: Message):
     if not connection or not connection["is_enabled"]:
         return
     owner_id = connection["owner_id"]
-    await cache_business_message(owner_id, message)
+    is_from_owner = bool(message.from_user) and message.from_user.id == owner_id
+    # Свои же сообщения (владелец) не отслеживаем на удаление/изменение —
+    # ловим только то, что написал собеседник. Активные заметки и /calc
+    # по-прежнему реагируют на сообщения от любой стороны чата.
+    if not is_from_owner:
+        await cache_business_message(owner_id, message)
     if message.text and message.text.startswith("/calc"):
         await reply_calc_in_business_chat(owner_id, message)
     else:
@@ -2807,6 +2822,9 @@ async def handle_edited_business_message(message: Message):
     if not connection or not connection["is_enabled"]:
         return
     owner_id = connection["owner_id"]
+    is_from_owner = bool(message.from_user) and message.from_user.id == owner_id
+    if is_from_owner:
+        return
     old = get_cached_business_message(owner_id, message.chat.id, message.message_id)
     new_text = message.text or message.caption or ""
     if old and old["text"] and old["text"] != new_text and await gate_by_trial(owner_id):
@@ -3628,7 +3646,20 @@ async def main() -> None:
     asyncio.create_task(deleted_message_poller())
     asyncio.create_task(public_user_count_updater())
     asyncio.create_task(reminder_poller())
-    await dp.start_polling(bot)
+
+    # Если сам long polling вылетит (обрыв сети, временная недоступность
+    # Telegram API и т.п.) — не даём процессу упасть целиком, а перезапускаем
+    # polling с нарастающей паузой. Ошибки внутри отдельных хэндлеров сюда
+    # не долетают — их ловит on_dispatcher_error() выше.
+    delay = 5
+    while True:
+        try:
+            await dp.start_polling(bot)
+            break  # start_polling завершился штатно (например, dp.stop_polling())
+        except Exception:
+            logger.exception("Polling упал, перезапуск через %s сек", delay)
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, 300)
 
 
 if __name__ == "__main__":
