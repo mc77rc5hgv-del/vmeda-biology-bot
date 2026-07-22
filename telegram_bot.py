@@ -1134,7 +1134,7 @@ GATED_CALLBACKS_CHEMISTRY = {
 }
 GATED_PREFIXES_CHEMISTRY = (
     "chem_theory:", "chemtask_topic:", "chemtask_formulas:", "chemtask_list:", "chemtask_show:",
-    "lab:", "lab_exp:", "lab_calc:",
+    "lab:", "lab_exp:", "lab_calc:", "lab_summary:",
 )
 
 GATED_CALLBACKS = GATED_CALLBACKS_BIOLOGY | GATED_CALLBACKS_PHYSICS | GATED_CALLBACKS_CHEMISTRY
@@ -4459,8 +4459,23 @@ async def cb_show_lab(callback: CallbackQuery):
         builder.button(text="🔬 Опыты", callback_data=f"lab_exp:{lab_num}")
     if lab.get("calculations"):
         builder.button(text="📐 Расчёты", callback_data=f"lab_calc:{lab_num}")
+    if lab.get("summary"):
+        builder.button(text="📝 Кратко (конспект)", callback_data=f"lab_summary:{lab_num}")
     builder.button(text="🔙 Назад к лабам", callback_data="chemistry_labs")
     builder.adjust(1)
+    await safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=builder.as_markup())
+
+@dp.callback_query(F.data.startswith("lab_summary:"))
+async def cb_lab_summary(callback: CallbackQuery):
+    await callback.answer()
+    lab_num = int(callback.data.split(":")[1])
+    lab = next((entry for entry in CHEMISTRY_LABS["labs"] if entry["number"] == lab_num), None)
+    if not lab or not lab.get("summary"):
+        await callback.answer("Конспект не найден", show_alert=True)
+        return
+    text = f"📝 <b>Кратко — Лабораторная работа {lab_num}</b>\n{DIVIDER}\n\n{lab['summary']}"
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔙 Назад", callback_data=f"lab:{lab_num}")
     await safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=builder.as_markup())
 
 @dp.callback_query(F.data.startswith("lab_exp:"))
