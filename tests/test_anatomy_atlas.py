@@ -41,13 +41,15 @@ async def main():
     errors = []
     total_images_tested = 0
 
+    # Derived generically (not hand-listed) so every section that adds atlas_images —
+    # present and future — is automatically exercised here.
     topics_with_atlas = [
-        ("arthrology", "trunk_joints"), ("arthrology", "skull_joints"),
-        ("arthrology", "upper_limb_joints"), ("arthrology", "lower_limb_joints"),
-        ("myology", "back_muscles"), ("myology", "chest_muscles"), ("myology", "abdomen_muscles"),
-        ("myology", "diaphragm"), ("myology", "neck_muscles"), ("myology", "head_muscles"),
-        ("myology", "upper_limb_muscles"), ("myology", "lower_limb_muscles"),
+        (section_key, topic_key)
+        for section_key, section in tb.ANATOMY.items()
+        for topic_key, topic in section.get("topics", {}).items()
+        if topic.get("atlas_images")
     ]
+    assert len(topics_with_atlas) >= 29, f"expected atlas_images on ~29+ topics, got {len(topics_with_atlas)}"
 
     # 1. every topic with atlas_images shows the button on its topic screen
     for section_key, topic_key in topics_with_atlas:

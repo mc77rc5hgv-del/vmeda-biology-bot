@@ -90,12 +90,26 @@ automatically apply to another.
 
 `ANATOMY` (in `anatomy.json`) and `HISTOLOGY` (in `histology.json`) share a deeper nested schema:
 `section -> topics{} -> topic{material[], flashcards[], matching_sets[], mnemonics[], picture_quiz[], bones_list,
-bone_material_ids, bone_images}`. `bones_list`/`bone_material_ids`/`bone_images` let a topic be browsed either as
-one continuous `material` sequence or broken down per named bone/structure ("hub" screens) — see
-`get_anatomy_bone_hub_*` / `get_bone_*` helpers. Content style convention: Russian terms in `<b>bold</b>`, Latin
-nomenclature in `<i>italic</i>`, `━━━━━━━━━━━━━━` (the `DIVIDER` constant) as a visual sub-section break. Sourced
-from the Гайворонский textbook and academy handouts — keep new anatomy/histology material consistent with that
-style and cite Latin terms the same way.
+bone_material_ids, bone_images, atlas_images}`. `bones_list`/`bone_material_ids`/`bone_images` let a topic be
+browsed either as one continuous `material` sequence or broken down per named bone/structure ("hub" screens) —
+see `get_anatomy_bone_hub_*` / `get_bone_*` helpers; only osteology topics (`skull`, `trunk_bones`,
+`upper_limb_bones`, `lower_limb_bones`) use this hub structure. Topics with no natural per-bone breakdown
+(arthrology, myology, and the whole of `splanchnology`/`angiology`/`neurology`/`sense_organs`) instead carry a flat
+`atlas_images: [{path, caption, credit}]` list, shown via a "🖼 Атлас" button (`anatomy_atlas:{topic}:{idx}`,
+`get_topic_atlas_images`/`render_topic_atlas_image`) — a smaller, self-contained carousel mirroring
+`render_bone_image` rather than retrofitting the bone-hub code onto non-bone topics. **`ANATOMY`'s top-level
+section dict and topic dict are the only source of truth for navigation** — `get_anatomy_menu_keyboard`,
+`get_topic_section_key`, `get_anatomy_topic_data` all iterate `ANATOMY.items()` directly, so adding a whole new
+section (e.g. `splanchnology`) is a pure content change, zero code changes, as long as the topic dict shape
+matches. Content style convention: Russian terms in `<b>bold</b>`, Latin nomenclature in `<i>italic</i>`,
+`━━━━━━━━━━━━━━` (the `DIVIDER` constant) as a visual sub-section break. Sourced from the Гайворонский textbook and
+academy handouts — keep new anatomy/histology material consistent with that style and cite Latin terms the same
+way. `ANATOMY` currently has 7 sections mirroring Гайворонский's two-volume program: Vol. 1 (locomotor system) —
+`osteology`/`arthrology`/`myology`; Vol. 2 (everything else) — `splanchnology`/`angiology`/`neurology`/
+`sense_organs`. Atlas photos (Ф. Неттер + И.В. Гайворонский illustrations) live under `images/anatomy/atlas/`,
+one file per `<topic-id>-<N>.jpg`; `N` is NOT guaranteed contiguous from 1 (some placeholder illustrations in the
+source material were never filled with a real photo) — always discover real files by regex/glob per topic rather
+than assuming `range(1, count+1)`.
 
 Images referenced by content JSON live under `images/<subject>/...` and are resolved relative to `IMAGES_DIR`
 (`ANATOMY_IMAGES_DIR`, `HISTOLOGY_IMAGES_DIR`). Photo carousels are hand-rolled per section (delete-and-resend a
