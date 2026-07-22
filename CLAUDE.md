@@ -280,7 +280,11 @@ Stars payments go through the real Telegram Bot API invoice flow (`send_invoice`
    `cb_admin_confirm_sub` guards against two admins racing each other on the same request (checks whether
    `stats["subscriptions"][uid]` already has this exact tier granted via `"rubles"` in the last 10 minutes before
    granting again — the second tap edits its own message to "already confirmed" instead of double-granting/
-   double-notifying the buyer).
+   double-notifying the buyer). The same message also carries a `❌ Отклонить` button
+   (`admin_reject_sub:{tier}:{user_id}:{subject|-}`, `cb_admin_reject_sub`) for when the buyer never actually
+   transfers the money — it just edits the admin's own copy of the request to a closed state, grants nothing, and
+   doesn't block a real confirm later (rejecting is purely about clearing the admin's own notification, not a
+   durable "declined" flag on the request).
 2. **Manual flow** (unchanged, kept as a fallback) — `ADMIN_PENDING` (`record_subscription_username` →
    `record_subscription_tier` → `record_subscription_subject` if the chosen tier requires one), for cases where
    the admin wants to grant a subscription without the buyer having gone through the purchase flow at all — in

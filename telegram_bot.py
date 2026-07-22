@@ -3913,6 +3913,11 @@ def get_admin_payment_confirm_keyboard(tier_id: int, target_id: int, subject: st
         text="✅ Подтвердить оплату",
         callback_data=f"admin_confirm_sub:{tier_id}:{target_id}:{subject or '-'}"
     )
+    builder.button(
+        text="❌ Отклонить",
+        callback_data=f"admin_reject_sub:{tier_id}:{target_id}:{subject or '-'}"
+    )
+    builder.adjust(1)
     return builder.as_markup()
 
 async def notify_admins_of_payment_request(tier_id: int, target_id: int, user, subject: str | None = None) -> None:
@@ -4235,6 +4240,28 @@ async def cb_admin_confirm_sub(callback: CallbackQuery):
     await safe_edit_text(
         callback.message,
         f"✅ Подтверждено — подписка «{cfg['title']}» выдана {format_admin_target_label(None, target_id)}.",
+        parse_mode="HTML"
+    )
+
+@dp.callback_query(F.data.startswith("admin_reject_sub:"))
+async def cb_admin_reject_sub(callback: CallbackQuery):
+    """Позволяет закрыть запрос на подтверждение оплаты, если покупатель так и не перевёл
+    деньги (например, проигнорировал) — просто убирает заявку, ничего не выдаёт и не трогает
+    статистику."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    _, tier_id_raw, target_id_raw, subject_raw = callback.data.split(":")
+    tier_id = int(tier_id_raw)
+    target_id = int(target_id_raw)
+    if tier_id not in SUBSCRIPTION_TIERS:
+        await callback.answer("Тариф не найден", show_alert=True)
+        return
+    await callback.answer("Заявка отклонена", show_alert=True)
+    await safe_edit_text(
+        callback.message,
+        f"❌ Отклонено — заявка на «{SUBSCRIPTION_TIERS[tier_id]['title']}» от "
+        f"{format_admin_target_label(None, target_id)} закрыта без выдачи подписки.",
         parse_mode="HTML"
     )
 

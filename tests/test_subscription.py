@@ -562,8 +562,40 @@ async def main():
     await tb.cb_admin_confirm_sub(cb_confirm_bad)
     assert not tb.has_active_subscription(confirm_uid), "non-admin must not be able to confirm payments"
     tb.stats["subscriptions"].pop(str(confirm_uid), None)
-    tb.bot.send_message = orig_send_message
     print("non-admin cannot confirm a payment: OK")
+
+    # reject button: closes the request without granting anything (buyer ignored/never paid)
+    reject_uid = random.randint(10_000_000, 99_999_999)
+    tb.stats["subscriptions"].pop(str(reject_uid), None)
+    tb.stats["user_username"][str(reject_uid)] = "ignoredbuyer"
+    admin_sent.clear()
+    cb_rub2 = FakeCB("buy_sub_rubles:6", uid=reject_uid)
+    await tb.cb_buy_sub_rubles(cb_rub2)
+    admin_requests2 = [(c, t, k) for c, t, k in admin_sent if c in tb.ADMIN_IDS]
+    req_kb2 = admin_requests2[0][2]
+    assert len(req_kb2.inline_keyboard) == 2, "confirm and reject should each be on their own row"
+    confirm_data2 = req_kb2.inline_keyboard[0][0].callback_data
+    reject_data2 = req_kb2.inline_keyboard[1][0].callback_data
+    assert reject_data2 == f"admin_reject_sub:6:{reject_uid}:-"
+
+    cb_reject = FakeCB(reject_data2, uid=ADMIN_ID)
+    await tb.cb_admin_reject_sub(cb_reject)
+    assert cb_reject.message.edits and "Отклонено" in cb_reject.message.edits[0][0]
+    assert not tb.has_active_subscription(reject_uid), "reject must not grant a subscription"
+    assert str(reject_uid) not in tb.stats["subscriptions"]
+
+    # confirm still works afterwards (declining doesn't block a later real confirmation)
+    cb_confirm3 = FakeCB(confirm_data2, uid=ADMIN_ID)
+    await tb.cb_admin_confirm_sub(cb_confirm3)
+    assert tb.get_subscription(reject_uid)["tier"] == 6
+    tb.stats["subscriptions"].pop(str(reject_uid), None)
+
+    # non-admin cannot tap the reject button either
+    cb_reject_bad = FakeCB(reject_data2, uid=non_admin)
+    await tb.cb_admin_reject_sub(cb_reject_bad)
+    assert not cb_reject_bad.message.edits, "non-admin must not be able to reject a payment request"
+    tb.bot.send_message = orig_send_message
+    print("reject button closes an unpaid request without granting, and doesn't block a later confirm: OK")
 
     # 21. Referral gate integration: get_referral_status_text shows subscription branch
     tb.grant_subscription(non_admin, 9, "stars", 1119)
