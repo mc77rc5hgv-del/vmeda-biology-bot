@@ -117,6 +117,17 @@ one file per `<topic-id>-<N>.jpg`; `N` is NOT guaranteed contiguous from 1 (some
 source material were never filled with a real photo) — always discover real files by regex/glob per topic rather
 than assuming `range(1, count+1)`.
 
+Every topic across all 7 sections now has non-empty `flashcards`/`matching_sets`/`mnemonics`, **except** the three
+osteology bone-hub topics `trunk_bones`/`upper_limb_bones`/`lower_limb_bones` — those still have empty topic-level
+study-aid lists because their study aids live per-bone instead (`bone` field on each flashcard/pair/mnemonic,
+queried via `get_bone_flashcards`/`get_bone_pairs`/`get_bone_mnemonics`), the same mechanism `skull` already uses
+exhaustively (52 flashcards, 6 matching sets, 7 mnemonics, all tagged to specific bone IDs) — the other three
+bone-hub topics just haven't had that per-bone treatment done yet. `skull` additionally has a `latin_terms:
+[{la, ru}]` list (extracted from `<b>Russian</b> (<i>Latin</i>)` pairs already present in its `material` text) that
+powers a standalone multiple-choice trainer (`anatomy_latin_start:{topic}`, `ANATOMY_LATIN_SESSIONS`) — nothing
+else reads this field yet, so it's currently skull-only.
+than assuming `range(1, count+1)`.
+
 Images referenced by content JSON live under `images/<subject>/...` and are resolved relative to `IMAGES_DIR`
 (`ANATOMY_IMAGES_DIR`, `HISTOLOGY_IMAGES_DIR`). Anatomy photos are sent as native Telegram albums
 (`send_anatomy_album`, via `Message.answer_media_group`) — up to `ANATOMY_ALBUM_PAGE_SIZE` (10, Telegram's
