@@ -116,6 +116,7 @@ def load_stats() -> dict:
             data.setdefault("histology_warnings", {})
             data.setdefault("histology_temp_access", {})
             data.setdefault("rollcall_confirmed", {})
+            data.setdefault("anatomy_latin_scores", {})
             return data
         except (json.JSONDecodeError, OSError):
             logger.exception("Не удалось прочитать %s, статистика будет создана заново", STATS_FILE)
@@ -147,6 +148,7 @@ def load_stats() -> dict:
         "histology_warnings": {},
         "histology_temp_access": {},
         "rollcall_confirmed": {},
+        "anatomy_latin_scores": {},
     }
 
 # Один воркер сериализует записи на диск и не даёт им блокировать event loop бота.
@@ -4990,6 +4992,8 @@ ANATOMY_PUBLIC = False  # когда раздел будет готов для �
 ANATOMY_FLASH_SESSION_SIZE = 10
 ANATOMY_MATCH_SESSION_SIZE = 10
 ANATOMY_LATIN_SESSION_SIZE = 15
+ANATOMY_LATIN_ALL_SESSION_SIZE = 20
+ANATOMY_LATIN_LEADERBOARD_SIZE = 10
 
 ANATOMY_FLASH_SESSIONS: dict[int, dict] = {}
 ANATOMY_MATCH_SESSIONS: dict[int, dict] = {}
@@ -5052,6 +5056,9 @@ def get_anatomy_menu_keyboard():
     builder = InlineKeyboardBuilder()
     for section_key, section in ANATOMY.items():
         builder.button(text=section.get("menu_title", section["title"]), callback_data=f"anatomy_section:{section_key}")
+    if get_all_latin_terms():
+        builder.button(text="🏛 Тест по латинским терминам", callback_data="anatomy_latin_all_start")
+        builder.button(text="🏆 Рейтинг по латыни", callback_data="anatomy_latin_leaderboard")
     builder.adjust(1)
     builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
     return builder.as_markup()
@@ -5276,13 +5283,28 @@ def get_topic_latin_terms(topic_key: str) -> list:
     topic = get_anatomy_topic_data(topic_key)
     return topic.get("latin_terms", []) if topic else []
 
-def start_anatomy_latin_session(user_id: int, topic_key: str, bone_id: str = None):
-    all_terms = get_topic_latin_terms(topic_key)
-    queue_terms = get_bone_latin_terms(topic_key, bone_id) if bone_id else all_terms
-    size = min(ANATOMY_LATIN_SESSION_SIZE, len(queue_terms))
+def get_all_latin_terms() -> list:
+    """Pools latin_terms across every section/topic in ANATOMY — not a hand-picked
+    list, so any future section that adds latin_terms is automatically included."""
+    terms = []
+    for section in ANATOMY.values():
+        for topic in section.get("topics", {}).values():
+            terms.extend(topic.get("latin_terms", []))
+    return terms
+
+def start_anatomy_latin_session(user_id: int, topic_key: str = None, bone_id: str = None, is_global: bool = False):
+    if is_global:
+        all_terms = get_all_latin_terms()
+        size = min(ANATOMY_LATIN_ALL_SESSION_SIZE, len(all_terms))
+        queue_terms = all_terms
+    else:
+        all_terms = get_topic_latin_terms(topic_key)
+        queue_terms = get_bone_latin_terms(topic_key, bone_id) if bone_id else all_terms
+        size = min(ANATOMY_LATIN_SESSION_SIZE, len(queue_terms))
     ANATOMY_LATIN_SESSIONS[user_id] = {
         "topic_key": topic_key,
         "bone_id": bone_id,
+        "is_global": is_global,
         "all_terms": all_terms,
         "queue": random.sample(queue_terms, size),
         "index": 0,
@@ -5310,8 +5332,9 @@ async def render_anatomy_latin_question(message, user_id: int):
     random.shuffle(options)
     session["current_correct_idx"] = options.index(correct_ru)
     session["current_options"] = options
+    header = "Латинские термины — весь курс анатомии" if session.get("is_global") else "Латинские термины"
     lines = [
-        f"🏛 <b>Латинские термины — {session['index'] + 1}/{len(session['queue'])}</b>\n{DIVIDER}\n",
+        f"🏛 <b>{header} — {session['index'] + 1}/{len(session['queue'])}</b>\n{DIVIDER}\n",
         f"<i>{term['la']}</i>\n",
         "Выбери правильный перевод:",
         "",
@@ -5320,12 +5343,69 @@ async def render_anatomy_latin_question(message, user_id: int):
         lines.append(f"{i + 1}. {opt}")
     await safe_edit_text(message, "\n".join(lines), parse_mode="HTML", reply_markup=get_anatomy_latin_keyboard(options))
 
+def record_anatomy_latin_score(user_id: int, correct: int, total: int) -> bool:
+    """Updates the user's personal-best result for the global latin test if this run
+    is better (higher percent, or same percent on a larger sample). Returns True if
+    this run became the new personal best."""
+    if total <= 0:
+        return False
+    uid_str = str(user_id)
+    scores = stats.setdefault("anatomy_latin_scores", {})
+    prev = scores.get(uid_str)
+    percent = correct / total
+    is_new_best = True
+    if prev:
+        prev_percent = prev["best_correct"] / prev["best_total"] if prev["best_total"] else 0
+        is_new_best = percent > prev_percent or (percent == prev_percent and total > prev["best_total"])
+    entry = scores.setdefault(uid_str, {"best_correct": correct, "best_total": total, "attempts": 0})
+    entry["attempts"] = entry.get("attempts", 0) + 1
+    if is_new_best:
+        entry["best_correct"] = correct
+        entry["best_total"] = total
+    save_stats()
+    return is_new_best
+
+def get_anatomy_latin_leaderboard_text(user_id: int = None) -> str:
+    scores = stats.get("anatomy_latin_scores", {})
+    ranked = sorted(
+        scores.items(),
+        key=lambda kv: (kv[1]["best_correct"] / kv[1]["best_total"] if kv[1]["best_total"] else 0, kv[1]["best_correct"]),
+        reverse=True,
+    )
+    lines = [f"🏆 <b>Рейтинг по латинским терминам</b>\n{DIVIDER}"]
+    if not ranked:
+        lines.append("\nПока никто не проходил тест — стань первым! 🏛")
+        return "\n".join(lines)
+    top = ranked[:ANATOMY_LATIN_LEADERBOARD_SIZE]
+    lines.append("")
+    for i, (uid_str, entry) in enumerate(top):
+        icon = RANK_MEDALS[i] if i < 3 else f"{i + 1}."
+        percent = round(100 * entry["best_correct"] / entry["best_total"]) if entry["best_total"] else 0
+        lines.append(f"{icon} {donor_display_name(uid_str)} — <b>{entry['best_correct']}/{entry['best_total']}</b> ({percent}%)")
+    if user_id is not None:
+        uid_str = str(user_id)
+        if uid_str not in {u for u, _ in top} and uid_str in scores:
+            rank = next(i for i, (u, _) in enumerate(ranked) if u == uid_str) + 1
+            entry = scores[uid_str]
+            percent = round(100 * entry["best_correct"] / entry["best_total"]) if entry["best_total"] else 0
+            lines.append(f"\nТвоё место: <b>#{rank}</b> — {entry['best_correct']}/{entry['best_total']} ({percent}%)")
+    return "\n".join(lines)
+
+def get_anatomy_latin_leaderboard_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🏛 Пройти тест", callback_data="anatomy_latin_all_start")
+    builder.button(text="🔄 Обновить", callback_data="anatomy_latin_leaderboard")
+    builder.button(text="🔙 В меню Анатомии", callback_data="anatomy_menu")
+    builder.adjust(1)
+    return builder.as_markup()
+
 async def render_anatomy_latin_summary(message, user_id: int, aborted: bool = False):
     session = ANATOMY_LATIN_SESSIONS.pop(user_id, None)
     if not session:
         return
     topic_key = session["topic_key"]
     bone_id = session.get("bone_id")
+    is_global = session.get("is_global")
     answered = session["correct"] + session["wrong"]
     title = "🛑 <b>Прервано</b>" if aborted else "🏁 <b>Тренажёр пройден!</b>"
     text = (
@@ -5333,7 +5413,13 @@ async def render_anatomy_latin_summary(message, user_id: int, aborted: bool = Fa
         f"Отвечено: <b>{answered}</b>\n✅ Верно: <b>{session['correct']}</b>\n❌ Неверно: <b>{session['wrong']}</b>"
     )
     builder = InlineKeyboardBuilder()
-    if bone_id:
+    if is_global:
+        if not aborted and record_anatomy_latin_score(user_id, session["correct"], answered):
+            text += "\n\n🎉 Новый личный рекорд!"
+        builder.button(text="🔁 Пройти ещё раз", callback_data="anatomy_latin_all_start")
+        builder.button(text="🏆 Рейтинг", callback_data="anatomy_latin_leaderboard")
+        builder.button(text="🔙 В меню Анатомии", callback_data="anatomy_menu")
+    elif bone_id:
         builder.button(text="🔁 Пройти ещё раз", callback_data=f"anatomy_bone_latin_start:{topic_key}:{bone_id}")
         builder.button(text="🔙 К кости", callback_data=f"anatomy_bone_hub:{topic_key}:{bone_id}")
     else:
@@ -5940,6 +6026,31 @@ async def cb_anatomy_match_stop(callback: CallbackQuery):
     await callback.answer()
     if callback.from_user.id in ANATOMY_MATCH_SESSIONS:
         await render_anatomy_match_summary(callback.message, callback.from_user.id, aborted=True)
+
+@dp.callback_query(F.data == "anatomy_latin_all_start")
+async def cb_anatomy_latin_all_start(callback: CallbackQuery):
+    if not anatomy_access_ok(callback.from_user.id):
+        await callback.answer(get_anatomy_dev_alert_text(), show_alert=True)
+        return
+    if not get_all_latin_terms():
+        await callback.answer("Термины ещё не добавлены", show_alert=True)
+        return
+    await callback.answer()
+    start_anatomy_latin_session(callback.from_user.id, is_global=True)
+    await render_anatomy_latin_question(callback.message, callback.from_user.id)
+
+@dp.callback_query(F.data == "anatomy_latin_leaderboard")
+async def cb_anatomy_latin_leaderboard(callback: CallbackQuery):
+    if not anatomy_access_ok(callback.from_user.id):
+        await callback.answer(get_anatomy_dev_alert_text(), show_alert=True)
+        return
+    await callback.answer()
+    await safe_edit_text(
+        callback.message,
+        get_anatomy_latin_leaderboard_text(callback.from_user.id),
+        parse_mode="HTML",
+        reply_markup=get_anatomy_latin_leaderboard_keyboard()
+    )
 
 @dp.callback_query(F.data.startswith("anatomy_latin_start:"))
 async def cb_anatomy_latin_start(callback: CallbackQuery):

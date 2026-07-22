@@ -136,6 +136,20 @@ that bone, so small bones (2-3 terms) still get plausible wrong answers. Topics 
 myology, splanchnology, ...) don't have `latin_terms` at all — the field and its buttons are conditional on
 non-empty content, so nothing renders for them.
 
+A third, global trainer lives on the main Anatomy menu screen itself (`anatomy_latin_all_start`, "🏛 Тест по
+латинским терминам") — `get_all_latin_terms()` pools `latin_terms` across *every* section/topic in `ANATOMY`
+(currently just the 338 osteology terms, since no other section has the field yet, but the pooling is generic so
+any future section's terms are picked up automatically). It reuses the same `start_anatomy_latin_session(...,
+is_global=True)` / `ANATOMY_LATIN_SESSIONS` engine — `is_global` sessions have `topic_key=bone_id=None` and a
+bigger sample (`ANATOMY_LATIN_ALL_SESSION_SIZE`, 20 vs. 15 for topic/bone sessions). Only a *fully completed*
+global run (not aborted via "🛑 Закончить") calls `record_anatomy_latin_score(user_id, correct, total)`, which
+keeps one personal-best entry per user in `stats["anatomy_latin_scores"][uid] = {best_correct, best_total,
+attempts}` — a repeat run only overwrites the stored best if its percent is strictly higher, or tied on a larger
+sample (`attempts` still increments either way). `get_anatomy_latin_leaderboard_text(user_id=None)` ranks by
+percent (ties broken by raw `best_correct`) and reuses `donor_display_name()` for the row labels — the same
+opt-in/anonymous name logic as the donor leaderboard, even though there's no anonymity toggle specific to this
+feature (a user who's `donor_hide_name`'d themselves for donations stays hidden here too, incidentally).
+
 Images referenced by content JSON live under `images/<subject>/...` and are resolved relative to `IMAGES_DIR`
 (`ANATOMY_IMAGES_DIR`, `HISTOLOGY_IMAGES_DIR`). Anatomy photos are sent as native Telegram albums
 (`send_anatomy_album`, via `Message.answer_media_group`) — up to `ANATOMY_ALBUM_PAGE_SIZE` (10, Telegram's
