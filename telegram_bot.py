@@ -3524,7 +3524,7 @@ async def handle_admin_pending_action(message: Message):
             parse_mode="HTML",
             reply_markup=ReplyKeyboardRemove()
         )
-        await grant_subscription_and_notify_buyer(target_id, tier_id, "rubles", cfg["price_rub"])
+        await grant_subscription_and_notify_buyer(target_id, tier_id, "rubles_manual", cfg["price_rub"])
         return
 
     if action == "record_subscription_subject":
@@ -3550,7 +3550,7 @@ async def handle_admin_pending_action(message: Message):
             parse_mode="HTML",
             reply_markup=ReplyKeyboardRemove()
         )
-        await grant_subscription_and_notify_buyer(target_id, tier_id, "rubles", cfg["price_rub"], subject)
+        await grant_subscription_and_notify_buyer(target_id, tier_id, "rubles_manual", cfg["price_rub"], subject)
         return
 
     if action == "dm_message":
@@ -3878,7 +3878,9 @@ async def grant_subscription_and_notify_buyer(
 ) -> None:
     """Общая точка для всех трёх путей выдачи подписки (Stars, ручное подтверждение рублей
     админом, быстрое подтверждение по кнопке) — выдаёт тариф и шлёт покупателю одно и то же
-    сообщение об активации + апсейл на следующий тариф."""
+    сообщение об активации + апсейл на следующий тариф. method различает источник для
+    статистики платежей: "stars"/"rubles" — реальная подтверждённая оплата, "rubles_manual" —
+    ручная выдача админом (например, бесплатно другу) и в выручку не считается."""
     grant_subscription(target_id, tier_id, method, price, subject)
     cfg = SUBSCRIPTION_TIERS[tier_id]
     sub = get_subscription(target_id)

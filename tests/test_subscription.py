@@ -419,7 +419,7 @@ async def main():
     await tb.handle_admin_pending_action(m2)
     assert ADMIN_ID not in tb.ADMIN_PENDING
     assert tb.get_subscription(non_admin)["tier"] == 9
-    assert tb.get_subscription(non_admin)["method"] == "rubles"
+    assert tb.get_subscription(non_admin)["method"] == "rubles_manual"
     assert admin_notify and "активирована" in admin_notify[-1][1]
     print("admin manual rubles subscription grant flow via reply-keyboard: OK")
 

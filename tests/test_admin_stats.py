@@ -139,6 +139,23 @@ async def main():
     tb.stats["donor_rubles"].pop(uid_donor_rubles, None)
     print("subscriptions + payments stats block present and correct: OK")
 
+    # rubles_manual (admin-granted-for-free) subscriptions must NOT count toward payment revenue,
+    # even though they still count toward "Всего куплено" / active-by-tier totals
+    uid_sub_manual = fresh_uid()
+    tb.stats["subscriptions"].pop(uid_sub_manual, None)
+    tb.grant_subscription(int(uid_sub_manual), 6, "rubles_manual", 239)
+    cb4 = FakeCB("admin_stats")
+    await tb.cb_admin_stats(cb4)
+    text4 = cb4.message.edits[0]
+    m_total2 = _re.search(r"Всего куплено: <b>(\d+)</b>", text4)
+    assert m_total2 and int(m_total2.group(1)) == len(tb.stats["subscriptions"]), \
+        "manually-granted subscriptions still count toward the total"
+    m_rubles_rev2 = _re.search(r"💵 Подписки рублями: <b>(\d+)</b>₽", text4)
+    assert m_rubles_rev2 and int(m_rubles_rev2.group(1)) == 0, \
+        "rubles_manual grants (free comps) must not be counted as payment revenue"
+    tb.stats["subscriptions"].pop(uid_sub_manual, None)
+    print("manually-granted (free) subscriptions excluded from payment revenue: OK")
+
     # stats.json export: admin gets the current file as a document, nothing is modified/reset
     tb.save_stats()
     tb._stats_executor.submit(lambda: None).result()  # barrier: wait for the queued write (single worker, FIFO) to land

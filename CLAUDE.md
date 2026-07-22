@@ -283,12 +283,19 @@ Stars payments go through the real Telegram Bot API invoice flow (`send_invoice`
    double-notifying the buyer).
 2. **Manual flow** (unchanged, kept as a fallback) — `ADMIN_PENDING` (`record_subscription_username` →
    `record_subscription_tier` → `record_subscription_subject` if the chosen tier requires one), for cases where
-   the admin wants to grant a subscription without the buyer having gone through the purchase flow at all (e.g.
-   an off-platform payment, a manual comp, fixing a mistake).
+   the admin wants to grant a subscription without the buyer having gone through the purchase flow at all — in
+   practice this has become the "comp a subscription to a friend for free" path, not a paid one.
 
 Both paths funnel into the same `grant_subscription_and_notify_buyer()` — the single place that calls
 `grant_subscription()` and sends the buyer their "🎉 активирована" message + tier upsell, so the confirmation
-text/upsell logic never has to be kept in sync across three call sites by hand.
+text/upsell logic never has to be kept in sync across three call sites by hand. Its `method` argument doubles as
+the payment-revenue signal in `cb_admin_stats`: the one-tap path passes `"rubles"` (a real transfer the admin
+just confirmed) and Stars passes `"stars"`, both counted in "💰 Платежи"; the manual flow passes `"rubles_manual"`
+instead, which is deliberately excluded from `sub_revenue_rubles` — manually-granted subscriptions still count
+toward "Всего куплено" / per-tier active totals (they're real active subscriptions), just not toward revenue.
+This distinction only applies going forward — historical `"rubles"`-tagged subscriptions granted through the
+manual flow before this split existed aren't retroactively reclassified, since nothing in the stored data
+distinguishes which of them were actually paid off-platform vs. free comps.
 
 The tier-selection step of the manual flow sends a `ReplyKeyboardMarkup` (`get_admin_tier_reply_keyboard()`, one
 button per active tier, digit-prefixed so the parser can `re.match(r"\d+", raw)` out of either a tapped button or
