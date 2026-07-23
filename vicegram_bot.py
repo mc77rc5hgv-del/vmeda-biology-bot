@@ -3552,16 +3552,26 @@ PAYMENT_OCR_MAX_BYTES = 20 * 1024 * 1024
 PAYMENT_OCR_COOLDOWN_SECONDS = 15
 _last_payment_ocr_at: dict[int, float] = {}
 
+# Без явного timeout tesseract — это блокирующий subprocess.communicate()
+# без предела: под конкурентной нагрузкой он может зависнуть надолго
+# (подтверждено нагрузочным тестом — 5 параллельных вызовов виснут на
+# минуты), и поток из пула asyncio.to_thread уходит навсегда, постепенно
+# исчерпывая пул. С timeout pytesseract сам убивает зависший процесс.
+OCR_SUBPROCESS_TIMEOUT_SECONDS = 25
+
 
 class OcrUnavailableError(RuntimeError):
-    """Технический сбой OCR (например, Tesseract не установлен на сервере) —
-    отличаем от «распознали, но это не похоже на чек», чтобы не проглатывать
-    сбой молча и было что показать владельцу для диагностики."""
+    """Технический сбой OCR (например, Tesseract не установлен на сервере,
+    или завис/не уложился в timeout) — отличаем от «распознали, но это не
+    похоже на чек», чтобы не проглатывать сбой молча и было что показать
+    владельцу для диагностики."""
 
 
 def ocr_image_text(path: str) -> str:
     try:
-        return pytesseract.image_to_string(Image.open(path), lang="rus+eng")
+        return pytesseract.image_to_string(
+            Image.open(path), lang="rus+eng", timeout=OCR_SUBPROCESS_TIMEOUT_SECONDS
+        )
     except Exception as exc:
         logger.exception("Ошибка OCR изображения (проверь, установлен ли tesseract-ocr)")
         raise OcrUnavailableError(str(exc)) from exc
