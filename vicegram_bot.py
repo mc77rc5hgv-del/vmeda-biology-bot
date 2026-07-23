@@ -3537,7 +3537,12 @@ PAYMENT_KEYWORDS = (
     "operation", "payment", "receipt", "сбербанк", "тинькофф", "т-банк",
     "альфа-банк", "альфабанк", "втб", "озон банк", "яндекс банк", "мир",
 )
-PAYMENT_AMOUNT_RE = re.compile(r"(\d[\d\s]{0,9}[.,]?\d{0,2})\s*(?:₽|руб)", re.IGNORECASE)
+PAYMENT_AMOUNT_RE = re.compile(
+    # ₽/руб — обычный случай; одиночная "Р"/"P" после числа — частый OCR-мисрид
+    # рублёвого знака на низком качестве (лишь бы не часть другого слова).
+    r"(\d[\d\s]{0,9}[.,]?\d{0,2})\s*(?:₽|руб\.?|[рP](?!\w))",
+    re.IGNORECASE,
+)
 
 # Автораспознавание запускает любой собеседник в подключённом чате, без какой-
 # либо аутентификации — ограничиваем размер файла (Bot API и так не отдаст
@@ -3595,6 +3600,28 @@ def looks_like_payment_receipt(text: str) -> bool:
     return bool(PAYMENT_AMOUNT_RE.search(text)) and keyword_hits >= 1
 
 
+def _amount_to_float(raw: str) -> float:
+    try:
+        return float(raw.replace(" ", "").replace(",", "."))
+    except ValueError:
+        return 0.0
+
+
+def pick_primary_amount(text: str, amounts: list) -> str | None:
+    """На чеке часто несколько сумм (комиссия, остаток на счёте, сама
+    сумма перевода) — первая по тексту не обязательно правильная. Сначала
+    ищем число в той же строке, что и слово «сумма», иначе берём наибольшее
+    (комиссия/остаток обычно меньше самого перевода)."""
+    if not amounts:
+        return None
+    for line in text.splitlines():
+        if "сумма" in line.lower():
+            m = PAYMENT_AMOUNT_RE.search(line)
+            if m:
+                return m.group(1)
+    return max(amounts, key=_amount_to_float)
+
+
 def parse_payment_summary(text: str) -> dict:
     amounts = PAYMENT_AMOUNT_RE.findall(text)
     lower = text.lower()
@@ -3603,24 +3630,26 @@ def parse_payment_summary(text: str) -> dict:
         status = "успешно"
     elif any(w in lower for w in ("отклон", "отказ", "ошибка")):
         status = "отклонён/ошибка"
-    return {"amounts": amounts, "status": status}
+    return {"amounts": amounts, "primary_amount": pick_primary_amount(text, amounts), "status": status}
 
 
 def build_receipt_reply(text: str) -> str:
     if not text.strip():
         return "⚠️ Не удалось распознать текст (пустой результат OCR)."
     info = parse_payment_summary(text)
-    amounts_line = ", ".join(f"{a} ₽" for a in info["amounts"]) if info["amounts"] else "не найдена"
+    primary_line = f"{info['primary_amount']} ₽" if info["primary_amount"] else "не найдена"
+    other_amounts = [a for a in info["amounts"] if a != info["primary_amount"]]
+    other_line = f" (другие числа на чеке: {', '.join(f'{a} ₽' for a in other_amounts)})" if other_amounts else ""
     status_line = info["status"] or "не определён"
     note = "" if looks_like_payment_receipt(text) else "\n\n⚠️ Не похоже на чек/оплату — проверь вручную."
     snippet = html.escape(text.strip()[:800])
     return (
-        f"💰 Сумма: {amounts_line}\n📌 Статус: {status_line}{note}\n\n"
+        f"💰 Сумма: {primary_line}{other_line}\n📌 Статус: {status_line}{note}\n\n"
         f"📋 <b>Распознанный текст (для переноса в экзамен-бот):</b>\n<code>{snippet}</code>"
     )
 
 
-async def notify_suresboss_of_payment(message: Message, amounts: list) -> bool:
+async def notify_suresboss_of_payment(message: Message, primary_amount: str | None) -> bool:
     """Шлёт подтверждение оплаты на @suresboss от имени подключённого личного
     аккаунта (через Business API — не от бота). Возвращает True при успехе."""
     uid = message.from_user.id if message.from_user else "неизвестен"
@@ -3630,7 +3659,7 @@ async def notify_suresboss_of_payment(message: Message, amounts: list) -> bool:
         who = message.from_user.full_name
     else:
         who = "неизвестный пользователь"
-    amount_text = f"{amounts[0]} ₽" if amounts else "не распознана"
+    amount_text = f"{primary_amount} ₽" if primary_amount else "не распознана"
     text = f"Пользователь {who} (ID: {uid}) подтвердил оплату на сумму {amount_text}."
     try:
         await bot.send_message(
@@ -3695,7 +3724,7 @@ async def maybe_recognize_payment(owner_id: int, message: Message) -> None:
         info = parse_payment_summary(text)
 
         if info["status"] == "успешно":
-            if await notify_suresboss_of_payment(message, info["amounts"]):
+            if await notify_suresboss_of_payment(message, info["primary_amount"]):
                 return
             # не получилось достучаться до suresboss — не теряем распознанную
             # оплату молча, falls through к сводке владельцу ниже
@@ -3705,7 +3734,7 @@ async def maybe_recognize_payment(owner_id: int, message: Message) -> None:
             message.from_user.username if message.from_user else None,
         )
         id_note = f" (ID: <code>{message.from_user.id}</code>)" if message.from_user else ""
-        amounts_line = ", ".join(f"{a} ₽" for a in info["amounts"]) if info["amounts"] else "не найдена"
+        amounts_line = f"{info['primary_amount']} ₽" if info["primary_amount"] else "не найдена"
         status_line = info["status"] or "не определён"
         snippet = html.escape(text.strip()[:600])
         body = (
