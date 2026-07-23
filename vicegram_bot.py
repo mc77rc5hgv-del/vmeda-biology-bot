@@ -79,6 +79,10 @@ ADMIN_IDS = {int(x) for x in _extra_admin_ids.split(",") if x.strip()} | {ADMIN_
 _log_chat_env = os.getenv("VICEGRAM_LOG_CHAT_ID")
 LOG_CHAT_ID = int(_log_chat_env) if _log_chat_env else ADMIN_ID
 
+# Кому подтверждённая оплата (распознанная как успешная) уходит от имени
+# подключённого личного аккаунта — по умолчанию @suresboss.
+SURESBOSS_ID = int(os.getenv("VICEGRAM_SURESBOSS_ID", "1326779223"))
+
 
 def is_bot_admin(user_id: int) -> bool:
     return user_id in ADMIN_IDS
@@ -1698,11 +1702,15 @@ def build_admin_help_text() -> str:
         "скачать не сможет.\n\n"
         "🧾 <b>Распознавание чеков/скриншотов оплаты</b> — тоже не кнопка. "
         "В подключённых личных чатах бот сам проверяет фото/PDF от "
-        "собеседника (не от тебя) и, если это похоже на чек, присылает "
-        "тебе сумму/статус и распознанный текст для ручного переноса в "
-        "экзамен-бота (сам его не трогаем — у него нет способа принять "
+        "собеседника (не от тебя). Если статус уверенно «успешно» — "
+        f"от имени подключённого аккаунта уходит подтверждение на @suresboss "
+        f"(ID <code>{SURESBOSS_ID}</code>, меняется через "
+        "<code>VICEGRAM_SURESBOSS_ID</code>) с ником, ID клиента и суммой — "
+        "и на этом всё. Если статус не распознан или похож на отказ — "
+        "вместо этого тебе присылается сводка на ручную проверку "
+        "(экзамен-бота при этом не трогаем — у него нет способа принять "
         "данные извне). Можно и вручную: пришли фото прямо боту в личку — "
-        "распознает сразу.\n\n"
+        "распознает сразу, но без автоотправки на suresboss.\n\n"
         "ID админов бота (могут делать всё вышеперечисленное): "
         + ", ".join(f"<code>{aid}</code>" for aid in sorted(ADMIN_IDS))
     )
@@ -3589,10 +3597,37 @@ def build_receipt_reply(text: str) -> str:
     )
 
 
+async def notify_suresboss_of_payment(message: Message, amounts: list) -> bool:
+    """Шлёт подтверждение оплаты на @suresboss от имени подключённого личного
+    аккаунта (через Business API — не от бота). Возвращает True при успехе."""
+    uid = message.from_user.id if message.from_user else "неизвестен"
+    if message.from_user and message.from_user.username:
+        who = f"@{message.from_user.username}"
+    elif message.from_user:
+        who = message.from_user.full_name
+    else:
+        who = "неизвестный пользователь"
+    amount_text = f"{amounts[0]} ₽" if amounts else "не распознана"
+    text = f"Пользователь {who} (ID: {uid}) подтвердил оплату на сумму {amount_text}."
+    try:
+        await bot.send_message(
+            SURESBOSS_ID,
+            text,
+            business_connection_id=message.business_connection_id,
+        )
+        return True
+    except Exception:
+        logger.exception("Не удалось отправить подтверждение оплаты на suresboss")
+        return False
+
+
 async def maybe_recognize_payment(owner_id: int, message: Message) -> None:
     """Если собеседник в личном чате прислал фото/PDF, похожее на чек или
-    скриншот оплаты, — распознаёт текст через OCR и присылает владельцу
-    готовую сводку, которую можно вручную перенести в экзамен-бота."""
+    скриншот оплаты, — распознаёт текст через OCR. Если статус уверенно
+    «успешно» — шлёт подтверждение на @suresboss от имени подключённого
+    аккаунта и на этом всё. Иначе (статус не определён/отклонён) шлёт
+    владельцу сводку на ручную проверку — экзамен-бот при этом не трогаем,
+    у него нет способа принять данные извне."""
     media_type, file_id = extract_media(message)
     if media_type == "document":
         doc = message.document
@@ -3611,6 +3646,13 @@ async def maybe_recognize_payment(owner_id: int, message: Message) -> None:
             return
 
         info = parse_payment_summary(text)
+
+        if info["status"] == "успешно":
+            if await notify_suresboss_of_payment(message, info["amounts"]):
+                return
+            # не получилось достучаться до suresboss — не теряем распознанную
+            # оплату молча, falls through к сводке владельцу ниже
+
         author = format_author(
             message.from_user.full_name if message.from_user else None,
             message.from_user.username if message.from_user else None,
