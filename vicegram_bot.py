@@ -3549,11 +3549,14 @@ PAYMENT_AMOUNT_RE = re.compile(
 
 # Автораспознавание запускает любой собеседник в подключённом чате, без какой-
 # либо аутентификации — ограничиваем размер файла (Bot API и так не отдаст
-# больше 20 МБ, но не тратим ресурсы на попытку) и частоту запуска на владельца,
-# иначе спам фото/PDF от одного контакта мог бы забить CPU/тред-пул OCR-задачами.
+# больше 20 МБ, но не тратим ресурсы на попытку) и частоту запуска на пару
+# (владелец, чат), иначе спам фото/PDF от одного контакта мог бы забить
+# CPU/тред-пул OCR-задачами. Ключ — именно чат, а не только владелец: иначе
+# второй РЕАЛЬНЫЙ клиент, оплативший в течение тех же 15 секунд, что и первый,
+# молча остался бы без какого-либо ответа (подтверждено тестом).
 PAYMENT_OCR_MAX_BYTES = 20 * 1024 * 1024
 PAYMENT_OCR_COOLDOWN_SECONDS = 15
-_last_payment_ocr_at: dict[int, float] = {}
+_last_payment_ocr_at: dict[tuple[int, int], float] = {}
 
 # Без явного timeout tesseract — это блокирующий subprocess.communicate()
 # без предела: под конкурентной нагрузкой он может зависнуть надолго
@@ -3708,10 +3711,11 @@ async def maybe_recognize_payment(owner_id: int, message: Message) -> None:
     else:
         return
 
+    cooldown_key = (owner_id, message.chat.id)
     now = time.time()
-    if now - _last_payment_ocr_at.get(owner_id, 0) < PAYMENT_OCR_COOLDOWN_SECONDS:
+    if now - _last_payment_ocr_at.get(cooldown_key, 0) < PAYMENT_OCR_COOLDOWN_SECONDS:
         return
-    _last_payment_ocr_at[owner_id] = now
+    _last_payment_ocr_at[cooldown_key] = now
 
     tmp_dir = tempfile.mkdtemp(prefix="vg_ocr_")
     try:
