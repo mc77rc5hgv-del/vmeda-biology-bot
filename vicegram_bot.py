@@ -1522,7 +1522,10 @@ async def cb_pay_crypto(callback: CallbackQuery):
 async def cb_check_crypto(callback: CallbackQuery):
     payment_id = int(callback.data.split(":")[1])
     payment = get_payment(payment_id)
-    if not payment:
+    if not payment or payment["user_id"] != callback.from_user.id:
+        # payment_id — последовательный автоинкремент, легко перебирается;
+        # без этой проверки любой мог бы подглядывать чужие тарифы/суммы
+        # и статус оплаты, подставляя чужой payment_id.
         await callback.answer("Платёж не найден", show_alert=True)
         return
     if payment["status"] == "confirmed":
@@ -3427,7 +3430,7 @@ async def cb_pdf_compress(callback: CallbackQuery):
         await bot.download(pending["file_id"], destination=src_path)
         orig_size = os.path.getsize(src_path)
         out_path = os.path.join(tmp_dir, "compressed.pdf")
-        pdf_compress_lossless(src_path, out_path)
+        await asyncio.to_thread(pdf_compress_lossless, src_path, out_path)
         new_size = os.path.getsize(out_path)
         base_name = os.path.splitext(pending["file_name"])[0]
         await bot.send_document(
@@ -3478,7 +3481,7 @@ async def process_pending_pdf_input(message: Message, pending: dict) -> None:
             )
             return
         out_path = os.path.join(tmp_dir, "trimmed.pdf")
-        kept = pdf_trim_pages(src_path, out_path, ranges)
+        kept = await asyncio.to_thread(pdf_trim_pages, src_path, out_path, ranges)
         base_name = os.path.splitext(pending["file_name"])[0]
         await bot.send_document(
             admin_id,
@@ -3509,7 +3512,7 @@ async def cb_pdf_receipt(callback: CallbackQuery):
     try:
         src_path = os.path.join(tmp_dir, "input.pdf")
         await bot.download(pending["file_id"], destination=src_path)
-        text = extract_pdf_text_for_receipt(src_path)
+        text = await asyncio.to_thread(extract_pdf_text_for_receipt, src_path)
         await bot.send_message(callback.from_user.id, build_receipt_reply(text), parse_mode="HTML")
     except Exception as exc:
         logger.exception("Ошибка распознавания PDF-чека")
@@ -3530,6 +3533,14 @@ PAYMENT_KEYWORDS = (
     "альфа-банк", "альфабанк", "втб", "озон банк", "яндекс банк", "мир",
 )
 PAYMENT_AMOUNT_RE = re.compile(r"(\d[\d\s]{0,9}[.,]?\d{0,2})\s*(?:₽|руб)", re.IGNORECASE)
+
+# Автораспознавание запускает любой собеседник в подключённом чате, без какой-
+# либо аутентификации — ограничиваем размер файла (Bot API и так не отдаст
+# больше 20 МБ, но не тратим ресурсы на попытку) и частоту запуска на владельца,
+# иначе спам фото/PDF от одного контакта мог бы забить CPU/тред-пул OCR-задачами.
+PAYMENT_OCR_MAX_BYTES = 20 * 1024 * 1024
+PAYMENT_OCR_COOLDOWN_SECONDS = 15
+_last_payment_ocr_at: dict[int, float] = {}
 
 
 def ocr_image_text(path: str) -> str:
@@ -3634,14 +3645,28 @@ async def maybe_recognize_payment(owner_id: int, message: Message) -> None:
         is_pdf = doc.mime_type == "application/pdf" or (doc.file_name or "").lower().endswith(".pdf")
         if not is_pdf:
             return
-    elif media_type != "photo":
+        if doc.file_size and doc.file_size > PAYMENT_OCR_MAX_BYTES:
+            return
+    elif media_type == "photo":
+        largest = message.photo[-1]
+        if largest.file_size and largest.file_size > PAYMENT_OCR_MAX_BYTES:
+            return
+    else:
         return
+
+    now = time.time()
+    if now - _last_payment_ocr_at.get(owner_id, 0) < PAYMENT_OCR_COOLDOWN_SECONDS:
+        return
+    _last_payment_ocr_at[owner_id] = now
 
     tmp_dir = tempfile.mkdtemp(prefix="vg_ocr_")
     try:
         src_path = os.path.join(tmp_dir, "input")
         await bot.download(file_id, destination=src_path)
-        text = ocr_image_text(src_path) if media_type == "photo" else extract_pdf_text_for_receipt(src_path)
+        if media_type == "photo":
+            text = await asyncio.to_thread(ocr_image_text, src_path)
+        else:
+            text = await asyncio.to_thread(extract_pdf_text_for_receipt, src_path)
         if not looks_like_payment_receipt(text):
             return
 
@@ -3685,7 +3710,7 @@ async def handle_admin_photo_upload(message: Message):
     try:
         src_path = os.path.join(tmp_dir, "input.jpg")
         await bot.download(message.photo[-1].file_id, destination=src_path)
-        text = ocr_image_text(src_path)
+        text = await asyncio.to_thread(ocr_image_text, src_path)
         await status_msg.edit_text(build_receipt_reply(text), parse_mode="HTML")
     except Exception:
         logger.exception("Ошибка распознавания фото от админа")
