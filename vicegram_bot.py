@@ -3514,6 +3514,11 @@ async def cb_pdf_receipt(callback: CallbackQuery):
         await bot.download(pending["file_id"], destination=src_path)
         text = await asyncio.to_thread(extract_pdf_text_for_receipt, src_path)
         await bot.send_message(callback.from_user.id, build_receipt_reply(text), parse_mode="HTML")
+    except OcrUnavailableError:
+        await bot.send_message(
+            callback.from_user.id,
+            "⚠️ OCR (Tesseract) недоступен на сервере — проверь /ocr_check и билд-логи Railway.",
+        )
     except Exception as exc:
         logger.exception("Ошибка распознавания PDF-чека")
         await bot.send_message(callback.from_user.id, pdf_download_error_text(exc))
@@ -3543,12 +3548,18 @@ PAYMENT_OCR_COOLDOWN_SECONDS = 15
 _last_payment_ocr_at: dict[int, float] = {}
 
 
+class OcrUnavailableError(RuntimeError):
+    """Технический сбой OCR (например, Tesseract не установлен на сервере) —
+    отличаем от «распознали, но это не похоже на чек», чтобы не проглатывать
+    сбой молча и было что показать владельцу для диагностики."""
+
+
 def ocr_image_text(path: str) -> str:
     try:
         return pytesseract.image_to_string(Image.open(path), lang="rus+eng")
-    except Exception:
+    except Exception as exc:
         logger.exception("Ошибка OCR изображения (проверь, установлен ли tesseract-ocr)")
-        return ""
+        raise OcrUnavailableError(str(exc)) from exc
 
 
 def extract_pdf_text_for_receipt(path: str) -> str:
@@ -3568,13 +3579,14 @@ def extract_pdf_text_for_receipt(path: str) -> str:
         page = doc.load_page(0)
         page.get_pixmap(dpi=200).save(img_path)
         doc.close()
-        text = ocr_image_text(img_path)
     except Exception:
         logger.exception("Не удалось отрендерить PDF для OCR")
+        return ""
+    try:
+        return ocr_image_text(img_path)  # пробрасывает OcrUnavailableError дальше
     finally:
         if os.path.exists(img_path):
             os.remove(img_path)
-    return text
 
 
 def looks_like_payment_receipt(text: str) -> bool:
@@ -3663,10 +3675,20 @@ async def maybe_recognize_payment(owner_id: int, message: Message) -> None:
     try:
         src_path = os.path.join(tmp_dir, "input")
         await bot.download(file_id, destination=src_path)
-        if media_type == "photo":
-            text = await asyncio.to_thread(ocr_image_text, src_path)
-        else:
-            text = await asyncio.to_thread(extract_pdf_text_for_receipt, src_path)
+        try:
+            if media_type == "photo":
+                text = await asyncio.to_thread(ocr_image_text, src_path)
+            else:
+                text = await asyncio.to_thread(extract_pdf_text_for_receipt, src_path)
+        except OcrUnavailableError:
+            await bot.send_message(
+                owner_id,
+                "⚠️ Собеседник прислал фото/PDF, но распознать текст не "
+                "получилось — похоже, OCR (Tesseract) недоступен на "
+                "сервере. Проверь /ocr_check и билд-логи Railway (должна "
+                "была собраться сборка через Dockerfile).",
+            )
+            return
         if not looks_like_payment_receipt(text):
             return
 
@@ -3712,11 +3734,34 @@ async def handle_admin_photo_upload(message: Message):
         await bot.download(message.photo[-1].file_id, destination=src_path)
         text = await asyncio.to_thread(ocr_image_text, src_path)
         await status_msg.edit_text(build_receipt_reply(text), parse_mode="HTML")
+    except OcrUnavailableError:
+        await status_msg.edit_text(
+            "⚠️ OCR (Tesseract) недоступен на сервере — проверь /ocr_check и билд-логи Railway."
+        )
     except Exception:
         logger.exception("Ошибка распознавания фото от админа")
         await status_msg.edit_text("⚠️ Не получилось распознать фото.")
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+@dp.message(Command("ocr_check"), F.chat.type == ChatType.PRIVATE, F.from_user.id.in_(ADMIN_IDS))
+async def cmd_ocr_check(message: Message):
+    """Диагностика: реально ли Tesseract установлен и виден боту на сервере —
+    без этого распознавание чеков молча ничего не делает."""
+    try:
+        version = await asyncio.to_thread(pytesseract.get_tesseract_version)
+        langs = await asyncio.to_thread(pytesseract.get_languages, "")
+        await message.answer(
+            f"✅ Tesseract доступен.\nВерсия: {version}\nЯзыки: {', '.join(langs) or '—'}"
+        )
+    except Exception as exc:
+        await message.answer(
+            f"⚠️ Tesseract недоступен: <code>{html.escape(str(exc))}</code>\n\n"
+            "Проверь в Railway → Settings → Build, что билдер — Dockerfile "
+            "(не Railpack), и что сборка реально была применена (Deploy Changes).",
+            parse_mode="HTML",
+        )
 
 
 # ==================== ОБРАБОТЧИК: "ПОЙМАЙ ВСЁ" НА ЛИЧКУ ====================
@@ -3852,6 +3897,7 @@ async def setup_bot_commands() -> None:
                     BotCommand(command="settings", description="⚙️ Настройки"),
                     BotCommand(command="admin", description="🛠 Панель администратора"),
                     BotCommand(command="stats", description="📊 Статистика бота"),
+                    BotCommand(command="ocr_check", description="🧾 Проверить OCR (Tesseract)"),
                 ],
                 scope=BotCommandScopeChat(chat_id=admin_id),
             )
