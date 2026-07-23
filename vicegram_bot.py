@@ -3334,8 +3334,11 @@ def pdf_compress_lossless(input_path: str, output_path: str) -> None:
     reader = PdfReader(input_path)
     writer = PdfWriter()
     for page in reader.pages:
-        page.compress_content_streams()
-        writer.add_page(page)
+        # compress_content_streams() требует, чтобы страница уже принадлежала
+        # PdfWriter (иначе pypdf 6.x бросает ValueError) — поэтому сначала
+        # add_page(), и сжимаем уже добавленную (возвращённую) страницу.
+        added_page = writer.add_page(page)
+        added_page.compress_content_streams()
     writer.compress_identical_objects()
     with open(output_path, "wb") as f:
         writer.write(f)
