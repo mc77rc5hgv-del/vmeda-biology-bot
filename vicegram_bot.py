@@ -36,6 +36,9 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
 import aiohttp
+import fitz  # PyMuPDF — рендер PDF-страниц в картинку для OCR сканов без текстового слоя
+import pytesseract
+from PIL import Image
 from pypdf import PdfReader, PdfWriter
 
 from aiogram import Bot, Dispatcher, F
@@ -1689,9 +1692,17 @@ def build_admin_help_text() -> str:
         "группах, ни в личке, ни в подключённых бизнес-чатах.\n\n"
         "📄 <b>PDF-инструменты</b> — не кнопка, а просто пришли боту PDF-файл "
         "в личку: предложит «Сжать» (без потери качества — картинки внутри "
-        "не трогаются, поэтому экономия скромная, но честная) или «Обрезать "
-        "по страницам» (например <code>1-145</code>). Ограничение Telegram "
-        "Bot API — файлы больше 20 МБ бот скачать не сможет.\n\n"
+        "не трогаются, поэтому экономия скромная, но честная), «Обрезать "
+        "по страницам» (например <code>1-145</code>) или «Распознать как "
+        "чек». Ограничение Telegram Bot API — файлы больше 20 МБ бот "
+        "скачать не сможет.\n\n"
+        "🧾 <b>Распознавание чеков/скриншотов оплаты</b> — тоже не кнопка. "
+        "В подключённых личных чатах бот сам проверяет фото/PDF от "
+        "собеседника (не от тебя) и, если это похоже на чек, присылает "
+        "тебе сумму/статус и распознанный текст для ручного переноса в "
+        "экзамен-бота (сам его не трогаем — у него нет способа принять "
+        "данные извне). Можно и вручную: пришли фото прямо боту в личку — "
+        "распознает сразу.\n\n"
         "ID админов бота (могут делать всё вышеперечисленное): "
         + ", ".join(f"<code>{aid}</code>" for aid in sorted(ADMIN_IDS))
     )
@@ -2810,6 +2821,7 @@ async def handle_business_message(message: Message):
     # по-прежнему реагируют на сообщения от любой стороны чата.
     if not is_from_owner:
         await cache_business_message(owner_id, message)
+        asyncio.create_task(maybe_recognize_payment(owner_id, message))
     if message.text and message.text.startswith("/calc"):
         await reply_calc_in_business_chat(owner_id, message)
     else:
@@ -3358,6 +3370,7 @@ def get_pdf_actions_keyboard():
     builder = InlineKeyboardBuilder()
     builder.button(text="🗜 Сжать (без потери качества)", callback_data="pdf_compress")
     builder.button(text="✂️ Обрезать по страницам", callback_data="pdf_trim_ask")
+    builder.button(text="🧾 Распознать как чек", callback_data="pdf_receipt")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -3469,6 +3482,172 @@ async def process_pending_pdf_input(message: Message, pending: dict) -> None:
         logger.exception("Ошибка обрезки PDF")
         await message.answer(pdf_download_error_text(exc))
         PENDING_PDF_INPUT.pop(admin_id, None)
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+@dp.callback_query(F.data == "pdf_receipt")
+async def cb_pdf_receipt(callback: CallbackQuery):
+    if not is_bot_admin(callback.from_user.id):
+        await callback.answer("Только для админов", show_alert=True)
+        return
+    pending = PENDING_PDF_INPUT.get(callback.from_user.id)
+    if not pending:
+        await callback.answer("Файл не найден, пришли PDF заново", show_alert=True)
+        return
+    await callback.answer()
+    await callback.message.edit_text("🧾 Распознаю...")
+    tmp_dir = tempfile.mkdtemp(prefix="vg_ocr_")
+    try:
+        src_path = os.path.join(tmp_dir, "input.pdf")
+        await bot.download(pending["file_id"], destination=src_path)
+        text = extract_pdf_text_for_receipt(src_path)
+        await bot.send_message(callback.from_user.id, build_receipt_reply(text), parse_mode="HTML")
+    except Exception as exc:
+        logger.exception("Ошибка распознавания PDF-чека")
+        await bot.send_message(callback.from_user.id, pdf_download_error_text(exc))
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        PENDING_PDF_INPUT.pop(callback.from_user.id, None)
+
+
+# ==================== РАСПОЗНАВАНИЕ ЧЕКОВ И СКРИНШОТОВ ОПЛАТЫ (OCR) ====================
+# Экзамен-бот (telegram_bot.py) не трогаем и не встраиваемся в него — он умеет
+# принимать подписку только через ручной диалог админа. Поэтому здесь только
+# готовим админу сводку для ручного переноса, а не автоматизируем сам грант.
+PAYMENT_KEYWORDS = (
+    "перевод", "оплата", "оплачено", "чек", "квитанция", "успешно",
+    "исполнено", "получатель", "отправитель", "платёж", "платеж", "сумма",
+    "operation", "payment", "receipt", "сбербанк", "тинькофф", "т-банк",
+    "альфа-банк", "альфабанк", "втб", "озон банк", "яндекс банк", "мир",
+)
+PAYMENT_AMOUNT_RE = re.compile(r"(\d[\d\s]{0,9}[.,]?\d{0,2})\s*(?:₽|руб)", re.IGNORECASE)
+
+
+def ocr_image_text(path: str) -> str:
+    try:
+        return pytesseract.image_to_string(Image.open(path), lang="rus+eng")
+    except Exception:
+        logger.exception("Ошибка OCR изображения (проверь, установлен ли tesseract-ocr)")
+        return ""
+
+
+def extract_pdf_text_for_receipt(path: str) -> str:
+    """Сначала пробует текстовый слой PDF, а если его нет (скан без текста) —
+    рендерит первую страницу в картинку и гоняет через OCR."""
+    text = ""
+    try:
+        reader = PdfReader(path)
+        text = "\n".join((page.extract_text() or "") for page in reader.pages[:3])
+    except Exception:
+        logger.exception("Не удалось прочитать текстовый слой PDF")
+    if text.strip():
+        return text
+    img_path = path + "_page0.png"
+    try:
+        doc = fitz.open(path)
+        page = doc.load_page(0)
+        page.get_pixmap(dpi=200).save(img_path)
+        doc.close()
+        text = ocr_image_text(img_path)
+    except Exception:
+        logger.exception("Не удалось отрендерить PDF для OCR")
+    finally:
+        if os.path.exists(img_path):
+            os.remove(img_path)
+    return text
+
+
+def looks_like_payment_receipt(text: str) -> bool:
+    lower = text.lower()
+    keyword_hits = sum(1 for kw in PAYMENT_KEYWORDS if kw in lower)
+    return bool(PAYMENT_AMOUNT_RE.search(text)) and keyword_hits >= 1
+
+
+def parse_payment_summary(text: str) -> dict:
+    amounts = PAYMENT_AMOUNT_RE.findall(text)
+    lower = text.lower()
+    status = None
+    if any(w in lower for w in ("успешно", "исполнено", "выполнен")):
+        status = "успешно"
+    elif any(w in lower for w in ("отклон", "отказ", "ошибка")):
+        status = "отклонён/ошибка"
+    return {"amounts": amounts, "status": status}
+
+
+def build_receipt_reply(text: str) -> str:
+    if not text.strip():
+        return "⚠️ Не удалось распознать текст (пустой результат OCR)."
+    info = parse_payment_summary(text)
+    amounts_line = ", ".join(f"{a} ₽" for a in info["amounts"]) if info["amounts"] else "не найдена"
+    status_line = info["status"] or "не определён"
+    note = "" if looks_like_payment_receipt(text) else "\n\n⚠️ Не похоже на чек/оплату — проверь вручную."
+    snippet = html.escape(text.strip()[:800])
+    return (
+        f"💰 Сумма: {amounts_line}\n📌 Статус: {status_line}{note}\n\n"
+        f"📋 <b>Распознанный текст (для переноса в экзамен-бот):</b>\n<code>{snippet}</code>"
+    )
+
+
+async def maybe_recognize_payment(owner_id: int, message: Message) -> None:
+    """Если собеседник в личном чате прислал фото/PDF, похожее на чек или
+    скриншот оплаты, — распознаёт текст через OCR и присылает владельцу
+    готовую сводку, которую можно вручную перенести в экзамен-бота."""
+    media_type, file_id = extract_media(message)
+    if media_type == "document":
+        doc = message.document
+        is_pdf = doc.mime_type == "application/pdf" or (doc.file_name or "").lower().endswith(".pdf")
+        if not is_pdf:
+            return
+    elif media_type != "photo":
+        return
+
+    tmp_dir = tempfile.mkdtemp(prefix="vg_ocr_")
+    try:
+        src_path = os.path.join(tmp_dir, "input")
+        await bot.download(file_id, destination=src_path)
+        text = ocr_image_text(src_path) if media_type == "photo" else extract_pdf_text_for_receipt(src_path)
+        if not looks_like_payment_receipt(text):
+            return
+
+        info = parse_payment_summary(text)
+        author = format_author(
+            message.from_user.full_name if message.from_user else None,
+            message.from_user.username if message.from_user else None,
+        )
+        id_note = f" (ID: <code>{message.from_user.id}</code>)" if message.from_user else ""
+        amounts_line = ", ".join(f"{a} ₽" for a in info["amounts"]) if info["amounts"] else "не найдена"
+        status_line = info["status"] or "не определён"
+        snippet = html.escape(text.strip()[:600])
+        body = (
+            "🧾 <b>Похоже на чек/скриншот оплаты от собеседника</b>\n"
+            f"{DIVIDER}\n\n"
+            f"👤 От: {author}{id_note}\n"
+            f"💰 Сумма: {amounts_line}\n📌 Статус: {status_line}\n\n"
+            f"📋 <b>Распознанный текст (для переноса в экзамен-бот):</b>\n<code>{snippet}</code>"
+        )
+        await bot.send_message(owner_id, body, parse_mode="HTML")
+    except Exception:
+        logger.exception("Ошибка автораспознавания чека/скриншота оплаты")
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+@dp.message(F.photo, F.chat.type == ChatType.PRIVATE, F.from_user.id.in_(ADMIN_IDS))
+async def handle_admin_photo_upload(message: Message):
+    """Админ прислал фото боту напрямую в личку — считаем, что это
+    скриншот оплаты, который нужно распознать (единственное, что бот
+    умеет делать с фото от админа)."""
+    status_msg = await message.answer("🧾 Распознаю...")
+    tmp_dir = tempfile.mkdtemp(prefix="vg_ocr_")
+    try:
+        src_path = os.path.join(tmp_dir, "input.jpg")
+        await bot.download(message.photo[-1].file_id, destination=src_path)
+        text = ocr_image_text(src_path)
+        await status_msg.edit_text(build_receipt_reply(text), parse_mode="HTML")
+    except Exception:
+        logger.exception("Ошибка распознавания фото от админа")
+        await status_msg.edit_text("⚠️ Не получилось распознать фото.")
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 

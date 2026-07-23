@@ -1,0 +1,9 @@
+.git
+__pycache__
+*.pyc
+stats.json
+stats.json.tmp
+vicegram.db
+vicegram_media_cache/
+.env
+README.md
