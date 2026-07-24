@@ -468,6 +468,18 @@ SUBSCRIPTION_TIERS = {
 }
 ACTIVE_SUBSCRIPTION_TIERS = {t: cfg for t, cfg in SUBSCRIPTION_TIERS.items() if not cfg.get("retired")}
 
+SEPTEMBER_PRICE_INCREASE = 1.4  # с сентября цены на все тарифы вырастут на 40%
+
+def september_price(price: int) -> int:
+    return round(price * SEPTEMBER_PRICE_INCREASE)
+
+def get_tier_price_line(cfg: dict) -> str:
+    """Текущая цена + зачёркнутая цена на 40% выше — с сентября будет дороже."""
+    return (
+        f"<b>{cfg['price_rub']}₽</b> <s>{september_price(cfg['price_rub'])}₽</s> / "
+        f"<b>{cfg['price_stars']}⭐</b> <s>{september_price(cfg['price_stars'])}⭐</s>"
+    )
+
 def cheapest_active_tier(predicate=lambda cfg: True) -> dict:
     """Самый дешёвый тариф из числа продающихся сейчас, подходящий под predicate — чтобы не
     хардкодить цены/тарифы в текстах отдельно от SUBSCRIPTION_TIERS (см. CLAUDE.md pitfalls)."""
@@ -3993,12 +4005,13 @@ def get_subscription_menu_text(user_id: int) -> str:
         lines.append(status)
     lines.append(
         "Не хочешь ждать или звать друзей? Открой доступ сразу оплатой — без рефералов "
-        "и ограничений. Выбери вариант:\n"
+        "и ограничений. Выбери вариант:\n\n"
+        "⏳ Зачёркнутая цена — во сколько подписка будет обходиться с сентября, успей купить сейчас!\n"
     )
     for tier_id, cfg in ACTIVE_SUBSCRIPTION_TIERS.items():
         if cfg.get("badge"):
             lines.append(f"<b>{cfg['badge']}</b>")
-        lines.append(f"{cfg['emoji']} <b>{cfg['title']}</b> — {cfg['price_rub']}₽ / {cfg['price_stars']} ⭐")
+        lines.append(f"{cfg['emoji']} <b>{cfg['title']}</b> — {get_tier_price_line(cfg)}")
         if cfg.get("joke"):
             lines.append(f"<i>{cfg['joke']}</i>")
         for b in cfg["benefits"]:
@@ -4032,7 +4045,8 @@ def get_sub_tier_text(tier_id: int) -> str:
         lines.append(f"<i>{cfg['joke']}</i>\n")
     for b in cfg["benefits"]:
         lines.append(f"• {b}")
-    lines.append(f"\nЦена: <b>{cfg['price_rub']}₽</b> или <b>{cfg['price_stars']} ⭐</b>")
+    lines.append(f"\nЦена: {get_tier_price_line(cfg)}")
+    lines.append("⏳ Зачёркнутая цена — во сколько подписка будет обходиться с сентября, успей купить сейчас!")
     lines.append(get_tier_upsell_text(tier_id))
     if cfg.get("subject_choice_required"):
         lines.append("\nСначала выбери предмет, потом способ оплаты:")
@@ -4152,7 +4166,8 @@ async def cb_sub_subject(callback: CallbackQuery):
     cfg = SUBSCRIPTION_TIERS[tier_id]
     text = (
         f"{cfg['emoji']} <b>{cfg['title']}</b> — {SUBJECT_TITLES[subject]}\n{DIVIDER}\n\n"
-        f"Цена: <b>{cfg['price_rub']}₽</b> или <b>{cfg['price_stars']} ⭐</b>\n\n"
+        f"Цена: {get_tier_price_line(cfg)}\n"
+        "⏳ Зачёркнутая цена — во сколько подписка будет обходиться с сентября, успей купить сейчас!\n\n"
         "Выбери способ оплаты:"
     )
     await safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=get_sub_subject_keyboard(tier_id, subject))
