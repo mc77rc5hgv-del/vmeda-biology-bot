@@ -776,13 +776,18 @@ BATTLE_PLACE_ICONS = ["🥇", "🥈", "🥉", "🏅", "🎖"]
 # 4-5 место — без минимума, отдаются следующим по рейтингу.
 BATTLE_TOP3_MIN_REFERRALS = 30
 
+MEDICAL_VPN_URL = "https://t.me/Medical_vpn_bot"
+
 BATTLE_PRIZE_LABELS = [
-    'полный и <b>вечный</b> доступ к <a href="https://t.me/VMEDA_examen_bot">VMEDA_examen_bot</a> '
-    'и <b>вечный</b> доступ к <a href="https://t.me/Helperchat_bot">Helperchat_bot</a>',
-    'полный доступ к <a href="https://t.me/VMEDA_examen_bot">VMEDA_examen_bot</a> на <b>год</b> '
-    'и доступ на <b>год</b> к <a href="https://t.me/Helperchat_bot">Helperchat_bot</a>',
-    'полный доступ к <a href="https://t.me/VMEDA_examen_bot">VMEDA_examen_bot</a> на <b>год</b> '
-    'и доступ на <b>год</b> к <a href="https://t.me/Helperchat_bot">Helperchat_bot</a>',
+    'подписка «6 лет — абсолютно всё» (<b>6 лет</b>, все предметы + Анатомия/Гистология) в '
+    '<a href="https://t.me/VMEDA_examen_bot">VMEDA_examen_bot</a> + ВПН на <b>год</b> в '
+    f'<a href="{MEDICAL_VPN_URL}">Medical_vpn_bot</a>',
+    'полный доступ ко всем разделам <a href="https://t.me/VMEDA_examen_bot">VMEDA_examen_bot</a> '
+    'на <b>год</b> + ВПН на <b>полгода</b> в '
+    f'<a href="{MEDICAL_VPN_URL}">Medical_vpn_bot</a>',
+    'подписка «Месяц — Биология, Физика, Химия» на <b>месяц</b> в '
+    '<a href="https://t.me/VMEDA_examen_bot">VMEDA_examen_bot</a> + ВПН на <b>месяц</b> в '
+    f'<a href="{MEDICAL_VPN_URL}">Medical_vpn_bot</a>',
     'Химия, Физика, Биология и ранний доступ к Гистологии <b>навсегда</b> в '
     '<a href="https://t.me/VMEDA_examen_bot">VMEDA_examen_bot</a> + доступ к '
     '<a href="https://t.me/Helperchat_bot">Helperchat_bot</a>',
@@ -793,7 +798,7 @@ BATTLE_PRIZE_LABELS = [
 BATTLE_CHANNEL_POSTING_NOTICE = "📢 <b>ПОСТИНГ В TELEGRAM-КАНАЛЫ РАЗРЕШЁН 🤝</b>"
 
 # Денежная оценка приза за место (задана вручную, не выводится из цен тарифов подписки).
-BATTLE_PRIZE_VALUES_RUB = [4500, 2300, 2300, 1599, 1599]
+BATTLE_PRIZE_VALUES_RUB = [5400, 2000, 300, 1599, 1599]
 
 def format_rub(amount: int) -> str:
     return f"{amount:,}".replace(",", " ")

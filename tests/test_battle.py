@@ -61,13 +61,13 @@ def fresh_uid():
 # ==================== 1. Prize data / block ====================
 assert len(tb.BATTLE_PRIZE_LABELS) == 5
 assert len(tb.BATTLE_PRIZE_VALUES_RUB) == 5
-assert tb.BATTLE_PRIZE_VALUES_RUB == [4500, 2300, 2300, 1599, 1599]
+assert tb.BATTLE_PRIZE_VALUES_RUB == [5400, 2000, 300, 1599, 1599]
 assert tb.BATTLE_TOP3_MIN_REFERRALS == 30
 
 block = tb.format_battle_prizes_block()
 check("prizes_block", block)
 assert "VMEDA_examen_bot" in block and "Helperchat_bot" in block
-assert "вечный" in block
+assert "Medical_vpn_bot" in block
 assert "5 место" in block and "1 место" in block
 assert "30" in block
 for value in tb.BATTLE_PRIZE_VALUES_RUB:
