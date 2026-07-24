@@ -702,8 +702,12 @@ def get_referral_status_text(user_id: int) -> str:
         f"{link}\n\n"
         f"Приглашено друзей: <b>{count}</b> из {REFERRAL_FULL_ACCESS_THRESHOLD}\n"
         f"Осталось бесплатных заходов без рефералов: <b>{remaining_free}</b>\n\n"
-        f"💎 Не хочешь ждать друзей? Открой доступ сразу оплатой — подписки от "
-        f"{cheapest_gated3_tier()['price_rub']}₽. Жми «💎 Открыть доступ без рефералов» ниже."
+        f"💎 Не хочешь ждать друзей? Открой доступ сразу оплатой!\n\n"
+        f"🔥 Самые выгодные варианты — «{SUBSCRIPTION_TIERS[7]['short']}» за "
+        f"{SUBSCRIPTION_TIERS[7]['price_rub']}₽ или «{SUBSCRIPTION_TIERS[9]['short']}» за "
+        f"{SUBSCRIPTION_TIERS[9]['price_rub']}₽ ({SUBSCRIPTION_TIERS[9]['badge']}).\n\n"
+        f"Также доступна подписка от {cheapest_gated3_tier()['price_rub']}₽. "
+        "Жми «💎 Открыть доступ без рефералов» ниже."
     )
 
 RANK_MEDALS = ["🥇", "🥈", "🥉"]
