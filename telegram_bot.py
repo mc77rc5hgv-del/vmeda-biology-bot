@@ -6003,14 +6003,19 @@ async def cb_anatomy_topic(callback: CallbackQuery):
         return
     await callback.answer()
     icon = topic.get("icon", "📚")
+    video_block = f"\n\n🎥 Видео по теме:\n{topic['video']}" if topic.get("video") else ""
     text = (
         f"{icon} <b>{topic['title']}</b>\n{DIVIDER}\n\n"
         f"📖 Материал: {len(topic['material'])} тем\n"
         f"🎴 Флэш-карточек: {len(topic['flashcards'])}\n"
         f"🔗 Пар для сопоставления: {sum(len(s['pairs']) for s in topic['matching_sets'])}\n"
-        f"🧠 Мнемоник: {len(topic['mnemonics'])}\n\n"
+        f"🧠 Мнемоник: {len(topic['mnemonics'])}"
+        f"{video_block}\n\n"
         "Выбери формат подготовки:"
     )
+    # видео-ссылка намеренно не оборачивается в <a href>/URL-кнопку и disable_web_page_preview
+    # не выставляется — так Telegram сам строит превью со встроенным плеером YouTube прямо в
+    # чате, без перехода по ссылке и без скачивания видео ботом.
     await safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=get_anatomy_topic_keyboard(topic_key))
 
 @dp.callback_query(F.data.startswith("anatomy_bones:"))
