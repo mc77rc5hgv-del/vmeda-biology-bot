@@ -5973,6 +5973,17 @@ async def cb_anatomy_menu(callback: CallbackQuery):
         reply_markup=get_anatomy_menu_keyboard()
     )
 
+def get_video_block(entry: dict) -> str:
+    """Строит блок со ссылкой(ами) на видео из необязательного поля entry["video"] (строка
+    или список строк) — ссылка выводится обычным текстом, не оборачивается в <a href> и не
+    гасит превью (disable_web_page_preview не выставляется вызывающим кодом), поэтому Telegram
+    сам строит превью со встроенным плеером YouTube прямо в чате."""
+    video = entry.get("video")
+    if not video:
+        return ""
+    urls = video if isinstance(video, list) else [video]
+    return "\n\n🎥 Видео по теме:\n" + "\n".join(urls)
+
 @dp.callback_query(F.data.startswith("anatomy_section:"))
 async def cb_anatomy_section(callback: CallbackQuery):
     if not anatomy_access_ok(callback.from_user.id):
@@ -5986,7 +5997,7 @@ async def cb_anatomy_section(callback: CallbackQuery):
     await callback.answer()
     await safe_edit_text(
         callback.message,
-        f"🦴 <b>{section['title']}</b>\n{DIVIDER}\n\nВыбери тему:",
+        f"🦴 <b>{section['title']}</b>\n{DIVIDER}{get_video_block(section)}\n\nВыбери тему:",
         parse_mode="HTML",
         reply_markup=get_anatomy_section_keyboard(section_key)
     )
@@ -6003,14 +6014,13 @@ async def cb_anatomy_topic(callback: CallbackQuery):
         return
     await callback.answer()
     icon = topic.get("icon", "📚")
-    video_block = f"\n\n🎥 Видео по теме:\n{topic['video']}" if topic.get("video") else ""
     text = (
         f"{icon} <b>{topic['title']}</b>\n{DIVIDER}\n\n"
         f"📖 Материал: {len(topic['material'])} тем\n"
         f"🎴 Флэш-карточек: {len(topic['flashcards'])}\n"
         f"🔗 Пар для сопоставления: {sum(len(s['pairs']) for s in topic['matching_sets'])}\n"
         f"🧠 Мнемоник: {len(topic['mnemonics'])}"
-        f"{video_block}\n\n"
+        f"{get_video_block(topic)}\n\n"
         "Выбери формат подготовки:"
     )
     # видео-ссылка намеренно не оборачивается в <a href>/URL-кнопку и disable_web_page_preview

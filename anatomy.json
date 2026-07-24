@@ -3791,7 +3791,12 @@
         ]
       }
     },
-    "menu_title": "🦴 Остеология (кости)"
+    "menu_title": "🦴 Остеология (кости)",
+    "video": [
+      "https://www.youtube.com/watch?v=gQy061-GgJU",
+      "https://www.youtube.com/watch?v=mSt5A-tD5ts",
+      "https://www.youtube.com/playlist?list=PLLSkuEB_noXeO7wwECSXhzMrHQO04cdek"
+    ]
   },
   "arthrology": {
     "title": "Соединения костей (Артросиндесмология)",
@@ -3964,7 +3969,11 @@
             "bone": null
           }
         ],
-        "picture_quiz": []
+        "picture_quiz": [],
+        "video": [
+          "https://www.youtube.com/watch?v=Yul4qO1Akf8",
+          "https://www.youtube.com/watch?v=v2GyiREUEvU"
+        ]
       },
       "trunk_joints": {
         "title": "Соединения костей туловища",
@@ -4690,7 +4699,8 @@
           }
         ]
       }
-    }
+    },
+    "video": "https://www.youtube.com/playlist?list=PLLSkuEB_noXeO7wwECSXhzMrHQO04cdek"
   },
   "myology": {
     "title": "Мышечная система (Миология)",
@@ -5019,7 +5029,8 @@
             "caption": "Спина (dorsum)",
             "credit": "Ф. Неттер, Атлас анатомии человека"
           }
-        ]
+        ],
+        "video": "https://www.youtube.com/watch?v=xFaAiz-bfL4"
       },
       "chest_muscles": {
         "title": "Мышцы груди",
@@ -5165,7 +5176,8 @@
             "caption": "Дыхательные мышцы",
             "credit": "Ф. Неттер, Атлас анатомии человека"
           }
-        ]
+        ],
+        "video": "https://www.youtube.com/watch?v=_bNr04ifZHs"
       },
       "abdomen_muscles": {
         "title": "Мышцы живота",
@@ -5643,7 +5655,8 @@
             "caption": "Фасции шеи",
             "credit": "Ф. Неттер, Атлас анатомии человека"
           }
-        ]
+        ],
+        "video": "https://www.youtube.com/watch?v=La7dOlKlPzQ"
       },
       "head_muscles": {
         "title": "Мышцы головы",
@@ -5804,7 +5817,8 @@
             "caption": "Жевательные мышцы, mm. masticatorii (продолжение)",
             "credit": "Ф. Неттер, Атлас анатомии человека"
           }
-        ]
+        ],
+        "video": "https://www.youtube.com/watch?v=La7dOlKlPzQ"
       },
       "upper_limb_muscles": {
         "title": "Мышцы верхней конечности",
@@ -6080,7 +6094,8 @@
             "caption": "Пальцы (digiti)",
             "credit": "Ф. Неттер, Атлас анатомии человека"
           }
-        ]
+        ],
+        "video": "https://www.youtube.com/watch?v=Qd1NZ9UmwEM"
       },
       "lower_limb_muscles": {
         "title": "Мышцы нижней конечности",
@@ -6368,7 +6383,8 @@
           }
         ]
       }
-    }
+    },
+    "video": "https://www.youtube.com/playlist?list=PLLSkuEB_noXfZB1gqJmAY44Q7hJZ19CFj"
   },
   "splanchnology": {
     "title": "Спланхнология",
@@ -8269,7 +8285,8 @@
           }
         ]
       }
-    }
+    },
+    "video": "https://www.youtube.com/playlist?list=PLLSkuEB_noXd78RQLE-va9GQOP-T9c53h"
   },
   "angiology": {
     "title": "Ангиология",
@@ -8568,6 +8585,10 @@
             "caption": "Грудная клетка: бифуркация трахеи, левое предсердие (срез)",
             "credit": "Ф. Неттер, Атлас анатомии человека"
           }
+        ],
+        "video": [
+          "https://www.youtube.com/watch?v=upbafDZ3O34",
+          "https://www.youtube.com/watch?v=DWah78tihxw"
         ]
       },
       "arteries": {
@@ -9195,7 +9216,8 @@
           }
         ]
       }
-    }
+    },
+    "video": "https://www.youtube.com/playlist?list=PLLSkuEB_noXdSXXGVgv3qQhbdgoYjMrQt"
   },
   "cns": {
     "title": "Центральная нервная система (ЦНС)",
@@ -9344,7 +9366,8 @@
             "caption": "Вены спинного мозга и позвоночного столба",
             "credit": "Ф. Неттер, Атлас анатомии человека"
           }
-        ]
+        ],
+        "video": "https://www.youtube.com/watch?v=bunmNgGZ02E"
       },
       "brainstem": {
         "title": "Ствол головного мозга",
@@ -9876,7 +9899,8 @@
           }
         ]
       }
-    }
+    },
+    "video": "https://www.youtube.com/shorts/vdDKGm1wBxE"
   },
   "neurology": {
     "title": "Периферическая нервная система (ПНС)",
@@ -10140,7 +10164,8 @@
             "caption": "Поверхностные нервы и вены нижней конечности: вид сзади",
             "credit": "Ф. Неттер, Атлас анатомии человека"
           }
-        ]
+        ],
+        "video": "https://www.youtube.com/shorts/Q5PWR2y9buY"
       },
       "cranial_nerves": {
         "title": "Черепные нервы",
@@ -10577,7 +10602,8 @@
           }
         ]
       }
-    }
+    },
+    "video": "https://www.youtube.com/shorts/2Pc6W-i5F9M"
   },
   "sense_organs": {
     "title": "Органы чувств. Покровы",
