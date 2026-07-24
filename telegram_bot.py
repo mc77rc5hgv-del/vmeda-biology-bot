@@ -58,6 +58,9 @@ with open("physics_questions.json", "r", encoding="utf-8") as f:
 with open("physics_grade45.json", "r", encoding="utf-8") as f:
     PHYSICS_GRADE45_QUESTIONS = json.load(f)
 
+with open("physics_extra_questions.json", "r", encoding="utf-8") as f:
+    PHYSICS_EXTRA_QUESTIONS = json.load(f)
+
 with open("chemistry_labs.json", "r", encoding="utf-8") as f:
     CHEMISTRY_LABS = json.load(f)
 
@@ -1180,12 +1183,12 @@ GATED_PREFIXES_BIOLOGY = ("ticket:", "ticket_q:", "qpage:", "q:")
 GATED_CALLBACKS_PHYSICS = {
     "menu_physics", "physics_tickets", "physics_theory_tickets", "physics_test_tickets",
     "physics_test", "physics_tasks", "download_physics_full", "download_physics_ticket_tasks",
-    "physics_grade45", "download_physics_grade45", "download_physics_tasks_cheatsheet",
+    "physics_grade45", "download_physics_grade45", "download_physics_tasks_cheatsheet", "physics_extra",
 }
 GATED_PREFIXES_PHYSICS = (
     "phys_test_ticket:", "phys_test_ticket_tasks:", "phys_test_ticket_task_show:", "physics_page:", "physics_q:",
     "phystask_topic:", "phystask_formulas:", "phystask_list:", "phystask_show:", "physics45_q:",
-    "phys_theory_ticket:", "phys_theory_q:",
+    "phys_theory_ticket:", "phys_theory_q:", "physics_extra_q:",
 )
 
 GATED_CALLBACKS_CHEMISTRY = {
@@ -2208,6 +2211,7 @@ def get_physics_menu():
     builder.button(text="📘 Билеты", callback_data="physics_tickets")
     builder.button(text="🧮 Задачи", callback_data="physics_tasks")
     builder.button(text="❓ (60 вопросов) на 4/5", callback_data="physics_grade45")
+    builder.button(text="⭐ Доп. вопросы от преподавателей", callback_data="physics_extra")
     builder.button(text="📄 186 вопросов + шаблоны задач (файл)", callback_data="download_physics_full")
     builder.button(text="📄 (60 вопросов) на 4/5 (файл)", callback_data="download_physics_grade45")
     builder.button(text="📄 Ответы на задачи билетов (файл)", callback_data="download_physics_ticket_tasks")
@@ -2401,6 +2405,28 @@ def get_physics_grade45_answer_keyboard(q_num: str):
     if nav:
         builder.row(*nav)
     builder.row(InlineKeyboardButton(text="🔙 К списку вопросов", callback_data="physics_grade45"))
+    return builder.as_markup()
+
+def get_physics_extra_keyboard():
+    builder = InlineKeyboardBuilder()
+    for num in sorted(PHYSICS_EXTRA_QUESTIONS.keys(), key=int):
+        builder.button(text=f"⭐ {PHYSICS_EXTRA_QUESTIONS[num]['title']}", callback_data=f"physics_extra_q:{num}")
+    builder.adjust(1)
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="menu_physics"))
+    return builder.as_markup()
+
+def get_physics_extra_answer_keyboard(q_num: str):
+    builder = InlineKeyboardBuilder()
+    nums = sorted(PHYSICS_EXTRA_QUESTIONS.keys(), key=int)
+    idx = nums.index(q_num)
+    nav = []
+    if idx > 0:
+        nav.append(InlineKeyboardButton(text="⬅️ Предыдущий вопрос", callback_data=f"physics_extra_q:{nums[idx - 1]}"))
+    if idx < len(nums) - 1:
+        nav.append(InlineKeyboardButton(text="Следующий вопрос ➡️", callback_data=f"physics_extra_q:{nums[idx + 1]}"))
+    if nav:
+        builder.row(*nav)
+    builder.row(InlineKeyboardButton(text="🔙 К списку вопросов", callback_data="physics_extra"))
     return builder.as_markup()
 
 # ==================== ХИМИЯ ====================
@@ -5135,6 +5161,29 @@ async def cb_physics_grade45_question(callback: CallbackQuery):
         body = f"{header}\n{DIVIDER}\n\n<b>{q.get('title', '')}</b>\n\n{q.get('answer', '')}"
         short_caption = f"{header}\n{DIVIDER}\n\n<b>{q.get('title', '')}</b>"
         await send_answer(callback.message, body, short_caption, q, get_physics_grade45_answer_keyboard(q_num), edit=True)
+    else:
+        await callback.answer("Вопрос пока не добавлен в файл", show_alert=True)
+
+@dp.callback_query(F.data == "physics_extra")
+async def cb_physics_extra(callback: CallbackQuery):
+    await callback.answer()
+    await safe_edit_text(
+        callback.message,
+        f"⭐ <b>Доп. вопросы от преподавателей</b>\n{DIVIDER}\n\nВыбери вопрос:",
+        parse_mode="HTML",
+        reply_markup=get_physics_extra_keyboard()
+    )
+
+@dp.callback_query(F.data.startswith("physics_extra_q:"))
+async def cb_physics_extra_question(callback: CallbackQuery):
+    await callback.answer()
+    q_num = callback.data.split(":")[1]
+    if q_num in PHYSICS_EXTRA_QUESTIONS:
+        q = PHYSICS_EXTRA_QUESTIONS[q_num]
+        header = "⭐ <b>Доп. вопрос от преподавателей</b>"
+        body = f"{header}\n{DIVIDER}\n\n<b>{q.get('title', '')}</b>\n\n{q.get('answer', '')}"
+        short_caption = f"{header}\n{DIVIDER}\n\n<b>{q.get('title', '')}</b>"
+        await send_answer(callback.message, body, short_caption, q, get_physics_extra_answer_keyboard(q_num), edit=True)
     else:
         await callback.answer("Вопрос пока не добавлен в файл", show_alert=True)
 
