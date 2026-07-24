@@ -276,7 +276,7 @@ SUBSCRIPTION_TIERS = {
         "anatomy": False,
         "biology_download": False,
         "cheat_sheets": False,
-        "menu_number": 2,
+        "menu_number": 3,
         "joke": "ЭНЕРГЕТИК 🤮 или УСПЕШНАЯ СДАЧА ЭКЗАМЕНА 😇",
         "benefits": [
             "Полный доступ к Биологии, Физике и Химии на 30 дней",
@@ -346,7 +346,7 @@ SUBSCRIPTION_TIERS = {
         "anatomy": False,
         "biology_download": False,
         "cheat_sheets": False,
-        "menu_number": 1,
+        "menu_number": 4,
         "joke": "Меньше стакана кофе ☕ — но хватит ровно на один экзамен",
         "benefits": [
             "Доступ только к ОДНОМУ предмету на выбор — Биология, Физика или Химия — на 3 дня",
@@ -368,7 +368,7 @@ SUBSCRIPTION_TIERS = {
         "anatomy": False,
         "biology_download": False,
         "cheat_sheets": False,
-        "menu_number": 3,
+        "menu_number": 5,
         "benefits": [
             "Полный доступ к Биологии, Физике, Химии и уже готовой Гистологии — все 4 экзамена сразу",
             "Действует до 1 октября 2026 года",
@@ -389,7 +389,8 @@ SUBSCRIPTION_TIERS = {
         "anatomy": True,
         "biology_download": False,
         "cheat_sheets": False,
-        "menu_number": 4,
+        "badge": "🔥 ХИТ ПРОДАЖ 🔥",
+        "menu_number": 1,
         "benefits": [
             "Полный доступ ко всем 5 предметам — Биология, Физика, Химия, Гистология и досрочно Анатомия",
             "Действует до конца ноября 2026 года",
@@ -410,7 +411,7 @@ SUBSCRIPTION_TIERS = {
         "anatomy": True,
         "biology_download": False,
         "cheat_sheets": False,
-        "menu_number": 5,
+        "menu_number": 6,
         "benefits": [
             "Полный доступ ко всем 5 предметам — Биология, Физика, Химия, Гистология и досрочно Анатомия",
             "Действует до февраля 2027 года — хватит на весь учебный год без повторной оплаты",
@@ -432,7 +433,7 @@ SUBSCRIPTION_TIERS = {
         "biology_download": True,
         "cheat_sheets": True,
         "badge": "🔥 РЕКОМЕНДОВАНО 🔥",
-        "menu_number": 6,
+        "menu_number": 2,
         "benefits": [
             "Полный доступ ко всем предметам — Биология, Физика, Химия, Гистология, Анатомия",
             "Плюс текущие зачёты, контрольные и диагностики по мере их появления в боте",
@@ -473,12 +474,22 @@ SEPTEMBER_PRICE_INCREASE = 1.4  # с сентября цены на все та�
 def september_price(price: int) -> int:
     return round(price * SEPTEMBER_PRICE_INCREASE)
 
+DISCOUNT_RATE = 0.10  # разовая скидка 10% для пользователей без рефералов, промо-рассылкой
+
+def discount_price(price: int) -> int:
+    return round(price * (1 - DISCOUNT_RATE))
+
 def get_tier_price_line(cfg: dict) -> str:
     """Текущая цена + зачёркнутая цена на 40% выше — с сентября будет дороже."""
     return (
         f"<b>{cfg['price_rub']}₽</b> <s>{september_price(cfg['price_rub'])}₽</s> / "
         f"<b>{cfg['price_stars']}⭐</b> <s>{september_price(cfg['price_stars'])}⭐</s>"
     )
+
+def sorted_active_tiers() -> list[tuple[int, dict]]:
+    """Тарифы в порядке показа (menu_number), а не в порядке ключей SUBSCRIPTION_TIERS —
+    так самые выгодные для нас предложения можно выводить первыми, не трогая сами tier id."""
+    return sorted(ACTIVE_SUBSCRIPTION_TIERS.items(), key=lambda kv: kv[1].get("menu_number", 999))
 
 def cheapest_active_tier(predicate=lambda cfg: True) -> dict:
     """Самый дешёвый тариф из числа продающихся сейчас, подходящий под predicate — чтобы не
@@ -1018,6 +1029,30 @@ def get_referral_reminder_broadcast_keyboard():
     builder = InlineKeyboardBuilder()
     builder.button(text="👥 Пригласить друзей", callback_data="referral_info")
     builder.button(text="💎 Подписка", callback_data="subscription_menu")
+    builder.adjust(1)
+    return builder.as_markup()
+
+DISCOUNT_PROMO_TIER_IDS = (7, 9)  # какие тарифы предлагаются со скидкой в этой рассылке
+
+def get_discount_promo_broadcast_text() -> str:
+    t7, t9 = (SUBSCRIPTION_TIERS[t] for t in DISCOUNT_PROMO_TIER_IDS)
+    return (
+        f"🔥 <b>Скидка {int(DISCOUNT_RATE * 100)}% специально для тебя!</b>\n{DIVIDER}\n\n"
+        "Ты ещё не пригласил друзей и пока не открыл доступ к боту — специально для тебя разовая "
+        f"скидка {int(DISCOUNT_RATE * 100)}% на два самых выгодных тарифа:\n\n"
+        f"{t7['emoji']} «{t7['title']}» — <s>{t7['price_rub']}₽</s> <b>{discount_price(t7['price_rub'])}₽</b>\n"
+        f"{t9['emoji']} «{t9['title']}» — <s>{t9['price_rub']}₽</s> <b>{discount_price(t9['price_rub'])}₽</b>\n\n"
+        "Жми на кнопку ниже, чтобы забрать скидку — предложение разовое!"
+    )
+
+def get_discount_promo_broadcast_keyboard():
+    builder = InlineKeyboardBuilder()
+    for t in DISCOUNT_PROMO_TIER_IDS:
+        cfg = SUBSCRIPTION_TIERS[t]
+        builder.button(
+            text=f"{cfg['emoji']} {cfg['short']} — {discount_price(cfg['price_rub'])}₽ со скидкой",
+            callback_data=f"sub_discount:{t}"
+        )
     builder.adjust(1)
     return builder.as_markup()
 
@@ -2627,6 +2662,7 @@ def get_admin_menu():
     builder.button(text="📣 Анонс раздела поддержки", callback_data="admin_announce_support_confirm")
     builder.button(text="🎁 Восстановить доступ исчерпавшим (7 дней)", callback_data="admin_restore_access_confirm")
     builder.button(text="📣 Напомнить о реферале/подписке (<2 реф.)", callback_data="admin_referral_reminder_confirm")
+    builder.button(text="🔥 Скидка 10% без рефералов (<2 реф.)", callback_data="admin_discount_promo_confirm")
     builder.button(text="📤 Опубликовать пост в канал", callback_data="admin_channel_post_prompt")
     builder.button(text="🔬 Открыть Гистологию всем на 24ч", callback_data="admin_histology_promo_confirm")
     builder.button(text="🎉 Снять все ограничения всем на 24ч", callback_data="admin_global_promo_confirm")
@@ -3061,6 +3097,49 @@ async def cb_admin_referral_reminder_go(callback: CallbackQuery):
     await safe_edit_text(
         callback.message,
         f"✅ Напоминание отправлено (попытка охватить {len(cohort)} пользователей).",
+        parse_mode="HTML",
+        reply_markup=get_admin_back_keyboard()
+    )
+
+@dp.callback_query(F.data == "admin_discount_promo_confirm")
+async def cb_admin_discount_promo_confirm(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    cohort = get_below_threshold_users()
+    if not cohort:
+        await callback.answer("Сейчас нет пользователей без бесплатного доступа", show_alert=True)
+        return
+    await callback.answer()
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Отправить рассылку", callback_data="admin_discount_promo_go")
+    builder.button(text="❌ Отмена", callback_data="admin_panel")
+    builder.adjust(1)
+    preview = (
+        f"👀 <b>Предпросмотр рассылки</b>\n{DIVIDER}\n\n"
+        f"{get_discount_promo_broadcast_text()}\n\n{DIVIDER}\n"
+        f"Рассылка уйдёт {len(cohort)} пользователям, у которых меньше "
+        f"{REFERRAL_FULL_ACCESS_THRESHOLD} рефералов и нет подписки/ручного/временного доступа. "
+        "Кнопки в рассылке ведут прямо на оформление подписки со скидкой."
+    )
+    await safe_edit_text(callback.message, preview, parse_mode="HTML", reply_markup=builder.as_markup())
+
+@dp.callback_query(F.data == "admin_discount_promo_go")
+async def cb_admin_discount_promo_go(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    cohort = get_below_threshold_users()
+    if not cohort:
+        await callback.answer("Сейчас нет пользователей без бесплатного доступа", show_alert=True)
+        return
+    await callback.answer("📣 Рассылка запущена!", show_alert=True)
+    stats["broadcast_count"] = stats.get("broadcast_count", 0) + 1
+    save_stats()
+    await _broadcast_to(cohort, get_discount_promo_broadcast_text(), get_discount_promo_broadcast_keyboard())
+    await safe_edit_text(
+        callback.message,
+        f"✅ Рассылка со скидкой отправлена (попытка охватить {len(cohort)} пользователей).",
         parse_mode="HTML",
         reply_markup=get_admin_back_keyboard()
     )
@@ -3913,21 +3992,25 @@ async def grant_subscription_and_notify_buyer(
     except Exception:
         logger.exception("Не удалось уведомить пользователя %s о выдаче подписки", target_id)
 
-def get_admin_payment_confirm_text(cfg: dict, user, subject: str | None = None) -> str:
+def get_admin_payment_confirm_text(cfg: dict, user, subject: str | None = None, price: int | None = None) -> str:
+    price = price if price is not None else cfg["price_rub"]
     subject_line = f"\nПредмет: {SUBJECT_TITLES[subject]}" if subject else ""
+    discount_line = " (со скидкой 10%)" if price != cfg["price_rub"] else ""
     return (
         f"💰 <b>Запрос на подтверждение оплаты</b>\n{DIVIDER}\n\n"
-        f"Тариф: «{cfg['title']}» — {cfg['price_rub']}₽{subject_line}\n"
+        f"Тариф: «{cfg['title']}» — {price}₽{discount_line}{subject_line}\n"
         f"От: {html.escape(user.full_name)} "
         f"({f'@{user.username} ' if user.username else ''}ID <code>{user.id}</code>)\n\n"
         "Нажми ниже, когда увидишь перевод в чате с @vmeda_helper — подписка выдастся сразу."
     )
 
-def get_admin_payment_confirm_keyboard(tier_id: int, target_id: int, subject: str | None = None):
+def get_admin_payment_confirm_keyboard(tier_id: int, target_id: int, subject: str | None = None, price: int | None = None):
+    cfg = SUBSCRIPTION_TIERS[tier_id]
+    price = price if price is not None else cfg["price_rub"]
     builder = InlineKeyboardBuilder()
     builder.button(
         text="✅ Подтвердить оплату",
-        callback_data=f"admin_confirm_sub:{tier_id}:{target_id}:{subject or '-'}"
+        callback_data=f"admin_confirm_sub:{tier_id}:{target_id}:{subject or '-'}:{price}"
     )
     builder.button(
         text="❌ Отклонить",
@@ -3936,10 +4019,12 @@ def get_admin_payment_confirm_keyboard(tier_id: int, target_id: int, subject: st
     builder.adjust(1)
     return builder.as_markup()
 
-async def notify_admins_of_payment_request(tier_id: int, target_id: int, user, subject: str | None = None) -> None:
+async def notify_admins_of_payment_request(
+    tier_id: int, target_id: int, user, subject: str | None = None, price: int | None = None
+) -> None:
     cfg = SUBSCRIPTION_TIERS[tier_id]
-    text = get_admin_payment_confirm_text(cfg, user, subject)
-    keyboard = get_admin_payment_confirm_keyboard(tier_id, target_id, subject)
+    text = get_admin_payment_confirm_text(cfg, user, subject, price)
+    keyboard = get_admin_payment_confirm_keyboard(tier_id, target_id, subject, price)
     for admin_id in ADMIN_IDS:
         try:
             await bot.send_message(admin_id, text, parse_mode="HTML", reply_markup=keyboard)
@@ -4008,7 +4093,13 @@ def get_subscription_menu_text(user_id: int) -> str:
         "и ограничений. Выбери вариант:\n\n"
         "⏳ Зачёркнутая цена — во сколько подписка будет обходиться с сентября, успей купить сейчас!\n"
     )
-    for tier_id, cfg in ACTIVE_SUBSCRIPTION_TIERS.items():
+    best7, best9 = SUBSCRIPTION_TIERS[7], SUBSCRIPTION_TIERS[9]
+    lines.append(
+        "🏆 <b>ТОП-2 предложения:</b>\n"
+        f"👉 «{best7['emoji']} {best7['title']}» — {best7['price_rub']}₽, "
+        f"или «{best9['emoji']} {best9['title']}» — {best9['price_rub']}₽ — закрывают всё сразу! 🔥\n"
+    )
+    for tier_id, cfg in sorted_active_tiers():
         if cfg.get("badge"):
             lines.append(f"<b>{cfg['badge']}</b>")
         lines.append(f"{cfg['emoji']} <b>{cfg['title']}</b> — {get_tier_price_line(cfg)}")
@@ -4025,7 +4116,7 @@ def get_subscription_menu_text(user_id: int) -> str:
 
 def get_subscription_menu_keyboard():
     builder = InlineKeyboardBuilder()
-    for tier_id, cfg in ACTIVE_SUBSCRIPTION_TIERS.items():
+    for tier_id, cfg in sorted_active_tiers():
         badge = f"{cfg['badge']} — " if cfg.get("badge") else ""
         builder.button(
             text=f"{badge}{cfg['emoji']} {cfg['short']} — {cfg['price_rub']}₽/{cfg['price_stars']}⭐",
@@ -4087,22 +4178,24 @@ def get_sub_subject_keyboard(tier_id: int, subject: str):
     builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data=f"sub_tier:{tier_id}"))
     return builder.as_markup()
 
-def get_sub_rubles_message_text(tier_id: int, subject: str | None = None) -> str:
+def get_sub_rubles_message_text(tier_id: int, subject: str | None = None, price: int | None = None) -> str:
     cfg = SUBSCRIPTION_TIERS[tier_id]
+    price = price if price is not None else cfg["price_rub"]
     subject_line = f" ({SUBJECT_TITLES[subject]})" if subject else ""
     return (
-        f"💵 <b>Оплата подписки «{cfg['title']}»{subject_line} — {cfg['price_rub']}₽</b>\n{DIVIDER}\n\n"
+        f"💵 <b>Оплата подписки «{cfg['title']}»{subject_line} — {price}₽</b>\n{DIVIDER}\n\n"
         f'Нажми на кнопку ниже — откроется чат с <a href="{HELPER_ACCOUNT_URL}">@vmeda_helper</a>, '
         "сообщение с тарифом уже будет готово. Отправь его и переведи по присланным реквизитам — "
         "как только оплата подтвердится, подписка будет включена вручную.\n\n"
         "Спасибо, что поддерживаешь бота! 🙏"
     )
 
-def get_sub_rubles_keyboard(tier_id: int, subject: str | None = None):
+def get_sub_rubles_keyboard(tier_id: int, subject: str | None = None, price: int | None = None):
     cfg = SUBSCRIPTION_TIERS[tier_id]
+    price = price if price is not None else cfg["price_rub"]
     subject_line = f" ({SUBJECT_TITLES[subject]})" if subject else ""
     template = (
-        f"Привет! Хочу оформить подписку «{cfg['title']}»{subject_line} за {cfg['price_rub']}₽ в боте "
+        f"Привет! Хочу оформить подписку «{cfg['title']}»{subject_line} за {price}₽ в боте "
         "VMEDA_examen_bot. Подскажи, пожалуйста, реквизиты для перевода."
     )
     url = f"{HELPER_ACCOUNT_URL}?text={urllib.parse.quote(template)}"
@@ -4112,18 +4205,49 @@ def get_sub_rubles_keyboard(tier_id: int, subject: str | None = None):
     builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data=back_data))
     return builder.as_markup()
 
-async def send_subscription_stars_invoice(chat_id: int, tier_id: int, subject: str | None = None) -> None:
+async def send_subscription_stars_invoice(
+    chat_id: int, tier_id: int, subject: str | None = None, discount: bool = False
+) -> None:
     cfg = SUBSCRIPTION_TIERS[tier_id]
+    price_stars = discount_price(cfg["price_stars"]) if discount else cfg["price_stars"]
     subject_line = f" ({SUBJECT_TITLES[subject]})" if subject else ""
+    discount_line = " — скидка 10%" if discount else ""
     await bot.send_invoice(
         chat_id=chat_id,
-        title=f"Подписка: {cfg['title']}{subject_line}",
-        description=f"VMEDA_examen_bot — подписка «{cfg['title']}»{subject_line}. Доступ откроется сразу после оплаты.",
+        title=f"Подписка: {cfg['title']}{subject_line}{discount_line}",
+        description=f"VMEDA_examen_bot — подписка «{cfg['title']}»{subject_line}{discount_line}. Доступ откроется сразу после оплаты.",
         payload=f"sub_stars_{tier_id}_{subject or '-'}_{chat_id}_{int(time.time())}",
         provider_token="",
         currency="XTR",
-        prices=[LabeledPrice(label=cfg["title"], amount=cfg["price_stars"])],
+        prices=[LabeledPrice(label=cfg["title"], amount=price_stars)],
     )
+
+def get_discount_offer_text(tier_id: int) -> str:
+    cfg = SUBSCRIPTION_TIERS[tier_id]
+    lines = [
+        f"🔥 <b>Скидка {int(DISCOUNT_RATE * 100)}% — специально для тебя!</b>\n{DIVIDER}\n",
+        f"{cfg['emoji']} <b>{cfg['title']}</b>\n",
+        f"Цена со скидкой: <b>{discount_price(cfg['price_rub'])}₽</b> <s>{cfg['price_rub']}₽</s> / "
+        f"<b>{discount_price(cfg['price_stars'])}⭐</b> <s>{cfg['price_stars']}⭐</s>\n",
+    ]
+    lines += [f"• {b}" for b in cfg["benefits"]]
+    lines.append("\n⏳ Скидка действует ограниченное время — не тяни с оплатой!\n\nВыбери способ оплаты:")
+    return "\n".join(lines)
+
+def get_discount_offer_keyboard(tier_id: int):
+    cfg = SUBSCRIPTION_TIERS[tier_id]
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text=f"⭐ Оплатить {discount_price(cfg['price_stars'])} звёзд",
+        callback_data=f"buy_sub_stars_discount:{tier_id}"
+    )
+    builder.button(
+        text=f"💵 Оплатить {discount_price(cfg['price_rub'])}₽",
+        callback_data=f"buy_sub_rubles_discount:{tier_id}"
+    )
+    builder.adjust(1)
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="subscription_menu"))
+    return builder.as_markup()
 
 def get_subscription_teaser_keyboard():
     builder = InlineKeyboardBuilder()
@@ -4224,18 +4348,61 @@ async def cb_buy_sub_rubles_subj(callback: CallbackQuery):
     )
     await notify_admins_of_payment_request(tier_id, callback.from_user.id, callback.from_user, subject)
 
+@dp.callback_query(F.data.startswith("sub_discount:"))
+async def cb_sub_discount(callback: CallbackQuery):
+    tier_id = int(callback.data.split(":")[1])
+    cfg = SUBSCRIPTION_TIERS.get(tier_id)
+    if not cfg or cfg.get("subject_choice_required"):
+        await callback.answer("Тариф не найден", show_alert=True)
+        return
+    await callback.answer()
+    await safe_edit_text(
+        callback.message,
+        get_discount_offer_text(tier_id),
+        parse_mode="HTML",
+        reply_markup=get_discount_offer_keyboard(tier_id),
+    )
+
+@dp.callback_query(F.data.startswith("buy_sub_stars_discount:"))
+async def cb_buy_sub_stars_discount(callback: CallbackQuery):
+    tier_id = int(callback.data.split(":")[1])
+    if tier_id not in SUBSCRIPTION_TIERS:
+        await callback.answer("Тариф не найден", show_alert=True)
+        return
+    await callback.answer()
+    await send_subscription_stars_invoice(callback.from_user.id, tier_id, discount=True)
+
+@dp.callback_query(F.data.startswith("buy_sub_rubles_discount:"))
+async def cb_buy_sub_rubles_discount(callback: CallbackQuery):
+    tier_id = int(callback.data.split(":")[1])
+    if tier_id not in SUBSCRIPTION_TIERS:
+        await callback.answer("Тариф не найден", show_alert=True)
+        return
+    await callback.answer()
+    price = discount_price(SUBSCRIPTION_TIERS[tier_id]["price_rub"])
+    await safe_edit_text(
+        callback.message,
+        get_sub_rubles_message_text(tier_id, price=price),
+        parse_mode="HTML",
+        reply_markup=get_sub_rubles_keyboard(tier_id, price=price),
+        disable_web_page_preview=True,
+    )
+    await notify_admins_of_payment_request(tier_id, callback.from_user.id, callback.from_user, price=price)
+
 @dp.callback_query(F.data.startswith("admin_confirm_sub:"))
 async def cb_admin_confirm_sub(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
         await callback.answer()
         return
-    _, tier_id_raw, target_id_raw, subject_raw = callback.data.split(":")
+    parts = callback.data.split(":")
+    _, tier_id_raw, target_id_raw, subject_raw = parts[:4]
     tier_id = int(tier_id_raw)
     target_id = int(target_id_raw)
     subject = subject_raw if subject_raw != "-" else None
     if tier_id not in SUBSCRIPTION_TIERS:
         await callback.answer("Тариф не найден", show_alert=True)
         return
+    price = int(parts[4]) if len(parts) > 4 else SUBSCRIPTION_TIERS[tier_id]["price_rub"]
 
     existing = get_subscription(target_id)
     already_confirmed = (
@@ -4253,12 +4420,12 @@ async def cb_admin_confirm_sub(callback: CallbackQuery):
         )
         return
 
-    cfg = SUBSCRIPTION_TIERS[tier_id]
     await callback.answer("Подтверждено ✅", show_alert=True)
-    await grant_subscription_and_notify_buyer(target_id, tier_id, "rubles", cfg["price_rub"], subject)
+    await grant_subscription_and_notify_buyer(target_id, tier_id, "rubles", price, subject)
     await safe_edit_text(
         callback.message,
-        f"✅ Подтверждено — подписка «{cfg['title']}» выдана {format_admin_target_label(None, target_id)}.",
+        f"✅ Подтверждено — подписка «{SUBSCRIPTION_TIERS[tier_id]['title']}» "
+        f"выдана {format_admin_target_label(None, target_id)}.",
         parse_mode="HTML"
     )
 

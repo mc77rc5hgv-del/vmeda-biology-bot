@@ -535,7 +535,7 @@ async def main():
     assert "239" in req_text and "подтверждение оплаты" in req_text
     assert req_kb is not None
     confirm_cb_data = req_kb.inline_keyboard[0][0].callback_data
-    assert confirm_cb_data == f"admin_confirm_sub:6:{confirm_uid}:-"
+    assert confirm_cb_data == f"admin_confirm_sub:6:{confirm_uid}:-:239"
     print("buy_sub_rubles pings every admin with a one-tap confirm request: OK")
 
     admin_sent.clear()
@@ -749,6 +749,115 @@ async def main():
 
     tb._broadcast = orig_broadcast
     print("admin subscription-announcement broadcast lists only active tiers, excludes retired ones: OK")
+
+    # 22. Menu order: tiers 7 (389₽) and 9 (1119₽) lead, then tier 1 (89₽), per menu_number
+    menu_text2 = tb.get_subscription_menu_text(non_admin)
+    check_html(menu_text2)
+    pos7 = menu_text2.index(tb.SUBSCRIPTION_TIERS[7]["title"])
+    pos9 = menu_text2.index(tb.SUBSCRIPTION_TIERS[9]["title"])
+    pos1 = menu_text2.index(tb.SUBSCRIPTION_TIERS[1]["title"])
+    assert pos7 < pos9 < pos1, "tiers 7 and 9 must lead the menu, ahead of tier 1"
+    menu_kb2 = tb.get_subscription_menu_keyboard()
+    order = [d for d in kb_data(menu_kb2) if d.startswith("sub_tier:")]
+    assert order[:3] == ["sub_tier:7", "sub_tier:9", "sub_tier:1"]
+    print("subscription menu leads with tiers 7, 9, then 1: OK")
+
+    # 23. Discount purchase flow (10% off), reachable via sub_discount:{tier}
+    for t in (7, 9):
+        cfg_t = tb.SUBSCRIPTION_TIERS[t]
+        expected_rub = round(cfg_t["price_rub"] * 0.9)
+        assert tb.discount_price(cfg_t["price_rub"]) == expected_rub
+        cb_disc = FakeCB(f"sub_discount:{t}", uid=non_admin)
+        await tb.cb_sub_discount(cb_disc)
+        disc_text, disc_kb = cb_disc.message.edits[-1]
+        check_html(disc_text)
+        assert str(expected_rub) in disc_text and str(cfg_t["price_rub"]) in disc_text
+        disc_data = kb_data(disc_kb)
+        assert f"buy_sub_stars_discount:{t}" in disc_data
+        assert f"buy_sub_rubles_discount:{t}" in disc_data
+    print("sub_discount screen shows correct 10%-off price for tiers 7 and 9: OK")
+
+    # subject-choice tiers aren't supported by the discount flow (guarded, not silently wrong)
+    cb_disc_bad = FakeCB("sub_discount:5", uid=non_admin)
+    await tb.cb_sub_discount(cb_disc_bad)
+    assert not cb_disc_bad.message.edits and cb_disc_bad._answers and cb_disc_bad._answers[0][1] is True
+    print("sub_discount rejects subject-choice tiers: OK")
+
+    # Stars: invoice is sent at the discounted amount
+    disc_stars_uid = random.randint(10_000_000, 99_999_999)
+    invoice_calls = []
+    async def fake_send_invoice_disc(**kwargs):
+        invoice_calls.append(kwargs)
+    orig_send_invoice2 = tb.bot.send_invoice
+    tb.bot.send_invoice = fake_send_invoice_disc
+    cb_disc_stars = FakeCB("buy_sub_stars_discount:9", uid=disc_stars_uid)
+    await tb.cb_buy_sub_stars_discount(cb_disc_stars)
+    assert invoice_calls[-1]["prices"][0].amount == tb.discount_price(tb.SUBSCRIPTION_TIERS[9]["price_stars"])
+    tb.bot.send_invoice = orig_send_invoice2
+    print("buy_sub_stars_discount sends the invoice at 10% off: OK")
+
+    # Rubles: admin sees the discounted price, and confirming grants at that discounted price
+    disc_rub_uid = random.randint(10_000_000, 99_999_999)
+    tb.stats["subscriptions"].pop(str(disc_rub_uid), None)
+    disc_admin_sent = []
+    async def fake_send_message_disc(chat_id, text, **kwargs):
+        disc_admin_sent.append((chat_id, text, kwargs.get("reply_markup")))
+    orig_send_message2 = tb.bot.send_message
+    tb.bot.send_message = fake_send_message_disc
+    cb_disc_rub = FakeCB("buy_sub_rubles_discount:7", uid=disc_rub_uid)
+    await tb.cb_buy_sub_rubles_discount(cb_disc_rub)
+    disc_rub_text, _ = cb_disc_rub.message.edits[-1]
+    check_html(disc_rub_text)
+    expected_disc7 = tb.discount_price(tb.SUBSCRIPTION_TIERS[7]["price_rub"])
+    assert str(expected_disc7) in disc_rub_text
+    admin_disc_reqs = [(c, t, k) for c, t, k in disc_admin_sent if c in tb.ADMIN_IDS]
+    assert admin_disc_reqs, "admin should be notified of the discounted rubles request"
+    disc_req_text = admin_disc_reqs[0][1]
+    assert str(expected_disc7) in disc_req_text and "скидк" in disc_req_text.lower()
+    disc_confirm_data = admin_disc_reqs[0][2].inline_keyboard[0][0].callback_data
+    assert disc_confirm_data == f"admin_confirm_sub:7:{disc_rub_uid}:-:{expected_disc7}"
+    disc_admin_sent.clear()
+    cb_disc_confirm = FakeCB(disc_confirm_data, uid=ADMIN_ID)
+    await tb.cb_admin_confirm_sub(cb_disc_confirm)
+    granted = tb.get_subscription(disc_rub_uid)
+    assert granted["tier"] == 7 and granted["price"] == expected_disc7
+    tb.stats["subscriptions"].pop(str(disc_rub_uid), None)
+    tb.bot.send_message = orig_send_message2
+    print("buy_sub_rubles_discount grants the subscription at the discounted price: OK")
+
+    # 24. Admin broadcast: 10%-off promo to users below the referral threshold (no subscription)
+    promo_uid = random.randint(10_000_000, 99_999_999)
+    tb.stats["total_users"].add(promo_uid)
+    tb.stats["referrals"].pop(str(promo_uid), None)
+    tb.stats["subscriptions"].pop(str(promo_uid), None)
+    tb.stats["manual_access_granted"] = [u for u in tb.stats["manual_access_granted"] if u != promo_uid]
+    tb.stats["temporary_access"].pop(str(promo_uid), None)
+
+    cb_promo_confirm = FakeCB("admin_discount_promo_confirm", uid=ADMIN_ID)
+    await tb.cb_admin_discount_promo_confirm(cb_promo_confirm)
+    promo_preview, promo_preview_kb = cb_promo_confirm.message.edits[-1]
+    check_html(promo_preview)
+    assert "10%" in promo_preview
+    assert kb_data(promo_preview_kb)[0] == "admin_discount_promo_go"
+
+    promo_sent = []
+    async def fake_send_message_promo(chat_id, text, **kwargs):
+        promo_sent.append((chat_id, text, kwargs.get("reply_markup")))
+    orig_send_message3 = tb.bot.send_message
+    tb.bot.send_message = fake_send_message_promo
+    cb_promo_go = FakeCB("admin_discount_promo_go", uid=ADMIN_ID)
+    await tb.cb_admin_discount_promo_go(cb_promo_go)
+    tb.bot.send_message = orig_send_message3
+    promo_delivered = [(c, t, k) for c, t, k in promo_sent if c == promo_uid]
+    assert promo_delivered, "user below the referral threshold should receive the discount broadcast"
+    promo_text, promo_kb = promo_delivered[0][1], promo_delivered[0][2]
+    check_html(promo_text)
+    assert kb_data(promo_kb) == ["sub_discount:7", "sub_discount:9"]
+
+    cb_promo_confirm_bad = FakeCB("admin_discount_promo_confirm", uid=non_admin)
+    await tb.cb_admin_discount_promo_confirm(cb_promo_confirm_bad)
+    assert not cb_promo_confirm_bad.message.edits, "non-admin must be blocked"
+    print("admin discount-promo broadcast reaches users below the referral threshold: OK")
 
     print("ALL SUBSCRIPTION TESTS PASSED")
 
