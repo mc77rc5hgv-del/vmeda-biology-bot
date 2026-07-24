@@ -61,7 +61,7 @@ def fresh_uid():
 # ==================== 1. Prize data / block ====================
 assert len(tb.BATTLE_PRIZE_LABELS) == 5
 assert len(tb.BATTLE_PRIZE_VALUES_RUB) == 5
-assert tb.BATTLE_PRIZE_VALUES_RUB == [5400, 2000, 300, 1599, 1599]
+assert tb.BATTLE_PRIZE_VALUES_RUB == [5400, 2000, 1800, 1599, 1599]
 assert tb.BATTLE_TOP3_MIN_REFERRALS == 30
 
 block = tb.format_battle_prizes_block()

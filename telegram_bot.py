@@ -785,7 +785,7 @@ BATTLE_PRIZE_LABELS = [
     'полный доступ ко всем разделам <a href="https://t.me/VMEDA_examen_bot">VMEDA_examen_bot</a> '
     'на <b>год</b> + ВПН на <b>полгода</b> в '
     f'<a href="{MEDICAL_VPN_URL}">Medical_vpn_bot</a>',
-    'подписка «Месяц — Биология, Физика, Химия» на <b>месяц</b> в '
+    'Химия, Физика, Биология и ранний доступ к Гистологии <b>навсегда</b> в '
     '<a href="https://t.me/VMEDA_examen_bot">VMEDA_examen_bot</a> + ВПН на <b>месяц</b> в '
     f'<a href="{MEDICAL_VPN_URL}">Medical_vpn_bot</a>',
     'Химия, Физика, Биология и ранний доступ к Гистологии <b>навсегда</b> в '
@@ -798,7 +798,7 @@ BATTLE_PRIZE_LABELS = [
 BATTLE_CHANNEL_POSTING_NOTICE = "📢 <b>ПОСТИНГ В TELEGRAM-КАНАЛЫ РАЗРЕШЁН 🤝</b>"
 
 # Денежная оценка приза за место (задана вручную, не выводится из цен тарифов подписки).
-BATTLE_PRIZE_VALUES_RUB = [5400, 2000, 300, 1599, 1599]
+BATTLE_PRIZE_VALUES_RUB = [5400, 2000, 1800, 1599, 1599]
 
 def format_rub(amount: int) -> str:
     return f"{amount:,}".replace(",", " ")
