@@ -613,15 +613,20 @@ async def main():
     check_html(default_text)
     assert "Не хочешь ждать друзей" in default_text
     assert str(tb.cheapest_gated3_tier()["price_rub"]) in default_text
+    assert "Medical_vpn_bot" in default_text
     print("default referral text includes subscription teaser with the cheapest 3-subject tier: OK")
 
     back_kb = tb.get_referral_back_keyboard()
     assert any("Открыть доступ без рефералов" in t for t in kb_texts(back_kb))
+    assert any(t == "🚀 Запустить Medical_vpn_bot" for t in kb_texts(back_kb))
+    vpn_btn = next(b for row in back_kb.inline_keyboard for b in row if b.text == "🚀 Запустить Medical_vpn_bot")
+    assert vpn_btn.url == tb.MEDICAL_VPN_URL
     print("get_referral_back_keyboard has subscription button: OK")
 
     teaser_kb = tb.get_subscription_teaser_keyboard()
     assert kb_texts(teaser_kb)[0] == "💎 Открыть доступ без рефералов"
     assert teaser_kb.inline_keyboard[0][0].callback_data == "subscription_menu"
+    assert any(t == "🚀 Запустить Medical_vpn_bot" for t in kb_texts(teaser_kb))
     print("get_subscription_teaser_keyboard: OK")
 
     # 22. Main menu: subscription button always visible; anatomy/histology labels reflect

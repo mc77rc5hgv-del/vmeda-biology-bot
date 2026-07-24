@@ -733,7 +733,8 @@ def get_referral_status_text(user_id: int) -> str:
         f"{SUBSCRIPTION_TIERS[7]['price_rub']}₽ или «{SUBSCRIPTION_TIERS[9]['short']}» за "
         f"{SUBSCRIPTION_TIERS[9]['price_rub']}₽ ({SUBSCRIPTION_TIERS[9]['badge']}).\n\n"
         f"Также доступна подписка от {cheapest_gated3_tier()['price_rub']}₽. "
-        "Жми «💎 Открыть доступ без рефералов» ниже."
+        "Жми «💎 Открыть доступ без рефералов» ниже.\n\n"
+        "🌐 А ещё рекомендуем пользоваться @Medical_vpn_bot — жми «🚀 Запустить Medical_vpn_bot» ниже."
     )
 
 RANK_MEDALS = ["🥇", "🥈", "🥉"]
@@ -779,7 +780,7 @@ BATTLE_PLACE_ICONS = ["🥇", "🥈", "🥉", "🏅", "🎖"]
 # 4-5 место — без минимума, отдаются следующим по рейтингу.
 BATTLE_TOP3_MIN_REFERRALS = 30
 
-MEDICAL_VPN_URL = "https://t.me/Medical_vpn_bot"
+MEDICAL_VPN_URL = "https://t.me/Medical_vpn_bot?start=vmeda"
 
 BATTLE_PRIZE_LABELS = [
     'подписка «6 лет — абсолютно всё» (<b>6 лет</b>, все предметы + Анатомия/Гистология) в '
@@ -2029,6 +2030,7 @@ def get_main_menu(user_id: int = None):
 def get_referral_back_keyboard():
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text="💎 Открыть доступ без рефералов", callback_data="subscription_menu"))
+    builder.row(InlineKeyboardButton(text="🚀 Запустить Medical_vpn_bot", url=MEDICAL_VPN_URL))
     builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
     return builder.as_markup()
 
@@ -4283,6 +4285,7 @@ def get_discount_offer_keyboard(tier_id: int):
 def get_subscription_teaser_keyboard():
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text="💎 Открыть доступ без рефералов", callback_data="subscription_menu"))
+    builder.row(InlineKeyboardButton(text="🚀 Запустить Medical_vpn_bot", url=MEDICAL_VPN_URL))
     return builder.as_markup()
 
 @dp.callback_query(F.data == "subscription_menu")
