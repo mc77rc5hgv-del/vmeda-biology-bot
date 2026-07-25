@@ -1973,7 +1973,8 @@
             "ru": "малый рог",
             "bone": "hyoid_bone"
           }
-        ]
+        ],
+        "video": "https://www.youtube.com/@Kafarovanatom/search?query=череп+анатомия+краниология"
       },
       "trunk_bones": {
         "title": "Кости туловища",
@@ -2692,7 +2693,8 @@
             "ru": "колеблющиеся рёбра (XI–XII)",
             "bone": "ribs"
           }
-        ]
+        ],
+        "video": "https://www.youtube.com/@Kafarovanatom/search?query=кости+туловища+позвоночник+грудная+клетка"
       },
       "upper_limb_bones": {
         "title": "Кости верхней конечности",
@@ -3274,7 +3276,8 @@
             "ru": "дистальная фаланга",
             "bone": "hand_bones"
           }
-        ]
+        ],
+        "video": "https://www.youtube.com/@Kafarovanatom/search?query=кости+верхней+конечности"
       },
       "lower_limb_bones": {
         "title": "Кости нижней конечности",
@@ -3788,7 +3791,8 @@
             "ru": "дистальная фаланга (стопы)",
             "bone": "foot_bones"
           }
-        ]
+        ],
+        "video": "https://www.youtube.com/@Kafarovanatom/search?query=кости+нижней+конечности"
       }
     },
     "menu_title": "🦴 Остеология (кости)",
@@ -3970,10 +3974,7 @@
           }
         ],
         "picture_quiz": [],
-        "video": [
-          "https://www.youtube.com/watch?v=Yul4qO1Akf8",
-          "https://www.youtube.com/watch?v=v2GyiREUEvU"
-        ]
+        "video": "https://www.youtube.com/watch?v=Yul4qO1Akf8"
       },
       "trunk_joints": {
         "title": "Соединения костей туловища",
@@ -4134,7 +4135,8 @@
             "caption": "Рёберно-позвоночные суставы (articulationes costovertebrales)",
             "credit": "Ф. Неттер, Атлас анатомии человека"
           }
-        ]
+        ],
+        "video": "https://www.youtube.com/@Kafarovanatom/search?query=соединения+костей+туловища+суставы"
       },
       "skull_joints": {
         "title": "Соединения костей черепа",
@@ -4300,7 +4302,8 @@
             "caption": "Височно-нижнечелюстной сустав (articulatio temporomandibularis)",
             "credit": "Ф. Неттер, Атлас анатомии человека"
           }
-        ]
+        ],
+        "video": "https://www.youtube.com/@Kafarovanatom/search?query=соединения+костей+черепа+швы+суставы"
       },
       "upper_limb_joints": {
         "title": "Соединения костей верхней конечности",
@@ -4506,7 +4509,8 @@
             "caption": "Пястные и межфаланговые связки",
             "credit": "Ф. Неттер, Атлас анатомии человека"
           }
-        ]
+        ],
+        "video": "https://www.youtube.com/@Kafarovanatom/search?query=соединения+костей+верхней+конечности+суставы"
       },
       "lower_limb_joints": {
         "title": "Соединения костей нижней конечности",
@@ -4697,7 +4701,8 @@
             "caption": "Коленный сустав: вид сзади и сагиттальный срез",
             "credit": "Ф. Неттер, Атлас анатомии человека"
           }
-        ]
+        ],
+        "video": "https://www.youtube.com/@Kafarovanatom/search?query=соединения+костей+нижней+конечности+суставы"
       }
     },
     "video": "https://www.youtube.com/playlist?list=PLLSkuEB_noXeO7wwECSXhzMrHQO04cdek"
@@ -4858,7 +4863,8 @@
             "bone": null
           }
         ],
-        "picture_quiz": []
+        "picture_quiz": [],
+        "video": "https://www.youtube.com/@Kafarovanatom/search?query=общая+миология+мышцы"
       },
       "back_muscles": {
         "title": "Мышцы спины",
@@ -5363,7 +5369,8 @@
             "caption": "Паховый канал и семенной канатик",
             "credit": "Ф. Неттер, Атлас анатомии человека"
           }
-        ]
+        ],
+        "video": "https://www.youtube.com/watch?v=yyD4TO58rAQ"
       },
       "diaphragm": {
         "title": "Диафрагма",
@@ -5504,7 +5511,8 @@
             "caption": "Диафрагмальный нерв (nervus phrenicus)",
             "credit": "Ф. Неттер, Атлас анатомии человека"
           }
-        ]
+        ],
+        "video": "https://www.youtube.com/@Kafarovanatom/search?query=диафрагма+анатомия"
       },
       "neck_muscles": {
         "title": "Мышцы шеи",
@@ -5818,7 +5826,7 @@
             "credit": "Ф. Неттер, Атлас анатомии человека"
           }
         ],
-        "video": "https://www.youtube.com/watch?v=La7dOlKlPzQ"
+        "video": "https://www.youtube.com/@Kafarovanatom/search?query=мышцы+головы+анатомия"
       },
       "upper_limb_muscles": {
         "title": "Мышцы верхней конечности",
@@ -6381,7 +6389,8 @@
             "caption": "Межкостные мышцы стопы",
             "credit": "Ф. Неттер, Атлас анатомии человека"
           }
-        ]
+        ],
+        "video": "https://www.youtube.com/watch?v=fS0UvK4fILw"
       }
     },
     "video": "https://www.youtube.com/playlist?list=PLLSkuEB_noXfZB1gqJmAY44Q7hJZ19CFj"
@@ -6548,7 +6557,8 @@
             "caption": "Чувствительная (афферентная) иннервация полости рта",
             "credit": "Ф. Неттер, Атлас анатомии человека"
           }
-        ]
+        ],
+        "video": "https://www.youtube.com/@Kafarovanatom/search?query=полость+рта+зубы+язык+анатомия"
       },
       "pharynx_esophagus": {
         "title": "Глотка и пищевод",
@@ -6668,7 +6678,8 @@
             "caption": "Мышцы глотки: вид сбоку",
             "credit": "Ф. Неттер, Атлас анатомии человека"
           }
-        ]
+        ],
+        "video": "https://www.youtube.com/@Kafarovanatom/search?query=глотка+пищевод+анатомия"
       },
       "stomach": {
         "title": "Желудок",
@@ -6788,7 +6799,8 @@
             "caption": "Живот: переход пищевода в желудок (горизонтальный срез)",
             "credit": "Ф. Неттер, Атлас анатомии человека"
           }
-        ]
+        ],
+        "video": "https://www.youtube.com/@Kafarovanatom/search?query=желудок+анатомия"
       },
       "intestine": {
         "title": "Тонкая и толстая кишка",
@@ -6978,7 +6990,8 @@
             "caption": "Живот: илеоцекальный клапан (горизонтальный срез)",
             "credit": "Ф. Неттер, Атлас анатомии человека"
           }
-        ]
+        ],
+        "video": "https://www.youtube.com/@Kafarovanatom/search?query=тонкая+кишка+толстая+кишка+анатомия"
       },
       "liver_pancreas": {
         "title": "Печень, желчный пузырь, поджелудочная железа",
@@ -7143,7 +7156,8 @@
             "caption": "Живот: чревный ствол и воротная вена (горизонтальный срез)",
             "credit": "Ф. Неттер, Атлас анатомии человека"
           }
-        ]
+        ],
+        "video": "https://www.youtube.com/@Kafarovanatom/search?query=печень+желчный+пузырь+поджелудочная+анатомия"
       },
       "peritoneum": {
         "title": "Брюшина: ход и топография",
@@ -7248,7 +7262,8 @@
             "caption": "Сальниковая сумка, поперечный срез",
             "credit": "Ф. Неттер, Атлас анатомии человека"
           }
-        ]
+        ],
+        "video": "https://www.youtube.com/@Kafarovanatom/search?query=брюшина+анатомия+топография"
       },
       "respiratory_upper": {
         "title": "Нос, гортань, трахея",
@@ -7423,7 +7438,8 @@
             "caption": "Иннервация трахеи и бронхов (схема)",
             "credit": "Ф. Неттер, Атлас анатомии человека"
           }
-        ]
+        ],
+        "video": "https://www.youtube.com/@Kafarovanatom/search?query=нос+гортань+трахея+анатомия"
       },
       "lungs_pleura": {
         "title": "Лёгкие, плевра, средостение",
@@ -7598,7 +7614,8 @@
             "caption": "Средостение: горизонтальный срез (вид сверху)",
             "credit": "Ф. Неттер, Атлас анатомии человека"
           }
-        ]
+        ],
+        "video": "https://www.youtube.com/@Kafarovanatom/search?query=лёгкие+плевра+средостение+анатомия"
       },
       "urogenital": {
         "title": "Мочевыделительная и половая системы",
@@ -7928,7 +7945,8 @@
             "caption": "Мужской таз: срез на уровне копчика",
             "credit": "Ф. Неттер, Атлас анатомии человека"
           }
-        ]
+        ],
+        "video": "https://www.youtube.com/@Kafarovanatom/search?query=мочевыделительная+система+половая+система+анатомия"
       },
       "endocrine_glands": {
         "title": "Железы внутренней секреции",
@@ -8058,7 +8076,8 @@
             "caption": "Паращитовидные железы (glandulae parathyroideae)",
             "credit": "Ф. Неттер, Атлас анатомии человека"
           }
-        ]
+        ],
+        "video": "https://www.youtube.com/@Kafarovanatom/search?query=железы+внутренней+секреции+анатомия"
       },
       "mammary_gland": {
         "title": "Молочная железа",
@@ -8168,7 +8187,8 @@
             "caption": "Лимфатические сосуды и узлы молочной железы",
             "credit": "Ф. Неттер, Атлас анатомии человека"
           }
-        ]
+        ],
+        "video": "https://www.youtube.com/@Kafarovanatom/search?query=молочная+железа+анатомия"
       },
       "immune_system": {
         "title": "Органы иммунной системы и кроветворения",
@@ -8283,7 +8303,8 @@
             "caption": "Селезёнка (splen [lien])",
             "credit": "Ф. Неттер, Атлас анатомии человека"
           }
-        ]
+        ],
+        "video": "https://www.youtube.com/@Kafarovanatom/search?query=иммунная+система+кроветворение+анатомия"
       }
     },
     "video": "https://www.youtube.com/playlist?list=PLLSkuEB_noXd78RQLE-va9GQOP-T9c53h"
@@ -8380,7 +8401,8 @@
             "caption": "Пренатальная и постнатальная циркуляция крови",
             "credit": "Ф. Неттер, Атлас анатомии человека"
           }
-        ]
+        ],
+        "video": "https://www.youtube.com/@Kafarovanatom/search?query=круги+кровообращения+анатомия"
       },
       "heart": {
         "title": "Сердце",
@@ -8586,10 +8608,7 @@
             "credit": "Ф. Неттер, Атлас анатомии человека"
           }
         ],
-        "video": [
-          "https://www.youtube.com/watch?v=upbafDZ3O34",
-          "https://www.youtube.com/watch?v=DWah78tihxw"
-        ]
+        "video": "https://www.youtube.com/watch?v=upbafDZ3O34"
       },
       "arteries": {
         "title": "Артериальная система",
@@ -8859,7 +8878,8 @@
             "caption": "Артерии головки и шейки бедренной кости",
             "credit": "Ф. Неттер, Атлас анатомии человека"
           }
-        ]
+        ],
+        "video": "https://www.youtube.com/@Kafarovanatom/search?query=артериальная+система+артерии+анатомия"
       },
       "veins": {
         "title": "Венозная система",
@@ -9044,7 +9064,8 @@
             "caption": "Кожные нервы и подкожные вены предплечья и кисти",
             "credit": "Ф. Неттер, Атлас анатомии человека"
           }
-        ]
+        ],
+        "video": "https://www.youtube.com/@Kafarovanatom/search?query=венозная+система+вены+анатомия"
       },
       "lymphatic": {
         "title": "Лимфатическая система",
@@ -9214,7 +9235,8 @@
             "caption": "Лимфатические сосуды и узлы нижней конечности",
             "credit": "Ф. Неттер, Атлас анатомии человека"
           }
-        ]
+        ],
+        "video": "https://www.youtube.com/@Kafarovanatom/search?query=лимфатическая+система+анатомия"
       }
     },
     "video": "https://www.youtube.com/playlist?list=PLLSkuEB_noXdSXXGVgv3qQhbdgoYjMrQt"
@@ -9477,7 +9499,8 @@
             "caption": "Ядра черепных нервов в стволе мозга: схема (продолжение)",
             "credit": "Ф. Неттер, Атлас анатомии человека"
           }
-        ]
+        ],
+        "video": "https://www.youtube.com/@Kafarovanatom/search?query=ствол+головного+мозга+анатомия"
       },
       "cerebellum_diencephalon": {
         "title": "Мозжечок и промежуточный мозг",
@@ -9612,7 +9635,8 @@
             "caption": "Артерии и вены гипоталамуса и гипофиза",
             "credit": "Ф. Неттер, Атлас анатомии человека"
           }
-        ]
+        ],
+        "video": "https://www.youtube.com/@Kafarovanatom/search?query=мозжечок+промежуточный+мозг+анатомия"
       },
       "telencephalon": {
         "title": "Конечный мозг",
@@ -9762,7 +9786,8 @@
             "caption": "Гиппокамп и свод (hippocampus et fornix)",
             "credit": "Ф. Неттер, Атлас анатомии человека"
           }
-        ]
+        ],
+        "video": "https://www.youtube.com/@Kafarovanatom/search?query=конечный+мозг+анатомия"
       },
       "meninges_csf": {
         "title": "Оболочки мозга. Ликворная система",
@@ -9897,7 +9922,8 @@
             "caption": "Циркуляция спинномозговой жидкости",
             "credit": "Ф. Неттер, Атлас анатомии человека"
           }
-        ]
+        ],
+        "video": "https://www.youtube.com/@Kafarovanatom/search?query=оболочки+мозга+ликвор+анатомия"
       }
     },
     "video": "https://www.youtube.com/shorts/vdDKGm1wBxE"
@@ -10335,7 +10361,8 @@
             "caption": "Подъязычный нерв (n. hypoglossus)",
             "credit": "Ф. Неттер, Атлас анатомии человека"
           }
-        ]
+        ],
+        "video": "https://www.youtube.com/@Kafarovanatom/search?query=черепные+нервы+анатомия"
       },
       "ans": {
         "title": "Вегетативная нервная система",
@@ -10600,7 +10627,8 @@
             "caption": "Иннервация мочевого пузыря и мочеточников: схема",
             "credit": "Ф. Неттер, Атлас анатомии человека"
           }
-        ]
+        ],
+        "video": "https://www.youtube.com/watch?v=bunmNgGZ02E"
       }
     },
     "video": "https://www.youtube.com/shorts/2Pc6W-i5F9M"
@@ -10772,7 +10800,8 @@
             "caption": "Артерии и вены глазного яблока",
             "credit": "Ф. Неттер, Атлас анатомии человека"
           }
-        ]
+        ],
+        "video": "https://www.youtube.com/@Kafarovanatom/search?query=орган+зрения+глаз+анатомия"
       },
       "ear": {
         "title": "Орган слуха и равновесия",
@@ -10917,7 +10946,8 @@
             "caption": "Слуховая труба (tuba auditiva)",
             "credit": "Ф. Неттер, Атлас анатомии человека"
           }
-        ]
+        ],
+        "video": "https://www.youtube.com/@Kafarovanatom/search?query=орган+слуха+ухо+анатомия"
       },
       "skin": {
         "title": "Кожа и её производные",
@@ -11022,7 +11052,8 @@
             "caption": "Срез кожи: микроскопическая картина",
             "credit": "Ф. Неттер, Атлас анатомии человека"
           }
-        ]
+        ],
+        "video": "https://www.youtube.com/@Kafarovanatom/search?query=кожа+анатомия+производные"
       },
       "taste_smell": {
         "title": "Органы вкуса и обоняния",
@@ -11127,7 +11158,8 @@
             "caption": "Вкусовая чувствительность",
             "credit": "Ф. Неттер, Атлас анатомии человека"
           }
-        ]
+        ],
+        "video": "https://www.youtube.com/@Kafarovanatom/search?query=орган+вкуса+обоняния+анатомия"
       }
     }
   }

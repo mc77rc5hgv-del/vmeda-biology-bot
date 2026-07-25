@@ -5340,6 +5340,8 @@ def get_anatomy_section_keyboard(section_key: str):
     builder = InlineKeyboardBuilder()
     for topic_key, topic in section.get("topics", {}).items():
         builder.button(text=topic.get("menu_title", topic["title"]), callback_data=f"anatomy_topic:{topic_key}")
+    if section.get("video"):
+        builder.button(text="🎥 Видео", callback_data=f"anatomy_section_video:{section_key}")
     builder.adjust(1)
     builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="anatomy_menu"))
     return builder.as_markup()
@@ -5358,6 +5360,8 @@ def get_anatomy_topic_keyboard(topic_key: str):
     builder.button(text="🖼 Найди на картинке", callback_data=f"anatomy_picture:{topic_key}")
     if topic and topic.get("atlas_images"):
         builder.button(text="🖼 Атлас (Неттер/Гайворонский)", callback_data=f"anatomy_atlas:{topic_key}:0")
+    if topic and topic.get("video"):
+        builder.button(text="🎥 Видео", callback_data=f"anatomy_topic_video:{topic_key}")
     builder.adjust(1)
     builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data=f"anatomy_section:{get_topic_section_key(topic_key)}"))
     return builder.as_markup()
@@ -5973,16 +5977,14 @@ async def cb_anatomy_menu(callback: CallbackQuery):
         reply_markup=get_anatomy_menu_keyboard()
     )
 
-def get_video_block(entry: dict) -> str:
-    """Строит блок со ссылкой(ами) на видео из необязательного поля entry["video"] (строка
-    или список строк) — ссылка выводится обычным текстом, не оборачивается в <a href> и не
-    гасит превью (disable_web_page_preview не выставляется вызывающим кодом), поэтому Telegram
-    сам строит превью со встроенным плеером YouTube прямо в чате."""
+def get_anatomy_video_text(entry: dict, title: str) -> str:
+    """Экран «🎥 Видео»: ссылка(и) из entry["video"] (строка или список строк) выводится
+    обычным текстом, не оборачивается в <a href> — Telegram сам строит превью со встроенным
+    плеером YouTube прямо в чате (см. cb_anatomy_section_video/cb_anatomy_topic_video — там же
+    не гасится disable_web_page_preview, иначе превью не появится)."""
     video = entry.get("video")
-    if not video:
-        return ""
     urls = video if isinstance(video, list) else [video]
-    return "\n\n🎥 Видео по теме:\n" + "\n".join(urls)
+    return f"🎥 <b>Видео: {title}</b>\n{DIVIDER}\n\n" + "\n".join(urls)
 
 @dp.callback_query(F.data.startswith("anatomy_section:"))
 async def cb_anatomy_section(callback: CallbackQuery):
@@ -5997,9 +5999,29 @@ async def cb_anatomy_section(callback: CallbackQuery):
     await callback.answer()
     await safe_edit_text(
         callback.message,
-        f"🦴 <b>{section['title']}</b>\n{DIVIDER}{get_video_block(section)}\n\nВыбери тему:",
+        f"🦴 <b>{section['title']}</b>\n{DIVIDER}\n\nВыбери тему:",
         parse_mode="HTML",
         reply_markup=get_anatomy_section_keyboard(section_key)
+    )
+
+@dp.callback_query(F.data.startswith("anatomy_section_video:"))
+async def cb_anatomy_section_video(callback: CallbackQuery):
+    if not anatomy_access_ok(callback.from_user.id):
+        await callback.answer(get_anatomy_dev_alert_text(), show_alert=True)
+        return
+    section_key = callback.data.split(":")[1]
+    section = ANATOMY.get(section_key)
+    if not section or not section.get("video"):
+        await callback.answer("Видео не найдено", show_alert=True)
+        return
+    await callback.answer()
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data=f"anatomy_section:{section_key}"))
+    await safe_edit_text(
+        callback.message,
+        get_anatomy_video_text(section, section["title"]),
+        parse_mode="HTML",
+        reply_markup=builder.as_markup()
     )
 
 @dp.callback_query(F.data.startswith("anatomy_topic:"))
@@ -6019,14 +6041,33 @@ async def cb_anatomy_topic(callback: CallbackQuery):
         f"📖 Материал: {len(topic['material'])} тем\n"
         f"🎴 Флэш-карточек: {len(topic['flashcards'])}\n"
         f"🔗 Пар для сопоставления: {sum(len(s['pairs']) for s in topic['matching_sets'])}\n"
-        f"🧠 Мнемоник: {len(topic['mnemonics'])}"
-        f"{get_video_block(topic)}\n\n"
+        f"🧠 Мнемоник: {len(topic['mnemonics'])}\n\n"
         "Выбери формат подготовки:"
     )
+    await safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=get_anatomy_topic_keyboard(topic_key))
+
+@dp.callback_query(F.data.startswith("anatomy_topic_video:"))
+async def cb_anatomy_topic_video(callback: CallbackQuery):
+    if not anatomy_access_ok(callback.from_user.id):
+        await callback.answer(get_anatomy_dev_alert_text(), show_alert=True)
+        return
+    topic_key = callback.data.split(":")[1]
+    topic = get_anatomy_topic_data(topic_key)
+    if not topic or not topic.get("video"):
+        await callback.answer("Видео не найдено", show_alert=True)
+        return
+    await callback.answer()
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data=f"anatomy_topic:{topic_key}"))
     # видео-ссылка намеренно не оборачивается в <a href>/URL-кнопку и disable_web_page_preview
     # не выставляется — так Telegram сам строит превью со встроенным плеером YouTube прямо в
     # чате, без перехода по ссылке и без скачивания видео ботом.
-    await safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=get_anatomy_topic_keyboard(topic_key))
+    await safe_edit_text(
+        callback.message,
+        get_anatomy_video_text(topic, topic["title"]),
+        parse_mode="HTML",
+        reply_markup=builder.as_markup()
+    )
 
 @dp.callback_query(F.data.startswith("anatomy_bones:"))
 async def cb_anatomy_bones(callback: CallbackQuery):
