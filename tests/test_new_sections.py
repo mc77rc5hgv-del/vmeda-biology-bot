@@ -74,13 +74,13 @@ async def main():
             print(f"  topic {topic_key}: {n_pages} pages OK")
 
     # 3. skull's per-bone subdivisions should still work (regression check)
-    cb = FakeCB("anatomy_bones:skull")
+    cb = FakeCB("anatomy_bones:facial_skull_bones")
     await tb.cb_anatomy_bones(cb)
     assert cb.message.edits, "skull bones list broken"
     print("skull bones list still OK (regression check)")
 
     # 4. non-admin should be blocked everywhere (ANATOMY_PUBLIC=False)
-    cb = FakeCB("anatomy_section:myology", uid=123456789)
+    cb = FakeCB("anatomy_section:module3_myology", uid=123456789)
     await tb.cb_anatomy_section(cb)
     assert not cb.message.edits and cb._answers[0][1] is True
     print("access-control OK")

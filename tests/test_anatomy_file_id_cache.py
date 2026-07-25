@@ -59,7 +59,7 @@ async def main():
     tb.ANATOMY_FILE_ID_CACHE.clear()
 
     # ---- multi-photo album page: every image's file_id gets cached after first send ----
-    topic_key, bone_id = "skull", "temporal"
+    topic_key, bone_id = "paired_skull_bones", "temporal"
     images = tb.get_bone_images(topic_key, bone_id, kind="slides")
     assert len(images) >= 2, "need a multi-image page to exercise the media-group branch"
     keys = [tb._anatomy_image_key(img) for img in images[:tb.ANATOMY_ALBUM_PAGE_SIZE]]
@@ -84,7 +84,7 @@ async def main():
 
     # ---- single-photo page (answer_photo branch) also gets cached and reused ----
     tb.ANATOMY_FILE_ID_CACHE.clear()
-    single_topic, single_bone = "skull", "mandible"
+    single_topic, single_bone = "facial_skull_bones", "mandible"
     single_images = tb.get_bone_images(single_topic, single_bone, kind="atlas")
     assert len(single_images) == 1, "mandible should have exactly one atlas image (single-photo branch)"
     key = tb._anatomy_image_key(single_images[0])

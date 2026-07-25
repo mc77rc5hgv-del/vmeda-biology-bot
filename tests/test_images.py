@@ -40,7 +40,7 @@ class FakeCB:
         self._answers.append((text, show_alert))
 
 async def main():
-    topic_key = "skull"
+    topic_key = "unpaired_skull_bones"
     topic = tb.get_anatomy_topic_data(topic_key)
     bones = topic["bones_list"]
 

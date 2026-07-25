@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 from _bootstrap import tb
 
-topic_key = "skull"
+topic_key = "unpaired_skull_bones"
 topic = tb.get_anatomy_topic_data(topic_key)
 bones = topic["bones_list"]
 print("bones:", len(bones))

@@ -55,23 +55,19 @@ def kb_texts(markup):
     return [b.text for row in markup.inline_keyboard for b in row]
 
 async def main():
-    topic_key, topic = next(iter(next(iter(tb.ANATOMY.values()))["topics"].items()))
+    # topic with no "video" field: cranium_intro carries no video since it holds the
+    # general/overview skull material split off from the old skull topic's single video.
+    topic_key, topic = "cranium_intro", tb.ANATOMY["module1_osteology"]["topics"]["cranium_intro"]
 
     # 1. topic with no "video" field: no button on the topic screen, direct access alerts.
-    # Every topic in anatomy.json is now populated with a video, so simulate absence by
-    # popping it temporarily rather than relying on finding a naturally video-less topic.
-    assert "video" in topic, "every real topic is expected to have a video field by now"
-    saved_video = topic.pop("video")
-    try:
-        kb = tb.get_anatomy_topic_keyboard(topic_key)
-        assert "🎥 Видео" not in kb_texts(kb)
-        cb_direct = FakeCB(f"anatomy_topic_video:{topic_key}")
-        await tb.cb_anatomy_topic_video(cb_direct)
-        assert not cb_direct.message.edits
-        assert cb_direct._answers and cb_direct._answers[-1][1] is True
-        print("topic without a video field: no button, direct access alerts: OK")
-    finally:
-        topic["video"] = saved_video
+    assert "video" not in topic
+    kb = tb.get_anatomy_topic_keyboard(topic_key)
+    assert "🎥 Видео" not in kb_texts(kb)
+    cb_direct = FakeCB(f"anatomy_topic_video:{topic_key}")
+    await tb.cb_anatomy_topic_video(cb_direct)
+    assert not cb_direct.message.edits
+    assert cb_direct._answers and cb_direct._answers[-1][1] is True
+    print("topic without a video field: no button, direct access alerts: OK")
 
     # 2. topic with a "video" field: button appears, and its screen shows the URL as plain
     # text (not wrapped in <a href>), with disable_web_page_preview not set to True so the
@@ -95,7 +91,7 @@ async def main():
         assert kb_data(back_kb) == [f"anatomy_topic:{topic_key}"]
         print("topic with a video field: button leads to a plain-URL screen, preview not disabled: OK")
     finally:
-        topic["video"] = saved_video
+        del topic["video"]
 
     # 3. list-valued "video" renders every URL on its own line (used e.g. by general_joints)
     fake_urls = [
@@ -112,10 +108,12 @@ async def main():
         assert kwargs3.get("disable_web_page_preview") is not True
         print("topic with a list-valued video field: every URL shown: OK")
     finally:
-        topic["video"] = saved_video
+        del topic["video"]
 
-    # 4. section-level video button (anatomy_section_video:) works the same way
-    section_key, section = "sense_organs", tb.ANATOMY["sense_organs"]
+    # 4. section-level video button (anatomy_section_video:) works the same way -- no
+    # section in the current (Kafarov-module) structure carries a video field, since
+    # the old per-section videos didn't map cleanly onto the new module boundaries.
+    section_key, section = "module1_osteology", tb.ANATOMY["module1_osteology"]
     assert "video" not in section
     kb4 = tb.get_anatomy_section_keyboard(section_key)
     assert "🎥 Видео" not in kb_texts(kb4)
@@ -142,21 +140,15 @@ async def main():
 
     # 5. real content: every section/topic video URL currently in anatomy.json is a real
     # youtube.com link, the "🎥 Видео" button is present, and its screen renders valid,
-    # in-budget HTML for every populated entry.
+    # in-budget HTML for every populated entry. Since the Kafarov-module restructuring,
+    # not every topic carries a video (many new fine-grained subtopics are still empty
+    # skeletons), so this walks only the topics that do, rather than asserting on all.
     checked = 0
     for skey, sect in tb.ANATOMY.items():
-        if sect.get("video"):
-            urls = sect["video"] if isinstance(sect["video"], list) else [sect["video"]]
-            for u in urls:
-                assert u.startswith("https://www.youtube.com/"), f"{skey}: bad video url {u}"
-            assert "🎥 Видео" in kb_texts(tb.get_anatomy_section_keyboard(skey))
-            cb = FakeCB(f"anatomy_section_video:{skey}")
-            await tb.cb_anatomy_section_video(cb)
-            text, _ = cb.message.edits[-1]
-            check_html(text)
-            checked += 1
+        assert not sect.get("video"), f"{skey}: unexpected section-level video in new structure"
         for tkey, top in sect.get("topics", {}).items():
-            assert top.get("video"), f"{skey}/{tkey}: expected every topic to have a video field"
+            if not top.get("video"):
+                continue
             urls = top["video"] if isinstance(top["video"], list) else [top["video"]]
             for u in urls:
                 assert u.startswith("https://www.youtube.com/"), f"{tkey}: bad video url {u}"
@@ -166,15 +158,15 @@ async def main():
             text, _ = cb.message.edits[-1]
             check_html(text)
             checked += 1
-    assert checked == 47 + 7, f"expected 47 topics + 7 sections with video, got {checked}"
-    print(f"all {checked} real video-bearing screens render OK (HTML-balanced, under 4096 chars): OK")
+    assert checked == 44, f"expected 44 topics with a migrated video field, got {checked}"
+    print(f"all {checked} real video-bearing topic screens render OK (HTML-balanced, under 4096 chars): OK")
 
     # 6. access control: non-admin without anatomy access is blocked on both new callbacks
     non_admin = 123456789
     cb_na1 = FakeCB(f"anatomy_topic_video:{topic_key}", uid=non_admin)
     await tb.cb_anatomy_topic_video(cb_na1)
     assert not cb_na1.message.edits
-    cb_na2 = FakeCB("anatomy_section_video:osteology", uid=non_admin)
+    cb_na2 = FakeCB("anatomy_section_video:module1_osteology", uid=non_admin)
     await tb.cb_anatomy_section_video(cb_na2)
     assert not cb_na2.message.edits
     print("non-admin without anatomy access blocked on both video callbacks: OK")

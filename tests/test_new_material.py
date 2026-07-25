@@ -31,7 +31,11 @@ class FakeCB:
 
 async def main():
     errors = []
-    for topic_key in ("trunk_bones", "upper_limb_bones", "skull"):
+    for topic_key in (
+        "axial_skeleton", "upper_limb_skeleton", "lower_limb_skeleton",
+        "cranium_intro", "paired_skull_bones", "unpaired_skull_bones",
+        "facial_skull_bones", "skull_topography",
+    ):
         topic = tb.get_anatomy_topic_data(topic_key)
         for bone in topic["bones_list"]:
             bid = bone["id"]

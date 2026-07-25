@@ -1,14 +1,17 @@
 # -*- coding: utf-8 -*-
 """Generic coverage test for the per-bone Latin terminology trainer — walks every
-bone-hub topic (skull, trunk_bones, upper_limb_bones, lower_limb_bones) and every
-bone in its bones_list, not a hand-picked list, so newly added terms are automatically
-exercised here."""
+bone-hub topic that carries latin_terms (the skull-derived topics plus the axial/
+upper-limb/lower-limb skeleton topics) and every bone in its bones_list, not a
+hand-picked list, so newly added terms are automatically exercised here."""
 import asyncio
 from _bootstrap import tb
 
 ADMIN_ID = next(iter(tb.ADMIN_IDS))
 
-BONE_HUB_TOPICS = ("skull", "trunk_bones", "upper_limb_bones", "lower_limb_bones")
+BONE_HUB_TOPICS = (
+    "paired_skull_bones", "unpaired_skull_bones", "facial_skull_bones",
+    "axial_skeleton", "upper_limb_skeleton", "lower_limb_skeleton",
+)
 
 class FakeUser:
     def __init__(self, uid):

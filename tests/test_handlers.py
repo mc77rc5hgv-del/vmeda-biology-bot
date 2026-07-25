@@ -36,7 +36,7 @@ class FakeCB:
         self._answers.append((text, show_alert))
 
 async def main():
-    topic_key = "skull"
+    topic_key = "unpaired_skull_bones"
     topic = tb.get_anatomy_topic_data(topic_key)
     bones = topic["bones_list"]
 
@@ -139,7 +139,7 @@ async def main():
 
     # latin terms trainer (pooled, whole-topic)
     latin_terms = tb.get_topic_latin_terms(topic_key)
-    assert len(latin_terms) >= 100, "skull should have a large per-bone latin term bank"
+    assert len(latin_terms) >= 40, "unpaired_skull_bones should have a sizable per-bone latin term bank"
     cb = FakeCB(f"anatomy_latin_start:{topic_key}")
     await tb.cb_anatomy_latin_start(cb)
     assert cb.message.edits
@@ -162,7 +162,7 @@ async def main():
     assert uid not in tb.ANATOMY_LATIN_SESSIONS
 
     # topic with no latin_terms -> graceful alert, not a crash
-    cb4 = FakeCB("anatomy_latin_start:general_joints")
+    cb4 = FakeCB("anatomy_latin_start:syndesmology_intro")
     await tb.cb_anatomy_latin_start(cb4)
     assert cb4._answers and cb4._answers[0][1] is True
 
@@ -180,8 +180,9 @@ async def main():
     await tb.cb_anatomy_latin_stop(cb6)
     assert uid5 not in tb.ANATOMY_LATIN_SESSIONS
 
-    # bone with no latin terms -> graceful alert, not a crash
-    cb7 = FakeCB(f"anatomy_bone_latin_start:{topic_key}:general")
+    # bone with no latin terms -> graceful alert, not a crash (the "general" overview
+    # bone lives in the cranium_intro topic, which has no per-bone latin terms at all)
+    cb7 = FakeCB("anatomy_bone_latin_start:cranium_intro:general")
     await tb.cb_anatomy_bone_latin_start(cb7)
     assert cb7._answers and cb7._answers[0][1] is True
     print("latin terms trainer OK")

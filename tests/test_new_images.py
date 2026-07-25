@@ -62,7 +62,11 @@ async def main():
     errors = []
     total_images_tested = 0
 
-    for topic_key in ("trunk_bones", "upper_limb_bones", "skull"):
+    for topic_key in (
+        "axial_skeleton", "upper_limb_skeleton",
+        "cranium_intro", "paired_skull_bones", "unpaired_skull_bones",
+        "facial_skull_bones", "skull_topography",
+    ):
         topic = tb.get_anatomy_topic_data(topic_key)
         for bone in topic["bones_list"]:
             bid = bone["id"]
@@ -103,16 +107,17 @@ async def main():
                         errors.append(f"{label}: no nav message sent")
         print(f"{topic_key}: {len(topic['bones_list'])} bones OK")
 
-    # section navigation: trunk_bones and upper_limb_bones must appear under osteology menu
-    cb = FakeCB("anatomy_section:osteology")
+    # section navigation: axial_skeleton and upper_limb_skeleton must appear under the
+    # osteology module menu
+    cb = FakeCB("anatomy_section:module1_osteology")
     await tb.cb_anatomy_section(cb)
     assert cb.message.edits
 
     # bone hub text should reflect slides/atlas counts correctly, split by source
-    hub_text = tb.get_anatomy_bone_hub_text("trunk_bones", "columna_vertebralis")
+    hub_text = tb.get_anatomy_bone_hub_text("axial_skeleton", "columna_vertebralis")
     assert "Атлас (Неттер/Гайворонский): 1" in hub_text, hub_text
 
-    hub_text2 = tb.get_anatomy_bone_hub_text("skull", "whole_skull")
+    hub_text2 = tb.get_anatomy_bone_hub_text("skull_topography", "whole_skull")
     assert "Слайдов презентации:" in hub_text2 and "Атлас (Неттер/Гайворонский):" in hub_text2, hub_text2
 
     print(f"\nTotal images functionally tested: {total_images_tested}")
