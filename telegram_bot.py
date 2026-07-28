@@ -237,6 +237,7 @@ REFERRAL_WARNING_THRESHOLD = 3  # столько предупреждений д
 REFERRAL_WARNING_COOLDOWN_SECONDS = 4 * 60 * 60  # не чаще одного предупреждения раз в 4 часа
 TEMP_ACCESS_GRANT_SECONDS = 7 * 24 * 60 * 60  # длительность временного восстановления доступа
 GLOBAL_PROMO_SECONDS = 24 * 60 * 60  # длительность полного открытия всех разделов всем (раздел "global")
+GLOBAL_PROMO_12H_SECONDS = 12 * 60 * 60  # укороченная версия того же промо, на 12 часов
 
 def get_referral_link(user_id: int) -> str:
     return f"https://t.me/{BOT_USERNAME}?start=ref_{user_id}"
@@ -991,6 +992,16 @@ async def announce_global_promo_start() -> None:
         "Абсолютно все разделы — Биология, Физика, Химия, Гистология — сейчас "
         "полностью бесплатны для всех, без рефералов и подписки.\n\n"
         "Успей позаниматься, пока открыто — доступ вернётся к обычным правилам ровно через сутки! ⏳"
+    )
+    await _broadcast(text)
+
+async def announce_global_promo_12h_start() -> None:
+    text = (
+        "🎉🚀 <b>ВСЕ ОГРАНИЧЕНИЯ СНЯТЫ НА 12 ЧАСОВ!</b> 🚀🎉\n"
+        f"{DIVIDER}\n\n"
+        "Абсолютно все разделы — Биология, Физика, Химия, Гистология — сейчас "
+        "полностью бесплатны для всех, без рефералов и подписки.\n\n"
+        "Успей позаниматься, пока открыто — доступ вернётся к обычным правилам через 12 часов! ⏳"
     )
     await _broadcast(text)
 
@@ -2763,6 +2774,7 @@ def get_admin_menu():
     builder.button(text="📤 Опубликовать пост в канал", callback_data="admin_channel_post_prompt")
     builder.button(text="🔬 Открыть Гистологию всем на 24ч", callback_data="admin_histology_promo_confirm")
     builder.button(text="🎉 Снять все ограничения всем на 24ч", callback_data="admin_global_promo_confirm")
+    builder.button(text="🎉 Снять все ограничения всем на 12ч", callback_data="admin_global_promo_12h_confirm")
     builder.button(text="📋 Анонс переклички групп", callback_data="admin_announce_rollcall_confirm")
     builder.adjust(1)
     return builder.as_markup()
@@ -3030,6 +3042,46 @@ async def cb_admin_global_promo_go(callback: CallbackQuery):
     await safe_edit_text(
         callback.message,
         "✅ Все ограничения сняты для всех на 24 часа.",
+        parse_mode="HTML",
+        reply_markup=get_admin_back_keyboard()
+    )
+
+@dp.callback_query(F.data == "admin_global_promo_12h_confirm")
+async def cb_admin_global_promo_12h_confirm(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer()
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Да, открыть всё на 12ч", callback_data="admin_global_promo_12h_go")
+    builder.button(text="❌ Отмена", callback_data="admin_panel")
+    builder.adjust(1)
+    await safe_edit_text(
+        callback.message,
+        "🎉 <b>Подтверди снятие всех ограничений на 12ч</b>\n\n"
+        "Биология, Физика, Химия и Гистология станут бесплатными для всех пользователей на 12 часов — "
+        "без рефералов и подписки. Анатомия (ещё в разработке) и скачивание билетов по биологии "
+        "(всегда только по подписке) промо не затрагивает. После 12 часов доступ вернётся к обычным "
+        "правилам каждого раздела.\n\n"
+        "Всем пользователям придёт рассылка с объявлением.",
+        parse_mode="HTML",
+        reply_markup=builder.as_markup()
+    )
+
+@dp.callback_query(F.data == "admin_global_promo_12h_go")
+async def cb_admin_global_promo_12h_go(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    if is_section_promo_active("global"):
+        await callback.answer("Промо уже идёт", show_alert=True)
+        return
+    await callback.answer("🚀 Все ограничения сняты на 12 часов!", show_alert=True)
+    start_section_promo("global", GLOBAL_PROMO_12H_SECONDS)
+    asyncio.create_task(announce_global_promo_12h_start())
+    await safe_edit_text(
+        callback.message,
+        "✅ Все ограничения сняты для всех на 12 часов.",
         parse_mode="HTML",
         reply_markup=get_admin_back_keyboard()
     )

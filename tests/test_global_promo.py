@@ -155,6 +155,62 @@ async def main():
     assert not tb.histology_access_ok(uid)
     print("after promo clears: access reverts to normal OK")
 
+    # 11. 12h variant: separate button/handlers, same underlying "global" promo mechanism
+    menu2 = tb.get_admin_menu()
+    assert any("Снять все ограничения всем на 12ч" in t for t in kb_texts(menu2))
+    print("admin menu 12h button present OK")
+
+    cb_nb12 = FakeCB("admin_global_promo_12h_confirm", uid=non_admin)
+    await tb.cb_admin_global_promo_12h_confirm(cb_nb12)
+    assert not cb_nb12.message.edits
+    print("non-admin blocked from 12h confirm OK")
+
+    cb_confirm12 = FakeCB("admin_global_promo_12h_confirm")
+    await tb.cb_admin_global_promo_12h_confirm(cb_confirm12)
+    assert cb_confirm12.message.edits
+    confirm_text12, confirm_kb12 = cb_confirm12.message.edits[0]
+    check_html(confirm_text12)
+    assert "12 часов" in confirm_text12
+    assert any("Да, открыть всё на 12ч" in t for t in kb_texts(confirm_kb12))
+    print("12h confirm screen renders OK")
+
+    cb_go_nb12 = FakeCB("admin_global_promo_12h_go", uid=non_admin)
+    await tb.cb_admin_global_promo_12h_go(cb_go_nb12)
+    assert not cb_go_nb12.message.edits
+    assert not tb.is_section_promo_active("global")
+    print("non-admin blocked from 12h go OK")
+
+    broadcast_calls12 = []
+    async def fake_broadcast12(text, keyboard=None):
+        broadcast_calls12.append((text, keyboard))
+    tb._broadcast = fake_broadcast12
+
+    cb_go12 = FakeCB("admin_global_promo_12h_go")
+    await tb.cb_admin_global_promo_12h_go(cb_go12)
+    await asyncio.sleep(0)  # let asyncio.create_task(announce_global_promo_12h_start()) run
+    assert tb.is_section_promo_active("global")
+    assert broadcast_calls12, "expected a broadcast announcing the 12h promo"
+    check_html(broadcast_calls12[0][0])
+    assert "12" in broadcast_calls12[0][0]
+    print("12h promo go activates promo + broadcasts OK")
+
+    cb_go_twice12 = FakeCB("admin_global_promo_12h_go")
+    await tb.cb_admin_global_promo_12h_go(cb_go_twice12)
+    assert cb_go_twice12._answers and cb_go_twice12._answers[0][1] is True
+    assert len(broadcast_calls12) == 1, "second 12h start attempt must not broadcast again"
+    print("12h double-start blocked OK")
+
+    assert tb.has_free_access(uid)
+    assert tb.has_subject_access(uid, "biology")
+    assert not tb.anatomy_access_ok(uid), "Anatomy must stay closed even during a 12h global promo"
+    assert tb.histology_access_ok(uid)
+    print("12h promo active: same access rules as the 24h promo OK")
+
+    tb.stats["section_promos"].pop("global", None)
+    tb._broadcast = orig_broadcast
+    assert not tb.has_free_access(uid)
+    print("after 12h promo clears: access reverts to normal OK")
+
     print("ALL GLOBAL PROMO TESTS PASSED")
 
 asyncio.run(main())
