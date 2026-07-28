@@ -70,7 +70,7 @@ async def main():
     # 2. get_below_threshold_users(): correct cohort membership
     uid_none = fresh_uid()          # 0 referrals, nothing else -> IN cohort
     uid_one = fresh_uid()           # 1 referral -> IN cohort
-    uid_full = fresh_uid()          # 2 referrals -> free access -> NOT in cohort
+    uid_full = fresh_uid()          # full referral count -> free access -> NOT in cohort
     uid_sub = fresh_uid()           # subscribed -> NOT in cohort
     uid_manual = fresh_uid()        # manual access granted -> NOT in cohort
     uid_temp = fresh_uid()          # temp access -> NOT in cohort
@@ -78,7 +78,7 @@ async def main():
         tb.stats["total_users"].add(uid)
     tb.stats["referrals"].pop(str(uid_none), None)
     tb.stats["referrals"][str(uid_one)] = ["a"]
-    tb.stats["referrals"][str(uid_full)] = ["a", "b"]
+    tb.stats["referrals"][str(uid_full)] = [f"ref{i}" for i in range(tb.REFERRAL_FULL_ACCESS_THRESHOLD)]
     tb.grant_subscription(uid_sub, 1, "stars", 89)
     if uid_manual not in tb.stats["manual_access_granted"]:
         tb.stats["manual_access_granted"].append(uid_manual)

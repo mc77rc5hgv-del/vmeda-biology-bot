@@ -61,8 +61,8 @@ class FakeSuccessfulPayment:
         self.total_amount = total_amount
         self.invoice_payload = invoice_payload
 
-RETIRED_TIERS = {2, 3, 4}
-ACTIVE_TIERS = {1, 5, 6, 7, 8, 9, 10}
+RETIRED_TIERS = {2, 3, 4, 5}
+ACTIVE_TIERS = {1, 6, 7, 8, 9, 10, 11}
 
 async def main():
     non_admin = random.randint(10_000_000, 99_999_999)
@@ -76,7 +76,7 @@ async def main():
         pass
     tb.bot.send_message = _noop_send_message
 
-    # 1. Tier data integrity: 10 defined, 3 retired (kept for historical grants), 7 on sale
+    # 1. Tier data integrity: 11 defined, 4 retired (kept for historical grants), 7 on sale
     assert set(tb.SUBSCRIPTION_TIERS.keys()) == RETIRED_TIERS | ACTIVE_TIERS
     assert set(tb.ACTIVE_SUBSCRIPTION_TIERS.keys()) == ACTIVE_TIERS
     for t in RETIRED_TIERS:
@@ -86,20 +86,20 @@ async def main():
     for cfg in tb.SUBSCRIPTION_TIERS.values():
         assert cfg["price_rub"] > 0 and cfg["price_stars"] > 0
         assert len(cfg["benefits"]) >= 2
-    expected_prices = {1: 89, 5: 49, 6: 239, 7: 389, 8: 749, 9: 1119, 10: 3899}
+    expected_prices = {1: 89, 6: 239, 7: 389, 8: 749, 9: 1119, 10: 3899, 11: 1999}
     for t, price in expected_prices.items():
         assert tb.SUBSCRIPTION_TIERS[t]["price_rub"] == price, t
     assert tb.SUBSCRIPTION_TIERS[5]["subject_choice_required"] is True
-    for t in ACTIVE_TIERS - {5}:
+    for t in ACTIVE_TIERS:
         assert not tb.SUBSCRIPTION_TIERS[t].get("subject_choice_required")
-    for t in (7, 8, 9, 10):
+    for t in (7, 8, 9, 10, 11):
         assert tb.SUBSCRIPTION_TIERS[t]["anatomy"] is True
-    for t in (1, 5, 6):
+    for t in (1, 6):
         assert not tb.SUBSCRIPTION_TIERS[t]["anatomy"]
-    for t in (9, 10):
+    for t in (9, 10, 11):
         assert tb.SUBSCRIPTION_TIERS[t]["biology_download"] is True
         assert tb.SUBSCRIPTION_TIERS[t]["cheat_sheets"] is True
-    for t in (1, 5, 6, 7, 8):
+    for t in (1, 6, 7, 8):
         assert not tb.SUBSCRIPTION_TIERS[t]["biology_download"]
     for cfg in tb.ACTIVE_SUBSCRIPTION_TIERS.values():
         assert any("текущим практическим занятиям" in b for b in cfg["benefits"]), cfg["title"]
@@ -252,7 +252,7 @@ async def main():
     assert not any(d.startswith("buy_sub_stars:") for d in tier5_data)
     print("tier 5 pre-payment screen offers subject choice, not direct payment: OK")
 
-    for tier_id in ACTIVE_TIERS - {5}:
+    for tier_id in ACTIVE_TIERS:
         tier_kb = tb.get_sub_tier_keyboard(tier_id)
         tt = kb_texts(tier_kb)
         assert any("Оплатить" in t and "звёзд" in t for t in tt)
@@ -458,25 +458,10 @@ async def main():
     assert ADMIN_ID not in tb.ADMIN_PENDING
     print("admin flow rejects invalid tier number, supports cancel: OK")
 
-    # 19c. Admin grant flow for a subject-choice tier (5): tier -> subject reply-keyboard -> grant
-    cb_prompt3 = FakeCB("admin_subscription_prompt")
-    await tb.cb_admin_subscription_prompt(cb_prompt3)
-    ms1 = FakeMsg(from_user=FakeUser(ADMIN_ID))
-    ms1.text = "testbuyer"
-    await tb.handle_admin_pending_action(ms1)
-    ms2 = FakeMsg(from_user=FakeUser(ADMIN_ID))
-    ms2.text = "5"
-    await tb.handle_admin_pending_action(ms2)
-    assert tb.ADMIN_PENDING[ADMIN_ID]["action"] == "record_subscription_subject"
-    assert isinstance(ms2.answers[-1][1], tb.ReplyKeyboardMarkup)
-    ms3 = FakeMsg(from_user=FakeUser(ADMIN_ID))
-    ms3.text = "Физика"
-    await tb.handle_admin_pending_action(ms3)
-    assert ADMIN_ID not in tb.ADMIN_PENDING
-    assert tb.get_subscription(non_admin)["tier"] == 5
-    assert tb.get_subscription(non_admin)["restricted_subject"] == "physics"
-    tb.stats["subscriptions"].pop(str(non_admin), None)
-    print("admin grant flow for subject-choice tier prompts for and stores the subject: OK")
+    # 19c. Admin grant flow for a subject-choice tier: tier 5 is currently retired (temporarily
+    # off sale), so there is no active subject_choice_required tier to exercise this path with
+    # real data right now — grant_subscription(..., subject) itself is still covered directly
+    # by test 3 above (bypasses the retired-tier guard, same as any programmatic grant).
 
     tb.bot.send_message = orig_send_message
 
@@ -653,7 +638,7 @@ async def main():
     print("main menu subscription button always visible, anatomy/histology labels match per-tier flags: OK")
 
     # 22b. Regression: free referral access (no subscription) must still show the subscription entry
-    tb.stats["referrals"][str(non_admin)] = ["ref1", "ref2"]
+    tb.stats["referrals"][str(non_admin)] = [f"ref{i}" for i in range(tb.REFERRAL_FULL_ACCESS_THRESHOLD)]
     assert tb.get_referral_count(non_admin) >= tb.REFERRAL_FULL_ACCESS_THRESHOLD
     assert tb.has_free_access(non_admin) and not tb.has_active_subscription(non_admin)
     menu_referral_access = tb.get_main_menu(user_id=non_admin)
@@ -754,6 +739,53 @@ async def main():
 
     tb._broadcast = orig_broadcast
     print("admin subscription-announcement broadcast lists only active tiers, excludes retired ones: OK")
+
+    # 26b. Admin Anatomy-section announcement broadcast: preview -> confirm -> broadcast
+    orig_broadcast2 = tb._broadcast
+    anatomy_broadcast_calls = []
+    async def fake_broadcast2(text, keyboard=None):
+        anatomy_broadcast_calls.append((text, keyboard))
+    tb._broadcast = fake_broadcast2
+
+    anat_ann_text = tb.get_anatomy_announcement_text()
+    check_html(anat_ann_text)
+    for cfg in tb.ACTIVE_SUBSCRIPTION_TIERS.values():
+        if cfg.get("anatomy"):
+            assert str(cfg["price_rub"]) in anat_ann_text
+            assert cfg["title"] in anat_ann_text
+    for t in RETIRED_TIERS:
+        assert tb.SUBSCRIPTION_TIERS[t]["title"] not in anat_ann_text
+    # tier 6 (no anatomy) must not be advertised as an anatomy-granting tier here
+    assert tb.SUBSCRIPTION_TIERS[6]["title"] not in anat_ann_text
+    anat_ann_kb = tb.get_anatomy_announcement_keyboard()
+    anat_ann_data = kb_data(anat_ann_kb)
+    assert "subscription_menu" in anat_ann_data
+    assert "anatomy_menu" in anat_ann_data
+
+    cb_anat1 = FakeCB("admin_announce_anatomy_confirm")
+    await tb.cb_admin_announce_anatomy_confirm(cb_anat1)
+    assert cb_anat1.message.edits and "Отправить" in cb_anat1.message.edits[0][0]
+    assert not anatomy_broadcast_calls, "must not broadcast before confirmation"
+
+    broadcasts_before2 = tb.stats.get("broadcast_count", 0)
+    cb_anat2 = FakeCB("admin_announce_anatomy_go")
+    await tb.cb_admin_announce_anatomy_go(cb_anat2)
+    assert anatomy_broadcast_calls, "expected broadcast to be sent"
+    assert anatomy_broadcast_calls[0][0] == anat_ann_text
+    assert tb.stats["broadcast_count"] == broadcasts_before2 + 1
+    assert cb_anat2.message.edits and "отправлен" in cb_anat2.message.edits[0][0]
+
+    cb_anat3 = FakeCB("admin_announce_anatomy_confirm", uid=non_admin)
+    await tb.cb_admin_announce_anatomy_confirm(cb_anat3)
+    assert not cb_anat3.message.edits, "non-admin must be blocked"
+
+    tb._broadcast = orig_broadcast2
+    print("admin Anatomy-announcement broadcast lists only anatomy-granting active tiers: OK")
+
+    # 26c. Admin panel exposes the new Anatomy-announcement button
+    admin_menu_texts = kb_texts(tb.get_admin_menu())
+    assert "📣 Анонс раздела Анатомия" in admin_menu_texts
+    print("admin panel exposes Anatomy-announcement button: OK")
 
     # 22. Menu order: tiers 7 (389₽) and 9 (1119₽) lead, then tier 1 (89₽), per menu_number
     menu_text2 = tb.get_subscription_menu_text(non_admin)

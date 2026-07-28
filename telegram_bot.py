@@ -232,7 +232,7 @@ async def helperchat_promo_middleware(handler, event: Update, data):
 
 # ==================== РЕФЕРАЛЬНАЯ СИСТЕМА ====================
 BOT_USERNAME = "VMEDA_examen_bot"
-REFERRAL_FULL_ACCESS_THRESHOLD = 2  # столько рефералов нужно, чтобы открыть доступ навсегда
+REFERRAL_FULL_ACCESS_THRESHOLD = 4  # столько рефералов нужно, чтобы открыть доступ навсегда
 REFERRAL_WARNING_THRESHOLD = 3  # столько предупреждений даём, прежде чем закрыть доступ
 REFERRAL_WARNING_COOLDOWN_SECONDS = 4 * 60 * 60  # не чаще одного предупреждения раз в 4 часа
 TEMP_ACCESS_GRANT_SECONDS = 7 * 24 * 60 * 60  # длительность временного восстановления доступа
@@ -337,6 +337,8 @@ SUBSCRIPTION_TIERS = {
         ],
     },
     5: {
+        # temporarily off sale (not a permanent retirement like 2/3/4) — flag removable later
+        "retired": True,
         "title": "3 дня — один предмет на выбор",
         "short": "3 дня, 1 предмет",
         "emoji": "⚡",
@@ -467,6 +469,28 @@ SUBSCRIPTION_TIERS = {
             "Скачивание всех файлов с ответами и шпаргалок для распечатки",
             "Подходит и для подготовки к текущим практическим занятиям",
             "⏫ Цена вырастет позже — сейчас это самая низкая стоимость этого тарифа",
+        ],
+    },
+    11: {
+        "title": "2 года — абсолютно всё",
+        "short": "2 года, абсолютно всё",
+        "emoji": "🏆",
+        "price_rub": 1999,
+        "price_stars": 1999,
+        "duration_days": 2 * 365,
+        "expires_at": None,
+        "subject_choice_required": False,
+        "histology_until_rule": "expiry",
+        "anatomy": True,
+        "biology_download": True,
+        "cheat_sheets": True,
+        "menu_number": 8,
+        "joke": "Дешевле, чем повторная сдача пересдачи",
+        "benefits": [
+            "АБСОЛЮТНО ПОЛНЫЙ доступ ко всем предметам — Биология, Физика, Химия, Гистология, Анатомия",
+            "Один платёж на 2 года учёбы — включая всё, что появится в боте позже",
+            "Скачивание всех файлов с ответами и готовых шпаргалок для распечатки",
+            "Подходит и для подготовки к текущим практическим занятиям",
         ],
     },
 }
@@ -1556,7 +1580,8 @@ def get_subscription_announcement_text() -> str:
     return (
         f"💎 <b>Новое в боте — платная подписка без рефералов!</b>\n{DIVIDER}\n\n"
         "Разработка и содержание бота требуют серьёзных затрат — поэтому в дополнение "
-        "к бесплатному доступу за 2 рефералов теперь можно открыть доступ сразу оплатой:\n\n"
+        f"к бесплатному доступу за {REFERRAL_FULL_ACCESS_THRESHOLD} рефералов теперь можно "
+        "открыть доступ сразу оплатой:\n\n"
         f"{tier_lines}\n\n"
         "После оплаты правило с рефералами для тебя больше не действует — доступ "
         "открывается сразу и держится всё оплаченное время.\n\n"
@@ -1566,6 +1591,38 @@ def get_subscription_announcement_text() -> str:
 def get_subscription_announcement_keyboard():
     builder = InlineKeyboardBuilder()
     builder.button(text="💎 Подписка без рефералов", callback_data="subscription_menu")
+    return builder.as_markup()
+
+def get_anatomy_announcement_text() -> str:
+    tier_lines = " или ".join(
+        f"«{cfg['emoji']} {cfg['title']}» ({cfg['price_rub']}₽)"
+        for cfg in ACTIVE_SUBSCRIPTION_TIERS.values()
+        if cfg.get("anatomy")
+    )
+    return (
+        f"🦴 <b>Открываем раздел «Анатомия»!</b>\n{DIVIDER}\n\n"
+        "Самый подробный раздел бота — теперь доступен по подписке 👇\n\n"
+        "📚 <b>Что внутри:</b>\n"
+        "• 10 модулей по программе Кафарова — 107 тем: от остеологии и миологии до "
+        "нервной, сердечно-сосудистой и клинической анатомии\n"
+        "• Материал написан по учебнику Гайворонского и методичкам кафедры, с латинской "
+        "номенклатурой в каждой теме\n"
+        "• Кости черепа, туловища и конечностей разобраны отдельно по каждой кости — "
+        "с фото, флэш-карточками, сопоставлением терминов и мнемониками\n"
+        "• Атлас с иллюстрациями Неттера и Гайворонского плюс учебные фотопрезентации "
+        "кафедры\n"
+        "• Тренажёр латинских терминов по каждой кости и теме, а также общий тест по "
+        "всей номенклатуре с рейтингом лучших\n"
+        "• Видео-разборы по темам и разделам\n\n"
+        f"💎 Доступна в тарифах: {tier_lines}\n\n"
+        "Загляни в «💎 Подписка» в главном меню, чтобы выбрать тариф 👇"
+    )
+
+def get_anatomy_announcement_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="💎 Подписка", callback_data="subscription_menu")
+    builder.button(text="🦴 Анатомия", callback_data="anatomy_menu")
+    builder.adjust(1)
     return builder.as_markup()
 
 def donor_display_name(uid_str: str) -> str:
@@ -2694,8 +2751,15 @@ def get_admin_menu():
     builder.button(text="📣 Оповещение о подписке", callback_data="admin_announce_subscription_confirm")
     builder.button(text="📣 Анонс раздела поддержки", callback_data="admin_announce_support_confirm")
     builder.button(text="🎁 Восстановить доступ исчерпавшим (7 дней)", callback_data="admin_restore_access_confirm")
-    builder.button(text="📣 Напомнить о реферале/подписке (<2 реф.)", callback_data="admin_referral_reminder_confirm")
-    builder.button(text="🔥 Скидка 10% без рефералов (<2 реф.)", callback_data="admin_discount_promo_confirm")
+    builder.button(
+        text=f"📣 Напомнить о реферале/подписке (<{REFERRAL_FULL_ACCESS_THRESHOLD} реф.)",
+        callback_data="admin_referral_reminder_confirm",
+    )
+    builder.button(
+        text=f"🔥 Скидка 10% без рефералов (<{REFERRAL_FULL_ACCESS_THRESHOLD} реф.)",
+        callback_data="admin_discount_promo_confirm",
+    )
+    builder.button(text="📣 Анонс раздела Анатомия", callback_data="admin_announce_anatomy_confirm")
     builder.button(text="📤 Опубликовать пост в канал", callback_data="admin_channel_post_prompt")
     builder.button(text="🔬 Открыть Гистологию всем на 24ч", callback_data="admin_histology_promo_confirm")
     builder.button(text="🎉 Снять все ограничения всем на 24ч", callback_data="admin_global_promo_confirm")
@@ -3436,6 +3500,40 @@ async def cb_admin_announce_subscription_go(callback: CallbackQuery):
     await safe_edit_text(
         callback.message,
         f"✅ Оповещение о подписке отправлено (попытка охватить {recipients} пользователей).",
+        parse_mode="HTML",
+        reply_markup=get_admin_back_keyboard()
+    )
+
+@dp.callback_query(F.data == "admin_announce_anatomy_confirm")
+async def cb_admin_announce_anatomy_confirm(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer()
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Отправить всем", callback_data="admin_announce_anatomy_go")
+    builder.button(text="❌ Отмена", callback_data="admin_panel")
+    builder.adjust(1)
+    preview = (
+        f"👀 <b>Предпросмотр анонса</b>\n{DIVIDER}\n\n"
+        f"{get_anatomy_announcement_text()}\n\n{DIVIDER}\n"
+        f"Отправить это всем {len(stats['total_users'])} пользователям?"
+    )
+    await safe_edit_text(callback.message, preview, parse_mode="HTML", reply_markup=builder.as_markup())
+
+@dp.callback_query(F.data == "admin_announce_anatomy_go")
+async def cb_admin_announce_anatomy_go(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer("📣 Рассылка запущена!", show_alert=True)
+    recipients = len(stats["total_users"])
+    stats["broadcast_count"] = stats.get("broadcast_count", 0) + 1
+    save_stats()
+    await _broadcast(get_anatomy_announcement_text(), get_anatomy_announcement_keyboard())
+    await safe_edit_text(
+        callback.message,
+        f"✅ Анонс раздела Анатомия отправлен (попытка охватить {recipients} пользователей).",
         parse_mode="HTML",
         reply_markup=get_admin_back_keyboard()
     )

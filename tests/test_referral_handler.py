@@ -46,14 +46,14 @@ async def main():
     assert "🔙 Назад в меню" in texts
     print("0-ref keyboard OK:", texts)
 
-    # 2 referrals -> battle button appears, subscription entry point stays reachable
-    tb.stats["referrals"][uid_str] = ["a", "b"]
+    # full referral count -> battle button appears, subscription entry point stays reachable
+    tb.stats["referrals"][uid_str] = [f"ref{i}" for i in range(tb.REFERRAL_FULL_ACCESS_THRESHOLD)]
     cb = FakeCB("referral_info", UID)
     await tb.cb_referral_info(cb)
     texts = keyboard_texts(cb.message.markups[0])
     assert "⚔️ Битва рефералов" in texts, texts
     assert "💎 Подписка" in texts, "subscription entry point must not disappear once free access is granted"
-    print("2-ref keyboard OK:", texts)
+    print("full-ref keyboard OK:", texts)
 
     print("ALL HANDLER TESTS PASSED")
 
