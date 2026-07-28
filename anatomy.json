@@ -8756,6 +8756,11 @@
             "path": "atlas/spinal-cord-9.jpg",
             "caption": "Вены спинного мозга и позвоночного столба",
             "credit": "Ф. Неттер, Атлас анатомии человека"
+          },
+          {
+            "path": "atlas/spinal_medulla_oblongata-1.jpg",
+            "caption": "Спинной мозг: передняя и задняя поверхность",
+            "credit": "И.В. Гайворонский, Нормальная анатомия человека"
           }
         ],
         "video": "https://www.youtube.com/watch?v=bunmNgGZ02E"
@@ -10895,7 +10900,14 @@
             "bone": null
           }
         ],
-        "picture_quiz": []
+        "picture_quiz": [],
+        "atlas_images": [
+          {
+            "path": "atlas/cranial_nerves_intro-1.jpg",
+            "caption": "Места выхода и области иннервации черепных нервов (I-XII)",
+            "credit": "И.В. Гайворонский, Нормальная анатомия человека"
+          }
+        ]
       },
       "cranial_nerves_1_12": {
         "title": "Черепно-мозговые нервы 1-12 пары",
