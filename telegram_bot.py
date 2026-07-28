@@ -70,6 +70,12 @@ with open("chemistry_theory.json", "r", encoding="utf-8") as f:
 with open("chemistry_tasks.json", "r", encoding="utf-8") as f:
     CHEMISTRY_TASKS = json.load(f)["topics"]
 
+with open("chemistry_theory_tickets.json", "r", encoding="utf-8") as f:
+    CHEMISTRY_THEORY_TICKETS = json.load(f)["tickets"]
+
+with open("chemistry_practice_tickets.json", "r", encoding="utf-8") as f:
+    CHEMISTRY_PRACTICE_TICKETS = json.load(f)["tickets"]
+
 with open("physics_tasks.json", "r", encoding="utf-8") as f:
     PHYSICS_TASKS = json.load(f)["topics"]
 
@@ -1230,10 +1236,12 @@ GATED_PREFIXES_PHYSICS = (
 GATED_CALLBACKS_CHEMISTRY = {
     "menu_chemistry", "chemistry_theory", "chemistry_theory_list",
     "chemistry_tasks", "chemistry_labs", "download_chemistry_labs", "download_chemistry_tasks",
+    "chemistry_tickets", "chem_theory_tickets", "chem_practice_tickets",
 }
 GATED_PREFIXES_CHEMISTRY = (
     "chem_theory:", "chemtask_topic:", "chemtask_formulas:", "chemtask_list:", "chemtask_show:",
     "lab:", "lab_exp:", "lab_calc:", "lab_summary:",
+    "chem_theory_ticket:", "chem_theory_q:", "chem_practice_ticket:",
 )
 
 GATED_CALLBACKS = GATED_CALLBACKS_BIOLOGY | GATED_CALLBACKS_PHYSICS | GATED_CALLBACKS_CHEMISTRY
@@ -2505,10 +2513,63 @@ def get_chemistry_menu():
     builder.button(text="📚 Теория", callback_data="chemistry_theory")
     builder.button(text="📝 Задачи", callback_data="chemistry_tasks")
     builder.button(text="🧪 Лабораторные работы", callback_data="chemistry_labs")
+    builder.button(text="🎫 Билеты", callback_data="chemistry_tickets")
     builder.button(text="📄 Все лабораторные работы (файл)", callback_data="download_chemistry_labs")
     builder.button(text="📄 Все задачи (файл)", callback_data="download_chemistry_tasks")
     builder.adjust(1)
     builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
+    return builder.as_markup()
+
+def get_chemistry_tickets_menu():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="📖 Билеты теории", callback_data="chem_theory_tickets")
+    builder.button(text="🧮 Билеты практики", callback_data="chem_practice_tickets")
+    builder.adjust(1)
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="menu_chemistry"))
+    return builder.as_markup()
+
+def get_chemistry_theory_tickets_keyboard():
+    builder = InlineKeyboardBuilder()
+    for num in sorted(CHEMISTRY_THEORY_TICKETS.keys(), key=int):
+        builder.button(text=f"📖 {CHEMISTRY_THEORY_TICKETS[num]['title']}", callback_data=f"chem_theory_ticket:{num}")
+    builder.adjust(2)
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="chemistry_tickets"))
+    return builder.as_markup()
+
+def get_chemistry_theory_ticket_detail_keyboard(num: str):
+    builder = InlineKeyboardBuilder()
+    ticket = CHEMISTRY_THEORY_TICKETS[num]
+    for i, q in enumerate(ticket["questions"]):
+        label = q["title"] if len(q["title"]) <= 60 else q["title"][:57] + "..."
+        builder.button(text=f"{i + 1}. {label}", callback_data=f"chem_theory_q:{num}:{i}")
+    builder.adjust(1)
+    builder.row(InlineKeyboardButton(text="🔙 К списку билетов", callback_data="chem_theory_tickets"))
+    return builder.as_markup()
+
+def get_chemistry_theory_question_keyboard(num: str, idx: int):
+    builder = InlineKeyboardBuilder()
+    total = len(CHEMISTRY_THEORY_TICKETS[num]["questions"])
+    nav = []
+    if idx > 0:
+        nav.append(InlineKeyboardButton(text="⬅️ Предыдущий вопрос", callback_data=f"chem_theory_q:{num}:{idx - 1}"))
+    if idx < total - 1:
+        nav.append(InlineKeyboardButton(text="Следующий вопрос ➡️", callback_data=f"chem_theory_q:{num}:{idx + 1}"))
+    if nav:
+        builder.row(*nav)
+    builder.row(InlineKeyboardButton(text="🔙 К списку билетов", callback_data="chem_theory_tickets"))
+    return builder.as_markup()
+
+def get_chemistry_practice_tickets_keyboard():
+    builder = InlineKeyboardBuilder()
+    for num in sorted(CHEMISTRY_PRACTICE_TICKETS.keys(), key=int):
+        builder.button(text=f"🧮 {CHEMISTRY_PRACTICE_TICKETS[num]['title']}", callback_data=f"chem_practice_ticket:{num}")
+    builder.adjust(2)
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="chemistry_tickets"))
+    return builder.as_markup()
+
+def get_chemistry_practice_ticket_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="🔙 К списку билетов", callback_data="chem_practice_tickets"))
     return builder.as_markup()
 
 def get_chemistry_theory_list():
@@ -2775,6 +2836,7 @@ def get_admin_menu():
     builder.button(text="🔬 Открыть Гистологию всем на 24ч", callback_data="admin_histology_promo_confirm")
     builder.button(text="🎉 Снять все ограничения всем на 24ч", callback_data="admin_global_promo_confirm")
     builder.button(text="🎉 Снять все ограничения всем на 12ч", callback_data="admin_global_promo_12h_confirm")
+    builder.button(text="🔒 Вернуть ограничения", callback_data="admin_restore_restrictions_confirm")
     builder.button(text="📋 Анонс переклички групп", callback_data="admin_announce_rollcall_confirm")
     builder.adjust(1)
     return builder.as_markup()
@@ -3082,6 +3144,49 @@ async def cb_admin_global_promo_12h_go(callback: CallbackQuery):
     await safe_edit_text(
         callback.message,
         "✅ Все ограничения сняты для всех на 12 часов.",
+        parse_mode="HTML",
+        reply_markup=get_admin_back_keyboard()
+    )
+
+@dp.callback_query(F.data == "admin_restore_restrictions_confirm")
+async def cb_admin_restore_restrictions_confirm(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer()
+    active = [section for section, until in stats.get("section_promos", {}).items() if time.time() < until]
+    if not active:
+        await safe_edit_text(
+            callback.message,
+            "🔒 Сейчас нет активных промо-доступов — возвращать нечего.",
+            parse_mode="HTML",
+            reply_markup=get_admin_back_keyboard()
+        )
+        return
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Да, вернуть ограничения", callback_data="admin_restore_restrictions_go")
+    builder.button(text="❌ Отмена", callback_data="admin_panel")
+    builder.adjust(1)
+    await safe_edit_text(
+        callback.message,
+        "🔒 <b>Подтверди возврат ограничений</b>\n\n"
+        f"Сейчас активны промо-доступы: {', '.join(active)}. Все они будут закрыты немедленно, доступ "
+        "вернётся к обычным правилам каждого раздела.",
+        parse_mode="HTML",
+        reply_markup=builder.as_markup()
+    )
+
+@dp.callback_query(F.data == "admin_restore_restrictions_go")
+async def cb_admin_restore_restrictions_go(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    stats["section_promos"] = {}
+    save_stats()
+    await callback.answer("🔒 Ограничения возвращены для всех.", show_alert=True)
+    await safe_edit_text(
+        callback.message,
+        "✅ Все активные промо-доступы закрыты, ограничения возвращены.",
         parse_mode="HTML",
         reply_markup=get_admin_back_keyboard()
     )
@@ -4821,6 +4926,77 @@ async def cb_theory_list(callback: CallbackQuery):
         parse_mode="HTML",
         reply_markup=get_chemistry_theory_list()
     )
+
+# ==================== ХИМИЯ - БИЛЕТЫ ====================
+@dp.callback_query(F.data == "chemistry_tickets")
+async def cb_chemistry_tickets(callback: CallbackQuery):
+    await callback.answer()
+    await safe_edit_text(
+        callback.message,
+        f"🎫 <b>Билеты по химии</b>\n{DIVIDER}\n\nВыбери раздел:",
+        parse_mode="HTML",
+        reply_markup=get_chemistry_tickets_menu()
+    )
+
+@dp.callback_query(F.data == "chem_theory_tickets")
+async def cb_chem_theory_tickets(callback: CallbackQuery):
+    await callback.answer()
+    await safe_edit_text(
+        callback.message,
+        f"📖 <b>Билеты теории</b>\n{DIVIDER}\n\nВыбери билет:",
+        parse_mode="HTML",
+        reply_markup=get_chemistry_theory_tickets_keyboard()
+    )
+
+@dp.callback_query(F.data.startswith("chem_theory_ticket:"))
+async def cb_chem_theory_ticket(callback: CallbackQuery):
+    await callback.answer()
+    num = callback.data.split(":")[1]
+    ticket = CHEMISTRY_THEORY_TICKETS.get(num)
+    if not ticket:
+        await callback.answer("Билет не найден", show_alert=True)
+        return
+    await safe_edit_text(
+        callback.message,
+        f"📖 <b>{ticket['title']}</b>\n{DIVIDER}\n\nВыбери вопрос:",
+        parse_mode="HTML",
+        reply_markup=get_chemistry_theory_ticket_detail_keyboard(num)
+    )
+
+@dp.callback_query(F.data.startswith("chem_theory_q:"))
+async def cb_chem_theory_question(callback: CallbackQuery):
+    await callback.answer()
+    _, num, idx_s = callback.data.split(":")
+    idx = int(idx_s)
+    ticket = CHEMISTRY_THEORY_TICKETS.get(num)
+    if not ticket or idx >= len(ticket["questions"]):
+        await callback.answer("Вопрос не найден", show_alert=True)
+        return
+    q = ticket["questions"][idx]
+    header = f"📖 <b>{ticket['title']} — Вопрос {idx + 1}</b>"
+    body = f"{header}\n{DIVIDER}\n\n<b>{q['title']}</b>\n\n{q['answer']}"
+    await safe_edit_text(callback.message, body, parse_mode="HTML", reply_markup=get_chemistry_theory_question_keyboard(num, idx))
+
+@dp.callback_query(F.data == "chem_practice_tickets")
+async def cb_chem_practice_tickets(callback: CallbackQuery):
+    await callback.answer()
+    await safe_edit_text(
+        callback.message,
+        f"🧮 <b>Билеты практики</b>\n{DIVIDER}\n\nВыбери билет:",
+        parse_mode="HTML",
+        reply_markup=get_chemistry_practice_tickets_keyboard()
+    )
+
+@dp.callback_query(F.data.startswith("chem_practice_ticket:"))
+async def cb_chem_practice_ticket(callback: CallbackQuery):
+    await callback.answer()
+    num = callback.data.split(":")[1]
+    ticket = CHEMISTRY_PRACTICE_TICKETS.get(num)
+    if not ticket:
+        await callback.answer("Билет не найден", show_alert=True)
+        return
+    text = f"🧮 <b>{ticket['title']}</b>\n{DIVIDER}\n\n{ticket['content']}"
+    await safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=get_chemistry_practice_ticket_keyboard())
 
 # ==================== ХИМИЯ - ЗАДАЧИ ====================
 @dp.callback_query(F.data == "chemistry_tasks")

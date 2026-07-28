@@ -158,7 +158,8 @@ async def main():
     # 11. 12h variant: separate button/handlers, same underlying "global" promo mechanism
     menu2 = tb.get_admin_menu()
     assert any("Снять все ограничения всем на 12ч" in t for t in kb_texts(menu2))
-    print("admin menu 12h button present OK")
+    assert any("Вернуть ограничения" in t for t in kb_texts(menu2))
+    print("admin menu 12h + restore-restrictions buttons present OK")
 
     cb_nb12 = FakeCB("admin_global_promo_12h_confirm", uid=non_admin)
     await tb.cb_admin_global_promo_12h_confirm(cb_nb12)
@@ -205,6 +206,46 @@ async def main():
     assert not tb.anatomy_access_ok(uid), "Anatomy must stay closed even during a 12h global promo"
     assert tb.histology_access_ok(uid)
     print("12h promo active: same access rules as the 24h promo OK")
+
+    # 12. "Вернуть ограничения": non-admin blocked
+    cb_restore_nb = FakeCB("admin_restore_restrictions_confirm", uid=non_admin)
+    await tb.cb_admin_restore_restrictions_confirm(cb_restore_nb)
+    assert not cb_restore_nb.message.edits
+    print("non-admin blocked from restore-restrictions confirm OK")
+
+    # 13. confirm screen lists the active promo and offers to end it
+    cb_restore_confirm = FakeCB("admin_restore_restrictions_confirm")
+    await tb.cb_admin_restore_restrictions_confirm(cb_restore_confirm)
+    assert cb_restore_confirm.message.edits
+    restore_text, restore_kb = cb_restore_confirm.message.edits[0]
+    check_html(restore_text)
+    assert "global" in restore_text
+    assert any("вернуть ограничения" in t.lower() for t in kb_texts(restore_kb))
+    print("restore-restrictions confirm screen lists active promo OK")
+
+    # 14. non-admin blocked from go
+    cb_restore_go_nb = FakeCB("admin_restore_restrictions_go", uid=non_admin)
+    await tb.cb_admin_restore_restrictions_go(cb_restore_go_nb)
+    assert not cb_restore_go_nb.message.edits
+    assert tb.is_section_promo_active("global"), "non-admin must not be able to clear the promo"
+    print("non-admin blocked from restore-restrictions go OK")
+
+    # 15. go clears every active promo immediately
+    cb_restore_go = FakeCB("admin_restore_restrictions_go")
+    await tb.cb_admin_restore_restrictions_go(cb_restore_go)
+    assert not tb.is_section_promo_active("global")
+    assert not tb.has_free_access(uid)
+    assert not tb.histology_access_ok(uid)
+    print("restore-restrictions go clears the active promo OK")
+
+    # 16. with nothing active, confirm shows a "nothing to restore" message and no button
+    cb_restore_empty = FakeCB("admin_restore_restrictions_confirm")
+    await tb.cb_admin_restore_restrictions_confirm(cb_restore_empty)
+    assert cb_restore_empty.message.edits
+    empty_text, _ = cb_restore_empty.message.edits[0]
+    check_html(empty_text)
+    assert "нет активных" in empty_text.lower()
+    print("restore-restrictions confirm with nothing active OK")
 
     tb.stats["section_promos"].pop("global", None)
     tb._broadcast = orig_broadcast
