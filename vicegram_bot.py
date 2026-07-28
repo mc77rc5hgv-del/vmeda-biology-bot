@@ -3770,9 +3770,18 @@ async def maybe_recognize_payment(owner_id: int, message: Message) -> None:
 
 @dp.message(F.photo, F.chat.type == ChatType.PRIVATE, F.from_user.id.in_(ADMIN_IDS))
 async def handle_admin_photo_upload(message: Message):
-    """Админ прислал фото боту напрямую в личку — считаем, что это
-    скриншот оплаты, который нужно распознать (единственное, что бот
-    умеет делать с фото от админа)."""
+    """Админ прислал фото боту напрямую в личку — по умолчанию считаем, что
+    это скриншот оплаты для распознавания. НО если у админа есть незавершённый
+    сценарий, который сам ждёт фото (например, добавление активной заметки
+    с фото-содержимым) — отдаём фото туда, а не перехватываем его здесь.
+    Без этой проверки фото для заметки никогда бы не доходило до
+    process_pending_note_input, так как этот хэндлер зарегистрирован раньше
+    catch-all и aiogram останавливается на первом совпавшем хэндлере."""
+    note_pending = PENDING_NOTE_INPUT.get(message.from_user.id)
+    if note_pending:
+        await process_pending_note_input(message, note_pending)
+        return
+
     status_msg = await message.answer("🧾 Распознаю...")
     tmp_dir = tempfile.mkdtemp(prefix="vg_ocr_")
     try:
