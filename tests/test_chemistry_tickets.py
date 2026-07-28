@@ -47,7 +47,66 @@ def kb_texts(markup):
 def kb_data(markup):
     return [b.callback_data for row in markup.inline_keyboard for b in row]
 
+TEST_UID = 111222333
+
 async def main():
+    uid_str = str(TEST_UID)
+    tb.stats["referrals"][uid_str] = []
+    tb.stats["subscriptions"].pop(uid_str, None)
+    tb.stats["manual_access_granted"] = [x for x in tb.stats["manual_access_granted"] if x != TEST_UID]
+    tb.stats["temporary_access"].pop(uid_str, None)
+
+    # 0. extra restriction: no referrals + no subscription -> every ticket entry point locked,
+    #    even though the general chemistry gate itself would already let this callback through
+    assert not tb.chemistry_tickets_access_ok(TEST_UID)
+    locked_points = [
+        "chemistry_tickets", "chem_theory_tickets", "chem_practice_tickets",
+        "chem_theory_ticket:1", "chem_theory_q:1:0", "chem_practice_ticket:1",
+    ]
+    handlers = {
+        "chemistry_tickets": tb.cb_chemistry_tickets,
+        "chem_theory_tickets": tb.cb_chem_theory_tickets,
+        "chem_practice_tickets": tb.cb_chem_practice_tickets,
+        "chem_theory_ticket:1": tb.cb_chem_theory_ticket,
+        "chem_theory_q:1:0": tb.cb_chem_theory_question,
+        "chem_practice_ticket:1": tb.cb_chem_practice_ticket,
+    }
+    for data in locked_points:
+        cb = FakeCB(data)
+        await handlers[data](cb)
+        assert cb.message.edits, f"{data} did not render a locked screen"
+        text, kb = cb.message.edits[-1]
+        check_html(text)
+        assert f"{tb.REFERRAL_FULL_ACCESS_THRESHOLD} реферала" in text or "реферала или подписка" in text
+        assert "89" in text
+        assert "subscription_menu" in kb_data(kb)
+        assert "referral_info" in kb_data(kb)
+    print("extra restriction locks all 6 ticket entry points without referrals/subscription: OK")
+
+    # 0b. a legacy chemistry-granting subscription priced below 89₽ (retired tier 5, still
+    # grantable programmatically for historical accounts) does NOT satisfy the extra restriction,
+    # even though it does satisfy the ordinary chemistry gate (has_subject_access)
+    tb.grant_subscription(TEST_UID, 5, "rubles", 49, "chemistry")
+    assert tb.has_subject_access(TEST_UID, "chemistry")
+    assert not tb.chemistry_tickets_access_ok(TEST_UID), "a sub priced below 89₽ must not unlock tickets"
+    cb = FakeCB("chemistry_tickets")
+    await tb.cb_chemistry_tickets(cb)
+    text, _ = cb.message.edits[-1]
+    assert "89" in text
+    tb.stats["subscriptions"].pop(uid_str, None)
+    print("sub priced below 89₽ satisfies the general gate but not the ticket restriction: OK")
+
+    # 0c. an active subscription priced >= 89₽ satisfies the extra restriction
+    tb.grant_subscription(TEST_UID, 1, "stars", 89)
+    assert tb.chemistry_tickets_access_ok(TEST_UID)
+    tb.stats["subscriptions"].pop(uid_str, None)
+    print("sub priced >= 89₽ satisfies the ticket restriction: OK")
+
+    # From here on, grant the test user full referral access so the rest of this file exercises
+    # ticket content/navigation exactly as before the extra restriction was added.
+    tb.stats["referrals"][uid_str] = [f"ref{i}" for i in range(tb.REFERRAL_FULL_ACCESS_THRESHOLD)]
+    assert tb.chemistry_tickets_access_ok(TEST_UID)
+
     # 1. chemistry menu exposes the new "Билеты" entry point
     menu_kb = tb.get_chemistry_menu()
     assert "chemistry_tickets" in kb_data(menu_kb)

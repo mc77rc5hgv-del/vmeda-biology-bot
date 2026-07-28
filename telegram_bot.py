@@ -2520,6 +2520,42 @@ def get_chemistry_menu():
     builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
     return builder.as_markup()
 
+def chemistry_tickets_access_ok(user_id: int) -> bool:
+    """Дополнительное, более строгое ограничение только для раздела «Билеты» химии — обычного
+    гейта по предмету (референт REFERRAL_FULL_ACCESS_THRESHOLD рефералов ИЛИ любой доступ к
+    Химии, включая ручной/временный доступ и промо) недостаточно. Сюда пускают только по
+    REFERRAL_FULL_ACCESS_THRESHOLD рефералам либо по активной подписке ценой от 89₽ — то есть
+    ручной/временный доступ и промо-акции ("Снять все ограничения") здесь не считаются."""
+    if is_admin(user_id):
+        return True
+    if get_referral_count(user_id) >= REFERRAL_FULL_ACCESS_THRESHOLD:
+        return True
+    sub = get_subscription(user_id)
+    if sub and has_active_subscription(user_id):
+        cfg = SUBSCRIPTION_TIERS.get(sub.get("tier"), {})
+        if cfg.get("price_rub", 0) >= 89:
+            return True
+    return False
+
+def get_chemistry_tickets_locked_text() -> str:
+    cheapest = cheapest_gated3_tier()
+    return (
+        f"🎫 <b>Билеты по химии</b>\n{DIVIDER}\n\n"
+        f"Раздел закрыт дополнительным условием: нужно {REFERRAL_FULL_ACCESS_THRESHOLD} "
+        f"реферала или подписка от 89₽ (например, «{cheapest['emoji']} {cheapest['title']}» за "
+        f"{cheapest['price_rub']}₽ / {cheapest['price_stars']}⭐) — обычного доступа к Химии для "
+        "билетов недостаточно.\n\n"
+        "Пригласи друзей или оформи подписку, чтобы открыть раздел."
+    )
+
+def get_chemistry_tickets_locked_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="👥 Пригласить друзей", callback_data="referral_info")
+    builder.button(text="💎 Оформить подписку", callback_data="subscription_menu")
+    builder.button(text="🔙 Назад", callback_data="menu_chemistry")
+    builder.adjust(1)
+    return builder.as_markup()
+
 def get_chemistry_tickets_menu():
     builder = InlineKeyboardBuilder()
     builder.button(text="📖 Билеты теории", callback_data="chem_theory_tickets")
@@ -4931,6 +4967,14 @@ async def cb_theory_list(callback: CallbackQuery):
 @dp.callback_query(F.data == "chemistry_tickets")
 async def cb_chemistry_tickets(callback: CallbackQuery):
     await callback.answer()
+    if not chemistry_tickets_access_ok(callback.from_user.id):
+        await safe_edit_text(
+            callback.message,
+            get_chemistry_tickets_locked_text(),
+            parse_mode="HTML",
+            reply_markup=get_chemistry_tickets_locked_keyboard()
+        )
+        return
     await safe_edit_text(
         callback.message,
         f"🎫 <b>Билеты по химии</b>\n{DIVIDER}\n\nВыбери раздел:",
@@ -4941,6 +4985,14 @@ async def cb_chemistry_tickets(callback: CallbackQuery):
 @dp.callback_query(F.data == "chem_theory_tickets")
 async def cb_chem_theory_tickets(callback: CallbackQuery):
     await callback.answer()
+    if not chemistry_tickets_access_ok(callback.from_user.id):
+        await safe_edit_text(
+            callback.message,
+            get_chemistry_tickets_locked_text(),
+            parse_mode="HTML",
+            reply_markup=get_chemistry_tickets_locked_keyboard()
+        )
+        return
     await safe_edit_text(
         callback.message,
         f"📖 <b>Билеты теории</b>\n{DIVIDER}\n\nВыбери билет:",
@@ -4951,6 +5003,14 @@ async def cb_chem_theory_tickets(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("chem_theory_ticket:"))
 async def cb_chem_theory_ticket(callback: CallbackQuery):
     await callback.answer()
+    if not chemistry_tickets_access_ok(callback.from_user.id):
+        await safe_edit_text(
+            callback.message,
+            get_chemistry_tickets_locked_text(),
+            parse_mode="HTML",
+            reply_markup=get_chemistry_tickets_locked_keyboard()
+        )
+        return
     num = callback.data.split(":")[1]
     ticket = CHEMISTRY_THEORY_TICKETS.get(num)
     if not ticket:
@@ -4966,6 +5026,14 @@ async def cb_chem_theory_ticket(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("chem_theory_q:"))
 async def cb_chem_theory_question(callback: CallbackQuery):
     await callback.answer()
+    if not chemistry_tickets_access_ok(callback.from_user.id):
+        await safe_edit_text(
+            callback.message,
+            get_chemistry_tickets_locked_text(),
+            parse_mode="HTML",
+            reply_markup=get_chemistry_tickets_locked_keyboard()
+        )
+        return
     _, num, idx_s = callback.data.split(":")
     idx = int(idx_s)
     ticket = CHEMISTRY_THEORY_TICKETS.get(num)
@@ -4980,6 +5048,14 @@ async def cb_chem_theory_question(callback: CallbackQuery):
 @dp.callback_query(F.data == "chem_practice_tickets")
 async def cb_chem_practice_tickets(callback: CallbackQuery):
     await callback.answer()
+    if not chemistry_tickets_access_ok(callback.from_user.id):
+        await safe_edit_text(
+            callback.message,
+            get_chemistry_tickets_locked_text(),
+            parse_mode="HTML",
+            reply_markup=get_chemistry_tickets_locked_keyboard()
+        )
+        return
     await safe_edit_text(
         callback.message,
         f"🧮 <b>Билеты практики</b>\n{DIVIDER}\n\nВыбери билет:",
@@ -4990,6 +5066,14 @@ async def cb_chem_practice_tickets(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("chem_practice_ticket:"))
 async def cb_chem_practice_ticket(callback: CallbackQuery):
     await callback.answer()
+    if not chemistry_tickets_access_ok(callback.from_user.id):
+        await safe_edit_text(
+            callback.message,
+            get_chemistry_tickets_locked_text(),
+            parse_mode="HTML",
+            reply_markup=get_chemistry_tickets_locked_keyboard()
+        )
+        return
     num = callback.data.split(":")[1]
     ticket = CHEMISTRY_PRACTICE_TICKETS.get(num)
     if not ticket:
