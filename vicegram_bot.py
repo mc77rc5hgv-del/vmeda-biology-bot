@@ -1054,11 +1054,9 @@ def add_active_note(owner_id: int, trigger: str, text: str = None, media_type: s
     conn.close()
 
 
-def remove_active_note(owner_id: int, trigger: str) -> None:
+def remove_active_note_by_rowid(owner_id: int, rowid: int) -> None:
     conn = db_connect()
-    conn.execute(
-        "DELETE FROM active_notes WHERE owner_id = ? AND trigger = ?", (owner_id, trigger.strip().lower())
-    )
+    conn.execute("DELETE FROM active_notes WHERE owner_id = ? AND rowid = ?", (owner_id, rowid))
     conn.commit()
     conn.close()
 
@@ -1066,7 +1064,8 @@ def remove_active_note(owner_id: int, trigger: str) -> None:
 def list_active_notes(owner_id: int):
     conn = db_connect()
     rows = conn.execute(
-        "SELECT trigger, text, media_type FROM active_notes WHERE owner_id = ? ORDER BY trigger", (owner_id,)
+        "SELECT rowid, trigger, text, media_type FROM active_notes WHERE owner_id = ? ORDER BY trigger",
+        (owner_id,),
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
@@ -2277,7 +2276,12 @@ def get_notes_keyboard(notes: list):
     builder = InlineKeyboardBuilder()
     builder.button(text="➕ Добавить заметку", callback_data="notes_add")
     for n in notes:
-        builder.button(text=f"🗑 {n['trigger']}", callback_data=f"notes_del:{n['trigger']}")
+        # callback_data у Telegram ограничен 64 байтами — раньше сюда подставляли
+        # весь триггер целиком, и длинный (или кириллический — 2 байта на символ)
+        # триггер ронял ВСЮ кнопку с ошибкой на стороне Telegram, из-за чего весь
+        # экран заметок переставал открываться. rowid всегда компактный и стабильный.
+        label = n["trigger"] if len(n["trigger"]) <= 30 else n["trigger"][:29] + "…"
+        builder.button(text=f"🗑 {label}", callback_data=f"notes_del:{n['rowid']}")
     builder.button(text="🔙 Назад", callback_data="features_hub")
     builder.adjust(1)
     return builder.as_markup()
@@ -2309,8 +2313,12 @@ async def cb_notes_add(callback: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("notes_del:"))
 async def cb_notes_del(callback: CallbackQuery):
-    trigger = callback.data.split(":", 1)[1]
-    remove_active_note(callback.from_user.id, trigger)
+    try:
+        rowid = int(callback.data.split(":", 1)[1])
+    except ValueError:
+        await callback.answer("Заметка не найдена", show_alert=True)
+        return
+    remove_active_note_by_rowid(callback.from_user.id, rowid)
     await callback.answer("🗑 Удалено")
     notes = list_active_notes(callback.from_user.id)
     await callback.message.edit_text(
@@ -2326,6 +2334,9 @@ async def process_pending_note_input(message: Message, pending: dict) -> bool:
     if stage == "trigger":
         if not message.text:
             await message.answer("⚠️ Пришли текстовую фразу-триггер.")
+            return True
+        if len(message.text) > 200:
+            await message.answer("⚠️ Слишком длинная фраза-триггер (максимум 200 символов). Сократи её.")
             return True
         PENDING_NOTE_INPUT[owner_id] = {"stage": "content", "trigger": message.text}
         await message.answer("📎 Теперь пришли текст или фото — это будет содержимым заметки.")
