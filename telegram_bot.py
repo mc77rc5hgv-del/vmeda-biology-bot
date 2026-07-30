@@ -7168,11 +7168,14 @@ async def cb_anatomy_exam_practice_section(callback: CallbackQuery):
 
 def get_anatomy_exam_practice_question_text(section: dict, num: int) -> str:
     question = next(q for q in section["questions"] if q["num"] == num)
-    img = question["image"]
+    credits = []
+    for img in question["images"]:
+        if img["credit"] not in credits:
+            credits.append(img["credit"])
     return (
         f"🖐 <b>Вопрос {num}/{len(section['questions'])}</b>\n\n{DIVIDER}\n\n"
         f"<b>{question['question']}</b>\n\n{DIVIDER}\n\n{question['answer']}\n\n"
-        f"<i>Источник фото: {img['credit']}</i>"
+        f"<i>Источник фото: {'; '.join(credits)}</i>"
     )
 
 def get_anatomy_exam_practice_question_keyboard(section_id: int, num: int, total: int):
@@ -7204,9 +7207,21 @@ async def cb_anatomy_exam_practice_question(callback: CallbackQuery):
 
     body = get_anatomy_exam_practice_question_text(section, num)
     keyboard = get_anatomy_exam_practice_question_keyboard(section_id, num, len(section["questions"]))
-    img = question["image"]
-    photo = _anatomy_image_media(img)
+    images = question["images"]
     await callback.message.delete()
+
+    if len(images) > 1:
+        # sendMediaGroup can't carry a reply_markup, so the album is followed by a
+        # separate text message with the full Q&A and nav buttons (mirrors send_anatomy_album).
+        media = [InputMediaPhoto(media=_anatomy_image_media(img)) for img in images]
+        sent_list = await callback.message.answer_media_group(media=media)
+        for img, sent in zip(images, sent_list):
+            _cache_anatomy_file_id(img, sent)
+        await callback.message.answer(body, parse_mode="HTML", reply_markup=keyboard)
+        return
+
+    img = images[0]
+    photo = _anatomy_image_media(img)
 
     if len(body) <= CAPTION_LIMIT:
         sent = await callback.message.answer_photo(photo, caption=body, parse_mode="HTML", reply_markup=keyboard)

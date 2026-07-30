@@ -33,6 +33,7 @@ class FakeMsg:
     def __init__(self):
         self.edits = []
         self.photos = []
+        self.media_groups = []
         self.deleted = False
     async def edit_text(self, text, **kwargs):
         self.edits.append((text, kwargs.get("reply_markup")))
@@ -47,6 +48,9 @@ class FakeMsg:
         new_msg = FakeMsg()
         new_msg.photos.append((photo, kwargs.get("caption"), kwargs.get("reply_markup")))
         return new_msg
+    async def answer_media_group(self, media, **kwargs):
+        self.media_groups.append(media)
+        return [FakeMsg() for _ in media]
 
 class FakeCB:
     def __init__(self, data, uid=NON_ADMIN):
@@ -86,14 +90,16 @@ async def main():
             seen_nums.add(q["num"])
             check_html(q["question"])
             check_html(q["answer"])
-            img = q["image"]
-            assert img.get("caption") and img.get("credit")
-            assert ("path" in img) != ("url" in img), "image needs exactly one of path/url"
-            if "path" in img:
-                full_path = os.path.join(tb.ANATOMY_IMAGES_DIR, img["path"])
-                assert os.path.exists(full_path), full_path
-            else:
-                assert img["url"].startswith("https://"), img["url"]
+            images = q["images"]
+            assert images, (s["id"], q["num"])
+            for img in images:
+                assert img.get("caption") and img.get("credit")
+                assert ("path" in img) != ("url" in img), "image needs exactly one of path/url"
+                if "path" in img:
+                    full_path = os.path.join(tb.ANATOMY_IMAGES_DIR, img["path"])
+                    assert os.path.exists(full_path), full_path
+                else:
+                    assert img["url"].startswith("https://"), img["url"]
             # combined question+answer as rendered on the detail screen must fit one message
             combined = tb.get_anatomy_exam_practice_question_text(s, q["num"])
             check_html(combined)
@@ -149,19 +155,29 @@ async def main():
             cb3 = FakeCB(f"anatomy_exam_practice_q:{section_id}:{num}", uid=NON_ADMIN)
             await tb.cb_anatomy_exam_practice_question(cb3)
             assert cb3.message.deleted
-            assert cb3.message.photos, (section_id, num)
-            photo, caption, markup = cb3.message.photos[-1]
             q = next(qq for qq in s["questions"] if qq["num"] == num)
-            if markup is not None:
-                # combined single-message case: keyboard is attached directly to the photo
-                nav_data = kb_data(markup)
-            else:
-                # split case: keyboard is on the follow-up text message instead
+            if len(q["images"]) > 1:
+                # album case: images have no caption/keyboard, text+nav follows separately
+                assert cb3.message.media_groups, (section_id, num)
+                assert len(cb3.message.media_groups[-1]) == len(q["images"])
                 assert cb3.message.edits, (section_id, num)
                 nav_text, nav_markup = cb3.message.edits[-1]
                 assert q["question"] in nav_text and q["answer"] in nav_text
                 check_html(nav_text)
                 nav_data = kb_data(nav_markup)
+            else:
+                assert cb3.message.photos, (section_id, num)
+                photo, caption, markup = cb3.message.photos[-1]
+                if markup is not None:
+                    # combined single-message case: keyboard is attached directly to the photo
+                    nav_data = kb_data(markup)
+                else:
+                    # split case: keyboard is on the follow-up text message instead
+                    assert cb3.message.edits, (section_id, num)
+                    nav_text, nav_markup = cb3.message.edits[-1]
+                    assert q["question"] in nav_text and q["answer"] in nav_text
+                    check_html(nav_text)
+                    nav_data = kb_data(nav_markup)
             if num > 1:
                 assert f"anatomy_exam_practice_q:{section_id}:{num - 1}" in nav_data
             else:
