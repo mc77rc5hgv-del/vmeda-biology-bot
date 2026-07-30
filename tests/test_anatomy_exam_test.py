@@ -109,13 +109,13 @@ async def main():
     assert "anatomy_root" in exam_data
     print("anatomy_exam_menu renders practice/theory/test entries: OK")
 
-    # 5. practice/theory are stubs — alert, no crash, no gating (free for everyone)
-    for cb_data in ("anatomy_exam_practice", "anatomy_exam_theory"):
-        cb4 = FakeCB(cb_data)
-        await getattr(tb, f"cb_{cb_data}")(cb4)
-        assert not cb4.message.edits
-        assert cb4._answers and cb4._answers[0][1] is True
-    print("Вопросы практики / Вопросы теории stubs: alert, no crash: OK")
+    # 5. practice is still a stub — alert, no crash, no gating (free for everyone).
+    # Вопросы теории is now a real feature — see test_anatomy_exam_theory.py.
+    cb4 = FakeCB("anatomy_exam_practice")
+    await tb.cb_anatomy_exam_practice(cb4)
+    assert not cb4.message.edits
+    assert cb4._answers and cb4._answers[0][1] is True
+    print("Вопросы практики stub: alert, no crash: OK")
 
     # 6. ТЕСТ part list shows all 10 parts, free for a non-admin user
     cb5 = FakeCB("anatomy_exam_test_menu", uid=NON_ADMIN)

@@ -94,6 +94,9 @@ with open("anatomy.json", "r", encoding="utf-8") as f:
 with open("anatomy_exam_test.json", "r", encoding="utf-8") as f:
     ANATOMY_EXAM_TEST_PARTS = json.load(f)["parts"]
 
+with open("anatomy_exam_theory.json", "r", encoding="utf-8") as f:
+    ANATOMY_EXAM_THEORY_SECTIONS = json.load(f)["sections"]
+
 with open("histology.json", "r", encoding="utf-8") as f:
     HISTOLOGY = json.load(f)
 
@@ -7105,9 +7108,100 @@ async def cb_anatomy_exam_menu(callback: CallbackQuery):
 async def cb_anatomy_exam_practice(callback: CallbackQuery):
     await callback.answer("🚧 Вопросы практики скоро появятся здесь", show_alert=True)
 
+def get_anatomy_exam_theory_section(section_id: int):
+    return next((s for s in ANATOMY_EXAM_THEORY_SECTIONS if s["id"] == section_id), None)
+
+def get_anatomy_exam_theory_section_keyboard():
+    builder = InlineKeyboardBuilder()
+    for section in ANATOMY_EXAM_THEORY_SECTIONS:
+        count = len(section["questions"])
+        prefix = "" if count else "🚧 "
+        builder.button(
+            text=f"{prefix}{section['title']} ({count})" if count else f"{prefix}{section['title']} — скоро",
+            callback_data=f"anatomy_exam_theory_section:{section['id']}"
+        )
+    builder.adjust(1)
+    builder.row(InlineKeyboardButton(text="🔙 К экзамену", callback_data="anatomy_exam_menu"))
+    return builder.as_markup()
+
 @dp.callback_query(F.data == "anatomy_exam_theory")
 async def cb_anatomy_exam_theory(callback: CallbackQuery):
-    await callback.answer("🚧 Вопросы теории скоро появятся здесь", show_alert=True)
+    await callback.answer()
+    total = sum(len(s["questions"]) for s in ANATOMY_EXAM_THEORY_SECTIONS)
+    await safe_edit_text(
+        callback.message,
+        f"📖 <b>Вопросы теории</b>\n{DIVIDER}\n\n"
+        f"Официальный перечень теоретических вопросов к экзамену по анатомии человека "
+        f"(лечебное дело), утверждённый кафедрой нормальной анатомии ВМедА — {total} вопросов "
+        f"в 4 разделах. Ответы составлены по учебнику И.В. Гайворонского.\n\n"
+        "Бесплатно для всех, без ограничений.\n\nВыбери раздел:",
+        parse_mode="HTML",
+        reply_markup=get_anatomy_exam_theory_section_keyboard()
+    )
+
+def get_anatomy_exam_theory_question_list_keyboard(section_id: int):
+    section = get_anatomy_exam_theory_section(section_id)
+    builder = InlineKeyboardBuilder()
+    for q in section["questions"]:
+        label = q["question"] if len(q["question"]) <= 50 else q["question"][:49] + "…"
+        builder.button(text=f"{q['num']}. {label}", callback_data=f"anatomy_exam_theory_q:{section_id}:{q['num']}")
+    builder.adjust(1)
+    builder.row(InlineKeyboardButton(text="🔙 К разделам", callback_data="anatomy_exam_theory"))
+    return builder.as_markup()
+
+@dp.callback_query(F.data.startswith("anatomy_exam_theory_section:"))
+async def cb_anatomy_exam_theory_section(callback: CallbackQuery):
+    section_id = int(callback.data.split(":")[1])
+    section = get_anatomy_exam_theory_section(section_id)
+    if not section:
+        await callback.answer("Раздел не найден", show_alert=True)
+        return
+    if not section["questions"]:
+        await callback.answer("🚧 Этот раздел пока в разработке", show_alert=True)
+        return
+    await callback.answer()
+    await safe_edit_text(
+        callback.message,
+        f"📖 <b>{section['title']}</b>\n{DIVIDER}\n\nВыбери вопрос ({len(section['questions'])}):",
+        parse_mode="HTML",
+        reply_markup=get_anatomy_exam_theory_question_list_keyboard(section_id)
+    )
+
+def get_anatomy_exam_theory_question_text(section: dict, num: int) -> str:
+    question = next(q for q in section["questions"] if q["num"] == num)
+    return (
+        f"📖 <b>Вопрос {num}/{len(section['questions'])}</b>\n\n{DIVIDER}\n\n"
+        f"<b>{question['question']}</b>\n\n{DIVIDER}\n\n{question['answer']}"
+    )
+
+def get_anatomy_exam_theory_question_keyboard(section_id: int, num: int, total: int):
+    builder = InlineKeyboardBuilder()
+    nav = []
+    if num > 1:
+        nav.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"anatomy_exam_theory_q:{section_id}:{num - 1}"))
+    if num < total:
+        nav.append(InlineKeyboardButton(text="Вперёд ➡️", callback_data=f"anatomy_exam_theory_q:{section_id}:{num + 1}"))
+    if nav:
+        builder.row(*nav)
+    builder.row(InlineKeyboardButton(text="📋 Список вопросов", callback_data=f"anatomy_exam_theory_section:{section_id}"))
+    builder.row(InlineKeyboardButton(text="🔙 К разделам", callback_data="anatomy_exam_theory"))
+    return builder.as_markup()
+
+@dp.callback_query(F.data.startswith("anatomy_exam_theory_q:"))
+async def cb_anatomy_exam_theory_question(callback: CallbackQuery):
+    _, section_id_str, num_str = callback.data.split(":")
+    section_id, num = int(section_id_str), int(num_str)
+    section = get_anatomy_exam_theory_section(section_id)
+    if not section or not any(q["num"] == num for q in section["questions"]):
+        await callback.answer("Вопрос не найден", show_alert=True)
+        return
+    await callback.answer()
+    await safe_edit_text(
+        callback.message,
+        get_anatomy_exam_theory_question_text(section, num),
+        parse_mode="HTML",
+        reply_markup=get_anatomy_exam_theory_question_keyboard(section_id, num, len(section["questions"]))
+    )
 
 # ---- ТЕСТ: 1040 вопросов официального сборника кафедры нормальной анатомии ВМедА
 # (Гайворонский и др., 2021), разбитые на 10 частей — 5 по «Базовой части», 5 по
