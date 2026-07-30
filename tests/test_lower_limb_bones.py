@@ -120,12 +120,12 @@ async def main():
     assert not cb_mnemo.message.edits
     print("empty images/flashcards/matching/mnemonics degrade gracefully (no crash): OK")
 
-    # 6. non-admin blocked (ANATOMY_PUBLIC=False, no subscription)
+    # 6. non-admin has free access (osteology, incl. lower_limb_skeleton, is in ANATOMY_FREE_SECTIONS)
     non_admin = 918273645
     cb_na = FakeCB("anatomy_topic:lower_limb_skeleton", uid=non_admin)
     await tb.cb_anatomy_topic(cb_na)
-    assert not cb_na.message.edits
-    print("non-admin blocked on lower_limb_skeleton: OK")
+    assert cb_na.message.edits
+    print("non-admin has free access to lower_limb_skeleton (osteology is free-tier): OK")
 
     # 7. the "Кости черепа" hardcoded label bug is fixed for non-skull topics
     kb_trunk = tb.get_anatomy_topic_keyboard("axial_skeleton")

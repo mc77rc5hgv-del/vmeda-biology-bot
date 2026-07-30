@@ -87,17 +87,18 @@ async def main():
     print(f"distractor fallback for a sparse bone ({sparse_bone}, {bone_counts[sparse_bone]} terms): OK")
 
     # ---- anatomy_menu shows both the quiz and leaderboard buttons ----
-    kb = tb.get_anatomy_menu_keyboard()
+    kb = tb.get_anatomy_menu_keyboard(ADMIN_ID)
     data = [b.callback_data for row in kb.inline_keyboard for b in row]
     assert "anatomy_latin_all_start" in data, "main menu missing global latin quiz button"
     assert "anatomy_latin_leaderboard" in data, "main menu missing latin leaderboard button"
     print("anatomy_menu buttons OK")
 
-    # ---- access control ----
+    # ---- the global quiz is free for everyone (its data is currently pooled only from
+    # osteology, which is a free-tier module in the anatomy funnel) ----
     cb = FakeCB("anatomy_latin_all_start", uid=123456789)
     await tb.cb_anatomy_latin_all_start(cb)
-    assert not cb.message.edits and cb._answers and cb._answers[0][1] is True
-    print("access-control OK")
+    assert cb.message.edits
+    print("global latin quiz free for non-admin: OK")
 
     # ---- starting a session samples ANATOMY_LATIN_ALL_SESSION_SIZE terms, all_terms is the global pool ----
     uid1 = fresh_uid()

@@ -806,7 +806,7 @@ def get_referral_leaderboard_text(user_id: int = None) -> str:
     return "\n".join(lines)
 
 # ==================== БИТВА РЕФЕРАЛОВ (ЛИМИТИРОВАННОЕ СОРЕВНОВАНИЕ) ====================
-BATTLE_DURATION_SECONDS = 24 * 60 * 60
+BATTLE_DURATION_SECONDS = 7 * 24 * 60 * 60
 BATTLE_PLACE_COUNT = 5
 BATTLE_PLACE_ICONS = ["🥇", "🥈", "🥉", "🏅", "🎖"]
 
@@ -904,9 +904,21 @@ def resolve_battle_winners() -> list:
 
 def format_time_left(seconds: float) -> str:
     seconds = max(int(seconds), 0)
-    h, rem = divmod(seconds, 3600)
+    d, rem = divmod(seconds, 86400)
+    h, rem = divmod(rem, 3600)
     m = rem // 60
+    if d > 0:
+        return f"{d}д {h}ч"
     return f"{h}ч {m}мин"
+
+def format_battle_duration() -> str:
+    days = BATTLE_DURATION_SECONDS // 86400
+    if days == 7:
+        return "неделю"
+    if days > 0:
+        return f"{days} дней"
+    hours = BATTLE_DURATION_SECONDS // 3600
+    return f"{hours} часов"
 
 def start_referral_battle() -> None:
     now = time.time()
@@ -946,13 +958,13 @@ def get_battle_text(user_id: int) -> str:
                 "Сейчас битва не идёт. Результаты последней битвы:\n\n"
                 f"{results_block}\n\n"
                 "Следи за объявлениями — как только стартует новая битва, "
-                "у тебя будет 24 часа, чтобы побороться за призы:\n\n"
+                f"у тебя будет {format_battle_duration()}, чтобы побороться за призы:\n\n"
                 f"{format_battle_prizes_block()}"
             )
         return (
             f"⚔️ <b>Битва рефералов</b>\n{DIVIDER}\n\n"
             "Сейчас битва не идёт. Следи за объявлениями — как только стартует новая, "
-            "у тебя будет 24 часа, чтобы побороться за призы:\n\n"
+            f"у тебя будет {format_battle_duration()}, чтобы побороться за призы:\n\n"
             f"{format_battle_prizes_block()}"
         )
     battle = stats["referral_battle"]
@@ -1020,7 +1032,7 @@ async def announce_battle_start() -> None:
     text = (
         "⚔️🔥 <b>СТАРТУЕТ БИТВА РЕФЕРАЛОВ!</b> 🔥⚔️\n"
         f"{DIVIDER}\n\n"
-        "У тебя есть <b>24 часа</b>, чтобы пригласить в бота как можно больше друзей "
+        f"У тебя есть <b>{format_battle_duration()}</b>, чтобы пригласить в бота как можно больше друзей "
         "и забрать один из пяти эксклюзивных призов:\n\n"
         f"{format_battle_prizes_block()}\n\n"
         f"{DIVIDER}\n\n"
@@ -2066,14 +2078,12 @@ def get_main_menu(user_id: int = None):
     builder.button(text="🧪 Химия", callback_data="menu_chemistry")
     sub_anatomy = user_id is not None and has_subscription_anatomy_access(user_id)
     sub_histology = user_id is not None and has_subscription_histology_access(user_id)
-    if ANATOMY_PUBLIC:
-        anatomy_label = "🦴 Анатомия"
-    elif user_id is not None and is_admin(user_id):
+    if user_id is not None and is_admin(user_id):
         anatomy_label = "🦴 Анатомия (админ)"
     elif sub_anatomy:
         anatomy_label = "🦴 Анатомия 💎"
     else:
-        anatomy_label = "🦴 Анатомия (в разработке)"
+        anatomy_label = "🦴 Анатомия"
     builder.button(text=anatomy_label, callback_data="anatomy_menu")
     if HISTOLOGY_PUBLIC:
         histology_label = "🔬 Гистология"
@@ -2921,7 +2931,7 @@ def get_admin_battle_keyboard():
         builder.button(text="📣 Разослать напоминание о битве", callback_data="admin_battle_remind_confirm")
         builder.button(text="🛑 Завершить досрочно", callback_data="admin_battle_end_confirm")
     else:
-        builder.button(text="🚀 Начать битву рефералов (24ч)", callback_data="admin_battle_start_confirm")
+        builder.button(text="🚀 Начать битву рефералов (неделя)", callback_data="admin_battle_start_confirm")
     battle = stats.get("referral_battle")
     if battle and battle.get("results") is not None:
         builder.button(text="🏁 Итоги последней битвы (для публикации)", callback_data="admin_battle_last_results")
@@ -2950,7 +2960,7 @@ def get_admin_battle_text() -> str:
     return (
         f"⚔️ <b>Битва рефералов</b>\n{DIVIDER}\n\n"
         "Сейчас битва не идёт.\n\n"
-        "Запусти битву на 24 часа — топ-5 пользователей по числу приглашённых друзей за это время "
+        f"Запусти битву на {format_battle_duration()} — топ-5 пользователей по числу приглашённых друзей за это время "
         f"получат призы:\n\n{format_battle_prizes_block()}\n\n"
         "Всем пользователям бота придёт рассылка с объявлением о старте и правилах."
     )
@@ -3072,13 +3082,13 @@ async def cb_admin_battle_start_confirm(callback: CallbackQuery):
         return
     await callback.answer()
     builder = InlineKeyboardBuilder()
-    builder.button(text="✅ Да, начать битву на 24ч", callback_data="admin_battle_start_go")
+    builder.button(text="✅ Да, начать битву на неделю", callback_data="admin_battle_start_go")
     builder.button(text="❌ Отмена", callback_data="admin_battle_menu")
     builder.adjust(1)
     await safe_edit_text(
         callback.message,
         "⚔️ <b>Подтверди запуск битвы рефералов</b>\n\n"
-        "Битва продлится 24 часа, топ-5 по числу новых приглашённых получат призы:\n\n"
+        f"Битва продлится {format_battle_duration()}, топ-5 по числу новых приглашённых получат призы:\n\n"
         f"{format_battle_prizes_block()}\n\nВсем пользователям придёт рассылка с объявлением.",
         parse_mode="HTML",
         reply_markup=builder.as_markup()
@@ -5773,12 +5783,33 @@ def anatomy_access_ok(user_id: int) -> bool:
         or user_id in stats["manual_anatomy_demo_granted"]
     )
 
+# Free-funnel split: одна половина модулей открыта всем без каких-либо условий (даже без
+# рефералов), чтобы привлечь как можно больше пользователей и показать им возможности бота;
+# вторая половина остаётся платной — на неё покупают подписку уже вовлечённые пользователи.
+# Free-модули выбраны так, чтобы покрыть базовую системную анатомию (скелет, мышцы, органы,
+# железы), а платные — самые объёмные/клинически нагруженные разделы (нервная и
+# сердечно-сосудистая системы) + бонусный клинический модуль.
+ANATOMY_FREE_SECTIONS = {
+    "module1_osteology",
+    "module2_syndesmology",
+    "module3_myology",
+    "module4_digestive",
+    "module5_respiratory",
+    "module6_urogenital",
+    "module9_endocrine",
+}
+
+def anatomy_section_access_ok(user_id: int, section_key: str) -> bool:
+    if section_key in ANATOMY_FREE_SECTIONS:
+        return True
+    return anatomy_access_ok(user_id)
+
 def get_anatomy_dev_alert_text() -> str:
     # Telegram ограничивает текст всплывающего алерта ~200 символами — показываем только
     # самый дешёвый подходящий тариф, полный список смотрят в «💎 Подписка».
     cheapest = cheapest_anatomy_tier()
     return (
-        f"🦴 Анатомия ещё в разработке. Доступна по подписке от «{cheapest['short']}» "
+        f"🔒 Этот раздел Анатомии — по подписке от «{cheapest['short']}» "
         f"({cheapest['price_rub']}₽/{cheapest['price_stars']}⭐) — полный список в «💎 Подписка» 💎"
     )
 
@@ -5795,30 +5826,35 @@ def get_topic_section_key(topic_key: str) -> str:
             return section_key
     return next(iter(ANATOMY), "osteology")
 
-def get_anatomy_locked_text() -> str:
+def get_anatomy_locked_text(section_key: str | None = None) -> str:
     tier_lines = " или ".join(
         f"«{cfg['emoji']} {cfg['title']}» ({cfg['price_rub']}₽ / {cfg['price_stars']}⭐)"
         for cfg in ACTIVE_SUBSCRIPTION_TIERS.values() if cfg.get("anatomy")
     )
+    section = ANATOMY.get(section_key) if section_key else None
+    title = section["title"] if section else "Анатомия"
+    free_titles = ", ".join(ANATOMY[k]["title"] for k in ANATOMY if k in ANATOMY_FREE_SECTIONS)
     return (
-        f"🦴 <b>Анатомия</b>\n{DIVIDER}\n\n"
-        "🚧 Раздел ещё в разработке — сейчас идёт работа над материалом.\n\n"
-        f"Уже сейчас можно получить ранний доступ по подписке {tier_lines} — подписчики "
-        "этих тарифов откроют раздел раньше всех, как только он будет готов.\n\n"
-        "А пока доступны Биология, Физика, Химия и полностью готовая Гистология."
+        f"🦴 <b>{title}</b>\n{DIVIDER}\n\n"
+        "🔒 Этот раздел анатомии доступен по подписке.\n\n"
+        f"Оформи подписку {tier_lines}, чтобы открыть его.\n\n"
+        f"А бесплатно уже сейчас доступны: {free_titles} — загляни в меню «🦴 Анатомия»."
     )
 
 def get_anatomy_locked_keyboard():
     builder = InlineKeyboardBuilder()
     builder.button(text="💎 Оформить подписку", callback_data="subscription_menu")
-    builder.button(text="🔙 Назад в меню", callback_data="back_to_main")
+    builder.button(text="🔙 В меню Анатомии", callback_data="anatomy_menu")
     builder.adjust(1)
     return builder.as_markup()
 
-def get_anatomy_menu_keyboard():
+def get_anatomy_menu_keyboard(user_id: int):
     builder = InlineKeyboardBuilder()
     for section_key, section in ANATOMY.items():
-        builder.button(text=section.get("menu_title", section["title"]), callback_data=f"anatomy_section:{section_key}")
+        label = section.get("menu_title", section["title"])
+        if not anatomy_section_access_ok(user_id, section_key):
+            label = f"🔒 {label}"
+        builder.button(text=label, callback_data=f"anatomy_section:{section_key}")
     if get_all_latin_terms():
         builder.button(text="🏛 Тест по латинским терминам", callback_data="anatomy_latin_all_start")
         builder.button(text="🏆 Рейтинг по латыни", callback_data="anatomy_latin_leaderboard")
@@ -6451,21 +6487,14 @@ def get_bone_mnemonic_text(topic_key: str, bone_id: str, idx: int) -> str:
 # ---- Хендлеры ----
 @dp.callback_query(F.data == "anatomy_menu")
 async def cb_anatomy_menu(callback: CallbackQuery):
-    if not anatomy_access_ok(callback.from_user.id):
-        await callback.answer()
-        await safe_edit_text(
-            callback.message,
-            get_anatomy_locked_text(),
-            parse_mode="HTML",
-            reply_markup=get_anatomy_locked_keyboard()
-        )
-        return
     await callback.answer()
     await safe_edit_text(
         callback.message,
-        f"🦴 <b>Анатомия</b>\n{DIVIDER}\n\nВыбери подраздел:",
+        f"🦴 <b>Анатомия</b>\n{DIVIDER}\n\n"
+        "Часть разделов открыта бесплатно для всех, часть — по подписке (отмечены 🔒).\n\n"
+        "Выбери подраздел:",
         parse_mode="HTML",
-        reply_markup=get_anatomy_menu_keyboard()
+        reply_markup=get_anatomy_menu_keyboard(callback.from_user.id)
     )
 
 def get_anatomy_video_text(entry: dict, title: str) -> str:
@@ -6479,13 +6508,19 @@ def get_anatomy_video_text(entry: dict, title: str) -> str:
 
 @dp.callback_query(F.data.startswith("anatomy_section:"))
 async def cb_anatomy_section(callback: CallbackQuery):
-    if not anatomy_access_ok(callback.from_user.id):
-        await callback.answer(get_anatomy_dev_alert_text(), show_alert=True)
-        return
     section_key = callback.data.split(":")[1]
     section = ANATOMY.get(section_key)
     if not section:
         await callback.answer("Раздел не найден", show_alert=True)
+        return
+    if not anatomy_section_access_ok(callback.from_user.id, section_key):
+        await callback.answer()
+        await safe_edit_text(
+            callback.message,
+            get_anatomy_locked_text(section_key),
+            parse_mode="HTML",
+            reply_markup=get_anatomy_locked_keyboard()
+        )
         return
     await callback.answer()
     await safe_edit_text(
@@ -6497,10 +6532,10 @@ async def cb_anatomy_section(callback: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("anatomy_section_video:"))
 async def cb_anatomy_section_video(callback: CallbackQuery):
-    if not anatomy_access_ok(callback.from_user.id):
+    section_key = callback.data.split(":")[1]
+    if not anatomy_section_access_ok(callback.from_user.id, section_key):
         await callback.answer(get_anatomy_dev_alert_text(), show_alert=True)
         return
-    section_key = callback.data.split(":")[1]
     section = ANATOMY.get(section_key)
     if not section or not section.get("video"):
         await callback.answer("Видео не найдено", show_alert=True)
@@ -6517,10 +6552,10 @@ async def cb_anatomy_section_video(callback: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("anatomy_topic:"))
 async def cb_anatomy_topic(callback: CallbackQuery):
-    if not anatomy_access_ok(callback.from_user.id):
+    topic_key = callback.data.split(":")[1]
+    if not anatomy_section_access_ok(callback.from_user.id, get_topic_section_key(topic_key)):
         await callback.answer(get_anatomy_dev_alert_text(), show_alert=True)
         return
-    topic_key = callback.data.split(":")[1]
     topic = get_anatomy_topic_data(topic_key)
     if not topic:
         await callback.answer("Тема не найдена", show_alert=True)
@@ -6539,10 +6574,10 @@ async def cb_anatomy_topic(callback: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("anatomy_topic_video:"))
 async def cb_anatomy_topic_video(callback: CallbackQuery):
-    if not anatomy_access_ok(callback.from_user.id):
+    topic_key = callback.data.split(":")[1]
+    if not anatomy_section_access_ok(callback.from_user.id, get_topic_section_key(topic_key)):
         await callback.answer(get_anatomy_dev_alert_text(), show_alert=True)
         return
-    topic_key = callback.data.split(":")[1]
     topic = get_anatomy_topic_data(topic_key)
     if not topic or not topic.get("video"):
         await callback.answer("Видео не найдено", show_alert=True)
@@ -6562,10 +6597,10 @@ async def cb_anatomy_topic_video(callback: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("anatomy_bones:"))
 async def cb_anatomy_bones(callback: CallbackQuery):
-    if not anatomy_access_ok(callback.from_user.id):
+    topic_key = callback.data.split(":")[1]
+    if not anatomy_section_access_ok(callback.from_user.id, get_topic_section_key(topic_key)):
         await callback.answer(get_anatomy_dev_alert_text(), show_alert=True)
         return
-    topic_key = callback.data.split(":")[1]
     topic = get_anatomy_topic_data(topic_key)
     if not topic:
         await callback.answer("Тема не найдена", show_alert=True)
@@ -6580,10 +6615,10 @@ async def cb_anatomy_bones(callback: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("anatomy_bone_hub:"))
 async def cb_anatomy_bone_hub(callback: CallbackQuery):
-    if not anatomy_access_ok(callback.from_user.id):
+    _, topic_key, bone_id = callback.data.split(":")
+    if not anatomy_section_access_ok(callback.from_user.id, get_topic_section_key(topic_key)):
         await callback.answer(get_anatomy_dev_alert_text(), show_alert=True)
         return
-    _, topic_key, bone_id = callback.data.split(":")
     topic = get_anatomy_topic_data(topic_key)
     if not topic:
         await callback.answer("Тема не найдена", show_alert=True)
@@ -6598,10 +6633,10 @@ async def cb_anatomy_bone_hub(callback: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("anatomy_bone_material:"))
 async def cb_anatomy_bone_material(callback: CallbackQuery):
-    if not anatomy_access_ok(callback.from_user.id):
+    _, topic_key, bone_id, idx_s = callback.data.split(":")
+    if not anatomy_section_access_ok(callback.from_user.id, get_topic_section_key(topic_key)):
         await callback.answer(get_anatomy_dev_alert_text(), show_alert=True)
         return
-    _, topic_key, bone_id, idx_s = callback.data.split(":")
     idx = int(idx_s)
     pages = get_bone_material_list(topic_key, bone_id)
     if not pages or not (0 <= idx < len(pages)):
@@ -6617,10 +6652,10 @@ async def cb_anatomy_bone_material(callback: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("anatomy_bone_slides:"))
 async def cb_anatomy_bone_slides(callback: CallbackQuery):
-    if not anatomy_access_ok(callback.from_user.id):
+    _, topic_key, bone_id, page_s = callback.data.split(":")
+    if not anatomy_section_access_ok(callback.from_user.id, get_topic_section_key(topic_key)):
         await callback.answer(get_anatomy_dev_alert_text(), show_alert=True)
         return
-    _, topic_key, bone_id, page_s = callback.data.split(":")
     page = int(page_s)
     images = get_bone_images(topic_key, bone_id, kind="slides")
     if not images or not (0 <= page < anatomy_page_count(len(images))):
@@ -6637,10 +6672,10 @@ async def cb_anatomy_bone_slides(callback: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("anatomy_bone_atlas:"))
 async def cb_anatomy_bone_atlas(callback: CallbackQuery):
-    if not anatomy_access_ok(callback.from_user.id):
+    _, topic_key, bone_id, page_s = callback.data.split(":")
+    if not anatomy_section_access_ok(callback.from_user.id, get_topic_section_key(topic_key)):
         await callback.answer(get_anatomy_dev_alert_text(), show_alert=True)
         return
-    _, topic_key, bone_id, page_s = callback.data.split(":")
     page = int(page_s)
     images = get_bone_images(topic_key, bone_id, kind="atlas")
     if not images or not (0 <= page < anatomy_page_count(len(images))):
@@ -6657,10 +6692,10 @@ async def cb_anatomy_bone_atlas(callback: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("anatomy_atlas:"))
 async def cb_anatomy_atlas(callback: CallbackQuery):
-    if not anatomy_access_ok(callback.from_user.id):
+    _, topic_key, page_s = callback.data.split(":")
+    if not anatomy_section_access_ok(callback.from_user.id, get_topic_section_key(topic_key)):
         await callback.answer(get_anatomy_dev_alert_text(), show_alert=True)
         return
-    _, topic_key, page_s = callback.data.split(":")
     page = int(page_s)
     images = get_topic_atlas_images(topic_key)
     if not images or not (0 <= page < anatomy_page_count(len(images))):
@@ -6677,10 +6712,10 @@ async def cb_anatomy_atlas(callback: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("anatomy_bone_flash_start:"))
 async def cb_anatomy_bone_flash_start(callback: CallbackQuery):
-    if not anatomy_access_ok(callback.from_user.id):
+    _, topic_key, bone_id = callback.data.split(":")
+    if not anatomy_section_access_ok(callback.from_user.id, get_topic_section_key(topic_key)):
         await callback.answer(get_anatomy_dev_alert_text(), show_alert=True)
         return
-    _, topic_key, bone_id = callback.data.split(":")
     topic = get_anatomy_topic_data(topic_key)
     if not topic or not get_bone_flashcards(topic_key, bone_id):
         await callback.answer("Карточки для этой кости ещё не добавлены", show_alert=True)
@@ -6691,10 +6726,10 @@ async def cb_anatomy_bone_flash_start(callback: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("anatomy_bone_match_start:"))
 async def cb_anatomy_bone_match_start(callback: CallbackQuery):
-    if not anatomy_access_ok(callback.from_user.id):
+    _, topic_key, bone_id = callback.data.split(":")
+    if not anatomy_section_access_ok(callback.from_user.id, get_topic_section_key(topic_key)):
         await callback.answer(get_anatomy_dev_alert_text(), show_alert=True)
         return
-    _, topic_key, bone_id = callback.data.split(":")
     topic = get_anatomy_topic_data(topic_key)
     if not topic or not get_bone_pairs(topic_key, bone_id):
         await callback.answer("Пары для этой кости ещё не добавлены", show_alert=True)
@@ -6705,10 +6740,10 @@ async def cb_anatomy_bone_match_start(callback: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("anatomy_bone_latin_start:"))
 async def cb_anatomy_bone_latin_start(callback: CallbackQuery):
-    if not anatomy_access_ok(callback.from_user.id):
+    _, topic_key, bone_id = callback.data.split(":")
+    if not anatomy_section_access_ok(callback.from_user.id, get_topic_section_key(topic_key)):
         await callback.answer(get_anatomy_dev_alert_text(), show_alert=True)
         return
-    _, topic_key, bone_id = callback.data.split(":")
     topic = get_anatomy_topic_data(topic_key)
     if not topic or not get_bone_latin_terms(topic_key, bone_id):
         await callback.answer("Термины для этой кости ещё не добавлены", show_alert=True)
@@ -6719,10 +6754,10 @@ async def cb_anatomy_bone_latin_start(callback: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("anatomy_bone_mnemonics:"))
 async def cb_anatomy_bone_mnemonics(callback: CallbackQuery):
-    if not anatomy_access_ok(callback.from_user.id):
+    _, topic_key, bone_id, idx_s = callback.data.split(":")
+    if not anatomy_section_access_ok(callback.from_user.id, get_topic_section_key(topic_key)):
         await callback.answer(get_anatomy_dev_alert_text(), show_alert=True)
         return
-    _, topic_key, bone_id, idx_s = callback.data.split(":")
     idx = int(idx_s)
     mnemonics = get_bone_mnemonics(topic_key, bone_id)
     if not mnemonics or not (0 <= idx < len(mnemonics)):
@@ -6738,11 +6773,11 @@ async def cb_anatomy_bone_mnemonics(callback: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("anatomy_material_list:"))
 async def cb_anatomy_material_list(callback: CallbackQuery):
-    if not anatomy_access_ok(callback.from_user.id):
+    topic_key = callback.data.split(":")[1]
+    if not anatomy_section_access_ok(callback.from_user.id, get_topic_section_key(topic_key)):
         await callback.answer(get_anatomy_dev_alert_text(), show_alert=True)
         return
     await callback.answer()
-    topic_key = callback.data.split(":")[1]
     topic = get_anatomy_topic_data(topic_key)
     await safe_edit_text(
         callback.message,
@@ -6753,10 +6788,10 @@ async def cb_anatomy_material_list(callback: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("anatomy_material:"))
 async def cb_anatomy_material(callback: CallbackQuery):
-    if not anatomy_access_ok(callback.from_user.id):
+    _, topic_key, idx_s = callback.data.split(":")
+    if not anatomy_section_access_ok(callback.from_user.id, get_topic_section_key(topic_key)):
         await callback.answer(get_anatomy_dev_alert_text(), show_alert=True)
         return
-    _, topic_key, idx_s = callback.data.split(":")
     idx = int(idx_s)
     topic = get_anatomy_topic_data(topic_key)
     if not topic or not (0 <= idx < len(topic["material"])):
@@ -6772,10 +6807,10 @@ async def cb_anatomy_material(callback: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("anatomy_flash_start:"))
 async def cb_anatomy_flash_start(callback: CallbackQuery):
-    if not anatomy_access_ok(callback.from_user.id):
+    topic_key = callback.data.split(":")[1]
+    if not anatomy_section_access_ok(callback.from_user.id, get_topic_section_key(topic_key)):
         await callback.answer(get_anatomy_dev_alert_text(), show_alert=True)
         return
-    topic_key = callback.data.split(":")[1]
     topic = get_anatomy_topic_data(topic_key)
     if not topic or not topic["flashcards"]:
         await callback.answer("Карточки ещё не добавлены", show_alert=True)
@@ -6819,10 +6854,10 @@ async def cb_anatomy_flash_stop(callback: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("anatomy_match_start:"))
 async def cb_anatomy_match_start(callback: CallbackQuery):
-    if not anatomy_access_ok(callback.from_user.id):
+    topic_key = callback.data.split(":")[1]
+    if not anatomy_section_access_ok(callback.from_user.id, get_topic_section_key(topic_key)):
         await callback.answer(get_anatomy_dev_alert_text(), show_alert=True)
         return
-    topic_key = callback.data.split(":")[1]
     topic = get_anatomy_topic_data(topic_key)
     if not topic or not get_anatomy_all_pairs(topic_key):
         await callback.answer("Пары ещё не добавлены", show_alert=True)
@@ -6861,9 +6896,9 @@ async def cb_anatomy_match_stop(callback: CallbackQuery):
 
 @dp.callback_query(F.data == "anatomy_latin_all_start")
 async def cb_anatomy_latin_all_start(callback: CallbackQuery):
-    if not anatomy_access_ok(callback.from_user.id):
-        await callback.answer(get_anatomy_dev_alert_text(), show_alert=True)
-        return
+    # Глобальный тренажёр всегда бесплатен: сейчас latin_terms есть только у остеологии
+    # (module1_osteology), а это свободный модуль — как только платный модуль обзаведётся
+    # latin_terms, этот трейнер нужно будет тоже перевести на anatomy_section_access_ok.
     if not get_all_latin_terms():
         await callback.answer("Термины ещё не добавлены", show_alert=True)
         return
@@ -6873,9 +6908,6 @@ async def cb_anatomy_latin_all_start(callback: CallbackQuery):
 
 @dp.callback_query(F.data == "anatomy_latin_leaderboard")
 async def cb_anatomy_latin_leaderboard(callback: CallbackQuery):
-    if not anatomy_access_ok(callback.from_user.id):
-        await callback.answer(get_anatomy_dev_alert_text(), show_alert=True)
-        return
     await callback.answer()
     await safe_edit_text(
         callback.message,
@@ -6886,10 +6918,10 @@ async def cb_anatomy_latin_leaderboard(callback: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("anatomy_latin_start:"))
 async def cb_anatomy_latin_start(callback: CallbackQuery):
-    if not anatomy_access_ok(callback.from_user.id):
+    topic_key = callback.data.split(":")[1]
+    if not anatomy_section_access_ok(callback.from_user.id, get_topic_section_key(topic_key)):
         await callback.answer(get_anatomy_dev_alert_text(), show_alert=True)
         return
-    topic_key = callback.data.split(":")[1]
     if not get_topic_latin_terms(topic_key):
         await callback.answer("Термины ещё не добавлены", show_alert=True)
         return
@@ -6927,10 +6959,10 @@ async def cb_anatomy_latin_stop(callback: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("anatomy_mnemonics:"))
 async def cb_anatomy_mnemonics(callback: CallbackQuery):
-    if not anatomy_access_ok(callback.from_user.id):
+    _, topic_key, idx_s = callback.data.split(":")
+    if not anatomy_section_access_ok(callback.from_user.id, get_topic_section_key(topic_key)):
         await callback.answer(get_anatomy_dev_alert_text(), show_alert=True)
         return
-    _, topic_key, idx_s = callback.data.split(":")
     idx = int(idx_s)
     topic = get_anatomy_topic_data(topic_key)
     if not topic or not topic["mnemonics"] or not (0 <= idx < len(topic["mnemonics"])):
@@ -6946,11 +6978,11 @@ async def cb_anatomy_mnemonics(callback: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("anatomy_picture:"))
 async def cb_anatomy_picture(callback: CallbackQuery):
-    if not anatomy_access_ok(callback.from_user.id):
+    topic_key = callback.data.split(":")[1]
+    if not anatomy_section_access_ok(callback.from_user.id, get_topic_section_key(topic_key)):
         await callback.answer(get_anatomy_dev_alert_text(), show_alert=True)
         return
     await callback.answer()
-    topic_key = callback.data.split(":")[1]
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data=f"anatomy_topic:{topic_key}"))
     await safe_edit_text(

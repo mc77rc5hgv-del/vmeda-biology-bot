@@ -79,10 +79,10 @@ async def main():
     assert cb.message.edits, "skull bones list broken"
     print("skull bones list still OK (regression check)")
 
-    # 4. non-admin should be blocked everywhere (ANATOMY_PUBLIC=False)
-    cb = FakeCB("anatomy_section:module3_myology", uid=123456789)
+    # 4. non-admin blocked on paid-tier sections (module7_nervous is not in ANATOMY_FREE_SECTIONS)
+    cb = FakeCB("anatomy_section:module7_nervous", uid=123456789)
     await tb.cb_anatomy_section(cb)
-    assert not cb.message.edits and cb._answers[0][1] is True
+    assert cb.message.edits and "🔒" in cb.message.edits[0]
     print("access-control OK")
 
     if errors:

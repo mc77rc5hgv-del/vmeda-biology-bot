@@ -618,7 +618,7 @@ async def main():
     # has_subscription_anatomy_access/has_subscription_histology_access, not scope=="all"
     menu_no_sub = tb.get_main_menu(user_id=non_admin)
     assert "💎 Подписка без рефералов" in kb_texts(menu_no_sub)
-    assert "🦴 Анатомия (в разработке)" in kb_texts(menu_no_sub)
+    assert "🦴 Анатомия" in kb_texts(menu_no_sub)
     assert "🔬 Гистология (рефералы/подписка)" in kb_texts(menu_no_sub)
 
     tb.grant_subscription(non_admin, 6, "stars", 239)  # histology yes, anatomy no
@@ -626,7 +626,7 @@ async def main():
     tier6_texts = kb_texts(menu_tier6)
     assert "💎 Моя подписка" in tier6_texts
     assert any(t.startswith("🔬 Гистология") for t in tier6_texts)
-    assert "🦴 Анатомия (в разработке)" in tier6_texts, "tier 6 has no anatomy — button stays locked"
+    assert "🦴 Анатомия" in tier6_texts, "tier 6 has no anatomy — button stays plain (not the 💎 variant)"
     tb.stats["subscriptions"].pop(str(non_admin), None)
 
     tb.grant_subscription(non_admin, 7, "stars", 389)  # anatomy yes
@@ -668,27 +668,46 @@ async def main():
     tb.stats["subscriptions"].pop(str(non_admin), None)
     print("histology_menu shows locked screen with dynamic subscription CTA when access is missing: OK")
 
-    # 24. Locked Anatomy screen: dynamic list of anatomy-granting tiers, not stale "Год"/"6 лет" text
+    # 24. anatomy_menu always renders the full section list (never a blanket lock screen) —
+    # paid-tier sections show a 🔒 prefix until the user has a qualifying subscription
     cb_anat_locked = FakeCB("anatomy_menu", uid=non_admin)
     await tb.cb_anatomy_menu(cb_anat_locked)
     assert cb_anat_locked.message.edits
     locked_text, locked_kb = cb_anat_locked.message.edits[0]
     check_html(locked_text)
-    assert "в разработке" in locked_text
-    for cfg in tb.ACTIVE_SUBSCRIPTION_TIERS.values():
-        if cfg.get("anatomy"):
-            assert cfg["title"] in locked_text
-    assert any("Оформить подписку" in t for t in kb_texts(locked_kb))
+    assert "Выбери подраздел" in locked_text
+    locked_labels = kb_texts(locked_kb)
+    for section_key, section in tb.ANATOMY.items():
+        label = section.get("menu_title", section["title"])
+        if section_key in tb.ANATOMY_FREE_SECTIONS:
+            assert label in locked_labels, f"{section_key} should be unlocked"
+        else:
+            assert f"🔒 {label}" in locked_labels, f"{section_key} should show a lock icon"
 
     tb.grant_subscription(non_admin, 8, "stars", 749)
     cb_anat_unlocked = FakeCB("anatomy_menu", uid=non_admin)
     await tb.cb_anatomy_menu(cb_anat_unlocked)
     assert cb_anat_unlocked.message.edits
-    assert "Выбери подраздел" in cb_anat_unlocked.message.edits[0][0]
+    unlocked_text, unlocked_kb = cb_anat_unlocked.message.edits[0]
+    assert "Выбери подраздел" in unlocked_text
+    assert not any(t.startswith("🔒") for t in kb_texts(unlocked_kb)), "subscribed user should see no locks"
     tb.stats["subscriptions"].pop(str(non_admin), None)
-    print("anatomy_menu shows locked screen listing all anatomy-granting tiers dynamically: OK")
+    print("anatomy_menu always renders; paid sections show 🔒 until a qualifying subscription: OK")
 
-    # 24b. The short callback-answer alert for in-handler anatomy locks stays under Telegram's ~200-char cap
+    # 24b. Tapping a locked section shows a section-specific locked screen with a dynamic tier list
+    paid_section_key = next(k for k in tb.ANATOMY if k not in tb.ANATOMY_FREE_SECTIONS)
+    cb_section_locked = FakeCB(f"anatomy_section:{paid_section_key}", uid=non_admin)
+    await tb.cb_anatomy_section(cb_section_locked)
+    assert cb_section_locked.message.edits
+    section_locked_text, section_locked_kb = cb_section_locked.message.edits[0]
+    check_html(section_locked_text)
+    for cfg in tb.ACTIVE_SUBSCRIPTION_TIERS.values():
+        if cfg.get("anatomy"):
+            assert cfg["title"] in section_locked_text
+    assert any("Оформить подписку" in t for t in kb_texts(section_locked_kb))
+    print("locked section screen lists all anatomy-granting tiers dynamically: OK")
+
+    # 24c. The short callback-answer alert for in-handler anatomy locks stays under Telegram's ~200-char cap
     alert_text = tb.get_anatomy_dev_alert_text()
     assert len(alert_text) <= 200
     assert str(tb.cheapest_anatomy_tier()["price_rub"]) in alert_text

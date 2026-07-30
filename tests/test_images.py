@@ -104,8 +104,9 @@ async def main():
     assert cb._answers and cb._answers[0][1] is True
     print("out-of-range page -> alert OK")
 
-    # access control still enforced
-    cb = FakeCB(f"anatomy_bone_slides:{topic_key}:frontal:0", uid=123456789)
+    # access control still enforced on a paid-tier section (osteology, incl. unpaired_skull_bones,
+    # is free now, so this check needs a topic from a paid module like module7_nervous)
+    cb = FakeCB("anatomy_bone_slides:nervous_intro_spinal_cord:frontal:0", uid=123456789)
     await tb.cb_anatomy_bone_slides(cb)
     assert not cb.message.media_groups and cb._answers[0][1] is True
     print("access-control OK")

@@ -111,8 +111,9 @@ async def main():
 
         print(f"handler-OK {bid}")
 
-    # non-admin access should be blocked (ANATOMY_PUBLIC=False)
-    cb = FakeCB(f"anatomy_bone_hub:{topic_key}:frontal", uid=123456789)
+    # non-admin blocked on a paid-tier section (module7_nervous is not in ANATOMY_FREE_SECTIONS);
+    # osteology topics like unpaired_skull_bones are free now, so this check needs a paid topic
+    cb = FakeCB("anatomy_bone_hub:nervous_intro_spinal_cord:frontal", uid=123456789)
     await tb.cb_anatomy_bone_hub(cb)
     assert not cb.message.edits and cb._answers[0][1] is True
     print("access-control OK")

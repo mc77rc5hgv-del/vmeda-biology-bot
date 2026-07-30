@@ -191,6 +191,21 @@ it's a safe no-op when `sent_message` has no `.photo` (e.g. test mocks), so test
    `manual_access_granted`'s shape but scoped to Anatomy only — granted/revoked from the admin panel by username/ID,
    same `ADMIN_PENDING` prompt pattern as the blanket grant/revoke, actions `grant_anatomy_demo`/`revoke_anatomy_demo`).
 
+   **Anatomy is additionally split section-by-section into a free half and a paid half** (a growth-funnel design —
+   free sections hook new users, the paid sections upsell engaged ones). `ANATOMY_FREE_SECTIONS` lists which of the
+   10 Kafarov module keys (`module1_osteology` … `module10_clinical`) are free to everyone regardless of
+   `anatomy_access_ok()`; the other modules still require it. `anatomy_section_access_ok(user_id, section_key)` is
+   the per-section predicate — `True` immediately if `section_key in ANATOMY_FREE_SECTIONS`, else falls back to
+   `anatomy_access_ok(user_id)` — and every anatomy handler that used to gate on the blanket `anatomy_access_ok()`
+   now resolves the relevant section first (directly for section-level handlers, via `get_topic_section_key(topic_key)`
+   for topic/bone-level ones) and checks this instead. Per the "hide vs. relabel" pitfall below, `anatomy_menu`
+   itself is never gated — it always renders all 10 sections, prefixing paid ones the user can't access yet with
+   `🔒` rather than hiding them or blocking the whole menu. The global Latin-terminology quiz
+   (`anatomy_latin_all_start`/`anatomy_latin_leaderboard`) is left ungated on purpose: today its only data source is
+   `module1_osteology`'s `latin_terms`, which is itself a free section — if a future paid module ever gets
+   `latin_terms`, this trainer needs to move onto `anatomy_section_access_ok` too, since it currently pools every
+   section's terms indiscriminately.
+
    **Histology also has its own trial+warning gate** (`histology_gate_ok`, called explicitly at the top of each
    histology handler — `histology_menu`/`_topic`/`_specimen`/`_img`/`_guess_start` — not a middleware, since the
    referral gate's `has_free_access()` can't be reused here without breaking the subscription-scope distinction
