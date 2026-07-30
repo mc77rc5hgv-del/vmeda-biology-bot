@@ -779,7 +779,7 @@ async def main():
     anat_ann_kb = tb.get_anatomy_announcement_keyboard()
     anat_ann_data = kb_data(anat_ann_kb)
     assert "subscription_menu" in anat_ann_data
-    assert "anatomy_menu" in anat_ann_data
+    assert "anatomy_root" in anat_ann_data
 
     cb_anat1 = FakeCB("admin_announce_anatomy_confirm")
     await tb.cb_admin_announce_anatomy_confirm(cb_anat1)

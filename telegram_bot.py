@@ -91,6 +91,9 @@ with open("physics_theory_tickets.json", "r", encoding="utf-8") as f:
 with open("anatomy.json", "r", encoding="utf-8") as f:
     ANATOMY = json.load(f)
 
+with open("anatomy_exam_test.json", "r", encoding="utf-8") as f:
+    ANATOMY_EXAM_TEST_PARTS = json.load(f)["parts"]
+
 with open("histology.json", "r", encoding="utf-8") as f:
     HISTOLOGY = json.load(f)
 
@@ -1657,7 +1660,7 @@ def get_anatomy_announcement_text() -> str:
 def get_anatomy_announcement_keyboard():
     builder = InlineKeyboardBuilder()
     builder.button(text="💎 Подписка", callback_data="subscription_menu")
-    builder.button(text="🦴 Анатомия", callback_data="anatomy_menu")
+    builder.button(text="🦴 Анатомия", callback_data="anatomy_root")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -2102,7 +2105,7 @@ def get_main_menu(user_id: int = None):
         anatomy_label = "🦴 Анатомия 💎"
     else:
         anatomy_label = "🦴 Анатомия"
-    builder.button(text=anatomy_label, callback_data="anatomy_menu")
+    builder.button(text=anatomy_label, callback_data="anatomy_root")
     if HISTOLOGY_PUBLIC:
         histology_label = "🔬 Гистология"
     elif user_id is not None and is_admin(user_id):
@@ -5912,7 +5915,7 @@ def get_anatomy_menu_keyboard(user_id: int):
         builder.button(text="🏛 Тест по латинским терминам", callback_data="anatomy_latin_all_start")
         builder.button(text="🏆 Рейтинг по латыни", callback_data="anatomy_latin_leaderboard")
     builder.adjust(1)
-    builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
+    builder.row(InlineKeyboardButton(text="🔙 Назад в меню Анатомии", callback_data="anatomy_root"))
     return builder.as_markup()
 
 def get_anatomy_section_keyboard(section_key: str):
@@ -6546,12 +6549,30 @@ def get_bone_mnemonic_text(topic_key: str, bone_id: str, idx: int) -> str:
     return f"🧠 <b>{mn['title']}</b>\n{DIVIDER}\n\n{mn['text']}\n\n{DIVIDER}\n{idx + 1}/{len(mnemonics)}"
 
 # ---- Хендлеры ----
+def get_anatomy_root_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="📚 Весь курс анатомии", callback_data="anatomy_menu")
+    builder.button(text="🎓 Экзамен", callback_data="anatomy_exam_menu")
+    builder.adjust(1)
+    builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
+    return builder.as_markup()
+
+@dp.callback_query(F.data == "anatomy_root")
+async def cb_anatomy_root(callback: CallbackQuery):
+    await callback.answer()
+    await safe_edit_text(
+        callback.message,
+        f"🦴 <b>Анатомия</b>\n{DIVIDER}\n\nВыбери раздел:",
+        parse_mode="HTML",
+        reply_markup=get_anatomy_root_keyboard()
+    )
+
 @dp.callback_query(F.data == "anatomy_menu")
 async def cb_anatomy_menu(callback: CallbackQuery):
     await callback.answer()
     await safe_edit_text(
         callback.message,
-        f"🦴 <b>Анатомия</b>\n{DIVIDER}\n\n"
+        f"📚 <b>Весь курс анатомии</b>\n{DIVIDER}\n\n"
         "Часть разделов открыта бесплатно для всех, часть — по подписке (отмечены 🔒).\n\n"
         "Выбери подраздел:",
         parse_mode="HTML",
@@ -7052,6 +7073,231 @@ async def cb_anatomy_picture(callback: CallbackQuery):
         "🚧 Скоро будет добавлено — нужны изображения из атласов Неттера и Гайворонского.",
         parse_mode="HTML",
         reply_markup=builder.as_markup()
+    )
+
+# ---- Экзамен (Вопросы практики / Вопросы теории / ТЕСТ) ----
+# Второй подраздел Анатомии, отдельный от «Весь курс анатомии» — намеренно бесплатен для всех
+# независимо от ANATOMY_FREE_SECTIONS/anatomy_access_ok, как и глобальный тест по латыни.
+def get_anatomy_exam_menu_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🖐 Вопросы практики", callback_data="anatomy_exam_practice")
+    builder.button(text="📖 Вопросы теории", callback_data="anatomy_exam_theory")
+    builder.button(text="✅ ТЕСТ", callback_data="anatomy_exam_test_menu")
+    builder.adjust(1)
+    builder.row(InlineKeyboardButton(text="🔙 Назад в меню Анатомии", callback_data="anatomy_root"))
+    return builder.as_markup()
+
+@dp.callback_query(F.data == "anatomy_exam_menu")
+async def cb_anatomy_exam_menu(callback: CallbackQuery):
+    await callback.answer()
+    await safe_edit_text(
+        callback.message,
+        f"🎓 <b>Экзамен по анатомии</b>\n{DIVIDER}\n\nВыбери формат подготовки:",
+        parse_mode="HTML",
+        reply_markup=get_anatomy_exam_menu_keyboard()
+    )
+
+@dp.callback_query(F.data == "anatomy_exam_practice")
+async def cb_anatomy_exam_practice(callback: CallbackQuery):
+    await callback.answer("🚧 Вопросы практики скоро появятся здесь", show_alert=True)
+
+@dp.callback_query(F.data == "anatomy_exam_theory")
+async def cb_anatomy_exam_theory(callback: CallbackQuery):
+    await callback.answer("🚧 Вопросы теории скоро появятся здесь", show_alert=True)
+
+# ---- ТЕСТ: 1040 вопросов официального сборника кафедры нормальной анатомии ВМедА
+# (Гайворонский и др., 2021), разбитые на 10 частей — 5 по «Базовой части», 5 по
+# «Лечебному делу». Прохождение — полный последовательный прогон всех вопросов части
+# (не случайная выборка, в отличие от ANATOMY_LATIN_SESSIONS), с возможностью закончить
+# досрочно и посмотреть разбор своих ошибок после завершения.
+ANATOMY_EXAM_TEST_SESSIONS: dict[int, dict] = {}
+ANATOMY_EXAM_TEST_MISTAKES: dict[int, list] = {}
+ANATOMY_EXAM_TEST_OPTION_LETTERS = "абвгд"
+
+def get_anatomy_exam_test_part(part_id: int):
+    return next((p for p in ANATOMY_EXAM_TEST_PARTS if p["id"] == part_id), None)
+
+def get_anatomy_exam_test_menu_keyboard():
+    builder = InlineKeyboardBuilder()
+    for part in ANATOMY_EXAM_TEST_PARTS:
+        builder.button(
+            text=f"{part['title']} ({len(part['questions'])} вопр.)",
+            callback_data=f"anatomy_exam_test_start:{part['id']}"
+        )
+    builder.adjust(1)
+    builder.row(InlineKeyboardButton(text="🔙 К экзамену", callback_data="anatomy_exam_menu"))
+    return builder.as_markup()
+
+@dp.callback_query(F.data == "anatomy_exam_test_menu")
+async def cb_anatomy_exam_test_menu(callback: CallbackQuery):
+    await callback.answer()
+    total = sum(len(p["questions"]) for p in ANATOMY_EXAM_TEST_PARTS)
+    await safe_edit_text(
+        callback.message,
+        f"✅ <b>ТЕСТ по анатомии</b>\n{DIVIDER}\n\n"
+        f"Официальный сборник тестовых вопросов кафедры нормальной анатомии ВМедА "
+        f"(Гайворонский и др., 2021) — всего {total} вопросов, разбит на 10 частей.\n\n"
+        "Внутри части вопросы идут по порядку, без случайной выборки — можно закончить "
+        "досрочно в любой момент и сразу посмотреть разбор своих ошибок.\n\n"
+        "Бесплатно для всех, без ограничений.\n\nВыбери часть:",
+        parse_mode="HTML",
+        reply_markup=get_anatomy_exam_test_menu_keyboard()
+    )
+
+def start_anatomy_exam_test_session(user_id: int, part_id: int) -> bool:
+    part = get_anatomy_exam_test_part(part_id)
+    if not part:
+        return False
+    ANATOMY_EXAM_TEST_SESSIONS[user_id] = {
+        "part_id": part_id,
+        "queue": part["questions"],
+        "index": 0,
+        "correct": 0,
+        "wrong": 0,
+        "mistakes": [],
+    }
+    return True
+
+def get_anatomy_exam_test_keyboard(question: dict):
+    builder = InlineKeyboardBuilder()
+    for letter in ANATOMY_EXAM_TEST_OPTION_LETTERS:
+        if letter in question["options"]:
+            builder.button(text=letter, callback_data=f"anatomy_exam_test_answer:{letter}")
+    builder.adjust(5)
+    builder.row(InlineKeyboardButton(text="🛑 Закончить", callback_data="anatomy_exam_test_stop"))
+    return builder.as_markup()
+
+async def render_anatomy_exam_test_question(message, user_id: int):
+    session = ANATOMY_EXAM_TEST_SESSIONS[user_id]
+    question = session["queue"][session["index"]]
+    lines = [
+        f"✅ <b>ТЕСТ — вопрос {session['index'] + 1}/{len(session['queue'])}</b>\n{DIVIDER}\n",
+        f"{question['question']}\n",
+    ]
+    for letter in ANATOMY_EXAM_TEST_OPTION_LETTERS:
+        if letter in question["options"]:
+            lines.append(f"{letter}) {question['options'][letter]}")
+    await safe_edit_text(
+        message, "\n".join(lines), parse_mode="HTML",
+        reply_markup=get_anatomy_exam_test_keyboard(question)
+    )
+
+def get_anatomy_exam_test_mistake_text(mistake: dict, idx: int, total: int) -> str:
+    lines = [
+        f"❌ <b>Разбор ошибок — {idx + 1}/{total}</b>\n{DIVIDER}\n",
+        f"{mistake['question']}\n",
+    ]
+    for letter in ANATOMY_EXAM_TEST_OPTION_LETTERS:
+        if letter not in mistake["options"]:
+            continue
+        marker = ""
+        if letter == mistake["correct"]:
+            marker = " ✅"
+        elif letter == mistake["chosen"]:
+            marker = " ❌ (твой ответ)"
+        lines.append(f"{letter}) {mistake['options'][letter]}{marker}")
+    return "\n".join(lines)
+
+def get_anatomy_exam_test_mistake_keyboard(part_id: int, idx: int, total: int):
+    builder = InlineKeyboardBuilder()
+    nav = []
+    if idx > 0:
+        nav.append(InlineKeyboardButton(text="⬅️ Предыдущая", callback_data=f"anatomy_exam_test_mistakes:{idx - 1}"))
+    if idx < total - 1:
+        nav.append(InlineKeyboardButton(text="➡️ Следующая", callback_data=f"anatomy_exam_test_mistakes:{idx + 1}"))
+    if nav:
+        builder.row(*nav)
+    builder.row(InlineKeyboardButton(text="🔁 Пройти часть ещё раз", callback_data=f"anatomy_exam_test_start:{part_id}"))
+    builder.row(InlineKeyboardButton(text="🔙 К списку частей", callback_data="anatomy_exam_test_menu"))
+    return builder.as_markup()
+
+async def render_anatomy_exam_test_summary(message, user_id: int, aborted: bool = False):
+    session = ANATOMY_EXAM_TEST_SESSIONS.pop(user_id, None)
+    if not session:
+        return
+    answered = session["correct"] + session["wrong"]
+    total = len(session["queue"])
+    percent = round(100 * session["correct"] / answered) if answered else 0
+    title = "🛑 <b>Тест прерван</b>" if aborted else "🏁 <b>Тест завершён!</b>"
+    text = (
+        f"{title}\n{DIVIDER}\n\n"
+        f"Отвечено: <b>{answered}</b> из {total}\n"
+        f"✅ Верно: <b>{session['correct']}</b>\n"
+        f"❌ Неверно: <b>{session['wrong']}</b>"
+        + (f" ({percent}%)" if answered else "")
+    )
+    builder = InlineKeyboardBuilder()
+    part_id = session["part_id"]
+    builder.button(text="🔁 Пройти ещё раз", callback_data=f"anatomy_exam_test_start:{part_id}")
+    if session["mistakes"]:
+        ANATOMY_EXAM_TEST_MISTAKES[user_id] = {"part_id": part_id, "mistakes": session["mistakes"]}
+        builder.button(text=f"❌ Разбор ошибок ({len(session['mistakes'])})", callback_data="anatomy_exam_test_mistakes:0")
+    builder.button(text="🔙 К списку частей", callback_data="anatomy_exam_test_menu")
+    builder.adjust(1)
+    await safe_edit_text(message, text, parse_mode="HTML", reply_markup=builder.as_markup())
+
+@dp.callback_query(F.data.startswith("anatomy_exam_test_start:"))
+async def cb_anatomy_exam_test_start(callback: CallbackQuery):
+    part_id = int(callback.data.split(":")[1])
+    if not start_anatomy_exam_test_session(callback.from_user.id, part_id):
+        await callback.answer("Часть не найдена", show_alert=True)
+        return
+    await callback.answer()
+    await render_anatomy_exam_test_question(callback.message, callback.from_user.id)
+
+@dp.callback_query(F.data.startswith("anatomy_exam_test_answer:"))
+async def cb_anatomy_exam_test_answer(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    session = ANATOMY_EXAM_TEST_SESSIONS.get(user_id)
+    if not session:
+        await callback.answer("Сессия истекла, начни заново", show_alert=True)
+        return
+    chosen = callback.data.split(":")[1]
+    question = session["queue"][session["index"]]
+    correct = question["correct"]
+    if chosen == correct:
+        session["correct"] += 1
+        await callback.answer("✅ Верно!")
+    else:
+        session["wrong"] += 1
+        session["mistakes"].append({
+            "question": question["question"],
+            "options": question["options"],
+            "correct": correct,
+            "chosen": chosen,
+        })
+        correct_text = question["options"].get(correct, "")
+        await callback.answer(f"❌ Неверно. Правильно: {correct}) {correct_text}", show_alert=True)
+    session["index"] += 1
+    if session["index"] >= len(session["queue"]):
+        await render_anatomy_exam_test_summary(callback.message, user_id)
+    else:
+        await render_anatomy_exam_test_question(callback.message, user_id)
+
+@dp.callback_query(F.data == "anatomy_exam_test_stop")
+async def cb_anatomy_exam_test_stop(callback: CallbackQuery):
+    await callback.answer()
+    if callback.from_user.id in ANATOMY_EXAM_TEST_SESSIONS:
+        await render_anatomy_exam_test_summary(callback.message, callback.from_user.id, aborted=True)
+
+@dp.callback_query(F.data.startswith("anatomy_exam_test_mistakes:"))
+async def cb_anatomy_exam_test_mistakes(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    record = ANATOMY_EXAM_TEST_MISTAKES.get(user_id)
+    if not record:
+        await callback.answer("Ошибок нет или список устарел", show_alert=True)
+        return
+    mistakes = record["mistakes"]
+    idx = int(callback.data.split(":")[1])
+    if not (0 <= idx < len(mistakes)):
+        await callback.answer("Вопрос не найден", show_alert=True)
+        return
+    await callback.answer()
+    await safe_edit_text(
+        callback.message,
+        get_anatomy_exam_test_mistake_text(mistakes[idx], idx, len(mistakes)),
+        parse_mode="HTML",
+        reply_markup=get_anatomy_exam_test_mistake_keyboard(record["part_id"], idx, len(mistakes))
     )
 
 # ==================== ГИСТОЛОГИЯ ====================

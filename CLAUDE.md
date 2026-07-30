@@ -206,6 +206,23 @@ it's a safe no-op when `sent_message` has no `.photo` (e.g. test mocks), so test
    `latin_terms`, this trainer needs to move onto `anatomy_section_access_ok` too, since it currently pools every
    section's terms indiscriminately.
 
+   **Anatomy has a top-level split independent of the free/paid module split above**: `anatomy_root` (bound to the
+   "🦴 Анатомия" button in the main menu and in the admin Anatomy-announcement broadcast — `anatomy_menu` itself is
+   no longer a direct entry point) shows two options — "📚 Весь курс анатомии" (`anatomy_menu`, unchanged: the
+   10-section module list described above) and "🎓 Экзамен" (`anatomy_exam_menu`, three entries: "🖐 Вопросы
+   практики"/"📖 Вопросы теории" are stubs pending content, "✅ ТЕСТ" is live). ТЕСТ is the official 1040-question
+   test bank of the ВМедА normal-anatomy department (Гайворонский и др., 2021, `anatomy_exam_test.json`,
+   `ANATOMY_EXAM_TEST_PARTS`), split into 10 fixed parts of ~102-106 questions each (5 parts "Базовая часть", 5
+   "Лечебное дело" — mirrors the two answer-key sections of the source document) — **always free for everyone**,
+   with no gate check at all, independent of `ANATOMY_FREE_SECTIONS`/subscriptions, same reasoning as the global
+   Latin quiz. A part is answered as one full sequential pass in source order (`ANATOMY_EXAM_TEST_SESSIONS`, not a
+   random sample like `ANATOMY_LATIN_SESSIONS`), with an early-stop button and, after finishing (or stopping
+   early), a "❌ Разбор ошибок" review screen (`ANATOMY_EXAM_TEST_MISTAKES`, paginated one mistake at a time,
+   marking both the correct option and — if different — the one the user picked) for every question answered
+   wrong. `anatomy.json`'s bone/topic gate machinery (`anatomy_section_access_ok`, `get_topic_section_key`, etc.)
+   is untouched by any of this — ТЕСТ questions aren't tied to `ANATOMY` topics/sections at all, just to their own
+   flat `anatomy_exam_test.json` part list.
+
    **Histology also has its own trial+warning gate** (`histology_gate_ok`, called explicitly at the top of each
    histology handler — `histology_menu`/`_topic`/`_specimen`/`_img`/`_guess_start` — not a middleware, since the
    referral gate's `has_free_access()` can't be reused here without breaking the subscription-scope distinction
