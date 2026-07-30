@@ -166,6 +166,23 @@ async def main():
     assert cb.message.edits and "Пока никто" in cb.message.edits[-1]
     print("empty leaderboard renders gracefully: OK")
 
+    # ---- leaderboard shows everyone (not capped at a fixed top-N) ----
+    tb.stats["anatomy_latin_scores"].clear()
+    n_users = 25
+    fake_uids = [str(fresh_uid()) for _ in range(n_users)]
+    for i, uid_str in enumerate(fake_uids):
+        tb.stats["anatomy_latin_scores"][uid_str] = {
+            "best_correct": n_users - i, "best_total": n_users, "attempts": 1,
+        }
+    full_text = tb.get_anatomy_latin_leaderboard_text()
+    assert full_text.count("<b>") == full_text.count("</b>")
+    for uid_str in fake_uids:
+        assert tb.donor_display_name(uid_str) in full_text, f"{uid_str} missing from full leaderboard"
+    assert "показаны первые" not in full_text, "should not truncate when it comfortably fits the message limit"
+    assert len(full_text) <= 4096
+    tb.stats["anatomy_latin_scores"].clear()
+    print(f"leaderboard shows all {n_users} scored users, not just a fixed top-N: OK")
+
     if errors:
         print("ERRORS:")
         for e in errors[:20]:

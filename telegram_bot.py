@@ -5819,7 +5819,7 @@ ANATOMY_FLASH_SESSION_SIZE = 10
 ANATOMY_MATCH_SESSION_SIZE = 10
 ANATOMY_LATIN_SESSION_SIZE = 15
 ANATOMY_LATIN_ALL_SESSION_SIZE = 50
-ANATOMY_LATIN_LEADERBOARD_SIZE = 10
+ANATOMY_LATIN_LEADERBOARD_MSG_LIMIT = 3800  # запас от лимита Telegram в 4096 символов на сообщение
 
 ANATOMY_FLASH_SESSIONS: dict[int, dict] = {}
 ANATOMY_MATCH_SESSIONS: dict[int, dict] = {}
@@ -6235,25 +6235,33 @@ def record_anatomy_latin_score(user_id: int, correct: int, total: int) -> bool:
     return is_new_best
 
 def get_anatomy_latin_leaderboard_text(user_id: int = None) -> str:
+    """Full ranking, not just a fixed top-N — includes every scored user, only
+    truncating (with a "показаны первые N" note) if the list gets long enough to
+    risk Telegram's 4096-char message cap."""
     scores = stats.get("anatomy_latin_scores", {})
     ranked = sorted(
         scores.items(),
         key=lambda kv: (kv[1]["best_correct"] / kv[1]["best_total"] if kv[1]["best_total"] else 0, kv[1]["best_correct"]),
         reverse=True,
     )
-    lines = [f"🏆 <b>Рейтинг по латинским терминам</b>\n{DIVIDER}"]
+    header = f"🏆 <b>Рейтинг по латинским терминам</b>\n{DIVIDER}"
     if not ranked:
-        lines.append("\nПока никто не проходил тест — стань первым! 🏛")
-        return "\n".join(lines)
-    top = ranked[:ANATOMY_LATIN_LEADERBOARD_SIZE]
-    lines.append("")
-    for i, (uid_str, entry) in enumerate(top):
+        return header + "\n\nПока никто не проходил тест — стань первым! 🏛"
+    lines = [header, ""]
+    shown_uids = []
+    for i, (uid_str, entry) in enumerate(ranked):
         icon = RANK_MEDALS[i] if i < 3 else f"{i + 1}."
         percent = round(100 * entry["best_correct"] / entry["best_total"]) if entry["best_total"] else 0
-        lines.append(f"{icon} {donor_display_name(uid_str)} — <b>{entry['best_correct']}/{entry['best_total']}</b> ({percent}%)")
+        row = f"{icon} {donor_display_name(uid_str)} — <b>{entry['best_correct']}/{entry['best_total']}</b> ({percent}%)"
+        if len("\n".join([*lines, row])) > ANATOMY_LATIN_LEADERBOARD_MSG_LIMIT:
+            break
+        lines.append(row)
+        shown_uids.append(uid_str)
+    if len(shown_uids) < len(ranked):
+        lines.append(f"\n… показаны первые {len(shown_uids)} из {len(ranked)}")
     if user_id is not None:
         uid_str = str(user_id)
-        if uid_str not in {u for u, _ in top} and uid_str in scores:
+        if uid_str not in shown_uids and uid_str in scores:
             rank = next(i for i, (u, _) in enumerate(ranked) if u == uid_str) + 1
             entry = scores[uid_str]
             percent = round(100 * entry["best_correct"] / entry["best_total"]) if entry["best_total"] else 0
