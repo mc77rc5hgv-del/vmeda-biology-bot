@@ -82,6 +82,9 @@ with open("physics_tasks.json", "r", encoding="utf-8") as f:
 with open("physics_test_tickets.json", "r", encoding="utf-8") as f:
     PHYSICS_TEST_TICKETS = json.load(f)["tickets"]
 
+with open("physics_task_tickets.json", "r", encoding="utf-8") as f:
+    PHYSICS_TASK_TICKETS = json.load(f)["tickets"]
+
 with open("physics_theory_tickets.json", "r", encoding="utf-8") as f:
     PHYSICS_THEORY_TICKETS = json.load(f)["tickets"]
 
@@ -1224,6 +1227,7 @@ GATED_PREFIXES_BIOLOGY = ("ticket:", "ticket_q:", "qpage:", "q:")
 
 GATED_CALLBACKS_PHYSICS = {
     "menu_physics", "physics_tickets", "physics_theory_tickets", "physics_test_tickets",
+    "physics_task_tickets",
     "physics_test", "physics_tasks", "download_physics_full", "download_physics_ticket_tasks",
     "physics_grade45", "download_physics_grade45", "download_physics_tasks_cheatsheet", "physics_extra",
 }
@@ -1231,6 +1235,7 @@ GATED_PREFIXES_PHYSICS = (
     "phys_test_ticket:", "phys_test_ticket_tasks:", "phys_test_ticket_task_show:", "physics_page:", "physics_q:",
     "phystask_topic:", "phystask_formulas:", "phystask_list:", "phystask_show:", "physics45_q:",
     "phys_theory_ticket:", "phys_theory_q:", "physics_extra_q:",
+    "phys_task_ticket:", "phys_task_ticket_show:",
 )
 
 GATED_CALLBACKS_CHEMISTRY = {
@@ -2302,8 +2307,40 @@ def get_physics_tickets_menu():
     builder = InlineKeyboardBuilder()
     builder.button(text="📝 Тестовые билеты", callback_data="physics_test_tickets")
     builder.button(text="📖 Билеты теоретической части", callback_data="physics_theory_tickets")
+    builder.button(text="🧮 Билеты с задачами", callback_data="physics_task_tickets")
     builder.adjust(1)
     builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="menu_physics"))
+    return builder.as_markup()
+
+def get_physics_task_tickets_keyboard():
+    builder = InlineKeyboardBuilder()
+    for num in sorted(PHYSICS_TASK_TICKETS.keys(), key=int):
+        builder.button(text=f"🧮 {PHYSICS_TASK_TICKETS[num]['title']}", callback_data=f"phys_task_ticket:{num}")
+    builder.adjust(2)
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="physics_tickets"))
+    return builder.as_markup()
+
+def get_physics_task_ticket_list_keyboard(num: str):
+    builder = InlineKeyboardBuilder()
+    for task in PHYSICS_TASK_TICKETS[num]["tasks"]:
+        builder.button(text=f"📝 Задача {task['num']}", callback_data=f"phys_task_ticket_show:{num}:{task['num']}")
+    builder.adjust(1)
+    builder.row(InlineKeyboardButton(text="🔙 К списку билетов", callback_data="physics_task_tickets"))
+    return builder.as_markup()
+
+def get_physics_task_ticket_detail_keyboard(num: str, task_num: int):
+    builder = InlineKeyboardBuilder()
+    tasks = PHYSICS_TASK_TICKETS[num]["tasks"]
+    nums = [t["num"] for t in tasks]
+    idx = nums.index(task_num)
+    nav = []
+    if idx > 0:
+        nav.append(InlineKeyboardButton(text="⬅️ Предыдущая", callback_data=f"phys_task_ticket_show:{num}:{nums[idx-1]}"))
+    if idx < len(nums) - 1:
+        nav.append(InlineKeyboardButton(text="Следующая ➡️", callback_data=f"phys_task_ticket_show:{num}:{nums[idx+1]}"))
+    if nav:
+        builder.row(*nav)
+    builder.row(InlineKeyboardButton(text="🔙 К списку задач", callback_data=f"phys_task_ticket:{num}"))
     return builder.as_markup()
 
 def get_physics_test_tickets_keyboard():
@@ -5518,6 +5555,50 @@ async def cb_phys_test_ticket_task_show(callback: CallbackQuery):
     await safe_edit_text(
         callback.message, text, parse_mode="HTML",
         reply_markup=get_physics_test_ticket_task_detail_keyboard(num, task_num)
+    )
+
+@dp.callback_query(F.data == "physics_task_tickets")
+async def cb_physics_task_tickets(callback: CallbackQuery):
+    await callback.answer()
+    await safe_edit_text(
+        callback.message,
+        f"🧮 <b>Билеты с задачами</b>\n{DIVIDER}\n\nВыбери билет:",
+        parse_mode="HTML",
+        reply_markup=get_physics_task_tickets_keyboard()
+    )
+
+@dp.callback_query(F.data.startswith("phys_task_ticket:"))
+async def cb_phys_task_ticket(callback: CallbackQuery):
+    await callback.answer()
+    num = callback.data.split(":")[1]
+    ticket = PHYSICS_TASK_TICKETS.get(num)
+    if not ticket:
+        await callback.answer("Билет не найден", show_alert=True)
+        return
+    text = f"🧮 <b>{ticket['title']}</b>\n{DIVIDER}\n\nВыбери задачу:"
+    await safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=get_physics_task_ticket_list_keyboard(num))
+
+@dp.callback_query(F.data.startswith("phys_task_ticket_show:"))
+async def cb_phys_task_ticket_show(callback: CallbackQuery):
+    await callback.answer()
+    _, num, task_num_s = callback.data.split(":")
+    task_num = int(task_num_s)
+    ticket = PHYSICS_TASK_TICKETS.get(num)
+    if not ticket:
+        await callback.answer("Билет не найден", show_alert=True)
+        return
+    task = next((t for t in ticket.get("tasks", []) if t["num"] == task_num), None)
+    if not task:
+        await callback.answer("Задача не найдена", show_alert=True)
+        return
+    text = (
+        f"📝 <b>{ticket['title']} — Задача №{task['num']}</b> — {task.get('title', '')}\n{DIVIDER}\n\n"
+        f"<b>Условие:</b>\n<i>{task['condition']}</i>\n\n"
+        f"<b>Решение:</b>\n{task['solution']}"
+    )
+    await safe_edit_text(
+        callback.message, text, parse_mode="HTML",
+        reply_markup=get_physics_task_ticket_detail_keyboard(num, task_num)
     )
 
 @dp.callback_query(F.data == "physics_test")

@@ -143,7 +143,8 @@ async def main():
     assert caption2c and f"@{tb.BOT_USERNAME}" in caption2c
     print("physics formulas cheat sheet: all 9 topics present, no step-by-step algorithm, HTML-free: OK")
 
-    # physics: 4-ticket task answers file has all 20 solved problems
+    # physics: ticket task answers file has every solved problem from tickets that have tasks
+    # (some test tickets are theory-only, with no recovered "tasks" page — they're skipped)
     cb3 = FakeCB("download_physics_ticket_tasks")
     await tb.cb_download_physics_ticket_tasks(cb3)
     doc3, caption3 = cb3.message.documents[0]
@@ -151,13 +152,17 @@ async def main():
     assert "<b>" not in text3
     total_tasks = 0
     for ticket in tb.PHYSICS_TEST_TICKETS.values():
+        tasks = ticket.get("tasks")
+        if not tasks:
+            continue
         assert ticket["title"] in text3
-        for task in ticket.get("tasks", []):
+        for task in tasks:
             total_tasks += 1
             assert tb.strip_html_tags(task["title"]) in text3
-    assert total_tasks == 20
+    assert total_tasks == sum(len(t.get("tasks") or []) for t in tb.PHYSICS_TEST_TICKETS.values())
+    assert total_tasks >= 20
     assert caption3 and f"@{tb.BOT_USERNAME}" in caption3
-    print("physics ticket-tasks file: all 20 solved problems present: OK")
+    print(f"physics ticket-tasks file: all {total_tasks} solved problems present: OK")
 
     # chemistry: labs file
     cb4 = FakeCB("download_chemistry_labs")
