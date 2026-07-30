@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """Anatomy -> «Экзамен» -> «Вопросы теории»: official essay-style theory exam question
 bank (Гайворонский и др.), browsable by section -> question list -> question detail.
-Sections I-III (СИСТЕМА ОРГАНОВ ОПОРЫ И ДВИЖЕНИЯ, СПЛАНХНОЛОГИЯ, СЕРДЕЧНО-СОСУДИСТАЯ
-СИСТЕМА, 45 questions each) are live; section IV is a stub placeholder pending future
-content."""
+All four sections (СИСТЕМА ОРГАНОВ ОПОРЫ И ДВИЖЕНИЯ, СПЛАНХНОЛОГИЯ, СЕРДЕЧНО-СОСУДИСТАЯ
+СИСТЕМА, ЦНС/ПНС и органы чувств, 45 questions each) are live — the full 180-question
+bank."""
 import asyncio
 from _bootstrap import tb
 from html.parser import HTMLParser
@@ -64,8 +64,9 @@ async def main():
     assert "СИСТЕМА ОРГАНОВ ОПОРЫ И ДВИЖЕНИЯ" in titles[0]
     assert "СПЛАНХНОЛОГИЯ" in titles[1]
     assert "СЕРДЕЧНО-СОСУДИСТАЯ СИСТЕМА" in titles[2]
-    live_sections = [sections[0], sections[1], sections[2]]
-    s1, s2, s3 = live_sections
+    assert "НЕРВНЫЕ СИСТЕМЫ" in titles[3]
+    live_sections = sections
+    s1, s2, s3, s4 = live_sections
     for s in live_sections:
         assert len(s["questions"]) == 45, s["id"]
         seen_nums = set()
@@ -79,10 +80,7 @@ async def main():
             combined = tb.get_anatomy_exam_theory_question_text(s, q["num"])
             check_html(combined)
         assert seen_nums == set(range(1, 46)), s["id"]
-    # section IV is still a stub placeholder
-    for s in sections[3:]:
-        assert s["questions"] == []
-    print("data integrity: 4 sections, sections I-III have 45 well-formed questions each, section IV is a stub: OK")
+    print("data integrity: all 4 sections have 45 well-formed questions each (180 total): OK")
 
     # 1. anatomy_exam_menu still lists theory as a live entry point (not a stub anymore)
     cb0 = FakeCB("anatomy_exam_menu")
@@ -103,17 +101,11 @@ async def main():
     assert any("СИСТЕМА ОРГАНОВ ОПОРЫ И ДВИЖЕНИЯ" in t and "(45)" in t for t in labels1)
     assert any("СПЛАНХНОЛОГИЯ" in t and "(45)" in t for t in labels1)
     assert any("СЕРДЕЧНО-СОСУДИСТАЯ СИСТЕМА" in t and "(45)" in t for t in labels1)
-    assert any("НЕРВНЫЕ СИСТЕМЫ" in t and "🚧" in t for t in labels1)
-    print("anatomy_exam_theory renders 4 sections, live sections show counts, stub section marked 🚧: OK")
+    assert any("НЕРВНЫЕ СИСТЕМЫ" in t and "(45)" in t for t in labels1)
+    assert not any("🚧" in t for t in labels1)
+    print("anatomy_exam_theory renders 4 sections, all sections live and show counts (no stub left): OK")
 
-    # 3. tapping the stub section (IV) -> alert, no crash, no navigation
-    cb2 = FakeCB("anatomy_exam_theory_section:4", uid=NON_ADMIN)
-    await tb.cb_anatomy_exam_theory_section(cb2)
-    assert not cb2.message.edits
-    assert cb2._answers and cb2._answers[0][1] is True
-    print("tapping a stub section alerts instead of crashing: OK")
-
-    # 4. unknown section id -> alert
+    # 3. unknown section id -> alert
     cb_bad_section = FakeCB("anatomy_exam_theory_section:999", uid=NON_ADMIN)
     await tb.cb_anatomy_exam_theory_section(cb_bad_section)
     assert not cb_bad_section.message.edits
@@ -166,14 +158,14 @@ async def main():
     assert not cb_bad_q.message.edits
     assert cb_bad_q._answers and cb_bad_q._answers[0][1] is True
 
-    cb_bad_q2 = FakeCB("anatomy_exam_theory_q:4:1", uid=NON_ADMIN)
+    cb_bad_q2 = FakeCB("anatomy_exam_theory_q:5:1", uid=NON_ADMIN)
     await tb.cb_anatomy_exam_theory_question(cb_bad_q2)
     assert not cb_bad_q2.message.edits
     assert cb_bad_q2._answers and cb_bad_q2._answers[0][1] is True
-    print("unknown question number / question in a still-stub section -> alert, no crash: OK")
+    print("unknown question number / question in a nonexistent section -> alert, no crash: OK")
 
-    # 9. sections II (СПЛАНХНОЛОГИЯ) and III (ССС) are live too — question list + detail nav works
-    for section_id, s in ((2, s2), (3, s3)):
+    # 9. sections II, III (СПЛАНХНОЛОГИЯ, ССС) and IV (нервные системы) are live too — question list + detail nav works
+    for section_id, s in ((2, s2), (3, s3), (4, s4)):
         cb7 = FakeCB(f"anatomy_exam_theory_section:{section_id}", uid=NON_ADMIN)
         await tb.cb_anatomy_exam_theory_section(cb7)
         text7, kb7 = cb7.message.edits[-1]
@@ -192,7 +184,7 @@ async def main():
         data8 = kb_data(kb8)
         assert f"anatomy_exam_theory_q:{section_id}:44" in data8
         assert not any(d == f"anatomy_exam_theory_q:{section_id}:46" for d in data8)
-    print("sections II (СПЛАНХНОЛОГИЯ) and III (ССС) question list + detail navigation work: OK")
+    print("sections II (СПЛАНХНОЛОГИЯ), III (ССС) and IV (нервные системы) question list + detail navigation work: OK")
 
     print("ALL ANATOMY EXAM THEORY TESTS PASSED")
 
