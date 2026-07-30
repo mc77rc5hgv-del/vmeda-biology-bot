@@ -132,6 +132,8 @@ def load_stats() -> dict:
             data.setdefault("histology_temp_access", {})
             data.setdefault("rollcall_confirmed", {})
             data.setdefault("anatomy_latin_scores", {})
+            data.setdefault("anatomy_exam_test_scores", {})
+            data.setdefault("anatomy_exam_test_mode", {})
             return data
         except (json.JSONDecodeError, OSError):
             logger.exception("Не удалось прочитать %s, статистика будет создана заново", STATS_FILE)
@@ -164,6 +166,8 @@ def load_stats() -> dict:
         "histology_temp_access": {},
         "rollcall_confirmed": {},
         "anatomy_latin_scores": {},
+        "anatomy_exam_test_scores": {},
+        "anatomy_exam_test_mode": {},
     }
 
 # Один воркер сериализует записи на диск и не даёт им блокировать event loop бота.
@@ -7117,8 +7121,85 @@ ANATOMY_EXAM_TEST_OPTION_LETTERS = "абвгд"
 def get_anatomy_exam_test_part(part_id: int):
     return next((p for p in ANATOMY_EXAM_TEST_PARTS if p["id"] == part_id), None)
 
-def get_anatomy_exam_test_menu_keyboard():
+# ---- Режим прохождения: обычный (просто для себя) или рейтинговый (результат каждой
+# полностью пройденной — не прерванной — части идёт в общий рейтинг всех пользователей,
+# накопительно: и число верных ответов, и общее число отвеченных вопросов растут с каждой
+# зачтённой частью). Выбор режима — персональная настройка, переключается кнопкой в меню
+# ТЕСТа и снимается в момент старта части, чтобы смена режима не задним числом не меняла
+# уже идущую сессию.
+def get_anatomy_exam_test_mode(user_id: int) -> str:
+    return stats.get("anatomy_exam_test_mode", {}).get(str(user_id), "normal")
+
+def set_anatomy_exam_test_mode(user_id: int, mode: str) -> None:
+    stats.setdefault("anatomy_exam_test_mode", {})[str(user_id)] = mode
+    save_stats()
+
+def record_anatomy_exam_test_score(user_id: int, correct: int, total: int) -> None:
+    if total <= 0:
+        return
+    uid_str = str(user_id)
+    scores = stats.setdefault("anatomy_exam_test_scores", {})
+    entry = scores.setdefault(uid_str, {"correct": 0, "total": 0, "attempts": 0})
+    entry["correct"] += correct
+    entry["total"] += total
+    entry["attempts"] += 1
+    save_stats()
+
+def get_anatomy_exam_test_leaderboard_text(user_id: int = None) -> str:
+    scores = stats.get("anatomy_exam_test_scores", {})
+    ranked = sorted(
+        scores.items(),
+        key=lambda kv: (kv[1]["correct"], kv[1]["correct"] / kv[1]["total"] if kv[1]["total"] else 0),
+        reverse=True,
+    )
+    header = f"🏆 <b>Рейтинг по ТЕСТу</b>\n{DIVIDER}"
+    if not ranked:
+        return header + "\n\nПока никто не проходил части в рейтинговом режиме — стань первым! ✅"
+    lines = [header, ""]
+    shown_uids = []
+    for i, (uid_str, entry) in enumerate(ranked):
+        icon = RANK_MEDALS[i] if i < 3 else f"{i + 1}."
+        percent = round(100 * entry["correct"] / entry["total"]) if entry["total"] else 0
+        row = f"{icon} {donor_display_name(uid_str)} — <b>{entry['correct']}</b> верных ({percent}%, {entry['attempts']} частей)"
+        if len("\n".join([*lines, row])) > ANATOMY_LATIN_LEADERBOARD_MSG_LIMIT:
+            break
+        lines.append(row)
+        shown_uids.append(uid_str)
+    if len(shown_uids) < len(ranked):
+        lines.append(f"\n… показаны первые {len(shown_uids)} из {len(ranked)}")
+    if user_id is not None:
+        uid_str = str(user_id)
+        if uid_str not in shown_uids and uid_str in scores:
+            rank = next(i for i, (u, _) in enumerate(ranked) if u == uid_str) + 1
+            entry = scores[uid_str]
+            percent = round(100 * entry["correct"] / entry["total"]) if entry["total"] else 0
+            lines.append(f"\nТвоё место: <b>#{rank}</b> — {entry['correct']} верных ({percent}%)")
+    return "\n".join(lines)
+
+def get_anatomy_exam_test_leaderboard_keyboard():
     builder = InlineKeyboardBuilder()
+    builder.button(text="🔄 Обновить", callback_data="anatomy_exam_test_leaderboard")
+    builder.button(text="🔙 К тесту", callback_data="anatomy_exam_test_menu")
+    builder.adjust(1)
+    return builder.as_markup()
+
+@dp.callback_query(F.data == "anatomy_exam_test_leaderboard")
+async def cb_anatomy_exam_test_leaderboard(callback: CallbackQuery):
+    await callback.answer()
+    await safe_edit_text(
+        callback.message,
+        get_anatomy_exam_test_leaderboard_text(callback.from_user.id),
+        parse_mode="HTML",
+        reply_markup=get_anatomy_exam_test_leaderboard_keyboard()
+    )
+
+def get_anatomy_exam_test_menu_keyboard(user_id: int):
+    builder = InlineKeyboardBuilder()
+    if get_anatomy_exam_test_mode(user_id) == "rating":
+        builder.button(text="🏆 Режим: рейтинговый (нажми для обычного)", callback_data="anatomy_exam_test_mode_toggle")
+    else:
+        builder.button(text="🎯 Режим: обычный (нажми для рейтингового)", callback_data="anatomy_exam_test_mode_toggle")
+    builder.button(text="🏆 Рейтинг", callback_data="anatomy_exam_test_leaderboard")
     for part in ANATOMY_EXAM_TEST_PARTS:
         builder.button(
             text=f"{part['title']} ({len(part['questions'])} вопр.)",
@@ -7128,10 +7209,14 @@ def get_anatomy_exam_test_menu_keyboard():
     builder.row(InlineKeyboardButton(text="🔙 К экзамену", callback_data="anatomy_exam_menu"))
     return builder.as_markup()
 
-@dp.callback_query(F.data == "anatomy_exam_test_menu")
-async def cb_anatomy_exam_test_menu(callback: CallbackQuery):
-    await callback.answer()
+async def render_anatomy_exam_test_menu(message, user_id: int):
     total = sum(len(p["questions"]) for p in ANATOMY_EXAM_TEST_PARTS)
+    mode_line = (
+        "🏆 Сейчас включён <b>рейтинговый режим</b> — результат каждой полностью пройденной "
+        "части идёт в общий рейтинг."
+        if get_anatomy_exam_test_mode(user_id) == "rating" else
+        "🎯 Сейчас включён <b>обычный режим</b> — проходишь тест для себя, без рейтинга."
+    )
     lines = [
         f"✅ <b>ТЕСТ по анатомии</b>\n{DIVIDER}\n",
         "Официальный сборник тестовых вопросов кафедры нормальной анатомии ВМедА "
@@ -7139,6 +7224,8 @@ async def cb_anatomy_exam_test_menu(callback: CallbackQuery):
         "",
         "Внутри части вопросы идут по порядку, без случайной выборки — можно закончить "
         "досрочно в любой момент и сразу посмотреть разбор своих ошибок.",
+        "",
+        mode_line,
         "",
         "Бесплатно для всех, без ограничений.",
         "",
@@ -7149,11 +7236,24 @@ async def cb_anatomy_exam_test_menu(callback: CallbackQuery):
         lines.append(part["topics"])
     lines.append("\nВыбери часть:")
     await safe_edit_text(
-        callback.message,
+        message,
         "\n".join(lines),
         parse_mode="HTML",
-        reply_markup=get_anatomy_exam_test_menu_keyboard()
+        reply_markup=get_anatomy_exam_test_menu_keyboard(user_id)
     )
+
+@dp.callback_query(F.data == "anatomy_exam_test_menu")
+async def cb_anatomy_exam_test_menu(callback: CallbackQuery):
+    await callback.answer()
+    await render_anatomy_exam_test_menu(callback.message, callback.from_user.id)
+
+@dp.callback_query(F.data == "anatomy_exam_test_mode_toggle")
+async def cb_anatomy_exam_test_mode_toggle(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    new_mode = "normal" if get_anatomy_exam_test_mode(user_id) == "rating" else "rating"
+    set_anatomy_exam_test_mode(user_id, new_mode)
+    await callback.answer("🏆 Рейтинговый режим включён" if new_mode == "rating" else "🎯 Обычный режим включён")
+    await render_anatomy_exam_test_menu(callback.message, user_id)
 
 def start_anatomy_exam_test_session(user_id: int, part_id: int) -> bool:
     part = get_anatomy_exam_test_part(part_id)
@@ -7166,6 +7266,7 @@ def start_anatomy_exam_test_session(user_id: int, part_id: int) -> bool:
         "correct": 0,
         "wrong": 0,
         "mistakes": [],
+        "is_rating": get_anatomy_exam_test_mode(user_id) == "rating",
     }
     return True
 
@@ -7181,8 +7282,9 @@ def get_anatomy_exam_test_keyboard(question: dict):
 async def render_anatomy_exam_test_question(message, user_id: int):
     session = ANATOMY_EXAM_TEST_SESSIONS[user_id]
     question = session["queue"][session["index"]]
+    icon = "🏆" if session.get("is_rating") else "🎯"
     lines = [
-        f"✅ <b>ТЕСТ — вопрос {session['index'] + 1}/{len(session['queue'])}</b>\n{DIVIDER}\n",
+        f"{icon} <b>ТЕСТ — вопрос {session['index'] + 1}/{len(session['queue'])}</b>\n{DIVIDER}\n",
         f"{question['question']}\n",
     ]
     for letter in ANATOMY_EXAM_TEST_OPTION_LETTERS:
@@ -7237,12 +7339,23 @@ async def render_anatomy_exam_test_summary(message, user_id: int, aborted: bool 
         f"❌ Неверно: <b>{session['wrong']}</b>"
         + (f" ({percent}%)" if answered else "")
     )
+    is_rating = session.get("is_rating", False)
+    if is_rating and not aborted and answered:
+        record_anatomy_exam_test_score(user_id, session["correct"], answered)
+        text += "\n\n🏆 Результат добавлен в общий рейтинг."
+    elif is_rating and aborted:
+        text += (
+            "\n\n⚠️ Часть не пройдена до конца — в рейтинг не засчитано "
+            "(в рейтинговом режиме учитываются только полностью пройденные части)."
+        )
     builder = InlineKeyboardBuilder()
     part_id = session["part_id"]
     builder.button(text="🔁 Пройти ещё раз", callback_data=f"anatomy_exam_test_start:{part_id}")
     if session["mistakes"]:
         ANATOMY_EXAM_TEST_MISTAKES[user_id] = {"part_id": part_id, "mistakes": session["mistakes"]}
         builder.button(text=f"❌ Разбор ошибок ({len(session['mistakes'])})", callback_data="anatomy_exam_test_mistakes:0")
+    if is_rating:
+        builder.button(text="🏆 Рейтинг", callback_data="anatomy_exam_test_leaderboard")
     builder.button(text="🔙 К списку частей", callback_data="anatomy_exam_test_menu")
     builder.adjust(1)
     await safe_edit_text(message, text, parse_mode="HTML", reply_markup=builder.as_markup())

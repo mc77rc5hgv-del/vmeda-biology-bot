@@ -252,6 +252,102 @@ async def main():
     assert not cb_stop_stale.message.edits
     print("stop with no active session is a silent no-op: OK")
 
+    # 15. mode defaults to normal; the toggle button flips it and re-renders the menu
+    uid3 = 700100202
+    assert tb.get_anatomy_exam_test_mode(uid3) == "normal"
+    cb_menu0 = FakeCB("anatomy_exam_test_menu", uid=uid3)
+    await tb.cb_anatomy_exam_test_menu(cb_menu0)
+    menu0_text, menu0_kb = cb_menu0.message.edits[-1]
+    assert "обычный режим" in menu0_text
+    assert "anatomy_exam_test_mode_toggle" in kb_data(menu0_kb)
+    assert "anatomy_exam_test_leaderboard" in kb_data(menu0_kb)
+
+    cb_toggle1 = FakeCB("anatomy_exam_test_mode_toggle", uid=uid3)
+    await tb.cb_anatomy_exam_test_mode_toggle(cb_toggle1)
+    assert tb.get_anatomy_exam_test_mode(uid3) == "rating"
+    assert cb_toggle1._answers and "Рейтинговый" in (cb_toggle1._answers[0][0] or "")
+    toggled_text, _ = cb_toggle1.message.edits[-1]
+    assert "рейтинговый режим" in toggled_text
+
+    cb_toggle2 = FakeCB("anatomy_exam_test_mode_toggle", uid=uid3)
+    await tb.cb_anatomy_exam_test_mode_toggle(cb_toggle2)
+    assert tb.get_anatomy_exam_test_mode(uid3) == "normal"
+    print("mode toggle flips normal<->rating and re-renders the menu: OK")
+
+    # 16. a session snapshots the mode at start time, shown via a 🏆/🎯 icon on each question
+    tb.set_anatomy_exam_test_mode(uid3, "rating")
+    cb_start_rating = FakeCB("anatomy_exam_test_start:2", uid=uid3)
+    await tb.cb_anatomy_exam_test_start(cb_start_rating)
+    assert tb.ANATOMY_EXAM_TEST_SESSIONS[uid3]["is_rating"] is True
+    rating_q_text, _ = cb_start_rating.message.edits[-1]
+    assert rating_q_text.startswith("🏆")
+    # switching mode mid-session must not retroactively change the running session
+    tb.set_anatomy_exam_test_mode(uid3, "normal")
+    assert tb.ANATOMY_EXAM_TEST_SESSIONS[uid3]["is_rating"] is True
+    print("session snapshots is_rating at start; mode changes don't affect a running session: OK")
+
+    # 17. completing a part in rating mode records the score; the leaderboard shows it,
+    # and completing another part accumulates on top of the first
+    part2 = tb.get_anatomy_exam_test_part(2)
+    for q in part2["questions"]:
+        session = tb.ANATOMY_EXAM_TEST_SESSIONS[uid3]
+        cb_a = FakeCB(f"anatomy_exam_test_answer:{q['correct']}", uid=uid3)
+        await tb.cb_anatomy_exam_test_answer(cb_a)
+    rating_summary_text, rating_summary_kb = cb_a.message.edits[-1]
+    assert "добавлен в общий рейтинг" in rating_summary_text
+    assert "anatomy_exam_test_leaderboard" in kb_data(rating_summary_kb)
+    uid3_str = str(uid3)
+    assert tb.stats["anatomy_exam_test_scores"][uid3_str]["correct"] == len(part2["questions"])
+    assert tb.stats["anatomy_exam_test_scores"][uid3_str]["total"] == len(part2["questions"])
+    assert tb.stats["anatomy_exam_test_scores"][uid3_str]["attempts"] == 1
+
+    cb_lb = FakeCB("anatomy_exam_test_leaderboard", uid=uid3)
+    await tb.cb_anatomy_exam_test_leaderboard(cb_lb)
+    lb_text, lb_kb = cb_lb.message.edits[-1]
+    check_html(lb_text)
+    assert tb.donor_display_name(uid3_str) in lb_text
+    assert "anatomy_exam_test_menu" in kb_data(lb_kb)
+
+    # a second, normal-mode part completion must NOT add to the rating score
+    tb.set_anatomy_exam_test_mode(uid3, "normal")
+    part3 = tb.get_anatomy_exam_test_part(3)
+    cb_start3 = FakeCB("anatomy_exam_test_start:3", uid=uid3)
+    await tb.cb_anatomy_exam_test_start(cb_start3)
+    assert tb.ANATOMY_EXAM_TEST_SESSIONS[uid3]["is_rating"] is False
+    for q in part3["questions"]:
+        cb_b = FakeCB(f"anatomy_exam_test_answer:{q['correct']}", uid=uid3)
+        await tb.cb_anatomy_exam_test_answer(cb_b)
+    normal_summary_text, _ = cb_b.message.edits[-1]
+    assert "рейтинг" not in normal_summary_text.lower()
+    assert tb.stats["anatomy_exam_test_scores"][uid3_str]["correct"] == len(part2["questions"]), \
+        "a normal-mode completion must not change the accumulated rating score"
+    print("rating-mode completion records + accumulates the score; normal-mode completion doesn't: OK")
+
+    # 18. aborting a rating-mode run does not count toward the rating
+    tb.set_anatomy_exam_test_mode(uid3, "rating")
+    before = dict(tb.stats["anatomy_exam_test_scores"][uid3_str])
+    cb_start_abort = FakeCB("anatomy_exam_test_start:4", uid=uid3)
+    await tb.cb_anatomy_exam_test_start(cb_start_abort)
+    session4 = tb.ANATOMY_EXAM_TEST_SESSIONS[uid3]
+    q4 = session4["queue"][0]
+    cb_ans4 = FakeCB(f"anatomy_exam_test_answer:{q4['correct']}", uid=uid3)
+    await tb.cb_anatomy_exam_test_answer(cb_ans4)
+    cb_stop4 = FakeCB("anatomy_exam_test_stop", uid=uid3)
+    await tb.cb_anatomy_exam_test_stop(cb_stop4)
+    abort_text, _ = cb_stop4.message.edits[-1]
+    assert "не засчитано" in abort_text
+    assert tb.stats["anatomy_exam_test_scores"][uid3_str] == before, \
+        "aborting a rating-mode run must not change the accumulated score"
+    print("aborting a rating-mode run is not scored: OK")
+
+    # 19. empty leaderboard (no one has ever completed a rating-mode part) renders gracefully
+    tb.stats["anatomy_exam_test_scores"].clear()
+    cb_lb_empty = FakeCB("anatomy_exam_test_leaderboard", uid=555444333)
+    await tb.cb_anatomy_exam_test_leaderboard(cb_lb_empty)
+    empty_lb_text, _ = cb_lb_empty.message.edits[-1]
+    assert "Пока никто" in empty_lb_text
+    print("empty rating leaderboard renders gracefully: OK")
+
     print("ALL ANATOMY EXAM TEST TESTS PASSED")
 
 asyncio.run(main())

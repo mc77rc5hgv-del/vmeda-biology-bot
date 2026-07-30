@@ -223,6 +223,22 @@ it's a safe no-op when `sent_message` has no `.photo` (e.g. test mocks), so test
    is untouched by any of this — ТЕСТ questions aren't tied to `ANATOMY` topics/sections at all, just to their own
    flat `anatomy_exam_test.json` part list.
 
+   **ТЕСТ has a per-user normal/rating mode toggle** (`get_anatomy_exam_test_mode`/`set_anatomy_exam_test_mode`,
+   `stats["anatomy_exam_test_mode"][uid]`, default `"normal"`) — a button on the part-list menu flips it
+   (`anatomy_exam_test_mode_toggle`) and immediately re-renders that same menu via the shared
+   `render_anatomy_exam_test_menu()` helper (both the `anatomy_exam_test_menu` handler and the toggle handler call
+   it, so the menu text/keyboard is never duplicated). `start_anatomy_exam_test_session()` snapshots the mode into
+   the session as `is_rating` at start time — switching the mode preference mid-run does not retroactively affect
+   a session already in progress, and the question screen shows a 🏆/🎯 icon reflecting which mode that particular
+   session is running in. Only a **fully completed** rating-mode part (not aborted via "🛑 Закончить") calls
+   `record_anatomy_exam_test_score()`, which accumulates (not "best of") into `stats["anatomy_exam_test_scores"][uid]
+   = {correct, total, attempts}` — every scored part adds its correct/total on top of the running total, unlike
+   `anatomy_latin_scores`' personal-best-per-attempt model, since parts vary in size (102 vs 106) and a cumulative
+   total rewards both accuracy and volume across the 10-part bank. `get_anatomy_exam_test_leaderboard_text()`
+   ranks by raw `correct` count (ties broken by percent) and reuses `donor_display_name()`/
+   `ANATOMY_LATIN_LEADERBOARD_MSG_LIMIT` for name display and the same length-safe truncation as the Latin
+   leaderboard.
+
    **Histology also has its own trial+warning gate** (`histology_gate_ok`, called explicitly at the top of each
    histology handler — `histology_menu`/`_topic`/`_specimen`/`_img`/`_guess_start` — not a middleware, since the
    referral gate's `has_free_access()` can't be reused here without breaking the subscription-scope distinction
