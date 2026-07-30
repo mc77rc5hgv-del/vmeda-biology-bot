@@ -1674,6 +1674,29 @@ def get_anatomy_announcement_keyboard():
     builder.adjust(1)
     return builder.as_markup()
 
+def get_anatomy_exam_announcement_text() -> str:
+    return (
+        f"🎓 <b>Открыт раздел «Экзамен» по Анатомии!</b>\n{DIVIDER}\n\n"
+        "Готовься к экзамену прицельно — три инструмента, и все бесплатно, без рефералов "
+        "и подписки:\n\n"
+        "✅ <b>ТЕСТ</b> — официальный банк вопросов кафедры нормальной анатомии ВМедА "
+        "(Гайворонский и др.), 1040 вопросов, 10 частей\n"
+        "📖 <b>Вопросы теории</b> — разбор экзаменационных вопросов с полными ответами\n"
+        "🖐 <b>Вопросы практики</b> — «покажите и назовите» с фото атласа к каждому ответу\n\n"
+        "🏆 Включи <b>рейтинговый режим</b> в ТЕСТе — результаты идут в общий рейтинг лучших. "
+        "Самые активные и точные получат призы от нас!\n\n"
+        "Жми «🎓 Экзамен» в разделе Анатомии и начинай готовиться 👇"
+    )
+
+def get_anatomy_exam_announcement_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ ТЕСТ", callback_data="anatomy_exam_test_menu")
+    builder.button(text="📖 Вопросы теории", callback_data="anatomy_exam_theory")
+    builder.button(text="🖐 Вопросы практики", callback_data="anatomy_exam_practice")
+    builder.button(text="🏆 Рейтинг ТЕСТа", callback_data="anatomy_exam_test_leaderboard")
+    builder.adjust(1)
+    return builder.as_markup()
+
 def get_anatomy_latin_announcement_text() -> str:
     return (
         f"🏛 <b>Тест по латинским терминам — по всему курсу анатомии!</b>\n{DIVIDER}\n\n"
@@ -2104,18 +2127,18 @@ def build_chemistry_tasks_file() -> BufferedInputFile:
 # ==================== КЛАВИАТУРЫ ====================
 def get_main_menu(user_id: int = None):
     builder = InlineKeyboardBuilder()
-    builder.button(text="🧬 Биология", callback_data="menu_biology")
-    builder.button(text="⚛️ Физика", callback_data="menu_physics")
-    builder.button(text="🧪 Химия", callback_data="menu_chemistry")
     sub_anatomy = user_id is not None and has_subscription_anatomy_access(user_id)
     sub_histology = user_id is not None and has_subscription_histology_access(user_id)
     if user_id is not None and is_admin(user_id):
-        anatomy_label = "🦴 Анатомия (админ)"
+        anatomy_label = "🔥🦴 Анатомия (админ)"
     elif sub_anatomy:
-        anatomy_label = "🦴 Анатомия 💎"
+        anatomy_label = "🔥🦴 Анатомия 💎"
     else:
-        anatomy_label = "🦴 Анатомия"
+        anatomy_label = "🔥🦴 Анатомия"
     builder.button(text=anatomy_label, callback_data="anatomy_root")
+    builder.button(text="🧬 Биология", callback_data="menu_biology")
+    builder.button(text="⚛️ Физика", callback_data="menu_physics")
+    builder.button(text="🧪 Химия", callback_data="menu_chemistry")
     if HISTOLOGY_PUBLIC:
         histology_label = "🔬 Гистология"
     elif user_id is not None and is_admin(user_id):
@@ -2946,6 +2969,7 @@ def get_admin_menu():
         callback_data="admin_discount_promo_confirm",
     )
     builder.button(text="📣 Анонс раздела Анатомия", callback_data="admin_announce_anatomy_confirm")
+    builder.button(text="📣 Анонс Экзамена (ТЕСТ/теория/практика)", callback_data="admin_announce_anatomy_exam_confirm")
     builder.button(text="📣 Анонс теста по латыни", callback_data="admin_announce_anatomy_latin_confirm")
     builder.button(text="📤 Опубликовать пост в канал", callback_data="admin_channel_post_prompt")
     builder.button(text="🔬 Открыть Гистологию всем на 24ч", callback_data="admin_histology_promo_confirm")
@@ -3806,6 +3830,40 @@ async def cb_admin_announce_anatomy_go(callback: CallbackQuery):
     await safe_edit_text(
         callback.message,
         f"✅ Анонс раздела Анатомия отправлен (попытка охватить {recipients} пользователей).",
+        parse_mode="HTML",
+        reply_markup=get_admin_back_keyboard()
+    )
+
+@dp.callback_query(F.data == "admin_announce_anatomy_exam_confirm")
+async def cb_admin_announce_anatomy_exam_confirm(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer()
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Отправить всем", callback_data="admin_announce_anatomy_exam_go")
+    builder.button(text="❌ Отмена", callback_data="admin_panel")
+    builder.adjust(1)
+    preview = (
+        f"👀 <b>Предпросмотр анонса</b>\n{DIVIDER}\n\n"
+        f"{get_anatomy_exam_announcement_text()}\n\n{DIVIDER}\n"
+        f"Отправить это всем {len(stats['total_users'])} пользователям?"
+    )
+    await safe_edit_text(callback.message, preview, parse_mode="HTML", reply_markup=builder.as_markup())
+
+@dp.callback_query(F.data == "admin_announce_anatomy_exam_go")
+async def cb_admin_announce_anatomy_exam_go(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer("📣 Рассылка запущена!", show_alert=True)
+    recipients = len(stats["total_users"])
+    stats["broadcast_count"] = stats.get("broadcast_count", 0) + 1
+    save_stats()
+    await _broadcast(get_anatomy_exam_announcement_text(), get_anatomy_exam_announcement_keyboard())
+    await safe_edit_text(
+        callback.message,
+        f"✅ Анонс раздела Экзамен отправлен (попытка охватить {recipients} пользователей).",
         parse_mode="HTML",
         reply_markup=get_admin_back_keyboard()
     )

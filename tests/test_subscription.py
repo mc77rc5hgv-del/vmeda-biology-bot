@@ -618,7 +618,7 @@ async def main():
     # has_subscription_anatomy_access/has_subscription_histology_access, not scope=="all"
     menu_no_sub = tb.get_main_menu(user_id=non_admin)
     assert "💎 Подписка без рефералов" in kb_texts(menu_no_sub)
-    assert "🦴 Анатомия" in kb_texts(menu_no_sub)
+    assert "🔥🦴 Анатомия" in kb_texts(menu_no_sub)
     assert "🔬 Гистология (рефералы/подписка)" in kb_texts(menu_no_sub)
 
     tb.grant_subscription(non_admin, 6, "stars", 239)  # histology yes, anatomy no
@@ -626,13 +626,13 @@ async def main():
     tier6_texts = kb_texts(menu_tier6)
     assert "💎 Моя подписка" in tier6_texts
     assert any(t.startswith("🔬 Гистология") for t in tier6_texts)
-    assert "🦴 Анатомия" in tier6_texts, "tier 6 has no anatomy — button stays plain (not the 💎 variant)"
+    assert "🔥🦴 Анатомия" in tier6_texts, "tier 6 has no anatomy — button stays plain (not the 💎 variant)"
     tb.stats["subscriptions"].pop(str(non_admin), None)
 
     tb.grant_subscription(non_admin, 7, "stars", 389)  # anatomy yes
     menu_tier7 = tb.get_main_menu(user_id=non_admin)
     tier7_texts = kb_texts(menu_tier7)
-    assert "🦴 Анатомия 💎" in tier7_texts
+    assert "🔥🦴 Анатомия 💎" in tier7_texts
     assert "🔬 Гистология 💎" in tier7_texts
     tb.stats["subscriptions"].pop(str(non_admin), None)
     print("main menu subscription button always visible, anatomy/histology labels match per-tier flags: OK")
@@ -805,6 +805,43 @@ async def main():
     admin_menu_texts = kb_texts(tb.get_admin_menu())
     assert "📣 Анонс раздела Анатомия" in admin_menu_texts
     print("admin panel exposes Anatomy-announcement button: OK")
+
+    # 26c2. Admin Anatomy-exam announcement broadcast (ТЕСТ/теория/практика): preview -> confirm -> broadcast
+    orig_broadcast_exam = tb._broadcast
+    exam_broadcast_calls = []
+    async def fake_broadcast_exam(text, keyboard=None):
+        exam_broadcast_calls.append((text, keyboard))
+    tb._broadcast = fake_broadcast_exam
+
+    exam_ann_text = tb.get_anatomy_exam_announcement_text()
+    check_html(exam_ann_text)
+    exam_ann_kb = tb.get_anatomy_exam_announcement_keyboard()
+    exam_ann_data = kb_data(exam_ann_kb)
+    assert "anatomy_exam_test_menu" in exam_ann_data
+    assert "anatomy_exam_theory" in exam_ann_data
+    assert "anatomy_exam_practice" in exam_ann_data
+    assert "anatomy_exam_test_leaderboard" in exam_ann_data
+
+    cb_exam1 = FakeCB("admin_announce_anatomy_exam_confirm")
+    await tb.cb_admin_announce_anatomy_exam_confirm(cb_exam1)
+    assert cb_exam1.message.edits and "Отправить" in cb_exam1.message.edits[0][0]
+    assert not exam_broadcast_calls, "must not broadcast before confirmation"
+
+    broadcasts_before_exam = tb.stats.get("broadcast_count", 0)
+    cb_exam2 = FakeCB("admin_announce_anatomy_exam_go")
+    await tb.cb_admin_announce_anatomy_exam_go(cb_exam2)
+    assert exam_broadcast_calls, "expected broadcast to be sent"
+    assert exam_broadcast_calls[0][0] == exam_ann_text
+    assert tb.stats["broadcast_count"] == broadcasts_before_exam + 1
+    assert cb_exam2.message.edits and "отправлен" in cb_exam2.message.edits[0][0]
+
+    cb_exam3 = FakeCB("admin_announce_anatomy_exam_confirm", uid=non_admin)
+    await tb.cb_admin_announce_anatomy_exam_confirm(cb_exam3)
+    assert not cb_exam3.message.edits, "non-admin must be blocked"
+
+    tb._broadcast = orig_broadcast_exam
+    assert "📣 Анонс Экзамена (ТЕСТ/теория/практика)" in admin_menu_texts
+    print("admin Anatomy-exam-announcement broadcast + admin panel button: OK")
 
     # 26d. Admin announcement for the global Latin-terminology quiz: preview -> confirm -> broadcast
     orig_broadcast3 = tb._broadcast
