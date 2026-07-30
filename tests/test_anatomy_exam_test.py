@@ -125,8 +125,10 @@ async def main():
     test_menu_data = kb_data(kb5)
     for part in parts:
         assert f"anatomy_exam_test_start:{part['id']}" in test_menu_data
+        assert part["topics"].strip(), part["id"]
+        assert part["topics"] in text5, f"part {part['id']} topics missing from menu text"
     assert "anatomy_exam_menu" in test_menu_data
-    print("ТЕСТ part-list menu lists all 10 parts, reachable by a non-admin: OK")
+    print("ТЕСТ part-list menu lists all 10 parts with topic labels, reachable by a non-admin: OK")
 
     # 7. starting a part renders the first question with lettered option buttons + stop
     cb6 = FakeCB("anatomy_exam_test_start:1", uid=NON_ADMIN)

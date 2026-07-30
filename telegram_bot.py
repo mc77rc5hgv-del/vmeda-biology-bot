@@ -7132,14 +7132,25 @@ def get_anatomy_exam_test_menu_keyboard():
 async def cb_anatomy_exam_test_menu(callback: CallbackQuery):
     await callback.answer()
     total = sum(len(p["questions"]) for p in ANATOMY_EXAM_TEST_PARTS)
+    lines = [
+        f"✅ <b>ТЕСТ по анатомии</b>\n{DIVIDER}\n",
+        "Официальный сборник тестовых вопросов кафедры нормальной анатомии ВМедА "
+        f"(Гайворонский и др., 2021) — всего {total} вопросов, разбит на 10 частей.",
+        "",
+        "Внутри части вопросы идут по порядку, без случайной выборки — можно закончить "
+        "досрочно в любой момент и сразу посмотреть разбор своих ошибок.",
+        "",
+        "Бесплатно для всех, без ограничений.",
+        "",
+        "<b>Что охватывает каждая часть:</b>",
+    ]
+    for part in ANATOMY_EXAM_TEST_PARTS:
+        lines.append(f"\n<b>{part['title']}</b>")
+        lines.append(part["topics"])
+    lines.append("\nВыбери часть:")
     await safe_edit_text(
         callback.message,
-        f"✅ <b>ТЕСТ по анатомии</b>\n{DIVIDER}\n\n"
-        f"Официальный сборник тестовых вопросов кафедры нормальной анатомии ВМедА "
-        f"(Гайворонский и др., 2021) — всего {total} вопросов, разбит на 10 частей.\n\n"
-        "Внутри части вопросы идут по порядку, без случайной выборки — можно закончить "
-        "досрочно в любой момент и сразу посмотреть разбор своих ошибок.\n\n"
-        "Бесплатно для всех, без ограничений.\n\nВыбери часть:",
+        "\n".join(lines),
         parse_mode="HTML",
         reply_markup=get_anatomy_exam_test_menu_keyboard()
     )
