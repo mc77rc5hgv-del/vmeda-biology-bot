@@ -97,6 +97,9 @@ with open("anatomy_exam_test.json", "r", encoding="utf-8") as f:
 with open("anatomy_exam_theory.json", "r", encoding="utf-8") as f:
     ANATOMY_EXAM_THEORY_SECTIONS = json.load(f)["sections"]
 
+with open("anatomy_exam_practice.json", "r", encoding="utf-8") as f:
+    ANATOMY_EXAM_PRACTICE_SECTIONS = json.load(f)["sections"]
+
 with open("histology.json", "r", encoding="utf-8") as f:
     HISTOLOGY = json.load(f)
 
@@ -7104,9 +7107,118 @@ async def cb_anatomy_exam_menu(callback: CallbackQuery):
         reply_markup=get_anatomy_exam_menu_keyboard()
     )
 
+def get_anatomy_exam_practice_section(section_id: int):
+    return next((s for s in ANATOMY_EXAM_PRACTICE_SECTIONS if s["id"] == section_id), None)
+
+def get_anatomy_exam_practice_section_keyboard():
+    builder = InlineKeyboardBuilder()
+    for section in ANATOMY_EXAM_PRACTICE_SECTIONS:
+        count = len(section["questions"])
+        prefix = "" if count else "🚧 "
+        builder.button(
+            text=f"{prefix}{section['title']} ({count})" if count else f"{prefix}{section['title']} — скоро",
+            callback_data=f"anatomy_exam_practice_section:{section['id']}"
+        )
+    builder.adjust(1)
+    builder.row(InlineKeyboardButton(text="🔙 К экзамену", callback_data="anatomy_exam_menu"))
+    return builder.as_markup()
+
 @dp.callback_query(F.data == "anatomy_exam_practice")
 async def cb_anatomy_exam_practice(callback: CallbackQuery):
-    await callback.answer("🚧 Вопросы практики скоро появятся здесь", show_alert=True)
+    await callback.answer()
+    total = sum(len(s["questions"]) for s in ANATOMY_EXAM_PRACTICE_SECTIONS)
+    await safe_edit_text(
+        callback.message,
+        f"🖐 <b>Вопросы практики</b>\n{DIVIDER}\n\n"
+        f"Официальный перечень вопросов практической части экзамена по анатомии человека "
+        f"(лечебное дело), утверждённый кафедрой нормальной анатомии ВМедА — {total} вопросов "
+        f"в 4 разделах. К каждому ответу — изображение из атласа Неттера, Гайворонского или "
+        f"из открытых источников.\n\nБесплатно для всех, без ограничений.\n\nВыбери раздел:",
+        parse_mode="HTML",
+        reply_markup=get_anatomy_exam_practice_section_keyboard()
+    )
+
+def get_anatomy_exam_practice_question_list_keyboard(section_id: int):
+    section = get_anatomy_exam_practice_section(section_id)
+    builder = InlineKeyboardBuilder()
+    for q in section["questions"]:
+        label = q["question"] if len(q["question"]) <= 50 else q["question"][:49] + "…"
+        builder.button(text=f"{q['num']}. {label}", callback_data=f"anatomy_exam_practice_q:{section_id}:{q['num']}")
+    builder.adjust(1)
+    builder.row(InlineKeyboardButton(text="🔙 К разделам", callback_data="anatomy_exam_practice"))
+    return builder.as_markup()
+
+@dp.callback_query(F.data.startswith("anatomy_exam_practice_section:"))
+async def cb_anatomy_exam_practice_section(callback: CallbackQuery):
+    section_id = int(callback.data.split(":")[1])
+    section = get_anatomy_exam_practice_section(section_id)
+    if not section:
+        await callback.answer("Раздел не найден", show_alert=True)
+        return
+    if not section["questions"]:
+        await callback.answer("🚧 Этот раздел пока в разработке", show_alert=True)
+        return
+    await callback.answer()
+    await safe_edit_text(
+        callback.message,
+        f"🖐 <b>{section['title']}</b>\n{DIVIDER}\n\nВыбери вопрос ({len(section['questions'])}):",
+        parse_mode="HTML",
+        reply_markup=get_anatomy_exam_practice_question_list_keyboard(section_id)
+    )
+
+def get_anatomy_exam_practice_question_text(section: dict, num: int) -> str:
+    question = next(q for q in section["questions"] if q["num"] == num)
+    img = question["image"]
+    return (
+        f"🖐 <b>Вопрос {num}/{len(section['questions'])}</b>\n\n{DIVIDER}\n\n"
+        f"<b>{question['question']}</b>\n\n{DIVIDER}\n\n{question['answer']}\n\n"
+        f"<i>Источник фото: {img['credit']}</i>"
+    )
+
+def get_anatomy_exam_practice_question_keyboard(section_id: int, num: int, total: int):
+    builder = InlineKeyboardBuilder()
+    nav = []
+    if num > 1:
+        nav.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"anatomy_exam_practice_q:{section_id}:{num - 1}"))
+    if num < total:
+        nav.append(InlineKeyboardButton(text="Вперёд ➡️", callback_data=f"anatomy_exam_practice_q:{section_id}:{num + 1}"))
+    if nav:
+        builder.row(*nav)
+    builder.row(InlineKeyboardButton(text="📋 Список вопросов", callback_data=f"anatomy_exam_practice_section:{section_id}"))
+    builder.row(InlineKeyboardButton(text="🔙 К разделам", callback_data="anatomy_exam_practice"))
+    return builder.as_markup()
+
+@dp.callback_query(F.data.startswith("anatomy_exam_practice_q:"))
+async def cb_anatomy_exam_practice_question(callback: CallbackQuery):
+    _, section_id_raw, num_raw = callback.data.split(":")
+    section_id, num = int(section_id_raw), int(num_raw)
+    section = get_anatomy_exam_practice_section(section_id)
+    if not section:
+        await callback.answer("Раздел не найден", show_alert=True)
+        return
+    question = next((q for q in section["questions"] if q["num"] == num), None)
+    if not question:
+        await callback.answer("Вопрос не найден", show_alert=True)
+        return
+    await callback.answer()
+
+    body = get_anatomy_exam_practice_question_text(section, num)
+    keyboard = get_anatomy_exam_practice_question_keyboard(section_id, num, len(section["questions"]))
+    img = question["image"]
+    photo = _anatomy_image_media(img)
+    await callback.message.delete()
+
+    if len(body) <= CAPTION_LIMIT:
+        sent = await callback.message.answer_photo(photo, caption=body, parse_mode="HTML", reply_markup=keyboard)
+        _cache_anatomy_file_id(img, sent)
+        return
+
+    short_caption = f"<b>{question['question']}</b>"
+    if len(short_caption) > CAPTION_LIMIT:
+        short_caption = short_caption[:CAPTION_LIMIT - 1] + "…"
+    sent = await callback.message.answer_photo(photo, caption=short_caption, parse_mode="HTML")
+    _cache_anatomy_file_id(img, sent)
+    await callback.message.answer(body, parse_mode="HTML", reply_markup=keyboard)
 
 def get_anatomy_exam_theory_section(section_id: int):
     return next((s for s in ANATOMY_EXAM_THEORY_SECTIONS if s["id"] == section_id), None)
