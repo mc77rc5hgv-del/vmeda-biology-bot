@@ -1661,6 +1661,24 @@ def get_anatomy_announcement_keyboard():
     builder.adjust(1)
     return builder.as_markup()
 
+def get_anatomy_latin_announcement_text() -> str:
+    return (
+        f"🏛 <b>Тест по латинским терминам — по всему курсу анатомии!</b>\n{DIVIDER}\n\n"
+        "Проверь себя: общий тест собирает вопросы по латинской номенклатуре сразу со всего "
+        "курса анатомии, а не по одной теме — и совершенно бесплатно, без рефералов и "
+        "подписки.\n\n"
+        "🏆 Лучшие результаты попадают в общий рейтинг — посмотри, на каком ты месте, "
+        "и постарайся его улучшить.\n\n"
+        "Жми кнопку ниже и проходи тест 👇"
+    )
+
+def get_anatomy_latin_announcement_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🏛 Пройти тест", callback_data="anatomy_latin_all_start")
+    builder.button(text="🏆 Рейтинг", callback_data="anatomy_latin_leaderboard")
+    builder.adjust(1)
+    return builder.as_markup()
+
 def donor_display_name(uid_str: str) -> str:
     if stats.get("donor_hide_name", {}).get(uid_str):
         return "🙈 Аноним"
@@ -2915,6 +2933,7 @@ def get_admin_menu():
         callback_data="admin_discount_promo_confirm",
     )
     builder.button(text="📣 Анонс раздела Анатомия", callback_data="admin_announce_anatomy_confirm")
+    builder.button(text="📣 Анонс теста по латыни", callback_data="admin_announce_anatomy_latin_confirm")
     builder.button(text="📤 Опубликовать пост в канал", callback_data="admin_channel_post_prompt")
     builder.button(text="🔬 Открыть Гистологию всем на 24ч", callback_data="admin_histology_promo_confirm")
     builder.button(text="🎉 Снять все ограничения всем на 24ч", callback_data="admin_global_promo_confirm")
@@ -3774,6 +3793,40 @@ async def cb_admin_announce_anatomy_go(callback: CallbackQuery):
     await safe_edit_text(
         callback.message,
         f"✅ Анонс раздела Анатомия отправлен (попытка охватить {recipients} пользователей).",
+        parse_mode="HTML",
+        reply_markup=get_admin_back_keyboard()
+    )
+
+@dp.callback_query(F.data == "admin_announce_anatomy_latin_confirm")
+async def cb_admin_announce_anatomy_latin_confirm(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer()
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Отправить всем", callback_data="admin_announce_anatomy_latin_go")
+    builder.button(text="❌ Отмена", callback_data="admin_panel")
+    builder.adjust(1)
+    preview = (
+        f"👀 <b>Предпросмотр анонса</b>\n{DIVIDER}\n\n"
+        f"{get_anatomy_latin_announcement_text()}\n\n{DIVIDER}\n"
+        f"Отправить это всем {len(stats['total_users'])} пользователям?"
+    )
+    await safe_edit_text(callback.message, preview, parse_mode="HTML", reply_markup=builder.as_markup())
+
+@dp.callback_query(F.data == "admin_announce_anatomy_latin_go")
+async def cb_admin_announce_anatomy_latin_go(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer("📣 Рассылка запущена!", show_alert=True)
+    recipients = len(stats["total_users"])
+    stats["broadcast_count"] = stats.get("broadcast_count", 0) + 1
+    save_stats()
+    await _broadcast(get_anatomy_latin_announcement_text(), get_anatomy_latin_announcement_keyboard())
+    await safe_edit_text(
+        callback.message,
+        f"✅ Анонс теста по латыни отправлен (попытка охватить {recipients} пользователей).",
         parse_mode="HTML",
         reply_markup=get_admin_back_keyboard()
     )

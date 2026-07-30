@@ -806,6 +806,41 @@ async def main():
     assert "📣 Анонс раздела Анатомия" in admin_menu_texts
     print("admin panel exposes Anatomy-announcement button: OK")
 
+    # 26d. Admin announcement for the global Latin-terminology quiz: preview -> confirm -> broadcast
+    orig_broadcast3 = tb._broadcast
+    latin_broadcast_calls = []
+    async def fake_broadcast3(text, keyboard=None):
+        latin_broadcast_calls.append((text, keyboard))
+    tb._broadcast = fake_broadcast3
+
+    latin_ann_text = tb.get_anatomy_latin_announcement_text()
+    check_html(latin_ann_text)
+    latin_ann_kb = tb.get_anatomy_latin_announcement_keyboard()
+    latin_ann_data = kb_data(latin_ann_kb)
+    assert "anatomy_latin_all_start" in latin_ann_data
+    assert "anatomy_latin_leaderboard" in latin_ann_data
+
+    cb_latin1 = FakeCB("admin_announce_anatomy_latin_confirm")
+    await tb.cb_admin_announce_anatomy_latin_confirm(cb_latin1)
+    assert cb_latin1.message.edits and "Отправить" in cb_latin1.message.edits[0][0]
+    assert not latin_broadcast_calls, "must not broadcast before confirmation"
+
+    broadcasts_before3 = tb.stats.get("broadcast_count", 0)
+    cb_latin2 = FakeCB("admin_announce_anatomy_latin_go")
+    await tb.cb_admin_announce_anatomy_latin_go(cb_latin2)
+    assert latin_broadcast_calls, "expected broadcast to be sent"
+    assert latin_broadcast_calls[0][0] == latin_ann_text
+    assert tb.stats["broadcast_count"] == broadcasts_before3 + 1
+    assert cb_latin2.message.edits and "отправлен" in cb_latin2.message.edits[0][0]
+
+    cb_latin3 = FakeCB("admin_announce_anatomy_latin_confirm", uid=non_admin)
+    await tb.cb_admin_announce_anatomy_latin_confirm(cb_latin3)
+    assert not cb_latin3.message.edits, "non-admin must be blocked"
+
+    tb._broadcast = orig_broadcast3
+    assert "📣 Анонс теста по латыни" in kb_texts(tb.get_admin_menu())
+    print("admin Latin-quiz announcement broadcast + admin panel button: OK")
+
     # 22. Menu order: tiers 7 (389₽) and 9 (1119₽) lead, then tier 1 (89₽), per menu_number
     menu_text2 = tb.get_subscription_menu_text(non_admin)
     check_html(menu_text2)
