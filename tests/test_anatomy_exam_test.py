@@ -347,6 +347,90 @@ async def main():
     assert "Пока никто" in empty_lb_text
     print("empty rating leaderboard renders gracefully: OK")
 
+    # 20. flash-test menu buttons: start + its own leaderboard, distinct from the rating one
+    uid4 = 700100303
+    cb_menu_flash = FakeCB("anatomy_exam_test_menu", uid=uid4)
+    await tb.cb_anatomy_exam_test_menu(cb_menu_flash)
+    menu_flash_text, menu_flash_kb = cb_menu_flash.message.edits[-1]
+    check_html(menu_flash_text)
+    assert "anatomy_exam_test_flash_start" in kb_data(menu_flash_kb)
+    assert "anatomy_exam_flash_leaderboard" in kb_data(menu_flash_kb)
+    print("ТЕСТ menu exposes flash-test start + its own leaderboard: OK")
+
+    # 21. flash-test session pulls exactly 50 random questions from the whole 1040-question
+    # pool (mixed across parts, unlike a sequential single-part run)
+    all_q = tb.ANATOMY_EXAM_TEST_ALL_QUESTIONS
+    assert len(all_q) == 1040
+    cb_flash_start = FakeCB("anatomy_exam_test_flash_start", uid=uid4)
+    await tb.cb_anatomy_exam_test_flash_start(cb_flash_start)
+    session_flash = tb.ANATOMY_EXAM_TEST_SESSIONS[uid4]
+    assert session_flash["is_flash"] is True
+    assert session_flash["part_id"] is None
+    assert len(session_flash["queue"]) == 50
+    flash_q_text, flash_q_kb = cb_flash_start.message.edits[-1]
+    assert flash_q_text.startswith("⚡")
+    assert "ФЛЭШ-ТЕСТ" in flash_q_text
+    assert "anatomy_exam_test_stop" in kb_data(flash_q_kb)
+    print("flash-test session samples 50 random questions from the full bank: OK")
+
+    # 22. completing a flash test (all correct, no mistakes) always records a personal-best
+    # score, independent of the normal/rating mode toggle
+    tb.set_anatomy_exam_test_mode(uid4, "normal")
+    for q in session_flash["queue"]:
+        cb_fa = FakeCB(f"anatomy_exam_test_answer:{q['correct']}", uid=uid4)
+        await tb.cb_anatomy_exam_test_answer(cb_fa)
+    flash_summary_text, flash_summary_kb = cb_fa.message.edits[-1]
+    assert "добавлен в рейтинг флэш-теста" in flash_summary_text
+    assert "новый личный рекорд" in flash_summary_text.lower()
+    flash_summary_data = kb_data(flash_summary_kb)
+    assert "anatomy_exam_test_flash_start" in flash_summary_data
+    assert "anatomy_exam_flash_leaderboard" in flash_summary_data
+    uid4_str = str(uid4)
+    assert tb.stats["anatomy_exam_flash_scores"][uid4_str]["best_correct"] == 50
+    assert tb.stats["anatomy_exam_flash_scores"][uid4_str]["best_total"] == 50
+    assert tb.stats["anatomy_exam_flash_scores"][uid4_str]["attempts"] == 1
+    assert uid4 not in tb.ANATOMY_EXAM_TEST_SESSIONS
+    print("completing a flash test records a personal-best score regardless of mode: OK")
+
+    # 23. flash leaderboard renders and is independent from the part-based rating leaderboard
+    cb_flash_lb = FakeCB("anatomy_exam_flash_leaderboard", uid=uid4)
+    await tb.cb_anatomy_exam_flash_leaderboard(cb_flash_lb)
+    flash_lb_text, flash_lb_kb = cb_flash_lb.message.edits[-1]
+    check_html(flash_lb_text)
+    assert tb.donor_display_name(uid4_str) in flash_lb_text
+    assert "50/50" in flash_lb_text
+    assert "anatomy_exam_test_menu" in kb_data(flash_lb_kb)
+    assert uid4_str not in tb.stats.get("anatomy_exam_test_scores", {}), \
+        "flash-test scoring must not touch the part-based rating leaderboard"
+    print("flash-test leaderboard is separate from the part-based rating leaderboard: OK")
+
+    # 24. a worse repeat attempt does not overwrite the personal best; aborting doesn't score
+    cb_flash_start2 = FakeCB("anatomy_exam_test_flash_start", uid=uid4)
+    await tb.cb_anatomy_exam_test_flash_start(cb_flash_start2)
+    session_flash2 = tb.ANATOMY_EXAM_TEST_SESSIONS[uid4]
+    q_first = session_flash2["queue"][0]
+    wrong_letter = next(letter for letter in q_first["options"] if letter != q_first["correct"])
+    cb_wrong = FakeCB(f"anatomy_exam_test_answer:{wrong_letter}", uid=uid4)
+    await tb.cb_anatomy_exam_test_answer(cb_wrong)
+    for q in session_flash2["queue"][1:]:
+        cb_fa2 = FakeCB(f"anatomy_exam_test_answer:{q['correct']}", uid=uid4)
+        await tb.cb_anatomy_exam_test_answer(cb_fa2)
+    worse_summary_text, _ = cb_fa2.message.edits[-1]
+    assert "рекорд" not in worse_summary_text.lower()
+    assert tb.stats["anatomy_exam_flash_scores"][uid4_str]["best_correct"] == 50, \
+        "a worse repeat attempt must not overwrite the personal best"
+    assert tb.stats["anatomy_exam_flash_scores"][uid4_str]["attempts"] == 2
+
+    cb_flash_start3 = FakeCB("anatomy_exam_test_flash_start", uid=uid4)
+    await tb.cb_anatomy_exam_test_flash_start(cb_flash_start3)
+    cb_flash_stop = FakeCB("anatomy_exam_test_stop", uid=uid4)
+    await tb.cb_anatomy_exam_test_stop(cb_flash_stop)
+    aborted_flash_text, _ = cb_flash_stop.message.edits[-1]
+    assert "не засчитано" in aborted_flash_text
+    assert tb.stats["anatomy_exam_flash_scores"][uid4_str]["attempts"] == 2, \
+        "an aborted flash test must not be scored at all"
+    print("worse repeat doesn't overwrite personal best; aborted flash test isn't scored: OK")
+
     print("ALL ANATOMY EXAM TEST TESTS PASSED")
 
 asyncio.run(main())

@@ -140,6 +140,7 @@ def load_stats() -> dict:
             data.setdefault("anatomy_latin_scores", {})
             data.setdefault("anatomy_exam_test_scores", {})
             data.setdefault("anatomy_exam_test_mode", {})
+            data.setdefault("anatomy_exam_flash_scores", {})
             return data
         except (json.JSONDecodeError, OSError):
             logger.exception("Не удалось прочитать %s, статистика будет создана заново", STATS_FILE)
@@ -174,6 +175,7 @@ def load_stats() -> dict:
         "anatomy_latin_scores": {},
         "anatomy_exam_test_scores": {},
         "anatomy_exam_test_mode": {},
+        "anatomy_exam_flash_scores": {},
     }
 
 # Один воркер сериализует записи на диск и не даёт им блокировать event loop бота.
@@ -7396,6 +7398,8 @@ async def cb_anatomy_exam_theory_question(callback: CallbackQuery):
 ANATOMY_EXAM_TEST_SESSIONS: dict[int, dict] = {}
 ANATOMY_EXAM_TEST_MISTAKES: dict[int, list] = {}
 ANATOMY_EXAM_TEST_OPTION_LETTERS = "абвгд"
+ANATOMY_EXAM_FLASH_SIZE = 50
+ANATOMY_EXAM_TEST_ALL_QUESTIONS = [q for p in ANATOMY_EXAM_TEST_PARTS for q in p["questions"]]
 
 def get_anatomy_exam_test_part(part_id: int):
     return next((p for p in ANATOMY_EXAM_TEST_PARTS if p["id"] == part_id), None)
@@ -7472,6 +7476,79 @@ async def cb_anatomy_exam_test_leaderboard(callback: CallbackQuery):
         reply_markup=get_anatomy_exam_test_leaderboard_keyboard()
     )
 
+# ---- Флэш-тест: 50 случайных вопросов из всего банка (все 10 частей вперемешку),
+# всегда засчитывается в личный рекорд при полном прохождении (в отличие от обычных
+# частей, тут нет отдельного переключателя режима — засчитывается любое завершённое
+# прохождение). Рейтинг — по личному лучшему результату, как у теста по латыни
+# (ANATOMY_LATIN_SESSIONS/record_anatomy_latin_score), а не накопительно, как у частей.
+def record_anatomy_exam_flash_score(user_id: int, correct: int, total: int) -> bool:
+    if total <= 0:
+        return False
+    uid_str = str(user_id)
+    scores = stats.setdefault("anatomy_exam_flash_scores", {})
+    prev = scores.get(uid_str)
+    percent = correct / total
+    is_new_best = True
+    if prev:
+        prev_percent = prev["best_correct"] / prev["best_total"] if prev["best_total"] else 0
+        is_new_best = percent > prev_percent or (percent == prev_percent and total > prev["best_total"])
+    entry = scores.setdefault(uid_str, {"best_correct": correct, "best_total": total, "attempts": 0})
+    entry["attempts"] = entry.get("attempts", 0) + 1
+    if is_new_best:
+        entry["best_correct"] = correct
+        entry["best_total"] = total
+    save_stats()
+    return is_new_best
+
+def get_anatomy_exam_flash_leaderboard_text(user_id: int = None) -> str:
+    scores = stats.get("anatomy_exam_flash_scores", {})
+    ranked = sorted(
+        scores.items(),
+        key=lambda kv: (kv[1]["best_correct"] / kv[1]["best_total"] if kv[1]["best_total"] else 0, kv[1]["best_correct"]),
+        reverse=True,
+    )
+    header = f"⚡ <b>Рейтинг флэш-теста по анатомии</b>\n{DIVIDER}"
+    if not ranked:
+        return header + "\n\nПока никто не проходил флэш-тест — стань первым! ⚡"
+    lines = [header, ""]
+    shown_uids = []
+    for i, (uid_str, entry) in enumerate(ranked):
+        icon = RANK_MEDALS[i] if i < 3 else f"{i + 1}."
+        percent = round(100 * entry["best_correct"] / entry["best_total"]) if entry["best_total"] else 0
+        row = f"{icon} {donor_display_name(uid_str)} — <b>{entry['best_correct']}/{entry['best_total']}</b> ({percent}%)"
+        if len("\n".join([*lines, row])) > ANATOMY_LATIN_LEADERBOARD_MSG_LIMIT:
+            break
+        lines.append(row)
+        shown_uids.append(uid_str)
+    if len(shown_uids) < len(ranked):
+        lines.append(f"\n… показаны первые {len(shown_uids)} из {len(ranked)}")
+    if user_id is not None:
+        uid_str = str(user_id)
+        if uid_str not in shown_uids and uid_str in scores:
+            rank = next(i for i, (u, _) in enumerate(ranked) if u == uid_str) + 1
+            entry = scores[uid_str]
+            percent = round(100 * entry["best_correct"] / entry["best_total"]) if entry["best_total"] else 0
+            lines.append(f"\nТвоё место: <b>#{rank}</b> — {entry['best_correct']}/{entry['best_total']} ({percent}%)")
+    return "\n".join(lines)
+
+def get_anatomy_exam_flash_leaderboard_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="⚡ Пройти флэш-тест", callback_data="anatomy_exam_test_flash_start")
+    builder.button(text="🔄 Обновить", callback_data="anatomy_exam_flash_leaderboard")
+    builder.button(text="🔙 К тесту", callback_data="anatomy_exam_test_menu")
+    builder.adjust(1)
+    return builder.as_markup()
+
+@dp.callback_query(F.data == "anatomy_exam_flash_leaderboard")
+async def cb_anatomy_exam_flash_leaderboard(callback: CallbackQuery):
+    await callback.answer()
+    await safe_edit_text(
+        callback.message,
+        get_anatomy_exam_flash_leaderboard_text(callback.from_user.id),
+        parse_mode="HTML",
+        reply_markup=get_anatomy_exam_flash_leaderboard_keyboard()
+    )
+
 def get_anatomy_exam_test_menu_keyboard(user_id: int):
     builder = InlineKeyboardBuilder()
     if get_anatomy_exam_test_mode(user_id) == "rating":
@@ -7479,6 +7556,8 @@ def get_anatomy_exam_test_menu_keyboard(user_id: int):
     else:
         builder.button(text="🎯 Режим: обычный (нажми для рейтингового)", callback_data="anatomy_exam_test_mode_toggle")
     builder.button(text="🏆 Рейтинг", callback_data="anatomy_exam_test_leaderboard")
+    builder.button(text="⚡ Флэш-тест (50 случайных вопросов)", callback_data="anatomy_exam_test_flash_start")
+    builder.button(text="🏆 Рейтинг флэш-теста", callback_data="anatomy_exam_flash_leaderboard")
     for part in ANATOMY_EXAM_TEST_PARTS:
         builder.button(
             text=f"{part['title']} ({len(part['questions'])} вопр.)",
@@ -7505,6 +7584,10 @@ async def render_anatomy_exam_test_menu(message, user_id: int):
         "досрочно в любой момент и сразу посмотреть разбор своих ошибок.",
         "",
         mode_line,
+        "",
+        "⚡ <b>Флэш-тест</b> — 50 случайных вопросов вперемешку из всех частей. Каждое "
+        "полное прохождение сразу идёт в отдельный рейтинг флэш-теста — независимо от "
+        "выбранного выше режима.",
         "",
         "Бесплатно для всех, без ограничений.",
         "",
@@ -7546,6 +7629,23 @@ def start_anatomy_exam_test_session(user_id: int, part_id: int) -> bool:
         "wrong": 0,
         "mistakes": [],
         "is_rating": get_anatomy_exam_test_mode(user_id) == "rating",
+        "is_flash": False,
+    }
+    return True
+
+def start_anatomy_exam_flash_session(user_id: int) -> bool:
+    if not ANATOMY_EXAM_TEST_ALL_QUESTIONS:
+        return False
+    size = min(ANATOMY_EXAM_FLASH_SIZE, len(ANATOMY_EXAM_TEST_ALL_QUESTIONS))
+    ANATOMY_EXAM_TEST_SESSIONS[user_id] = {
+        "part_id": None,
+        "queue": random.sample(ANATOMY_EXAM_TEST_ALL_QUESTIONS, size),
+        "index": 0,
+        "correct": 0,
+        "wrong": 0,
+        "mistakes": [],
+        "is_rating": False,
+        "is_flash": True,
     }
     return True
 
@@ -7561,9 +7661,14 @@ def get_anatomy_exam_test_keyboard(question: dict):
 async def render_anatomy_exam_test_question(message, user_id: int):
     session = ANATOMY_EXAM_TEST_SESSIONS[user_id]
     question = session["queue"][session["index"]]
-    icon = "🏆" if session.get("is_rating") else "🎯"
+    if session.get("is_flash"):
+        icon, label = "⚡", "ФЛЭШ-ТЕСТ"
+    elif session.get("is_rating"):
+        icon, label = "🏆", "ТЕСТ"
+    else:
+        icon, label = "🎯", "ТЕСТ"
     lines = [
-        f"{icon} <b>ТЕСТ — вопрос {session['index'] + 1}/{len(session['queue'])}</b>\n{DIVIDER}\n",
+        f"{icon} <b>{label} — вопрос {session['index'] + 1}/{len(session['queue'])}</b>\n{DIVIDER}\n",
         f"{question['question']}\n",
     ]
     for letter in ANATOMY_EXAM_TEST_OPTION_LETTERS:
@@ -7590,7 +7695,7 @@ def get_anatomy_exam_test_mistake_text(mistake: dict, idx: int, total: int) -> s
         lines.append(f"{letter}) {mistake['options'][letter]}{marker}")
     return "\n".join(lines)
 
-def get_anatomy_exam_test_mistake_keyboard(part_id: int, idx: int, total: int):
+def get_anatomy_exam_test_mistake_keyboard(part_id: int, idx: int, total: int, is_flash: bool = False):
     builder = InlineKeyboardBuilder()
     nav = []
     if idx > 0:
@@ -7599,7 +7704,10 @@ def get_anatomy_exam_test_mistake_keyboard(part_id: int, idx: int, total: int):
         nav.append(InlineKeyboardButton(text="➡️ Следующая", callback_data=f"anatomy_exam_test_mistakes:{idx + 1}"))
     if nav:
         builder.row(*nav)
-    builder.row(InlineKeyboardButton(text="🔁 Пройти часть ещё раз", callback_data=f"anatomy_exam_test_start:{part_id}"))
+    if is_flash:
+        builder.row(InlineKeyboardButton(text="🔁 Пройти ещё раз", callback_data="anatomy_exam_test_flash_start"))
+    else:
+        builder.row(InlineKeyboardButton(text="🔁 Пройти часть ещё раз", callback_data=f"anatomy_exam_test_start:{part_id}"))
     builder.row(InlineKeyboardButton(text="🔙 К списку частей", callback_data="anatomy_exam_test_menu"))
     return builder.as_markup()
 
@@ -7619,7 +7727,16 @@ async def render_anatomy_exam_test_summary(message, user_id: int, aborted: bool 
         + (f" ({percent}%)" if answered else "")
     )
     is_rating = session.get("is_rating", False)
-    if is_rating and not aborted and answered:
+    is_flash = session.get("is_flash", False)
+    if is_flash:
+        if not aborted and answered:
+            is_new_best = record_anatomy_exam_flash_score(user_id, session["correct"], answered)
+            text += "\n\n⚡ Результат добавлен в рейтинг флэш-теста." + (
+                " 🎉 Это твой новый личный рекорд!" if is_new_best else ""
+            )
+        elif aborted:
+            text += "\n\n⚠️ Флэш-тест не пройден до конца — в рейтинг не засчитано."
+    elif is_rating and not aborted and answered:
         record_anatomy_exam_test_score(user_id, session["correct"], answered)
         text += "\n\n🏆 Результат добавлен в общий рейтинг."
     elif is_rating and aborted:
@@ -7629,11 +7746,16 @@ async def render_anatomy_exam_test_summary(message, user_id: int, aborted: bool 
         )
     builder = InlineKeyboardBuilder()
     part_id = session["part_id"]
-    builder.button(text="🔁 Пройти ещё раз", callback_data=f"anatomy_exam_test_start:{part_id}")
+    if is_flash:
+        builder.button(text="🔁 Пройти ещё раз", callback_data="anatomy_exam_test_flash_start")
+    else:
+        builder.button(text="🔁 Пройти ещё раз", callback_data=f"anatomy_exam_test_start:{part_id}")
     if session["mistakes"]:
-        ANATOMY_EXAM_TEST_MISTAKES[user_id] = {"part_id": part_id, "mistakes": session["mistakes"]}
+        ANATOMY_EXAM_TEST_MISTAKES[user_id] = {"part_id": part_id, "is_flash": is_flash, "mistakes": session["mistakes"]}
         builder.button(text=f"❌ Разбор ошибок ({len(session['mistakes'])})", callback_data="anatomy_exam_test_mistakes:0")
-    if is_rating:
+    if is_flash:
+        builder.button(text="🏆 Рейтинг флэш-теста", callback_data="anatomy_exam_flash_leaderboard")
+    elif is_rating:
         builder.button(text="🏆 Рейтинг", callback_data="anatomy_exam_test_leaderboard")
     builder.button(text="🔙 К списку частей", callback_data="anatomy_exam_test_menu")
     builder.adjust(1)
@@ -7644,6 +7766,14 @@ async def cb_anatomy_exam_test_start(callback: CallbackQuery):
     part_id = int(callback.data.split(":")[1])
     if not start_anatomy_exam_test_session(callback.from_user.id, part_id):
         await callback.answer("Часть не найдена", show_alert=True)
+        return
+    await callback.answer()
+    await render_anatomy_exam_test_question(callback.message, callback.from_user.id)
+
+@dp.callback_query(F.data == "anatomy_exam_test_flash_start")
+async def cb_anatomy_exam_test_flash_start(callback: CallbackQuery):
+    if not start_anatomy_exam_flash_session(callback.from_user.id):
+        await callback.answer("Вопросы не найдены", show_alert=True)
         return
     await callback.answer()
     await render_anatomy_exam_test_question(callback.message, callback.from_user.id)
@@ -7700,7 +7830,9 @@ async def cb_anatomy_exam_test_mistakes(callback: CallbackQuery):
         callback.message,
         get_anatomy_exam_test_mistake_text(mistakes[idx], idx, len(mistakes)),
         parse_mode="HTML",
-        reply_markup=get_anatomy_exam_test_mistake_keyboard(record["part_id"], idx, len(mistakes))
+        reply_markup=get_anatomy_exam_test_mistake_keyboard(
+            record["part_id"], idx, len(mistakes), record.get("is_flash", False)
+        )
     )
 
 # ==================== ГИСТОЛОГИЯ ====================
