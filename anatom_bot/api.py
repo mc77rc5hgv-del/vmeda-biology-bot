@@ -11,6 +11,7 @@ import logging
 
 from aiogram import Bot
 from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 import config
@@ -21,6 +22,13 @@ from state_logic import detect_new_achievements
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="anatom-bot auth/state API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[config.WEBAPP_URL],
+    allow_methods=["GET", "POST", "PUT"],
+    allow_headers=["Authorization", "Content-Type"],
+)
 
 # Used only to push outgoing achievement notifications — this process never polls for updates,
 # so it can safely share the same bot token as the polling bot process in bot.py.
