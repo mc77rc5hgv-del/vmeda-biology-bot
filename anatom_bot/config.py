@@ -12,9 +12,19 @@ def _env(name: str, default: str | None = None, required: bool = False) -> str:
     return value or ""
 
 
+def _normalize_database_url(url: str) -> str:
+    """Railway (and Heroku-style providers) hand out `postgres://`/`postgresql://` — the async
+    engine needs the `+asyncpg` driver suffix, so rewrite it rather than requiring people to
+    hand-edit the string every time they copy it from the provider's dashboard."""
+    for prefix in ("postgres://", "postgresql://"):
+        if url.startswith(prefix) and "+asyncpg" not in url:
+            return "postgresql+asyncpg://" + url[len(prefix) :]
+    return url
+
+
 BOT_TOKEN = _env("ANATOM_BOT_TOKEN", required=True)
 BOT_USERNAME = _env("ANATOM_BOT_USERNAME", "Vmeda_anatom_bot")
-DATABASE_URL = _env("DATABASE_URL", required=True)
+DATABASE_URL = _normalize_database_url(_env("DATABASE_URL", required=True))
 
 # Website origin the bot links out to (e.g. https://anatom.example.com). Used to build
 # the "Открыть АНАТОМ" button and the deep-link login URL.
