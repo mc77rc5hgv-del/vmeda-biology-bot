@@ -9,7 +9,7 @@ from __future__ import annotations
 import datetime as dt
 from typing import Any, Optional
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, String, Time, select
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, String, Time, func, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -158,3 +158,31 @@ async def put_state(session: AsyncSession, user_id: int, state: dict) -> None:
 async def find_login_session(session: AsyncSession, code: str) -> Optional[LoginSession]:
     result = await session.execute(select(LoginSession).where(LoginSession.code == code))
     return result.scalar_one_or_none()
+
+
+async def count_users(session: AsyncSession) -> int:
+    result = await session.execute(select(func.count()).select_from(User))
+    return result.scalar_one()
+
+
+async def count_reminders_enabled(session: AsyncSession) -> int:
+    result = await session.execute(
+        select(func.count()).select_from(Reminder).where(Reminder.enabled.is_(True))
+    )
+    return result.scalar_one()
+
+
+async def list_chat_ids(session: AsyncSession) -> list[int]:
+    result = await session.execute(select(User.chat_id).where(User.chat_id.is_not(None)))
+    return [row[0] for row in result.all()]
+
+
+async def get_user_full(session: AsyncSession, user_id: int) -> Optional[dict[str, Any]]:
+    user = await session.get(User, user_id)
+    if user is None:
+        return None
+    return {
+        "user": user,
+        "state": await get_state(session, user_id),
+        "reminder": await session.get(Reminder, user_id),
+    }

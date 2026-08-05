@@ -44,3 +44,13 @@ LOGIN_CODE_TTL_SECONDS = int(_env("ANATOM_LOGIN_CODE_TTL_SECONDS", "600"))
 INACTIVITY_THRESHOLD_DAYS = int(_env("ANATOM_INACTIVITY_THRESHOLD_DAYS", "14"))
 
 SUPPORT_URL = _env("ANATOM_SUPPORT_URL", "https://t.me/vmeda_helper")
+
+
+def _parse_admin_ids(raw: str) -> frozenset[int]:
+    ids = {int(part) for part in raw.split(",") if part.strip()}
+    return frozenset(ids) if ids else frozenset({1326779223})
+
+
+# Comma-separated Telegram user IDs with access to /admin. Defaults to the one admin ID given
+# at launch; override with ANATOM_ADMIN_IDS (e.g. "1326779223,987654321") to add more.
+ADMIN_IDS = _parse_admin_ids(_env("ANATOM_ADMIN_IDS", ""))

@@ -9,9 +9,11 @@ import datetime as dt
 import re
 
 from aiogram import Bot, Dispatcher, F
+from aiogram.dispatcher.event.bases import SkipHandler
 from aiogram.filters import Command, CommandObject, CommandStart
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
+import admin
 import config
 import db
 from state_logic import (
@@ -162,6 +164,68 @@ async def cmd_reminder_off(message: Message) -> None:
             if reminder is not None:
                 reminder.enabled = False
     await message.answer("🔕 Напоминания выключены.")
+
+
+@dp.message(Command("admin"))
+async def cmd_admin(message: Message) -> None:
+    if not admin.is_admin(message.from_user.id):
+        return
+    await message.answer("⚙️ Админ-панель", reply_markup=admin.admin_menu_keyboard())
+
+
+@dp.callback_query(F.data == "admin_stats")
+async def cb_admin_stats(callback: CallbackQuery) -> None:
+    if not admin.is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    session_maker = db.get_session_maker()
+    async with session_maker() as session:
+        text = await admin.build_stats_text(session)
+    await callback.message.answer(text)
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "admin_broadcast")
+async def cb_admin_broadcast(callback: CallbackQuery) -> None:
+    if not admin.is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    admin.ADMIN_PENDING[callback.from_user.id] = "broadcast"
+    await callback.message.answer("Пришлите текст рассылки следующим сообщением.")
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "admin_lookup")
+async def cb_admin_lookup(callback: CallbackQuery) -> None:
+    if not admin.is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    admin.ADMIN_PENDING[callback.from_user.id] = "lookup"
+    await callback.message.answer("Пришлите Telegram ID пользователя.")
+    await callback.answer()
+
+
+@dp.message(F.text)
+async def handle_admin_pending(message: Message) -> None:
+    user_id = message.from_user.id
+    if not admin.is_admin(user_id) or user_id not in admin.ADMIN_PENDING:
+        raise SkipHandler
+
+    action = admin.ADMIN_PENDING.pop(user_id)
+    session_maker = db.get_session_maker()
+
+    if action == "broadcast":
+        async with session_maker() as session:
+            sent, failed = await admin.broadcast_text(bot, session, message.text)
+        await message.answer(f"Разослано: {sent}, ошибок: {failed}")
+    elif action == "lookup":
+        target_raw = message.text.strip()
+        if not target_raw.isdigit():
+            await message.answer("ID должен быть числом.")
+            return
+        async with session_maker() as session:
+            text = await admin.build_user_summary_text(session, int(target_raw))
+        await message.answer(text)
 
 
 _TIME_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
