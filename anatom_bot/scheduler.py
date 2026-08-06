@@ -231,8 +231,15 @@ def start_scheduler(bot: Bot) -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler(timezone="UTC")
 
     def add(job_id: str, func, **trigger) -> None:
+        # Must be a real `async def`: APScheduler only awaits jobs it detects as coroutine
+        # functions. A plain lambda returning a coroutine is called synchronously, so the job
+        # would silently never run ("coroutine was never awaited").
+        async def job(_func=func, _name=job_id) -> None:
+            await _guarded(_name, lambda: _func(bot))
+
+        job.__name__ = f"job_{job_id}"
         scheduler.add_job(
-            lambda f=func, n=job_id: _guarded(n, lambda: f(bot)),
+            job,
             "cron",
             id=job_id,
             misfire_grace_time=300,
