@@ -128,15 +128,21 @@ async def auth_session_status(code: str) -> SessionStatusResponse:
         return SessionStatusResponse(status="confirmed", token=token, user_id=login_session.user_id)
 
 
+class StateEnvelope(BaseModel):
+    state: dict
+
+
 @app.get("/api/state")
 async def get_state(user_id: int = Depends(current_user_id)) -> dict:
     session_maker = db.get_session_maker()
     async with session_maker() as session:
-        return await db.get_state(session, user_id)
+        state = await db.get_state(session, user_id)
+    return {"state": state}
 
 
 @app.put("/api/state")
-async def put_state(state: dict, user_id: int = Depends(current_user_id)) -> dict:
+async def put_state(payload: StateEnvelope, user_id: int = Depends(current_user_id)) -> dict:
+    state = payload.state
     session_maker = db.get_session_maker()
     async with session_maker() as session:
         old_state = await db.get_state(session, user_id)

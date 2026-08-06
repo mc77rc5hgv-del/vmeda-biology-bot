@@ -62,7 +62,7 @@ async def run_daily_reminders(bot: Bot) -> None:
             user = await session.get(db.User, reminder.user_id)
             state = await db.get_state(session, reminder.user_id)
             due = topics_due_for_review(state)
-            await _send(bot, user.chat_id if user else None, format_daily_reminder_text(due))
+            await _send(bot, user.chat_id if user else None, format_daily_reminder_text(len(due)))
             reminder.last_sent = now_utc
 
         await session.commit()

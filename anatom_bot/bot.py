@@ -1,4 +1,4 @@
-"""aiogram bot: /start /study /progress /review /streak /reminder /help.
+"""aiogram bot: rich menu mirroring anatomapp.ru's course structure + admin panel.
 
 Talks to Postgres directly through db.py (same DB as the FastAPI process in api.py).
 """
@@ -16,18 +16,58 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 import admin
 import config
 import db
+from modules import MODULES_BY_ID
 from state_logic import (
-    format_daily_reminder_text,
+    favorite_labels,
     format_streak_warning_text,
+    module_progress,
+    section_progress,
     topics_due_for_review,
 )
 
 bot = Bot(token=config.BOT_TOKEN)
 dp = Dispatcher()
 
+WEBAPP_BUTTON_TEXT = "🌐 Открыть АНАТОМ"
 
-def webapp_keyboard(text: str = "Открыть АНАТОМ") -> InlineKeyboardMarkup:
+
+def webapp_keyboard(text: str = WEBAPP_BUTTON_TEXT) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=text, url=config.WEBAPP_URL)]])
+
+
+def main_menu_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="📚 Модули", callback_data="menu:modules"),
+                InlineKeyboardButton(text="📊 Прогресс", callback_data="menu:progress"),
+            ],
+            [
+                InlineKeyboardButton(text="🔁 Повторить", callback_data="menu:review"),
+                InlineKeyboardButton(text="⭐ Избранное", callback_data="menu:favorites"),
+            ],
+            [
+                InlineKeyboardButton(text="🔥 Серия", callback_data="menu:streak"),
+                InlineKeyboardButton(text="⚙️ Настройки", callback_data="menu:settings"),
+            ],
+            [InlineKeyboardButton(text=WEBAPP_BUTTON_TEXT, url=config.WEBAPP_URL)],
+        ]
+    )
+
+
+def back_to_menu_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="⬅ В меню", callback_data="menu:home")]]
+    )
+
+
+def modules_list_keyboard(state: dict) -> InlineKeyboardMarkup:
+    rows = []
+    for row in module_progress(state):
+        text = f"{row['icon']} {row['title']} — {row['passed']}/{row['total']} ({row['pct']}%)"
+        rows.append([InlineKeyboardButton(text=text, callback_data=f"menu:module:{row['id']}")])
+    rows.append([InlineKeyboardButton(text="⬅ В меню", callback_data="menu:home")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 @dp.message(CommandStart())
@@ -39,9 +79,9 @@ async def cmd_start(message: Message, command: CommandObject) -> None:
 
     await message.answer(
         "👋 Привет! Я бот АНАТОМ — вход и напоминания для веб-приложения по нормальной анатомии.\n\n"
-        "Учёба, тесты и атлас — на сайте. Здесь ты найдёшь быструю сводку прогресса и напоминания "
-        "о повторении.",
-        reply_markup=webapp_keyboard(),
+        "Учёба, тесты и атлас — на сайте. Здесь ты найдёшь прогресс по модулям, темы к повторению, "
+        "избранное и напоминания.",
+        reply_markup=main_menu_keyboard(),
     )
 
 
@@ -73,68 +113,258 @@ async def _confirm_login_code(code: str, message: Message) -> None:
     )
 
 
-@dp.message(Command("study"))
-async def cmd_study(message: Message) -> None:
+@dp.message(Command("menu"))
+async def cmd_menu(message: Message) -> None:
+    await message.answer("Главное меню:", reply_markup=main_menu_keyboard())
+
+
+async def _get_state_for(user_id: int) -> dict:
     session_maker = db.get_session_maker()
     async with session_maker() as session:
-        state = await db.get_state(session, message.from_user.id)
+        return await db.get_state(session, user_id)
+
+
+def _modules_overview_text() -> str:
+    return "📚 Модули курса — нажми на модуль, чтобы увидеть разбивку по разделам:"
+
+
+def _module_detail_text(module_id: str, state: dict) -> str:
+    module = MODULES_BY_ID.get(module_id)
+    title = module.title if module else module_id
+    icon = module.icon if module else ""
+    lines = [f"{icon} {title}"]
+    sections = section_progress(state, module_id)
+    if not sections:
+        lines.append("Разделы для этого модуля пока не описаны.")
+    for sec in sections:
+        lines.append(f"{sec['icon']} {sec['name']} — {sec['passed']}/{sec['total']} ({sec['pct']}%)")
+    return "\n".join(lines)
+
+
+def _progress_text(state: dict) -> str:
+    xp = state.get("xp", 0)
+    streak = state.get("streak", 0)
+    day_done = state.get("dayDone", 0)
+    day_goal = state.get("dayGoal", 20)
+
+    lines = ["📊 Твой прогресс", f"XP: {xp}", f"Серия: {streak} 🔥", f"Сегодня: {day_done}/{day_goal}", ""]
+    total_passed = total_topics = 0
+    for row in module_progress(state):
+        lines.append(f"{row['icon']} {row['title']}: {row['passed']}/{row['total']} ({row['pct']}%)")
+        total_passed += row["passed"]
+        total_topics += row["total"]
+    if total_topics:
+        overall_pct = round(total_passed / total_topics * 100)
+        lines.append("")
+        lines.append(f"Итого по курсу: {total_passed}/{total_topics} ({overall_pct}%)")
+    return "\n".join(lines)
+
+
+def _review_text(state: dict) -> str:
+    due = topics_due_for_review(state)
+    if not due:
+        return "🔁 Сейчас нет тем к повторению — всё свежее! Загляни позже."
+    lines = [f"🔁 К повторению: {len(due)} {_topics_word(len(due))}", ""]
+    for entry in due[:10]:
+        overdue = entry["overdue_days"]
+        overdue_text = f" (просрочено {overdue} дн.)" if overdue > 0 else ""
+        lines.append(f"• {entry['label']}{overdue_text}")
+    if len(due) > 10:
+        lines.append(f"…и ещё {len(due) - 10}")
+    return "\n".join(lines)
+
+
+def _favorites_text(state: dict) -> str:
+    labels = favorite_labels(state)
+    if not labels:
+        return "⭐ Пока нет избранных тем — отмечай их звёздочкой на сайте."
+    lines = ["⭐ Избранные темы:", ""]
+    lines.extend(f"• {label}" for label in labels[:20])
+    if len(labels) > 20:
+        lines.append(f"…и ещё {len(labels) - 20}")
+    return "\n".join(lines)
+
+
+def _streak_text(state: dict) -> str:
+    streak = state.get("streak", 0)
+    day_done = state.get("dayDone", 0)
+    day_goal = state.get("dayGoal", 20)
+    text = f"🔥 Текущая серия: {streak} {_days_word(streak)}\nСегодня пройдено: {day_done}/{day_goal}"
+    if streak and day_done < day_goal:
+        text += f"\n\n{format_streak_warning_text(streak)}"
+    return text
+
+
+async def _settings_keyboard(user_id: int, state: dict) -> InlineKeyboardMarkup:
+    session_maker = db.get_session_maker()
+    async with session_maker() as session:
+        reminder = await session.get(db.Reminder, user_id)
+    reminder_on = bool(reminder and reminder.enabled)
+    term_lang = state.get("termLang", "ru")
+
+    rows = [
+        [
+            InlineKeyboardButton(
+                text=f"🔔 Напоминания: {'вкл' if reminder_on else 'выкл'}",
+                callback_data="menu:toggle_reminders",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text=f"🌐 Язык терминов: {term_lang.upper()}",
+                callback_data="menu:toggle_termlang",
+            )
+        ],
+        [InlineKeyboardButton(text="⬅ В меню", callback_data="menu:home")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _settings_text(reminder_on: bool) -> str:
+    if reminder_on:
+        return "⚙️ Настройки\n\nНапоминания включены. Чтобы изменить время, отправь ЧЧ:ММ следующим сообщением."
+    return "⚙️ Настройки\n\nЧтобы включить ежедневное напоминание, отправь время в формате ЧЧ:ММ (например 19:00)."
+
+
+@dp.callback_query(F.data == "menu:home")
+async def cb_menu_home(callback: CallbackQuery) -> None:
+    await callback.message.edit_text("Главное меню:", reply_markup=main_menu_keyboard())
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "menu:modules")
+async def cb_menu_modules(callback: CallbackQuery) -> None:
+    state = await _get_state_for(callback.from_user.id)
+    await callback.message.edit_text(_modules_overview_text(), reply_markup=modules_list_keyboard(state))
+    await callback.answer()
+
+
+@dp.callback_query(F.data.startswith("menu:module:"))
+async def cb_menu_module_detail(callback: CallbackQuery) -> None:
+    module_id = callback.data.removeprefix("menu:module:")
+    state = await _get_state_for(callback.from_user.id)
+    await callback.message.edit_text(
+        _module_detail_text(module_id, state),
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="⬅ К модулям", callback_data="menu:modules")],
+                [InlineKeyboardButton(text=WEBAPP_BUTTON_TEXT, url=config.WEBAPP_URL)],
+            ]
+        ),
+    )
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "menu:progress")
+async def cb_menu_progress(callback: CallbackQuery) -> None:
+    state = await _get_state_for(callback.from_user.id)
+    await callback.message.edit_text(_progress_text(state), reply_markup=back_to_menu_keyboard())
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "menu:review")
+async def cb_menu_review(callback: CallbackQuery) -> None:
+    state = await _get_state_for(callback.from_user.id)
+    await callback.message.edit_text(_review_text(state), reply_markup=back_to_menu_keyboard())
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "menu:favorites")
+async def cb_menu_favorites(callback: CallbackQuery) -> None:
+    state = await _get_state_for(callback.from_user.id)
+    await callback.message.edit_text(_favorites_text(state), reply_markup=back_to_menu_keyboard())
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "menu:streak")
+async def cb_menu_streak(callback: CallbackQuery) -> None:
+    state = await _get_state_for(callback.from_user.id)
+    await callback.message.edit_text(_streak_text(state), reply_markup=back_to_menu_keyboard())
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "menu:settings")
+async def cb_menu_settings(callback: CallbackQuery) -> None:
+    state = await _get_state_for(callback.from_user.id)
+    keyboard = await _settings_keyboard(callback.from_user.id, state)
+    session_maker = db.get_session_maker()
+    async with session_maker() as session:
+        reminder = await session.get(db.Reminder, callback.from_user.id)
+    await callback.message.edit_text(
+        _settings_text(bool(reminder and reminder.enabled)), reply_markup=keyboard
+    )
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "menu:toggle_reminders")
+async def cb_toggle_reminders(callback: CallbackQuery) -> None:
+    session_maker = db.get_session_maker()
+    async with session_maker() as session:
+        async with session.begin():
+            reminder = await session.get(db.Reminder, callback.from_user.id)
+            if reminder is None:
+                await db.get_or_create_user(
+                    session,
+                    telegram_id=callback.from_user.id,
+                    username=callback.from_user.username,
+                    first_name=callback.from_user.first_name,
+                    chat_id=callback.message.chat.id,
+                )
+                reminder = await session.get(db.Reminder, callback.from_user.id)
+            reminder.enabled = not reminder.enabled
+            new_state = reminder.enabled
+
+    state = await _get_state_for(callback.from_user.id)
+    keyboard = await _settings_keyboard(callback.from_user.id, state)
+    await callback.message.edit_text(_settings_text(new_state), reply_markup=keyboard)
+    await callback.answer("Напоминания включены" if new_state else "Напоминания выключены")
+
+
+@dp.callback_query(F.data == "menu:toggle_termlang")
+async def cb_toggle_termlang(callback: CallbackQuery) -> None:
+    session_maker = db.get_session_maker()
+    async with session_maker() as session:
+        state = await db.get_state(session, callback.from_user.id)
+        state["termLang"] = "en" if state.get("termLang", "ru") == "ru" else "ru"
+        async with session.begin():
+            await db.put_state(session, callback.from_user.id, state)
+
+    keyboard = await _settings_keyboard(callback.from_user.id, state)
+    session_maker = db.get_session_maker()
+    async with session_maker() as session:
+        reminder = await session.get(db.Reminder, callback.from_user.id)
+    await callback.message.edit_text(
+        _settings_text(bool(reminder and reminder.enabled)), reply_markup=keyboard
+    )
+    await callback.answer(f"Язык терминов: {state['termLang'].upper()}")
+
+
+@dp.message(Command("study"))
+async def cmd_study(message: Message) -> None:
+    state = await _get_state_for(message.from_user.id)
     due = topics_due_for_review(state)
     await message.answer(
-        f"сегодня к повторению: {due} {_topics_word(due)}",
-        reply_markup=webapp_keyboard(),
+        f"сегодня к повторению: {len(due)} {_topics_word(len(due))}",
+        reply_markup=main_menu_keyboard(),
     )
 
 
 @dp.message(Command("progress"))
 async def cmd_progress(message: Message) -> None:
-    session_maker = db.get_session_maker()
-    async with session_maker() as session:
-        state = await db.get_state(session, message.from_user.id)
-
-    xp = state.get("xp", 0)
-    streak = state.get("streak", 0)
-    progress = state.get("progress") or {}
-    passed = sum(
-        1 for entry in progress.values() if isinstance(entry, dict) and (entry.get("percent") or 0) >= 90
-    )
-    accuracies = [
-        entry.get("accuracy")
-        for entry in progress.values()
-        if isinstance(entry, dict) and isinstance(entry.get("accuracy"), (int, float))
-    ]
-    avg_accuracy = round(sum(accuracies) / len(accuracies), 1) if accuracies else None
-
-    lines = [
-        "📊 Твой прогресс",
-        f"XP: {xp}",
-        f"Серия: {streak} 🔥",
-        f"Сдано тем: {passed}",
-    ]
-    if avg_accuracy is not None:
-        lines.append(f"Средняя точность: {avg_accuracy}%")
-    await message.answer("\n".join(lines), reply_markup=webapp_keyboard())
+    state = await _get_state_for(message.from_user.id)
+    await message.answer(_progress_text(state), reply_markup=main_menu_keyboard())
 
 
 @dp.message(Command("review"))
 async def cmd_review(message: Message) -> None:
-    session_maker = db.get_session_maker()
-    async with session_maker() as session:
-        state = await db.get_state(session, message.from_user.id)
-    due = topics_due_for_review(state)
-    await message.answer(format_daily_reminder_text(due), reply_markup=webapp_keyboard())
+    state = await _get_state_for(message.from_user.id)
+    await message.answer(_review_text(state), reply_markup=main_menu_keyboard())
 
 
 @dp.message(Command("streak"))
 async def cmd_streak(message: Message) -> None:
-    session_maker = db.get_session_maker()
-    async with session_maker() as session:
-        state = await db.get_state(session, message.from_user.id)
-
-    streak = state.get("streak", 0)
-    text = f"🔥 Текущая серия: {streak} {_days_word(streak)}"
-    if streak and not state.get("dayDone", False):
-        text += f"\n\n{format_streak_warning_text(streak)}"
-    await message.answer(text, reply_markup=webapp_keyboard())
+    state = await _get_state_for(message.from_user.id)
+    await message.answer(_streak_text(state), reply_markup=main_menu_keyboard())
 
 
 @dp.message(Command("reminder"))
@@ -261,9 +491,10 @@ async def set_reminder_time(message: Message) -> None:
 async def cmd_help(message: Message) -> None:
     await message.answer(
         "Команды:\n"
-        "/start — открыть АНАТОМ\n"
+        "/start — открыть меню\n"
+        "/menu — главное меню (модули, прогресс, повторение, избранное, настройки)\n"
         "/study — сколько тем ждут повторения\n"
-        "/progress — уровень, XP, серия, точность\n"
+        "/progress — прогресс по модулям, XP, серия\n"
         "/review — темы к интервальному повторению\n"
         "/streak — текущая серия дней\n"
         "/reminder — настроить ежедневное напоминание\n"

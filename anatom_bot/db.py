@@ -16,25 +16,33 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from config import DATABASE_URL
 
-# Structure of `UserState.state` (owned by the frontend, do not rename these keys):
-# progress, mistakes, favorites, notes, xp, streak, lastActive, history, dayDone, dayKey,
-# dayGoal, lastTopic, examDone, termLang, reminders
+# Structure of `UserState.state` — owned by the frontend (anatomapp.ru), mirrored exactly from
+# its own `persist()` blob (do not rename/retype these keys without updating the site too):
+#   progress: {"<moduleId>:<topicNum>": {bestPct, attempts, reps, studied, last, due}} —
+#     `last`/`due` are JS epoch-millisecond timestamps (Date.now()); `due` drives spaced review.
+#   mistakes: [{q, ...}]  (list, not a dict)
+#   favorites: ["<moduleId>:<topicNum>", ...]
+#   notes: {"<moduleId>:<topicNum>": "text"}
+#   lastActive: JS `Date.toDateString()` string, e.g. "Wed Aug 05 2026" (not a timestamp)
+#   dayDone: number of reps done today (not a bool); dayKey: toDateString() of that count
+#   rewarded: {} — client-side reward/badge flags
 DEFAULT_STATE: dict[str, Any] = {
     "progress": {},
-    "mistakes": {},
+    "mistakes": [],
     "favorites": [],
     "notes": {},
     "xp": 0,
     "streak": 0,
-    "lastActive": None,
+    "lastActive": "",
     "history": [],
-    "dayDone": False,
-    "dayKey": None,
-    "dayGoal": 0,
+    "dayDone": 0,
+    "dayKey": "",
+    "dayGoal": 20,
     "lastTopic": None,
-    "examDone": {},
+    "examDone": False,
     "termLang": "ru",
-    "reminders": {},
+    "reminders": True,
+    "rewarded": {},
 }
 
 
