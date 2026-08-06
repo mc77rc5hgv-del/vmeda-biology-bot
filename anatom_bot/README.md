@@ -1,58 +1,95 @@
 # anatom-bot
 
-`@Vmeda_anatom_bot` — Telegram auth + reminders bridge for the (separately hosted) АНАТОМ web app.
-Independent of `telegram_bot.py` at the repo root: separate deps, separate Postgres DB, separate deploy.
-Full design: [`../docs/anatom-bot-spec.md`](../docs/anatom-bot-spec.md).
+`@Vmeda_anatom_bot` — Telegram-бот для веб-приложения [АНАТОМ](https://anatomapp.ru): вход,
+обучение прямо в чате, прогресс и напоминания. Независим от `telegram_bot.py` в корне репозитория
+(свои зависимости, своя БД, свой деплой). Проектное описание: [`../docs/anatom-bot-spec.md`](../docs/anatom-bot-spec.md).
 
-## Layout
+## Ключевая идея: общий прогресс с сайтом
 
-- `config.py` — env-driven settings.
-- `db.py` — SQLAlchemy async models (`User`, `UserState`, `Reminder`, `LoginSession`) + session helpers.
-  Shared by both processes below; each connects to Postgres directly, there's no HTTP hop between them.
-- `auth.py` — Telegram Login Widget hash verification, JWT session tokens, login-code generation. Pure
-  functions, no I/O — see `tests/test_auth.py`.
-- `state_logic.py` — pure helpers over the frontend's `state` JSON blob (due-for-review count, streak-risk,
-  inactivity check, achievement diffing, message templates). See `tests/test_state_logic.py`.
-- `api.py` — FastAPI app: `POST /auth/telegram` (Login Widget), `POST /auth/start` + `GET /auth/session/{code}`
-  (deep-link `/start <code>` flow), `GET`/`PUT /api/state`.
-- `bot.py` — aiogram bot: `/start /study /progress /review /streak /reminder /reminder_off /help`.
-- `scheduler.py` — APScheduler cron jobs (runs inside the bot process): daily reminder, evening streak
-  protection, 14-day inactivity win-back.
+Бот и сайт пишут в **один и тот же** JSON-блоб состояния (таблица `user_state`). Поэтому тест,
+пройденный в Telegram, поднимает XP и сдвигает интервальные повторения на сайте — и наоборот.
+Чтобы это работало, `progress.py` буквально повторяет логику сайта (`finish()` в его `index.html`):
+лестница интервалов `[1,2,4,9,18,35,60]`, 10 XP за впервые встреченный вопрос, порог сдачи 75%,
+префиксы ключей `rewarded` (`q:`/`f:`/`m:`/`t:`). **Менять эти правила можно только одновременно
+с сайтом**, иначе две поверхности начнут спорить о прогрессе одного студента.
 
-## Running locally
+Ключ темы — `"<moduleId>:<topicNum>"` (например `m1:5`), нумерация обязана совпадать с сайтом:
+модуль `m6` собирается из трёх датасетов со сдвигами (+15 и +26) — это учтено в
+`scripts/extract_content.py`.
+
+## Что умеет бот
+
+**Обучение (внутри Telegram, 143 темы, 2423 карточки, 1352 термина, 3155 вопросов):**
+- 📝 Тесты по теме и по модулю
+- 🃏 Флеш-карточки с самопроверкой
+- 🏛 Тренажёр латинских терминов (варианты-дистракторы берутся по всему курсу)
+- ⚡ Блиц — случайные вопросы по всему курсу
+- ❌ Работа над ошибками (список ошибок общий с сайтом)
+- 🔁 Интервальное повторение — запуск теста по самой просроченной теме
+
+**Прогресс и мотивация:**
+- 📊 Прогресс по модулям и разделам, 📈 подробная статистика, слабые места
+- 👤 Профиль: уровень (8 ступеней), XP, серия
+- 🏅 15 достижений, 🏆 рейтинг по XP (ранжирование в SQL)
+- 🎓 Обратный отсчёт до экзамена с планом «сколько тем в день»
+- 🤝 Реферальные ссылки, 🔍 поиск темы, 📖 термин дня
+
+**Автоматические рассылки** (`scheduler.py`): ежедневное напоминание в местном часовом поясе,
+спасение серии вечером, термин дня утром, возврат неактивных, недельный дайджест, поздравления
+с достижениями, полученными на сайте.
+
+## Структура
+
+- `config.py` — переменные окружения (включая `ADMIN_IDS`).
+- `db.py` — модели (`User` c JSONB `prefs`, `UserState`, `Reminder`, `LoginSession`), запросы
+  рейтинга, идемпотентные миграции колонок (`create_all` их не делает).
+- `auth.py` — проверка подписи Telegram Login Widget, JWT-сессии.
+- `content.py` / `content.json` — учебный контент; генерируется `scripts/extract_content.py`.
+- `progress.py` — правила начисления, общие с сайтом.
+- `quiz.py` — сессии обучения (в памяти, с авто-очисткой по TTL).
+- `achievements.py`, `texts.py`, `keyboards.py` — уровни/бейджи, тексты экранов, клавиатуры.
+- `api.py` — FastAPI: `POST /auth/telegram`, `POST /auth/start`, `GET /auth/session/{code}`,
+  `GET`/`PUT /api/state` (тело — `{"state": {...}}`, как ждёт сайт).
+- `bot.py`, `admin.py`, `scheduler.py`.
+
+## Разработка
 
 ```
 pip install -r requirements.txt
-cp .env.example .env   # fill in ANATOM_BOT_TOKEN, DATABASE_URL, ANATOM_SESSION_SECRET
+cp .env.example .env       # заполнить ANATOM_BOT_TOKEN, DATABASE_URL, ANATOM_SESSION_SECRET
 set -a && source .env && set +a
 
-python3 bot.py                                  # bot + scheduler (long polling)
-uvicorn api:app --reload --port 8000             # auth/state API for the web app
+python3 bot.py                            # бот + планировщик
+uvicorn api:app --reload --port 8000      # API для сайта
 ```
 
-Both processes call `db.init_models()` on startup, so tables are created automatically against
-whatever Postgres `DATABASE_URL` points at — no separate migration step yet.
-
-## Tests
-
-Pure-logic unit tests only (no live bot token or Postgres needed):
+Тесты (без БД и токена — плейсхолдеры ставит `tests/_bootstrap.py`):
 
 ```
 python3 -m unittest discover -s tests
 ```
 
-## Deploying
+Тесты с живой базой запускаются только при реальном `DATABASE_URL`, иначе пропускаются.
+`tests/test_handlers.py` проверяет, что у каждой кнопки есть обработчик — защита от «мёртвых»
+кнопок при опечатке в `callback_data`.
 
-Two Railway services sharing one `DATABASE_URL`:
-1. Bot worker: `python3 bot.py` (long polling + the reminder cron jobs).
-2. API web service: `uvicorn api:app --host 0.0.0.0 --port $PORT`.
+Обновить контент после изменений на сайте:
 
-## Open items / assumptions to confirm with the frontend
+```
+python3 scripts/extract_content.py /путь/к/index.html content.json
+```
 
-- `state["progress"][topicId]` is assumed to look like `{"nextReview": <epoch seconds>, "percent": 0-100,
-  "accuracy": 0-100, "title": str}` for `/review`, `/progress`, and the achievement nudge — the real frontend
-  shape isn't documented yet beyond the top-level `state` keys. Update `state_logic.py` once it's confirmed.
-- `/auth/start` builds its deep-link from `ANATOM_BOT_USERNAME` (defaults to `Vmeda_anatom_bot`) — override it
-  if the bot is ever registered under a different @username.
-- `api.py`'s `PUT /api/state` diffs old vs. new state on every save and pushes an achievement message via a
-  send-only `Bot` instance (no polling, so it's safe to share the token with the polling process in `bot.py`).
+## Деплой
+
+Два сервиса Railway из одного репозитория, Root Directory `anatom_bot`, общий `DATABASE_URL`:
+1. Бот: `python3 bot.py`
+2. API: `uvicorn api:app --host 0.0.0.0 --port $PORT`
+
+`ANATOM_WEBAPP_URL` задаёт и ссылку на сайт, и разрешённый CORS-origin — при смене домена сайта
+его нужно обновить в обоих сервисах.
+
+## Открытые вопросы
+
+- Контент вшит в `content.json` снимком; при обновлении материала на сайте его нужно
+  перегенерировать (сайт отдаёт данные инлайном в `index.html`, отдельных JSON-файлов на хосте нет).
+- Бот не показывает теорию и атлас — для них ведёт на сайт.

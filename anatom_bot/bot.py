@@ -1,381 +1,995 @@
-"""aiogram bot: rich menu mirroring anatomapp.ru's course structure + admin panel.
+"""aiogram bot for @Vmeda_anatom_bot — study, progress and motivation for anatomapp.ru.
 
-Talks to Postgres directly through db.py (same DB as the FastAPI process in api.py).
+Talks to Postgres directly through db.py (same database as the FastAPI process in api.py), and
+writes study results into the *same* state blob the website uses, so progress made here shows up
+there and vice versa.
 """
 
 from __future__ import annotations
 
 import datetime as dt
+import html
+import logging
 import re
+from typing import Any, Optional
 
 from aiogram import Bot, Dispatcher, F
-from aiogram.dispatcher.event.bases import SkipHandler
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
 from aiogram.filters import Command, CommandObject, CommandStart
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, Message
 
+import achievements
 import admin
 import config
+import content
 import db
-from modules import MODULES_BY_ID
-from state_logic import (
-    favorite_labels,
-    format_streak_warning_text,
-    module_progress,
-    section_progress,
-    topics_due_for_review,
-)
+import keyboards as kb
+import quiz
+import texts
+from modules import MODULES_BY_ID, PASS_THRESHOLD
+from progress import apply_session_result
+from state_logic import favorite_labels, module_progress, section_progress, topics_due_for_review
 
-bot = Bot(token=config.BOT_TOKEN)
+logger = logging.getLogger(__name__)
+
+bot = Bot(token=config.BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 
-WEBAPP_BUTTON_TEXT = "🌐 Открыть АНАТОМ"
+# Free-text prompts awaiting the user's next message: user_id -> {"kind": ..., ...}
+PENDING_INPUT: dict[int, dict[str, Any]] = {}
 
 
-def webapp_keyboard(text: str = WEBAPP_BUTTON_TEXT) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=text, url=config.WEBAPP_URL)]])
+def esc(text: str) -> str:
+    return html.escape(text or "", quote=False)
 
 
-def main_menu_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="📚 Модули", callback_data="menu:modules"),
-                InlineKeyboardButton(text="📊 Прогресс", callback_data="menu:progress"),
-            ],
-            [
-                InlineKeyboardButton(text="🔁 Повторить", callback_data="menu:review"),
-                InlineKeyboardButton(text="⭐ Избранное", callback_data="menu:favorites"),
-            ],
-            [
-                InlineKeyboardButton(text="🔥 Серия", callback_data="menu:streak"),
-                InlineKeyboardButton(text="⚙️ Настройки", callback_data="menu:settings"),
-            ],
-            [InlineKeyboardButton(text=WEBAPP_BUTTON_TEXT, url=config.WEBAPP_URL)],
-        ]
-    )
+# ---------------------------------------------------------------- helpers
 
 
-def back_to_menu_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[[InlineKeyboardButton(text="⬅ В меню", callback_data="menu:home")]]
-    )
+async def load_state(user_id: int) -> dict[str, Any]:
+    async with db.get_session_maker()() as session:
+        return await db.get_state(session, user_id)
 
 
-def modules_list_keyboard(state: dict) -> InlineKeyboardMarkup:
-    rows = []
-    for row in module_progress(state):
-        text = f"{row['icon']} {row['title']} — {row['passed']}/{row['total']} ({row['pct']}%)"
-        rows.append([InlineKeyboardButton(text=text, callback_data=f"menu:module:{row['id']}")])
-    rows.append([InlineKeyboardButton(text="⬅ В меню", callback_data="menu:home")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+async def load_state_and_prefs(user_id: int) -> tuple[dict[str, Any], dict[str, Any]]:
+    async with db.get_session_maker()() as session:
+        return await db.get_state(session, user_id), await db.get_prefs(session, user_id)
+
+
+async def save_state(user_id: int, state: dict[str, Any]) -> None:
+    async with db.get_session_maker()() as session:
+        await db.get_or_create_user(session, telegram_id=user_id)
+        await db.put_state(session, user_id, state)
+        await session.commit()
+
+
+async def register_user(message: Message, **extra: Any) -> None:
+    async with db.get_session_maker()() as session:
+        await db.get_or_create_user(
+            session,
+            telegram_id=message.from_user.id,
+            username=message.from_user.username,
+            first_name=message.from_user.first_name,
+            last_name=message.from_user.last_name,
+            chat_id=message.chat.id,
+            **extra,
+        )
+        await session.commit()
+
+
+async def safe_edit(callback: CallbackQuery, text: str, reply_markup=None) -> None:
+    """Edit in place, falling back to a new message when Telegram refuses the edit.
+
+    Telegram rejects an edit whose text and markup are byte-identical to what's already shown
+    (common when a user re-taps the same menu button), and edits fail outright on messages the
+    bot can no longer modify. Neither should surface as an error to the student.
+    """
+    try:
+        await callback.message.edit_text(text, reply_markup=reply_markup)
+    except Exception:
+        try:
+            await callback.message.answer(text, reply_markup=reply_markup)
+        except Exception:
+            logger.exception("Could not deliver screen to user %s", callback.from_user.id)
+
+
+def passed_keys(state: dict[str, Any]) -> set[str]:
+    return {
+        key
+        for key, entry in (state.get("progress") or {}).items()
+        if isinstance(entry, dict) and (entry.get("bestPct") or 0) >= PASS_THRESHOLD
+    }
+
+
+def user_display_name(message_or_cb) -> str:
+    user = message_or_cb.from_user
+    return texts.display_name(user.first_name, user.last_name, user.username)
+
+
+# ---------------------------------------------------------------- /start & deep links
 
 
 @dp.message(CommandStart())
 async def cmd_start(message: Message, command: CommandObject) -> None:
-    code = command.args
-    if code:
-        await _confirm_login_code(code, message)
+    arg = (command.args or "").strip()
+
+    if arg.startswith("ref"):
+        await _handle_referral(message, arg[3:])
+    elif arg:
+        await _confirm_login_code(arg, message)
         return
+    else:
+        await register_user(message)
 
     await message.answer(
-        "👋 Привет! Я бот АНАТОМ — вход и напоминания для веб-приложения по нормальной анатомии.\n\n"
-        "Учёба, тесты и атлас — на сайте. Здесь ты найдёшь прогресс по модулям, темы к повторению, "
-        "избранное и напоминания.",
-        reply_markup=main_menu_keyboard(),
+        f"👋 Привет, {esc(user_display_name(message))}!\n\n"
+        "Я бот <b>АНАТОМ</b> — учись прямо здесь: тесты, флеш-карточки и латинские термины "
+        "по всему курсу нормальной анатомии. Прогресс общий с сайтом: где бы ты ни занимался, "
+        "XP, серия и повторения синхронизируются.\n\n"
+        "Выбери, с чего начать:",
+        reply_markup=kb.main_menu(),
     )
+
+
+async def _handle_referral(message: Message, raw_id: str) -> None:
+    inviter_id: Optional[int] = None
+    if raw_id.isdigit():
+        inviter_id = int(raw_id)
+
+    await register_user(message)
+    if not inviter_id or inviter_id == message.from_user.id:
+        return
+
+    async with db.get_session_maker()() as session:
+        prefs = await db.get_prefs(session, message.from_user.id)
+        # First inviter wins, and only for someone who hasn't studied here before — otherwise
+        # an existing student could be "claimed" by re-opening someone's link.
+        if prefs.get("referred_by"):
+            return
+        state = await db.get_state(session, message.from_user.id)
+        if int(state.get("xp") or 0) > 0:
+            return
+        inviter = await session.get(db.User, inviter_id)
+        if inviter is None:
+            return
+        await db.update_prefs(session, message.from_user.id, referred_by=str(inviter_id))
+        count = await db.count_referrals(session, inviter_id)
+        inviter_chat = inviter.chat_id
+        await session.commit()
+
+    if inviter_chat:
+        try:
+            await bot.send_message(
+                inviter_chat,
+                f"🤝 По твоей ссылке присоединился новый студент! Всего приглашено: {count}",
+            )
+        except Exception:
+            logger.info("Could not notify inviter %s", inviter_id)
 
 
 async def _confirm_login_code(code: str, message: Message) -> None:
-    session_maker = db.get_session_maker()
-    async with session_maker() as session:
-        async with session.begin():
-            login_session = await db.find_login_session(session, code)
-            if login_session is None or login_session.expires_at < dt.datetime.now(dt.timezone.utc):
-                await message.answer(
-                    "Ссылка для входа устарела. Вернись на сайт и запроси новую кнопку входа через Telegram."
-                )
-                return
-
-            await db.get_or_create_user(
-                session,
-                telegram_id=message.from_user.id,
-                username=message.from_user.username,
-                first_name=message.from_user.first_name,
-                last_name=message.from_user.last_name,
-                chat_id=message.chat.id,
+    async with db.get_session_maker()() as session:
+        login_session = await db.find_login_session(session, code)
+        if login_session is None or login_session.expires_at < dt.datetime.now(dt.timezone.utc):
+            await message.answer(
+                "Ссылка для входа устарела. Вернись на сайт и запроси новую кнопку входа через Telegram.",
+                reply_markup=kb.webapp_keyboard(),
             )
-            login_session.status = "confirmed"
-            login_session.user_id = message.from_user.id
+            return
+
+        await db.get_or_create_user(
+            session,
+            telegram_id=message.from_user.id,
+            username=message.from_user.username,
+            first_name=message.from_user.first_name,
+            last_name=message.from_user.last_name,
+            chat_id=message.chat.id,
+        )
+        login_session.status = "confirmed"
+        login_session.user_id = message.from_user.id
+        await session.commit()
 
     await message.answer(
         "✅ Вход подтверждён! Возвращайся на сайт — там уже подхватится твой аккаунт.",
-        reply_markup=webapp_keyboard(),
+        reply_markup=kb.main_menu(),
     )
 
 
-@dp.message(Command("menu"))
-async def cmd_menu(message: Message) -> None:
-    await message.answer("Главное меню:", reply_markup=main_menu_keyboard())
+# ---------------------------------------------------------------- navigation
 
 
-async def _get_state_for(user_id: int) -> dict:
-    session_maker = db.get_session_maker()
-    async with session_maker() as session:
-        return await db.get_state(session, user_id)
-
-
-def _modules_overview_text() -> str:
-    return "📚 Модули курса — нажми на модуль, чтобы увидеть разбивку по разделам:"
-
-
-def _module_detail_text(module_id: str, state: dict) -> str:
-    module = MODULES_BY_ID.get(module_id)
-    title = module.title if module else module_id
-    icon = module.icon if module else ""
-    lines = [f"{icon} {title}"]
-    sections = section_progress(state, module_id)
-    if not sections:
-        lines.append("Разделы для этого модуля пока не описаны.")
-    for sec in sections:
-        lines.append(f"{sec['icon']} {sec['name']} — {sec['passed']}/{sec['total']} ({sec['pct']}%)")
-    return "\n".join(lines)
-
-
-def _progress_text(state: dict) -> str:
-    xp = state.get("xp", 0)
-    streak = state.get("streak", 0)
-    day_done = state.get("dayDone", 0)
-    day_goal = state.get("dayGoal", 20)
-
-    lines = ["📊 Твой прогресс", f"XP: {xp}", f"Серия: {streak} 🔥", f"Сегодня: {day_done}/{day_goal}", ""]
-    total_passed = total_topics = 0
-    for row in module_progress(state):
-        lines.append(f"{row['icon']} {row['title']}: {row['passed']}/{row['total']} ({row['pct']}%)")
-        total_passed += row["passed"]
-        total_topics += row["total"]
-    if total_topics:
-        overall_pct = round(total_passed / total_topics * 100)
-        lines.append("")
-        lines.append(f"Итого по курсу: {total_passed}/{total_topics} ({overall_pct}%)")
-    return "\n".join(lines)
-
-
-def _review_text(state: dict) -> str:
-    due = topics_due_for_review(state)
-    if not due:
-        return "🔁 Сейчас нет тем к повторению — всё свежее! Загляни позже."
-    lines = [f"🔁 К повторению: {len(due)} {_topics_word(len(due))}", ""]
-    for entry in due[:10]:
-        overdue = entry["overdue_days"]
-        overdue_text = f" (просрочено {overdue} дн.)" if overdue > 0 else ""
-        lines.append(f"• {entry['label']}{overdue_text}")
-    if len(due) > 10:
-        lines.append(f"…и ещё {len(due) - 10}")
-    return "\n".join(lines)
-
-
-def _favorites_text(state: dict) -> str:
-    labels = favorite_labels(state)
-    if not labels:
-        return "⭐ Пока нет избранных тем — отмечай их звёздочкой на сайте."
-    lines = ["⭐ Избранные темы:", ""]
-    lines.extend(f"• {label}" for label in labels[:20])
-    if len(labels) > 20:
-        lines.append(f"…и ещё {len(labels) - 20}")
-    return "\n".join(lines)
-
-
-def _streak_text(state: dict) -> str:
-    streak = state.get("streak", 0)
-    day_done = state.get("dayDone", 0)
-    day_goal = state.get("dayGoal", 20)
-    text = f"🔥 Текущая серия: {streak} {_days_word(streak)}\nСегодня пройдено: {day_done}/{day_goal}"
-    if streak and day_done < day_goal:
-        text += f"\n\n{format_streak_warning_text(streak)}"
-    return text
-
-
-async def _settings_keyboard(user_id: int, state: dict) -> InlineKeyboardMarkup:
-    session_maker = db.get_session_maker()
-    async with session_maker() as session:
-        reminder = await session.get(db.Reminder, user_id)
-    reminder_on = bool(reminder and reminder.enabled)
-    term_lang = state.get("termLang", "ru")
-
-    rows = [
-        [
-            InlineKeyboardButton(
-                text=f"🔔 Напоминания: {'вкл' if reminder_on else 'выкл'}",
-                callback_data="menu:toggle_reminders",
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                text=f"🌐 Язык терминов: {term_lang.upper()}",
-                callback_data="menu:toggle_termlang",
-            )
-        ],
-        [InlineKeyboardButton(text="⬅ В меню", callback_data="menu:home")],
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-def _settings_text(reminder_on: bool) -> str:
-    if reminder_on:
-        return "⚙️ Настройки\n\nНапоминания включены. Чтобы изменить время, отправь ЧЧ:ММ следующим сообщением."
-    return "⚙️ Настройки\n\nЧтобы включить ежедневное напоминание, отправь время в формате ЧЧ:ММ (например 19:00)."
-
-
-@dp.callback_query(F.data == "menu:home")
-async def cb_menu_home(callback: CallbackQuery) -> None:
-    await callback.message.edit_text("Главное меню:", reply_markup=main_menu_keyboard())
+@dp.callback_query(F.data == "menu:noop")
+async def cb_noop(callback: CallbackQuery) -> None:
     await callback.answer()
 
 
-@dp.callback_query(F.data == "menu:modules")
-async def cb_menu_modules(callback: CallbackQuery) -> None:
-    state = await _get_state_for(callback.from_user.id)
-    await callback.message.edit_text(_modules_overview_text(), reply_markup=modules_list_keyboard(state))
+@dp.callback_query(F.data == "menu:home")
+async def cb_home(callback: CallbackQuery) -> None:
+    quiz.end_session(callback.from_user.id)
+    PENDING_INPUT.pop(callback.from_user.id, None)
+    await safe_edit(callback, "🏠 <b>Главное меню</b>\n\nВыбери раздел:", kb.main_menu())
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "menu:learn")
+async def cb_learn(callback: CallbackQuery) -> None:
+    await safe_edit(
+        callback,
+        texts.course_overview_text() + "\n\nВыбери модуль или режим:",
+        kb.learn_menu_keyboard(),
+    )
     await callback.answer()
 
 
 @dp.callback_query(F.data.startswith("menu:module:"))
-async def cb_menu_module_detail(callback: CallbackQuery) -> None:
-    module_id = callback.data.removeprefix("menu:module:")
-    state = await _get_state_for(callback.from_user.id)
-    await callback.message.edit_text(
-        _module_detail_text(module_id, state),
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="⬅ К модулям", callback_data="menu:modules")],
-                [InlineKeyboardButton(text=WEBAPP_BUTTON_TEXT, url=config.WEBAPP_URL)],
+async def cb_module(callback: CallbackQuery) -> None:
+    module_id = callback.data.split(":")[2]
+    state = await load_state(callback.from_user.id)
+    module = MODULES_BY_ID.get(module_id)
+    if module is None:
+        await callback.answer("Модуль не найден")
+        return
+
+    lines = [f"{module.icon} <b>{esc(module.title)}</b>", ""]
+    for section in section_progress(state, module_id):
+        lines.append(
+            f"{section['icon']} {esc(section['name'])} — {section['passed']}/{section['total']} "
+            f"({section['pct']}%)"
+        )
+    lines += ["", f"Тем в модуле: {len(content.topics_of(module_id))}"]
+    await safe_edit(callback, "\n".join(lines), kb.module_actions_keyboard(module_id))
+    await callback.answer()
+
+
+@dp.callback_query(F.data.startswith("menu:topics:"))
+async def cb_topics(callback: CallbackQuery) -> None:
+    _, _, module_id, page_raw = callback.data.split(":")
+    page = int(page_raw)
+    state = await load_state(callback.from_user.id)
+    topics = content.topics_of(module_id)
+    module = MODULES_BY_ID.get(module_id)
+    title = module.title if module else module_id
+
+    await safe_edit(
+        callback,
+        f"📋 <b>{esc(title)}</b> — выбери тему\n(✅ отмечены сданные)",
+        kb.topics_keyboard(module_id, topics, page, passed_keys(state)),
+    )
+    await callback.answer()
+
+
+@dp.callback_query(F.data.startswith("menu:topic:"))
+async def cb_topic(callback: CallbackQuery) -> None:
+    _, _, module_id, num_raw = callback.data.split(":")
+    topic_num = int(num_raw)
+    topic = content.get_topic(module_id, topic_num)
+    if topic is None:
+        await callback.answer("Тема не найдена")
+        return
+
+    state = await load_state(callback.from_user.id)
+    entry = (state.get("progress") or {}).get(f"{module_id}:{topic_num}") or {}
+    best = entry.get("bestPct") or 0
+
+    lines = [f"<b>{esc(topic.get('name', ''))}</b>"]
+    if topic.get("lat"):
+        lines.append(f"<i>{esc(topic['lat'])}</i>")
+    lines += [
+        "",
+        f"🃏 Карточек: {len(topic.get('cards', []))}",
+        f"🏛 Терминов: {len(topic.get('pairs', []))}",
+        f"📝 Вопросов: {len(topic.get('tests', []))}",
+    ]
+    if entry:
+        status = "✅ сдана" if best >= PASS_THRESHOLD else "📖 в процессе"
+        lines += ["", f"Твой результат: {best}% — {status}"]
+    await safe_edit(callback, "\n".join(lines), kb.topic_actions_keyboard(module_id, topic_num))
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "menu:progress")
+async def cb_progress(callback: CallbackQuery) -> None:
+    state = await load_state(callback.from_user.id)
+    await safe_edit(
+        callback,
+        _progress_text(state),
+        kb.back_home([[InlineKeyboardButton(text="📈 Подробная статистика", callback_data="menu:stats")]]),
+    )
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "menu:stats")
+async def cb_stats(callback: CallbackQuery) -> None:
+    state = await load_state(callback.from_user.id)
+    await safe_edit(callback, texts.stats_text(state), kb.back_home())
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "menu:profile")
+async def cb_profile(callback: CallbackQuery) -> None:
+    user_id = callback.from_user.id
+    async with db.get_session_maker()() as session:
+        state = await db.get_state(session, user_id)
+        prefs = await db.get_prefs(session, user_id)
+        referrals = await db.count_referrals(session, user_id)
+
+    await safe_edit(
+        callback,
+        texts.profile_text(state, prefs, name=esc(user_display_name(callback)), referrals=referrals),
+        kb.back_home(
+            [
+                [InlineKeyboardButton(text="🏅 Достижения", callback_data="menu:badges")],
+                [InlineKeyboardButton(text="⭐ Избранное", callback_data="menu:favorites")],
             ]
         ),
     )
     await callback.answer()
 
 
-@dp.callback_query(F.data == "menu:progress")
-async def cb_menu_progress(callback: CallbackQuery) -> None:
-    state = await _get_state_for(callback.from_user.id)
-    await callback.message.edit_text(_progress_text(state), reply_markup=back_to_menu_keyboard())
-    await callback.answer()
-
-
-@dp.callback_query(F.data == "menu:review")
-async def cb_menu_review(callback: CallbackQuery) -> None:
-    state = await _get_state_for(callback.from_user.id)
-    await callback.message.edit_text(_review_text(state), reply_markup=back_to_menu_keyboard())
+@dp.callback_query(F.data == "menu:badges")
+async def cb_badges(callback: CallbackQuery) -> None:
+    state = await load_state(callback.from_user.id)
+    await safe_edit(callback, achievements.format_badges_text(state), kb.back_home())
     await callback.answer()
 
 
 @dp.callback_query(F.data == "menu:favorites")
-async def cb_menu_favorites(callback: CallbackQuery) -> None:
-    state = await _get_state_for(callback.from_user.id)
-    await callback.message.edit_text(_favorites_text(state), reply_markup=back_to_menu_keyboard())
+async def cb_favorites(callback: CallbackQuery) -> None:
+    state = await load_state(callback.from_user.id)
+    labels = favorite_labels(state)
+    if not labels:
+        text = "⭐ Пока нет избранных тем — отмечай их звёздочкой на сайте, они появятся здесь."
+    else:
+        shown = [f"• {esc(label)}" for label in labels[:20]]
+        text = "⭐ <b>Избранные темы</b>\n\n" + "\n".join(shown)
+        if len(labels) > 20:
+            text += f"\n…и ещё {len(labels) - 20}"
+    await safe_edit(callback, text, kb.back_home())
     await callback.answer()
 
 
-@dp.callback_query(F.data == "menu:streak")
-async def cb_menu_streak(callback: CallbackQuery) -> None:
-    state = await _get_state_for(callback.from_user.id)
-    await callback.message.edit_text(_streak_text(state), reply_markup=back_to_menu_keyboard())
+@dp.callback_query(F.data == "menu:leaderboard")
+async def cb_leaderboard(callback: CallbackQuery) -> None:
+    user_id = callback.from_user.id
+    async with db.get_session_maker()() as session:
+        top = await db.top_users_by_xp(session, limit=texts.MAX_LEADERBOARD_ROWS)
+        rank, xp, total = await db.user_rank_by_xp(session, user_id)
+
+    await safe_edit(callback, texts.leaderboard_text(top, rank, xp, total, user_id), kb.back_home())
     await callback.answer()
 
 
-@dp.callback_query(F.data == "menu:settings")
-async def cb_menu_settings(callback: CallbackQuery) -> None:
-    state = await _get_state_for(callback.from_user.id)
-    keyboard = await _settings_keyboard(callback.from_user.id, state)
-    session_maker = db.get_session_maker()
-    async with session_maker() as session:
-        reminder = await session.get(db.Reminder, callback.from_user.id)
-    await callback.message.edit_text(
-        _settings_text(bool(reminder and reminder.enabled)), reply_markup=keyboard
+@dp.callback_query(F.data == "menu:term")
+async def cb_term(callback: CallbackQuery) -> None:
+    await safe_edit(callback, texts.term_of_the_day_text(), kb.back_home())
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "menu:review")
+async def cb_review(callback: CallbackQuery) -> None:
+    state = await load_state(callback.from_user.id)
+    due = topics_due_for_review(state)
+    await safe_edit(callback, _review_text(due), kb.review_keyboard(bool(due)))
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "menu:exam")
+async def cb_exam(callback: CallbackQuery) -> None:
+    user_id = callback.from_user.id
+    state, prefs = await load_state_and_prefs(user_id)
+    PENDING_INPUT[user_id] = {"kind": "exam_date"}
+    await safe_edit(
+        callback,
+        texts.exam_plan_text(prefs, state)
+        + "\n\n<i>Отправь дату сообщением (ДД.ММ.ГГГГ), чтобы задать или изменить её.</i>",
+        kb.back_home(),
     )
     await callback.answer()
 
 
-@dp.callback_query(F.data == "menu:toggle_reminders")
-async def cb_toggle_reminders(callback: CallbackQuery) -> None:
-    session_maker = db.get_session_maker()
-    async with session_maker() as session:
-        async with session.begin():
-            reminder = await session.get(db.Reminder, callback.from_user.id)
-            if reminder is None:
-                await db.get_or_create_user(
-                    session,
-                    telegram_id=callback.from_user.id,
-                    username=callback.from_user.username,
-                    first_name=callback.from_user.first_name,
-                    chat_id=callback.message.chat.id,
-                )
-                reminder = await session.get(db.Reminder, callback.from_user.id)
-            reminder.enabled = not reminder.enabled
-            new_state = reminder.enabled
-
-    state = await _get_state_for(callback.from_user.id)
-    keyboard = await _settings_keyboard(callback.from_user.id, state)
-    await callback.message.edit_text(_settings_text(new_state), reply_markup=keyboard)
-    await callback.answer("Напоминания включены" if new_state else "Напоминания выключены")
+@dp.callback_query(F.data == "menu:search")
+async def cb_search(callback: CallbackQuery) -> None:
+    PENDING_INPUT[callback.from_user.id] = {"kind": "search"}
+    await safe_edit(
+        callback,
+        "🔍 <b>Поиск темы</b>\n\nОтправь название или латинский термин — например «череп», "
+        "«сердце», «cranium».",
+        kb.back_home(),
+    )
+    await callback.answer()
 
 
-@dp.callback_query(F.data == "menu:toggle_termlang")
-async def cb_toggle_termlang(callback: CallbackQuery) -> None:
-    session_maker = db.get_session_maker()
-    async with session_maker() as session:
-        # Read autobegins the transaction — no session.begin() here (see api.put_state).
-        state = await db.get_state(session, callback.from_user.id)
-        state["termLang"] = "en" if state.get("termLang", "ru") == "ru" else "ru"
-        await db.get_or_create_user(session, telegram_id=callback.from_user.id)
-        await db.put_state(session, callback.from_user.id, state)
-        reminder = await session.get(db.Reminder, callback.from_user.id)
-        reminder_on = bool(reminder and reminder.enabled)
+@dp.callback_query(F.data == "menu:invite")
+async def cb_invite(callback: CallbackQuery) -> None:
+    user_id = callback.from_user.id
+    async with db.get_session_maker()() as session:
+        referrals = await db.count_referrals(session, user_id)
+
+    link = f"https://t.me/{config.BOT_USERNAME}?start=ref{user_id}"
+    await safe_edit(
+        callback,
+        "🤝 <b>Пригласи однокурсников</b>\n\n"
+        "Учиться вместе проще: делись ссылкой, следите за прогрессом друг друга в рейтинге.\n\n"
+        f"Твоя ссылка:\n<code>{link}</code>\n\n"
+        f"Уже присоединилось: <b>{referrals}</b>",
+        kb.back_home(),
+    )
+    await callback.answer()
+
+
+# ---------------------------------------------------------------- settings
+
+
+async def _render_settings(callback: CallbackQuery) -> None:
+    user_id = callback.from_user.id
+    async with db.get_session_maker()() as session:
+        state = await db.get_state(session, user_id)
+        prefs = await db.get_prefs(session, user_id)
+        reminder = await session.get(db.Reminder, user_id)
+
+    reminder_on = bool(reminder and reminder.enabled)
+    when = reminder.time.strftime("%H:%M") if reminder else "19:00"
+    tz = (reminder.tz if reminder else None) or prefs.get("tz") or "Europe/Moscow"
+
+    lines = [
+        "⚙️ <b>Настройки</b>",
+        "",
+        f"🔔 Напоминания: {'включены' if reminder_on else 'выключены'}",
+        f"⏰ Время: {when} ({tz})",
+        f"🎯 Цель дня: {state.get('dayGoal', 20)} вопросов",
+    ]
+    await safe_edit(
+        callback,
+        "\n".join(lines),
+        kb.settings_keyboard(
+            reminder_on,
+            state.get("termLang", "ru"),
+            not prefs.get("digest_opt_out"),
+            not prefs.get("term_of_day_opt_out"),
+        ),
+    )
+
+
+@dp.callback_query(F.data == "menu:settings")
+async def cb_settings(callback: CallbackQuery) -> None:
+    await _render_settings(callback)
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "set:reminders")
+async def cb_set_reminders(callback: CallbackQuery) -> None:
+    user_id = callback.from_user.id
+    async with db.get_session_maker()() as session:
+        await db.get_or_create_user(session, telegram_id=user_id, chat_id=callback.message.chat.id)
+        reminder = await session.get(db.Reminder, user_id)
+        if reminder is None:
+            reminder = db.Reminder(user_id=user_id)
+            session.add(reminder)
+        reminder.enabled = not reminder.enabled
+        enabled = reminder.enabled
         await session.commit()
 
-    keyboard = await _settings_keyboard(callback.from_user.id, state)
-    await callback.message.edit_text(_settings_text(reminder_on), reply_markup=keyboard)
+    await _render_settings(callback)
+    await callback.answer("Напоминания включены" if enabled else "Напоминания выключены")
+
+
+@dp.callback_query(F.data == "set:termlang")
+async def cb_set_termlang(callback: CallbackQuery) -> None:
+    user_id = callback.from_user.id
+    async with db.get_session_maker()() as session:
+        state = await db.get_state(session, user_id)
+        state["termLang"] = "en" if state.get("termLang", "ru") == "ru" else "ru"
+        await db.get_or_create_user(session, telegram_id=user_id)
+        await db.put_state(session, user_id, state)
+        await session.commit()
+
+    await _render_settings(callback)
     await callback.answer(f"Язык терминов: {state['termLang'].upper()}")
+
+
+@dp.callback_query(F.data == "set:digest")
+async def cb_set_digest(callback: CallbackQuery) -> None:
+    user_id = callback.from_user.id
+    async with db.get_session_maker()() as session:
+        prefs = await db.get_prefs(session, user_id)
+        new_value = not prefs.get("digest_opt_out")
+        await db.update_prefs(session, user_id, digest_opt_out=new_value)
+        await session.commit()
+
+    await _render_settings(callback)
+    await callback.answer("Итоги недели выключены" if new_value else "Итоги недели включены")
+
+
+@dp.callback_query(F.data == "set:termday")
+async def cb_set_termday(callback: CallbackQuery) -> None:
+    user_id = callback.from_user.id
+    async with db.get_session_maker()() as session:
+        prefs = await db.get_prefs(session, user_id)
+        new_value = not prefs.get("term_of_day_opt_out")
+        await db.update_prefs(session, user_id, term_of_day_opt_out=new_value)
+        await session.commit()
+
+    await _render_settings(callback)
+    await callback.answer("Термин дня выключен" if new_value else "Термин дня включён")
+
+
+@dp.callback_query(F.data == "set:time")
+async def cb_set_time(callback: CallbackQuery) -> None:
+    PENDING_INPUT[callback.from_user.id] = {"kind": "reminder_time"}
+    await safe_edit(
+        callback,
+        "⏰ Отправь время ежедневного напоминания в формате <b>ЧЧ:ММ</b> — например 19:00.",
+        kb.back_home(),
+    )
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "set:tz")
+async def cb_set_tz(callback: CallbackQuery) -> None:
+    await safe_edit(callback, "🌍 Выбери часовой пояс — по нему приходят напоминания:", kb.timezone_keyboard())
+    await callback.answer()
+
+
+@dp.callback_query(F.data.startswith("set:tzpick:"))
+async def cb_set_tz_pick(callback: CallbackQuery) -> None:
+    tz = callback.data.split(":", 2)[2]
+    user_id = callback.from_user.id
+    async with db.get_session_maker()() as session:
+        await db.get_or_create_user(session, telegram_id=user_id, chat_id=callback.message.chat.id)
+        reminder = await session.get(db.Reminder, user_id)
+        if reminder is None:
+            reminder = db.Reminder(user_id=user_id)
+            session.add(reminder)
+        reminder.tz = tz
+        await db.update_prefs(session, user_id, tz=tz)
+        await session.commit()
+
+    await _render_settings(callback)
+    await callback.answer(f"Часовой пояс: {tz}")
+
+
+@dp.callback_query(F.data == "set:goal")
+async def cb_set_goal(callback: CallbackQuery) -> None:
+    await safe_edit(
+        callback, "🎯 Сколько вопросов в день ты хочешь проходить?", kb.goal_keyboard()
+    )
+    await callback.answer()
+
+
+@dp.callback_query(F.data.startswith("set:goalpick:"))
+async def cb_set_goal_pick(callback: CallbackQuery) -> None:
+    goal = int(callback.data.split(":")[2])
+    user_id = callback.from_user.id
+    async with db.get_session_maker()() as session:
+        state = await db.get_state(session, user_id)
+        state["dayGoal"] = goal
+        await db.get_or_create_user(session, telegram_id=user_id)
+        await db.put_state(session, user_id, state)
+        await session.commit()
+
+    await _render_settings(callback)
+    await callback.answer(f"Цель дня: {goal}")
+
+
+# ---------------------------------------------------------------- study sessions
+
+
+async def _send_current_item(target: Message, session: quiz.QuizSession, *, edit: bool = False) -> None:
+    item = session.current()
+    if item is None:
+        return
+
+    header = f"{quiz.MODE_TITLES.get(session.mode, '📝')} · {session.index + 1}/{session.total}"
+    if session.topic_name:
+        header += f"\n<i>{esc(session.topic_name[:60])}</i>"
+
+    if session.mode == "flash":
+        body = f"{header}\n\n<b>{esc(item.get('front', ''))}</b>"
+        markup = kb.flash_reveal_keyboard()
+    else:
+        options = "\n".join(
+            f"{index + 1}. {esc(text)}" for index, text in enumerate(item.get("options", []))
+        )
+        prompt = item.get("q", "")
+        if session.mode == "match":
+            body = f"{header}\n\nЧто означает <b><i>{esc(prompt)}</i></b>?\n\n{options}"
+        else:
+            body = f"{header}\n\n<b>{esc(prompt)}</b>\n\n{options}"
+        markup = kb.quiz_options_keyboard(item.get("options", []))
+
+    if edit:
+        try:
+            await target.edit_text(body, reply_markup=markup)
+            return
+        except Exception:
+            # Edit can fail on an unchanged body or a message too old to modify — fall through
+            # and post a fresh one rather than dropping the question.
+            logger.debug("Falling back to a new message for the next item", exc_info=True)
+    await target.answer(body, reply_markup=markup)
+
+
+async def _finish_session(
+    user_id: int, session: quiz.QuizSession, message: Message, repeat_callback: Optional[str]
+) -> None:
+    quiz.end_session(user_id)
+
+    if session.index == 0:
+        await message.answer("Сессия закрыта — ни одного ответа не засчитано.", reply_markup=kb.main_menu())
+        return
+
+    async with db.get_session_maker()() as db_session:
+        state = await db.get_state(db_session, user_id)
+        new_state, summary = apply_session_result(
+            state,
+            mode=session.mode,
+            module_id=session.module_id,
+            topic_num=session.topic_num,
+            topic_name=session.topic_name,
+            reward_keys=session.reward_keys,
+            correct=session.correct,
+            total=session.index,  # only what was actually answered
+            wrong_items=session.wrong,
+            solved_mistakes=session.solved if session.mode == "mistakes" else None,
+        )
+        prefs = await db.get_prefs(db_session, user_id)
+        fresh_badges = achievements.newly_earned(new_state, prefs.get("announced_badges") or [])
+        if fresh_badges:
+            announced = list(prefs.get("announced_badges") or [])
+            announced += [badge.code for badge in fresh_badges]
+            await db.update_prefs(db_session, user_id, announced_badges=announced)
+
+        await db.get_or_create_user(db_session, telegram_id=user_id)
+        await db.put_state(db_session, user_id, new_state)
+        await db_session.commit()
+
+    await message.answer(
+        texts.session_result_text(summary, quiz.MODE_TITLES.get(session.mode, "Сессия")),
+        reply_markup=kb.after_session_keyboard(repeat_callback),
+    )
+
+    for badge in fresh_badges:
+        await message.answer(
+            f"🎉 Новое достижение!\n\n{badge.icon} <b>{esc(badge.title)}</b>\n{esc(badge.description)}"
+        )
+
+
+def _repeat_callback(session: quiz.QuizSession) -> Optional[str]:
+    if session.mode == "blitz":
+        return "learn:blitz"
+    if session.mode == "mistakes":
+        return "learn:mistakes"
+    if session.module_id and session.topic_num is not None:
+        prefix = {"test": "learn:test", "flash": "learn:flash", "match": "learn:terms"}.get(session.mode)
+        if prefix:
+            return f"{prefix}:{session.module_id}:{session.topic_num}"
+    return None
+
+
+async def _start_and_show(callback: CallbackQuery, session: Optional[quiz.QuizSession], empty_msg: str) -> None:
+    if session is None:
+        await callback.answer(empty_msg, show_alert=True)
+        return
+    await safe_edit(callback, "Готовлю вопросы…", None)
+    await _send_current_item(callback.message, session)
+    await callback.answer()
+
+
+@dp.callback_query(F.data.startswith("learn:test:"))
+async def cb_learn_test(callback: CallbackQuery) -> None:
+    _, _, module_id, num_raw = callback.data.split(":")
+    session = quiz.start_test(callback.from_user.id, module_id, int(num_raw))
+    await _start_and_show(callback, session, "Для этой темы пока нет вопросов")
+
+
+@dp.callback_query(F.data.startswith("learn:modtest:"))
+async def cb_learn_module_test(callback: CallbackQuery) -> None:
+    module_id = callback.data.split(":")[2]
+    session = quiz.start_test(callback.from_user.id, module_id, None)
+    await _start_and_show(callback, session, "В модуле пока нет вопросов")
+
+
+@dp.callback_query(F.data.startswith("learn:flash:"))
+async def cb_learn_flash(callback: CallbackQuery) -> None:
+    _, _, module_id, num_raw = callback.data.split(":")
+    session = quiz.start_flash(callback.from_user.id, module_id, int(num_raw))
+    await _start_and_show(callback, session, "Для этой темы пока нет карточек")
+
+
+@dp.callback_query(F.data.startswith("learn:terms:"))
+async def cb_learn_terms(callback: CallbackQuery) -> None:
+    _, _, module_id, num_raw = callback.data.split(":")
+    session = quiz.start_terms(callback.from_user.id, module_id, int(num_raw))
+    await _start_and_show(callback, session, "Для этой темы пока нет терминов")
+
+
+@dp.callback_query(F.data.startswith("learn:modterms:"))
+async def cb_learn_module_terms(callback: CallbackQuery) -> None:
+    module_id = callback.data.split(":")[2]
+    session = quiz.start_terms(callback.from_user.id, module_id, None)
+    await _start_and_show(callback, session, "В модуле пока нет терминов")
+
+
+@dp.callback_query(F.data == "learn:terms_all")
+async def cb_learn_terms_all(callback: CallbackQuery) -> None:
+    session = quiz.start_terms(callback.from_user.id)
+    await _start_and_show(callback, session, "Термины пока недоступны")
+
+
+@dp.callback_query(F.data == "learn:blitz")
+async def cb_learn_blitz(callback: CallbackQuery) -> None:
+    session = quiz.start_blitz(callback.from_user.id)
+    await _start_and_show(callback, session, "Вопросы пока недоступны")
+
+
+@dp.callback_query(F.data == "learn:mistakes")
+async def cb_learn_mistakes(callback: CallbackQuery) -> None:
+    state = await load_state(callback.from_user.id)
+    session = quiz.start_mistakes(callback.from_user.id, state)
+    await _start_and_show(
+        callback, session, "Ошибок нет — отличная работа! Порешай тесты, чтобы было что разбирать."
+    )
+
+
+@dp.callback_query(F.data == "learn:review")
+async def cb_learn_review(callback: CallbackQuery) -> None:
+    """Start a test on the most overdue topic that's due for spaced review."""
+    state = await load_state(callback.from_user.id)
+    due = topics_due_for_review(state)
+    if not due:
+        await callback.answer("Сейчас нечего повторять", show_alert=True)
+        return
+
+    for entry in due:
+        module_id, _, num_raw = entry["key"].partition(":")
+        if not num_raw.isdigit():
+            continue
+        session = quiz.start_test(callback.from_user.id, module_id, int(num_raw))
+        if session:
+            await _start_and_show(callback, session, "Нет вопросов")
+            return
+    await callback.answer("Для этих тем нет вопросов в боте", show_alert=True)
+
+
+@dp.callback_query(F.data == "quiz:reveal")
+async def cb_quiz_reveal(callback: CallbackQuery) -> None:
+    session = quiz.get_session(callback.from_user.id)
+    if session is None or session.finished:
+        await callback.answer("Сессия завершена")
+        return
+
+    item = session.current() or {}
+    session.revealed = True
+    body = (
+        f"{quiz.MODE_TITLES['flash']} · {session.index + 1}/{session.total}\n\n"
+        f"<b>{esc(item.get('front', ''))}</b>\n\n"
+        f"💡 {esc(item.get('back', ''))}"
+    )
+    try:
+        await callback.message.edit_text(body, reply_markup=kb.flash_grade_keyboard())
+    except Exception:
+        await callback.message.answer(body, reply_markup=kb.flash_grade_keyboard())
+    await callback.answer()
+
+
+@dp.callback_query(F.data.startswith("quiz:flash:"))
+async def cb_quiz_flash_grade(callback: CallbackQuery) -> None:
+    session = quiz.get_session(callback.from_user.id)
+    if session is None or session.finished:
+        await callback.answer("Сессия завершена")
+        return
+
+    quiz.answer_flash(session, callback.data.endswith(":1"))
+    await callback.answer()
+    if session.finished:
+        await _finish_session(callback.from_user.id, session, callback.message, _repeat_callback(session))
+    else:
+        await _send_current_item(callback.message, session, edit=True)
+
+
+@dp.callback_query(F.data.startswith("quiz:ans:"))
+async def cb_quiz_answer(callback: CallbackQuery) -> None:
+    session = quiz.get_session(callback.from_user.id)
+    if session is None or session.finished:
+        await callback.answer("Сессия завершена")
+        return
+
+    chosen = int(callback.data.split(":")[2])
+    is_correct, item = quiz.answer_choice(session, chosen)
+    options = item.get("options", [])
+    correct_index = item.get("correct", 0)
+    correct_text = options[correct_index] if 0 <= correct_index < len(options) else ""
+
+    if is_correct:
+        verdict = "✅ <b>Верно!</b>"
+    else:
+        chosen_text = options[chosen] if 0 <= chosen < len(options) else ""
+        verdict = (
+            f"❌ <b>Неверно.</b>\nТы выбрал: {esc(chosen_text)}\n"
+            f"Правильный ответ: <b>{esc(correct_text)}</b>"
+        )
+
+    prompt = item.get("q", "")
+    body = f"{esc(prompt)}\n\n{verdict}\n\nСчёт: {session.correct}/{session.index}"
+    try:
+        await callback.message.edit_text(body, reply_markup=kb.next_question_keyboard())
+    except Exception:
+        await callback.message.answer(body, reply_markup=kb.next_question_keyboard())
+    await callback.answer("Верно!" if is_correct else "Неверно")
+
+    if session.finished:
+        await _finish_session(callback.from_user.id, session, callback.message, _repeat_callback(session))
+
+
+@dp.callback_query(F.data == "quiz:next")
+async def cb_quiz_next(callback: CallbackQuery) -> None:
+    session = quiz.get_session(callback.from_user.id)
+    if session is None or session.finished:
+        await callback.answer("Сессия завершена")
+        return
+    await _send_current_item(callback.message, session, edit=True)
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "quiz:stop")
+async def cb_quiz_stop(callback: CallbackQuery) -> None:
+    session = quiz.get_session(callback.from_user.id)
+    if session is None:
+        await callback.answer("Сессия уже завершена")
+        await safe_edit(callback, "🏠 <b>Главное меню</b>", kb.main_menu())
+        return
+    await callback.answer("Сессия завершена")
+    await _finish_session(callback.from_user.id, session, callback.message, _repeat_callback(session))
+
+
+# ---------------------------------------------------------------- commands
+
+
+def _progress_text(state: dict[str, Any]) -> str:
+    xp = int(state.get("xp") or 0)
+    level_no, level_title, _, _ = achievements.level_for_xp(xp)
+    lines = [
+        "📊 <b>Твой прогресс</b>",
+        "",
+        f"⭐ XP: {xp} · уровень {level_no} ({level_title})",
+        f"🔥 Серия: {state.get('streak', 0)}",
+        f"🎯 Сегодня: {state.get('dayDone', 0)}/{state.get('dayGoal', 20)}",
+        "",
+    ]
+    total_passed = total_topics = 0
+    for row in module_progress(state):
+        lines.append(
+            f"{row['icon']} {esc(row['title'])}: {row['passed']}/{row['total']} "
+            f"{texts.progress_bar(row['pct'], 8)} {row['pct']}%"
+        )
+        total_passed += row["passed"]
+        total_topics += row["total"]
+    if total_topics:
+        overall = round(total_passed / total_topics * 100)
+        lines += ["", f"<b>Итого: {total_passed}/{total_topics} ({overall}%)</b>"]
+    return "\n".join(lines)
+
+
+def _review_text(due: list[dict[str, Any]]) -> str:
+    if not due:
+        return "🔁 <b>Повторение</b>\n\nСейчас нет тем к повторению — всё свежее! Загляни позже."
+    lines = [
+        f"🔁 <b>К повторению: {len(due)}</b> {texts.plural(len(due), 'тема', 'темы', 'тем')}",
+        "",
+    ]
+    for entry in due[:10]:
+        overdue = entry["overdue_days"]
+        suffix = f" · просрочено {overdue} дн." if overdue > 0 else ""
+        lines.append(f"• {esc(entry['label'])}{suffix}")
+    if len(due) > 10:
+        lines.append(f"…и ещё {len(due) - 10}")
+    return "\n".join(lines)
+
+
+@dp.message(Command("menu"))
+async def cmd_menu(message: Message) -> None:
+    await register_user(message)
+    await message.answer("🏠 <b>Главное меню</b>", reply_markup=kb.main_menu())
 
 
 @dp.message(Command("study"))
 async def cmd_study(message: Message) -> None:
-    state = await _get_state_for(message.from_user.id)
-    due = topics_due_for_review(state)
-    await message.answer(
-        f"сегодня к повторению: {len(due)} {_topics_word(len(due))}",
-        reply_markup=main_menu_keyboard(),
-    )
+    await message.answer(texts.course_overview_text(), reply_markup=kb.learn_menu_keyboard())
 
 
 @dp.message(Command("progress"))
 async def cmd_progress(message: Message) -> None:
-    state = await _get_state_for(message.from_user.id)
-    await message.answer(_progress_text(state), reply_markup=main_menu_keyboard())
+    state = await load_state(message.from_user.id)
+    await message.answer(_progress_text(state), reply_markup=kb.main_menu())
+
+
+@dp.message(Command("stats"))
+async def cmd_stats(message: Message) -> None:
+    state = await load_state(message.from_user.id)
+    await message.answer(texts.stats_text(state), reply_markup=kb.main_menu())
+
+
+@dp.message(Command("profile"))
+async def cmd_profile(message: Message) -> None:
+    user_id = message.from_user.id
+    async with db.get_session_maker()() as session:
+        state = await db.get_state(session, user_id)
+        prefs = await db.get_prefs(session, user_id)
+        referrals = await db.count_referrals(session, user_id)
+    await message.answer(
+        texts.profile_text(state, prefs, name=esc(user_display_name(message)), referrals=referrals),
+        reply_markup=kb.main_menu(),
+    )
+
+
+@dp.message(Command("top"))
+async def cmd_top(message: Message) -> None:
+    user_id = message.from_user.id
+    async with db.get_session_maker()() as session:
+        top = await db.top_users_by_xp(session, limit=texts.MAX_LEADERBOARD_ROWS)
+        rank, xp, total = await db.user_rank_by_xp(session, user_id)
+    await message.answer(texts.leaderboard_text(top, rank, xp, total, user_id), reply_markup=kb.main_menu())
 
 
 @dp.message(Command("review"))
 async def cmd_review(message: Message) -> None:
-    state = await _get_state_for(message.from_user.id)
-    await message.answer(_review_text(state), reply_markup=main_menu_keyboard())
+    state = await load_state(message.from_user.id)
+    due = topics_due_for_review(state)
+    await message.answer(_review_text(due), reply_markup=kb.review_keyboard(bool(due)))
+
+
+@dp.message(Command("blitz"))
+async def cmd_blitz(message: Message) -> None:
+    session = quiz.start_blitz(message.from_user.id)
+    if session is None:
+        await message.answer("Вопросы пока недоступны.")
+        return
+    await _send_current_item(message, session)
+
+
+@dp.message(Command("term"))
+async def cmd_term(message: Message) -> None:
+    await message.answer(texts.term_of_the_day_text(), reply_markup=kb.main_menu())
 
 
 @dp.message(Command("streak"))
 async def cmd_streak(message: Message) -> None:
-    state = await _get_state_for(message.from_user.id)
-    await message.answer(_streak_text(state), reply_markup=main_menu_keyboard())
+    state = await load_state(message.from_user.id)
+    streak = int(state.get("streak") or 0)
+    text = (
+        f"🔥 Текущая серия: <b>{streak}</b> {texts.plural(streak, 'день', 'дня', 'дней')}\n"
+        f"Сегодня пройдено: {state.get('dayDone', 0)}/{state.get('dayGoal', 20)}"
+    )
+    await message.answer(text, reply_markup=kb.main_menu())
+
+
+@dp.message(Command("exam"))
+async def cmd_exam(message: Message) -> None:
+    state, prefs = await load_state_and_prefs(message.from_user.id)
+    PENDING_INPUT[message.from_user.id] = {"kind": "exam_date"}
+    await message.answer(
+        texts.exam_plan_text(prefs, state) + "\n\n<i>Отправь дату сообщением (ДД.ММ.ГГГГ).</i>"
+    )
+
+
+@dp.message(Command("invite"))
+async def cmd_invite(message: Message) -> None:
+    user_id = message.from_user.id
+    async with db.get_session_maker()() as session:
+        referrals = await db.count_referrals(session, user_id)
+    link = f"https://t.me/{config.BOT_USERNAME}?start=ref{user_id}"
+    await message.answer(
+        f"🤝 Твоя ссылка для друзей:\n<code>{link}</code>\n\nУже присоединилось: <b>{referrals}</b>"
+    )
 
 
 @dp.message(Command("reminder"))
 async def cmd_reminder(message: Message) -> None:
-    session_maker = db.get_session_maker()
-    async with session_maker() as session:
+    async with db.get_session_maker()() as session:
         reminder = await session.get(db.Reminder, message.from_user.id)
-
     if reminder is None or not reminder.enabled:
         await message.answer(
-            "🔕 Напоминания сейчас выключены.\n\n"
-            "Отправь время в формате ЧЧ:ММ (например 19:00), чтобы включить ежедневное напоминание."
+            "🔕 Напоминания выключены.\n\nОтправь время в формате ЧЧ:ММ (например 19:00), чтобы включить."
         )
     else:
         await message.answer(
@@ -386,13 +1000,38 @@ async def cmd_reminder(message: Message) -> None:
 
 @dp.message(Command("reminder_off"))
 async def cmd_reminder_off(message: Message) -> None:
-    session_maker = db.get_session_maker()
-    async with session_maker() as session:
-        async with session.begin():
-            reminder = await session.get(db.Reminder, message.from_user.id)
-            if reminder is not None:
-                reminder.enabled = False
+    async with db.get_session_maker()() as session:
+        reminder = await session.get(db.Reminder, message.from_user.id)
+        if reminder is not None:
+            reminder.enabled = False
+        await session.commit()
     await message.answer("🔕 Напоминания выключены.")
+
+
+@dp.message(Command("help"))
+async def cmd_help(message: Message) -> None:
+    await message.answer(
+        "<b>Команды бота АНАТОМ</b>\n\n"
+        "/menu — главное меню\n"
+        "/study — учиться: модули, темы, режимы\n"
+        "/blitz — быстрый тест по всему курсу\n"
+        "/review — темы к повторению\n"
+        "/progress — прогресс по модулям\n"
+        "/stats — подробная статистика\n"
+        "/profile — профиль и уровень\n"
+        "/top — рейтинг студентов\n"
+        "/term — латинский термин дня\n"
+        "/streak — серия дней\n"
+        "/exam — обратный отсчёт до экзамена\n"
+        "/invite — пригласить друзей\n"
+        "/reminder — напоминания\n"
+        "/help — эта справка\n\n"
+        f"Поддержка: {config.SUPPORT_URL}",
+        reply_markup=kb.main_menu(),
+    )
+
+
+# ---------------------------------------------------------------- admin
 
 
 @dp.message(Command("admin"))
@@ -407,8 +1046,7 @@ async def cb_admin_stats(callback: CallbackQuery) -> None:
     if not admin.is_admin(callback.from_user.id):
         await callback.answer()
         return
-    session_maker = db.get_session_maker()
-    async with session_maker() as session:
+    async with db.get_session_maker()() as session:
         text = await admin.build_stats_text(session)
     await callback.message.answer(text)
     await callback.answer()
@@ -434,94 +1072,105 @@ async def cb_admin_lookup(callback: CallbackQuery) -> None:
     await callback.answer()
 
 
-@dp.message(F.text)
-async def handle_admin_pending(message: Message) -> None:
-    user_id = message.from_user.id
-    if not admin.is_admin(user_id) or user_id not in admin.ADMIN_PENDING:
-        raise SkipHandler
-
-    action = admin.ADMIN_PENDING.pop(user_id)
-    session_maker = db.get_session_maker()
-
-    if action == "broadcast":
-        async with session_maker() as session:
-            sent, failed = await admin.broadcast_text(bot, session, message.text)
-        await message.answer(f"Разослано: {sent}, ошибок: {failed}")
-    elif action == "lookup":
-        target_raw = message.text.strip()
-        if not target_raw.isdigit():
-            await message.answer("ID должен быть числом.")
-            return
-        async with session_maker() as session:
-            text = await admin.build_user_summary_text(session, int(target_raw))
-        await message.answer(text)
+# ---------------------------------------------------------------- free text
 
 
 _TIME_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
+_DATE_RE = re.compile(r"^(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})$")
 
 
-@dp.message(F.text.regexp(_TIME_RE.pattern))
-async def set_reminder_time(message: Message) -> None:
-    match = _TIME_RE.match(message.text.strip())
-    if not match:
+async def _apply_reminder_time(user_id: int, chat_id: int, hour: int, minute: int) -> None:
+    async with db.get_session_maker()() as session:
+        await db.get_or_create_user(session, telegram_id=user_id, chat_id=chat_id)
+        reminder = await session.get(db.Reminder, user_id)
+        if reminder is None:
+            reminder = db.Reminder(user_id=user_id)
+            session.add(reminder)
+        reminder.enabled = True
+        reminder.time = dt.time(hour, minute)
+        await session.commit()
+
+
+@dp.message(F.text & ~F.text.startswith("/"))
+async def handle_text(message: Message) -> None:
+    user_id = message.from_user.id
+
+    # 1. Admin flows take precedence so an admin isn't hijacked by their own pending prompt.
+    if admin.is_admin(user_id) and user_id in admin.ADMIN_PENDING:
+        action = admin.ADMIN_PENDING.pop(user_id)
+        if action == "broadcast":
+            async with db.get_session_maker()() as session:
+                sent, failed = await admin.broadcast_text(bot, session, message.text)
+            await message.answer(f"Разослано: {sent}, ошибок: {failed}")
+        elif action == "lookup":
+            raw = message.text.strip()
+            if not raw.isdigit():
+                await message.answer("ID должен быть числом.")
+                return
+            async with db.get_session_maker()() as session:
+                text = await admin.build_user_summary_text(session, int(raw))
+            await message.answer(text)
         return
-    hour, minute = int(match.group(1)), int(match.group(2))
 
-    session_maker = db.get_session_maker()
-    async with session_maker() as session:
-        async with session.begin():
-            reminder = await session.get(db.Reminder, message.from_user.id)
-            if reminder is None:
-                await db.get_or_create_user(
-                    session,
-                    telegram_id=message.from_user.id,
-                    username=message.from_user.username,
-                    first_name=message.from_user.first_name,
-                    chat_id=message.chat.id,
-                )
-                reminder = await session.get(db.Reminder, message.from_user.id)
-            reminder.enabled = True
-            reminder.time = dt.time(hour, minute)
+    pending = PENDING_INPUT.get(user_id)
+    raw = message.text.strip()
 
-    await message.answer(f"✅ Готово! Буду напоминать каждый день в {hour:02d}:{minute:02d}.")
+    # 2. A bare HH:MM always means "set my reminder", prompted or not.
+    time_match = _TIME_RE.match(raw)
+    if time_match:
+        PENDING_INPUT.pop(user_id, None)
+        await _apply_reminder_time(user_id, message.chat.id, int(time_match.group(1)), int(time_match.group(2)))
+        await message.answer(
+            f"✅ Буду напоминать каждый день в {time_match.group(1).zfill(2)}:{time_match.group(2)}.",
+            reply_markup=kb.main_menu(),
+        )
+        return
 
+    if pending and pending.get("kind") == "exam_date":
+        date_match = _DATE_RE.match(raw)
+        if date_match:
+            day, month, year = (int(part) for part in date_match.groups())
+            try:
+                exam_date = dt.date(year, month, day)
+            except ValueError:
+                await message.answer("Такой даты не существует. Формат: ДД.ММ.ГГГГ")
+                return
+            PENDING_INPUT.pop(user_id, None)
+            async with db.get_session_maker()() as session:
+                await db.update_prefs(session, user_id, exam_date=exam_date.isoformat())
+                state = await db.get_state(session, user_id)
+                prefs = await db.get_prefs(session, user_id)
+                await session.commit()
+            await message.answer(texts.exam_plan_text(prefs, state), reply_markup=kb.main_menu())
+            return
 
-@dp.message(Command("help"))
-async def cmd_help(message: Message) -> None:
+    # 3. Anything else is treated as a topic search — the most useful default for a bare message.
+    PENDING_INPUT.pop(user_id, None)
+    results = content.search_topics(raw)
+    if not results:
+        await message.answer(
+            "Ничего не нашёл по этому запросу.\n\n"
+            "Попробуй другое слово — например «череп», «сердце» или латинский термин.",
+            reply_markup=kb.main_menu(),
+        )
+        return
+
     await message.answer(
-        "Команды:\n"
-        "/start — открыть меню\n"
-        "/menu — главное меню (модули, прогресс, повторение, избранное, настройки)\n"
-        "/study — сколько тем ждут повторения\n"
-        "/progress — прогресс по модулям, XP, серия\n"
-        "/review — темы к интервальному повторению\n"
-        "/streak — текущая серия дней\n"
-        "/reminder — настроить ежедневное напоминание\n"
-        f"/help — эта справка\n\nПоддержка: {config.SUPPORT_URL}"
+        f"🔍 Нашёл {len(results)} {texts.plural(len(results), 'тему', 'темы', 'тем')} по запросу "
+        f"«{esc(raw)}»:",
+        reply_markup=kb.search_results_keyboard(results),
     )
 
 
-def _topics_word(n: int) -> str:
-    if n % 10 == 1 and n % 100 != 11:
-        return "тема"
-    if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
-        return "темы"
-    return "тем"
-
-
-def _days_word(n: int) -> str:
-    if n % 10 == 1 and n % 100 != 11:
-        return "день"
-    if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
-        return "дня"
-    return "дней"
-
-
 async def main() -> None:
+    logging.basicConfig(level=logging.INFO)
     await db.init_models()
     from scheduler import start_scheduler
 
     start_scheduler(bot)
+    logger.info(
+        "anatom-bot starting; content: %s", content.counts() if content.has_content() else "MISSING"
+    )
     await dp.start_polling(bot)
 
 

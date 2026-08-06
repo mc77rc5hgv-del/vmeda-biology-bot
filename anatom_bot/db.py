@@ -10,7 +10,7 @@ import copy
 import datetime as dt
 from typing import Any, Optional
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, String, Time, func, select
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, String, Time, func, select, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -63,6 +63,10 @@ class User(Base):
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: dt.datetime.now(dt.timezone.utc)
     )
+    # Bot-side preferences that aren't part of the website's shared state blob:
+    # exam_date, tz, referred_by, announced_badges, digest_opt_out, term_of_day_opt_out.
+    # JSONB so a new preference never needs a schema migration.
+    prefs: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
 
     state: Mapped[Optional["UserState"]] = relationship(back_populates="user", uselist=False)
     reminder: Mapped[Optional["Reminder"]] = relationship(back_populates="user", uselist=False)
@@ -124,11 +128,21 @@ def get_session_maker() -> async_sessionmaker[AsyncSession]:
     return _session_maker
 
 
+# create_all() only creates missing *tables*, never missing columns, so every column added to an
+# existing model needs an explicit statement here. All must be IF NOT EXISTS: both processes run
+# this on every boot, and they can start concurrently.
+_MIGRATIONS = [
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS prefs JSONB NOT NULL DEFAULT '{}'::jsonb",
+]
+
+
 async def init_models() -> None:
-    """Create tables if they don't exist. Call once at process startup."""
+    """Create tables if missing and apply additive column migrations. Call once at startup."""
     engine = get_engine()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        for statement in _MIGRATIONS:
+            await conn.execute(text(statement))
 
 
 def default_state() -> dict:
@@ -212,3 +226,81 @@ async def get_user_full(session: AsyncSession, user_id: int) -> Optional[dict[st
         "state": await get_state(session, user_id),
         "reminder": await session.get(Reminder, user_id),
     }
+
+
+# ---------------------------------------------------------------- preferences
+
+
+async def get_prefs(session: AsyncSession, user_id: int) -> dict[str, Any]:
+    user = await session.get(User, user_id)
+    return copy.deepcopy(user.prefs or {}) if user else {}
+
+
+async def set_prefs(session: AsyncSession, user_id: int, prefs: dict[str, Any]) -> None:
+    """Replace a user's prefs. Reassigns the whole dict so SQLAlchemy sees the JSONB change."""
+    user = await get_or_create_user(session, telegram_id=user_id)
+    user.prefs = dict(prefs)
+    await session.flush()
+
+
+async def update_prefs(session: AsyncSession, user_id: int, **changes: Any) -> dict[str, Any]:
+    prefs = await get_prefs(session, user_id)
+    prefs.update(changes)
+    await set_prefs(session, user_id, prefs)
+    return prefs
+
+
+# ---------------------------------------------------------------- leaderboard
+
+# XP lives inside the shared JSONB state, so ranking is done in SQL rather than by loading every
+# user's blob into Python — at a few thousand students that difference matters.
+_XP_EXPR = func.coalesce(func.nullif(UserState.state["xp"].astext, ""), "0").cast(BigInteger)
+
+
+async def top_users_by_xp(session: AsyncSession, limit: int = 10) -> list[dict[str, Any]]:
+    result = await session.execute(
+        select(User.id, User.first_name, User.last_name, User.username, _XP_EXPR.label("xp"))
+        .join(UserState, UserState.user_id == User.id)
+        .where(_XP_EXPR > 0)
+        .order_by(_XP_EXPR.desc())
+        .limit(limit)
+    )
+    return [
+        {"id": row.id, "first_name": row.first_name, "last_name": row.last_name,
+         "username": row.username, "xp": int(row.xp or 0)}
+        for row in result.all()
+    ]
+
+
+async def user_rank_by_xp(session: AsyncSession, user_id: int) -> tuple[Optional[int], int, int]:
+    """Return (rank, xp, total_ranked). Rank is 1-based among users with any XP."""
+    state = await get_state(session, user_id)
+    xp = int(state.get("xp") or 0)
+
+    total_result = await session.execute(
+        select(func.count()).select_from(UserState).where(_XP_EXPR > 0)
+    )
+    total = int(total_result.scalar_one() or 0)
+
+    if xp <= 0:
+        return None, 0, total
+
+    ahead_result = await session.execute(
+        select(func.count()).select_from(UserState).where(_XP_EXPR > xp)
+    )
+    return int(ahead_result.scalar_one() or 0) + 1, xp, total
+
+
+async def count_referrals(session: AsyncSession, user_id: int) -> int:
+    result = await session.execute(
+        select(func.count()).select_from(User).where(User.prefs["referred_by"].astext == str(user_id))
+    )
+    return int(result.scalar_one() or 0)
+
+
+async def list_users_with_state(session: AsyncSession) -> list[tuple[User, dict[str, Any]]]:
+    """Every user paired with their state — used by the nightly/weekly sweeps."""
+    result = await session.execute(
+        select(User, UserState.state).outerjoin(UserState, UserState.user_id == User.id)
+    )
+    return [(row[0], copy.deepcopy(row[1] or {})) for row in result.all()]
