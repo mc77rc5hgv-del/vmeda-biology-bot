@@ -6,6 +6,7 @@ there is no internal HTTP hop between the bot and the API server.
 
 from __future__ import annotations
 
+import copy
 import datetime as dt
 from typing import Any, Optional
 
@@ -130,12 +131,22 @@ async def init_models() -> None:
         await conn.run_sync(Base.metadata.create_all)
 
 
+def default_state() -> dict:
+    """A fresh, fully-independent copy of DEFAULT_STATE.
+
+    Must be a *deep* copy: DEFAULT_STATE's nested containers (progress/notes/rewarded/...)
+    would otherwise be shared by every user created in this process, so one user's writes
+    would leak into every other new user's starting state.
+    """
+    return copy.deepcopy(DEFAULT_STATE)
+
+
 async def get_or_create_user(session: AsyncSession, *, telegram_id: int, **fields: Any) -> User:
     user = await session.get(User, telegram_id)
     if user is None:
         user = User(id=telegram_id, **fields)
         session.add(user)
-        session.add(UserState(user_id=telegram_id, state=dict(DEFAULT_STATE)))
+        session.add(UserState(user_id=telegram_id, state=default_state()))
         session.add(Reminder(user_id=telegram_id))
     else:
         for key, value in fields.items():
@@ -146,10 +157,17 @@ async def get_or_create_user(session: AsyncSession, *, telegram_id: int, **field
 
 
 async def get_state(session: AsyncSession, user_id: int) -> dict:
+    """Return a detached deep copy of the user's state.
+
+    Deliberately a copy, not the live `row.state`: callers routinely read-modify-write, and
+    handing back the attached object means (a) in-place edits silently bypass SQLAlchemy's
+    change detection on the JSONB column, and (b) `put_state(row.state)` would assign the
+    object to itself, which SQLAlchemy sees as "unchanged" and never flushes.
+    """
     row = await session.get(UserState, user_id)
     if row is None:
-        return dict(DEFAULT_STATE)
-    return row.state
+        return default_state()
+    return copy.deepcopy(row.state or {})
 
 
 async def put_state(session: AsyncSession, user_id: int, state: dict) -> None:

@@ -145,10 +145,15 @@ async def put_state(payload: StateEnvelope, user_id: int = Depends(current_user_
     state = payload.state
     session_maker = db.get_session_maker()
     async with session_maker() as session:
+        # No explicit session.begin() here: the read below autobegins the transaction, and
+        # opening a second one on the same session raises InvalidRequestError. Let autobegin
+        # own it and commit once at the end.
         old_state = await db.get_state(session, user_id)
-        async with session.begin():
-            await db.put_state(session, user_id, state)
-        user = await session.get(db.User, user_id)
+        # user_state.user_id is an FK, so a token that outlives its users row (DB reset, manual
+        # delete) would fail the insert instead of just saving state — reinstate the row first.
+        user = await db.get_or_create_user(session, telegram_id=user_id)
+        await db.put_state(session, user_id, state)
+        await session.commit()
 
     for achievement_text in detect_new_achievements(old_state, state):
         if not user or not user.chat_id:

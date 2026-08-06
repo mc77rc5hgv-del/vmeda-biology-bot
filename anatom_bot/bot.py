@@ -324,18 +324,17 @@ async def cb_toggle_reminders(callback: CallbackQuery) -> None:
 async def cb_toggle_termlang(callback: CallbackQuery) -> None:
     session_maker = db.get_session_maker()
     async with session_maker() as session:
+        # Read autobegins the transaction — no session.begin() here (see api.put_state).
         state = await db.get_state(session, callback.from_user.id)
         state["termLang"] = "en" if state.get("termLang", "ru") == "ru" else "ru"
-        async with session.begin():
-            await db.put_state(session, callback.from_user.id, state)
+        await db.get_or_create_user(session, telegram_id=callback.from_user.id)
+        await db.put_state(session, callback.from_user.id, state)
+        reminder = await session.get(db.Reminder, callback.from_user.id)
+        reminder_on = bool(reminder and reminder.enabled)
+        await session.commit()
 
     keyboard = await _settings_keyboard(callback.from_user.id, state)
-    session_maker = db.get_session_maker()
-    async with session_maker() as session:
-        reminder = await session.get(db.Reminder, callback.from_user.id)
-    await callback.message.edit_text(
-        _settings_text(bool(reminder and reminder.enabled)), reply_markup=keyboard
-    )
+    await callback.message.edit_text(_settings_text(reminder_on), reply_markup=keyboard)
     await callback.answer(f"Язык терминов: {state['termLang'].upper()}")
 
 
