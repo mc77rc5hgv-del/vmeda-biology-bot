@@ -234,9 +234,11 @@ def answer_choice(session: QuizSession, chosen_index: int) -> tuple[bool, dict[s
         return False, {}
 
     is_correct = chosen_index == item.get("correct")
-    session.reward_keys.append(reward_key(session.mode, item.get("q", "")))
 
     if is_correct:
+        # XP is earned per correct answer only — the site pushes its reward key inside the
+        # `if(ok)` branch of pickTest/pickDef, so a wrong answer must never bank one.
+        session.reward_keys.append(reward_key(session.mode, item.get("q", "")))
         session.correct += 1
         if session.mode == "mistakes":
             session.solved.append(item.get("q", ""))
@@ -262,8 +264,10 @@ def answer_flash(session: QuizSession, knew_it: bool) -> None:
     item = session.current()
     if item is None:
         return
-    session.reward_keys.append(reward_key("flash", item.get("front", "")))
     if knew_it:
+        # Same rule as the choice questions: the site only banks a flashcard's key inside
+        # `advance(known)`'s `if(known)` branch, so "не знал" earns nothing.
+        session.reward_keys.append(reward_key("flash", item.get("front", "")))
         session.correct += 1
     session.index += 1
     session.revealed = False

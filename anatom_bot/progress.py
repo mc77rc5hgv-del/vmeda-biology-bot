@@ -23,6 +23,10 @@ HISTORY_CAP = 40
 
 # `rewarded` key prefixes, per study mode — must match the site's, otherwise the same question
 # would grant XP twice (once per surface).
+#
+# XP rule (site's pickTest/pickDef/advance/termCheck): a key is banked ONLY for a correct answer,
+# and only the first time that item is ever answered correctly. So a 10-question run answered
+# 4/10 earns 40 XP, and re-answering those same 4 later earns nothing.
 REWARD_PREFIX = {"test": "q:", "flash": "f:", "match": "m:", "term": "t:"}
 
 MODE_NAMES = {
@@ -88,7 +92,9 @@ def apply_session_result(
     new_state = dict(state)
     pct = round(correct / total * 100) if total else 0
 
-    # XP is granted per *first-ever* encounter of an item, so replaying a topic can't farm it.
+    # XP is granted per item answered *correctly for the first time ever*: callers pass reward
+    # keys only for correct answers, and `rewarded` then dedupes across sessions and surfaces, so
+    # replaying a topic you already aced can't farm more XP.
     rewarded = dict(new_state.get("rewarded") or {})
     newly_seen = 0
     for key in reward_keys:

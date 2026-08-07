@@ -74,6 +74,47 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(len(session.reward_keys), total)
         self.assertEqual(session.wrong, [])
 
+    def test_xp_keys_are_banked_only_for_correct_answers(self):
+        """Reward keys drive XP, and the site banks one only inside its `if(ok)` branch."""
+        session = quiz.start_test(USER, "m1", 5, rng=random.Random(11))
+        item = session.current()
+        quiz.answer_choice(session, (item["correct"] + 1) % len(item["options"]))  # wrong
+        self.assertEqual(session.reward_keys, [], "a wrong answer must not earn XP")
+
+        item = session.current()
+        quiz.answer_choice(session, item["correct"])  # right
+        self.assertEqual(len(session.reward_keys), 1)
+
+    def test_four_of_ten_earns_forty_xp(self):
+        """The exact scenario a student reported: 4/10 correct must pay 40 XP, not 100."""
+        from progress import XP_PER_NEW_ITEM, apply_session_result
+
+        session = quiz.start_test(USER, "m1", 5, rng=random.Random(12))
+        self.assertEqual(session.total, 10)
+        for position in range(session.total):
+            item = session.current()
+            if position < 4:
+                quiz.answer_choice(session, item["correct"])
+            else:
+                quiz.answer_choice(session, (item["correct"] + 1) % len(item["options"]))
+
+        self.assertEqual(session.correct, 4)
+        _, summary = apply_session_result(
+            {"xp": 0, "rewarded": {}, "progress": {}, "mistakes": [], "history": [],
+             "streak": 0, "lastActive": "", "dayDone": 0, "dayKey": "", "dayGoal": 20},
+            mode=session.mode, module_id=session.module_id, topic_num=session.topic_num,
+            topic_name=session.topic_name, reward_keys=session.reward_keys,
+            correct=session.correct, total=session.index, wrong_items=session.wrong,
+        )
+        self.assertEqual(summary["earned_xp"], 4 * XP_PER_NEW_ITEM)
+
+    def test_flashcard_xp_only_when_known(self):
+        session = quiz.start_flash(USER, "m1", 5, rng=random.Random(13))
+        quiz.answer_flash(session, False)
+        self.assertEqual(session.reward_keys, [], "«не знал» must not earn XP")
+        quiz.answer_flash(session, True)
+        self.assertEqual(len(session.reward_keys), 1)
+
     def test_wrong_answers_are_collected(self):
         session = quiz.start_test(USER, "m1", 5, rng=random.Random(2))
         item = session.current()
