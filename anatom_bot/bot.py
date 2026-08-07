@@ -650,7 +650,8 @@ async def _finish_session(
 
     for badge in fresh_badges:
         await message.answer(
-            f"🎉 Новое достижение!\n\n{badge.icon} <b>{esc(badge.title)}</b>\n{esc(badge.description)}"
+            f"🎉 Новое достижение!\n\n{badge.icon} <b>{esc(badge.title)}</b>\n{esc(badge.description)}",
+            reply_markup=kb.webapp_keyboard(),
         )
 
 
@@ -942,7 +943,7 @@ async def cmd_review(message: Message) -> None:
 async def cmd_blitz(message: Message) -> None:
     session = quiz.start_blitz(message.from_user.id)
     if session is None:
-        await message.answer("Вопросы пока недоступны.")
+        await message.answer("Вопросы пока недоступны.", reply_markup=kb.webapp_keyboard())
         return
     await _send_current_item(message, session)
 
@@ -968,7 +969,8 @@ async def cmd_exam(message: Message) -> None:
     state, prefs = await load_state_and_prefs(message.from_user.id)
     PENDING_INPUT[message.from_user.id] = {"kind": "exam_date"}
     await message.answer(
-        texts.exam_plan_text(prefs, state) + "\n\n<i>Отправь дату сообщением (ДД.ММ.ГГГГ).</i>"
+        texts.exam_plan_text(prefs, state) + "\n\n<i>Отправь дату сообщением (ДД.ММ.ГГГГ).</i>",
+        reply_markup=kb.webapp_keyboard(),
     )
 
 
@@ -979,7 +981,8 @@ async def cmd_invite(message: Message) -> None:
         referrals = await db.count_referrals(session, user_id)
     link = f"https://t.me/{config.BOT_USERNAME}?start=ref{user_id}"
     await message.answer(
-        f"🤝 Твоя ссылка для друзей:\n<code>{link}</code>\n\nУже присоединилось: <b>{referrals}</b>"
+        f"🤝 Твоя ссылка для друзей:\n<code>{link}</code>\n\nУже присоединилось: <b>{referrals}</b>",
+        reply_markup=kb.webapp_keyboard(),
     )
 
 
@@ -989,12 +992,14 @@ async def cmd_reminder(message: Message) -> None:
         reminder = await session.get(db.Reminder, message.from_user.id)
     if reminder is None or not reminder.enabled:
         await message.answer(
-            "🔕 Напоминания выключены.\n\nОтправь время в формате ЧЧ:ММ (например 19:00), чтобы включить."
+            "🔕 Напоминания выключены.\n\nОтправь время в формате ЧЧ:ММ (например 19:00), чтобы включить.",
+            reply_markup=kb.webapp_keyboard(),
         )
     else:
         await message.answer(
             f"🔔 Напоминания включены на {reminder.time.strftime('%H:%M')} ({reminder.tz}).\n\n"
-            "Отправь новое время ЧЧ:ММ, чтобы изменить, или /reminder_off, чтобы выключить."
+            "Отправь новое время ЧЧ:ММ, чтобы изменить, или /reminder_off, чтобы выключить.",
+            reply_markup=kb.webapp_keyboard(),
         )
 
 
@@ -1005,7 +1010,7 @@ async def cmd_reminder_off(message: Message) -> None:
         if reminder is not None:
             reminder.enabled = False
         await session.commit()
-    await message.answer("🔕 Напоминания выключены.")
+    await message.answer("🔕 Напоминания выключены.", reply_markup=kb.webapp_keyboard())
 
 
 @dp.message(Command("help"))

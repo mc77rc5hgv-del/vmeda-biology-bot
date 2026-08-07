@@ -17,12 +17,22 @@ WEBAPP_BUTTON_TEXT = "🌐 Открыть АНАТОМ"
 PAGE_SIZE = 8
 
 
-def _webapp_button() -> InlineKeyboardButton:
-    return InlineKeyboardButton(text=WEBAPP_BUTTON_TEXT, url=config.WEBAPP_URL)
+def _webapp_button(text: str = WEBAPP_BUTTON_TEXT) -> InlineKeyboardButton:
+    return InlineKeyboardButton(text=text, url=config.WEBAPP_URL)
+
+
+def with_site(rows: list[list[InlineKeyboardButton]], text: str = WEBAPP_BUTTON_TEXT) -> InlineKeyboardMarkup:
+    """Append the site link as the last row of any keyboard.
+
+    Driving students to the web app is the bot's main job, so the link is present on *every*
+    screen rather than only in the main menu — it is always the last row so it never displaces
+    the buttons a student is actually aiming for.
+    """
+    return InlineKeyboardMarkup(inline_keyboard=[*rows, [_webapp_button(text)]])
 
 
 def webapp_keyboard(text: str = WEBAPP_BUTTON_TEXT) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=text, url=config.WEBAPP_URL)]])
+    return InlineKeyboardMarkup(inline_keyboard=[[_webapp_button(text)]])
 
 
 def main_menu() -> InlineKeyboardMarkup:
@@ -60,7 +70,7 @@ def main_menu() -> InlineKeyboardMarkup:
 def back_home(extra_rows: Optional[list[list[InlineKeyboardButton]]] = None) -> InlineKeyboardMarkup:
     rows = list(extra_rows or [])
     rows.append([InlineKeyboardButton(text="⬅ В меню", callback_data="menu:home")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+    return with_site(rows)
 
 
 def modules_keyboard(rows_progress: list[dict[str, Any]], action: str) -> InlineKeyboardMarkup:
@@ -70,17 +80,18 @@ def modules_keyboard(rows_progress: list[dict[str, Any]], action: str) -> Inline
         text = f"{row['icon']} {row['title']} · {row['passed']}/{row['total']}"
         rows.append([InlineKeyboardButton(text=text, callback_data=f"{action}:{row['id']}")])
     rows.append([InlineKeyboardButton(text="⬅ В меню", callback_data="menu:home")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+    return with_site(rows)
 
 
 def module_actions_keyboard(module_id: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
+    return with_site(
+        [
             [InlineKeyboardButton(text="📝 Тест по модулю", callback_data=f"learn:modtest:{module_id}")],
             [InlineKeyboardButton(text="🏛 Латынь модуля", callback_data=f"learn:modterms:{module_id}")],
             [InlineKeyboardButton(text="📋 Выбрать тему", callback_data=f"menu:topics:{module_id}:0")],
             [InlineKeyboardButton(text="⬅ К модулям", callback_data="menu:learn")],
-        ]
+        ],
+        "📖 Читать теорию на сайте",
     )
 
 
@@ -109,19 +120,19 @@ def topics_keyboard(
         nav.append(InlineKeyboardButton(text="➡", callback_data=f"menu:topics:{module_id}:{page + 1}"))
     rows.append(nav)
     rows.append([InlineKeyboardButton(text="⬅ К модулю", callback_data=f"menu:module:{module_id}")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+    return with_site(rows)
 
 
 def topic_actions_keyboard(module_id: str, topic_num: int) -> InlineKeyboardMarkup:
     suffix = f"{module_id}:{topic_num}"
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
+    return with_site(
+        [
             [InlineKeyboardButton(text="📝 Тест", callback_data=f"learn:test:{suffix}")],
             [InlineKeyboardButton(text="🃏 Флеш-карточки", callback_data=f"learn:flash:{suffix}")],
             [InlineKeyboardButton(text="🏛 Латинские термины", callback_data=f"learn:terms:{suffix}")],
-            [InlineKeyboardButton(text="📖 Теория на сайте", url=config.WEBAPP_URL)],
             [InlineKeyboardButton(text="⬅ К темам", callback_data=f"menu:topics:{module_id}:0")],
-        ]
+        ],
+        "📖 Теория и атлас на сайте",
     )
 
 
@@ -132,12 +143,12 @@ def quiz_options_keyboard(options: list[str], *, show_stop: bool = True) -> Inli
     ]
     if show_stop:
         rows.append([InlineKeyboardButton(text="🛑 Закончить", callback_data="quiz:stop")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+    return with_site(rows)
 
 
 def flash_reveal_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
+    return with_site(
+        [
             [InlineKeyboardButton(text="👁 Показать ответ", callback_data="quiz:reveal")],
             [InlineKeyboardButton(text="🛑 Закончить", callback_data="quiz:stop")],
         ]
@@ -145,8 +156,8 @@ def flash_reveal_keyboard() -> InlineKeyboardMarkup:
 
 
 def flash_grade_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
+    return with_site(
+        [
             [
                 InlineKeyboardButton(text="✅ Знал", callback_data="quiz:flash:1"),
                 InlineKeyboardButton(text="❌ Не знал", callback_data="quiz:flash:0"),
@@ -157,8 +168,8 @@ def flash_grade_keyboard() -> InlineKeyboardMarkup:
 
 
 def next_question_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
+    return with_site(
+        [
             [InlineKeyboardButton(text="➡ Дальше", callback_data="quiz:next")],
             [InlineKeyboardButton(text="🛑 Закончить", callback_data="quiz:stop")],
         ]
@@ -171,7 +182,8 @@ def after_session_keyboard(repeat_callback: Optional[str] = None) -> InlineKeybo
         rows.append([InlineKeyboardButton(text="🔄 Ещё раз", callback_data=repeat_callback)])
     rows.append([InlineKeyboardButton(text="🎓 Другой режим", callback_data="menu:learn")])
     rows.append([InlineKeyboardButton(text="⬅ В меню", callback_data="menu:home")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+    # Right after a result is the moment a student is most likely to want the full material.
+    return with_site(rows, "📖 Разобрать тему на сайте")
 
 
 def learn_menu_keyboard() -> InlineKeyboardMarkup:
@@ -186,12 +198,12 @@ def learn_menu_keyboard() -> InlineKeyboardMarkup:
         ]
     )
     rows.append([InlineKeyboardButton(text="⬅ В меню", callback_data="menu:home")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+    return with_site(rows, "📖 Весь курс на сайте")
 
 
 def settings_keyboard(reminder_on: bool, term_lang: str, digest_on: bool, term_day_on: bool) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
+    return with_site(
+        [
             [
                 InlineKeyboardButton(
                     text=f"🔔 Напоминания: {'вкл' if reminder_on else 'выкл'}",
@@ -239,7 +251,7 @@ def timezone_keyboard() -> InlineKeyboardMarkup:
     ]
     rows = [[InlineKeyboardButton(text=label, callback_data=f"set:tzpick:{tz}")] for label, tz in zones]
     rows.append([InlineKeyboardButton(text="⬅ К настройкам", callback_data="menu:settings")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+    return with_site(rows)
 
 
 def goal_keyboard() -> InlineKeyboardMarkup:
@@ -252,7 +264,7 @@ def goal_keyboard() -> InlineKeyboardMarkup:
         ],
         [InlineKeyboardButton(text="⬅ К настройкам", callback_data="menu:settings")],
     ]
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+    return with_site(rows)
 
 
 def review_keyboard(has_due: bool) -> InlineKeyboardMarkup:
@@ -260,7 +272,7 @@ def review_keyboard(has_due: bool) -> InlineKeyboardMarkup:
     if has_due:
         rows.append([InlineKeyboardButton(text="▶️ Начать повторение", callback_data="learn:review")])
     rows.append([InlineKeyboardButton(text="⬅ В меню", callback_data="menu:home")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+    return with_site(rows)
 
 
 def search_results_keyboard(results: list[dict[str, Any]]) -> InlineKeyboardMarkup:
@@ -274,7 +286,7 @@ def search_results_keyboard(results: list[dict[str, Any]]) -> InlineKeyboardMark
         for item in results
     ]
     rows.append([InlineKeyboardButton(text="⬅ В меню", callback_data="menu:home")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+    return with_site(rows, "📖 Найти на сайте")
 
 
 def sections_hint(module_id: str) -> str:

@@ -23,6 +23,7 @@ from sqlalchemy import select
 import achievements
 import config
 import db
+import keyboards as kb
 import texts
 from state_logic import (
     format_daily_reminder_text,
@@ -69,9 +70,12 @@ async def _send(bot: Bot, chat_id: Optional[int], text: str, **kwargs: Any) -> b
 
 
 async def _broadcast(bot: Bot, targets: Iterable[tuple[Optional[int], str]]) -> int:
+    """Fan out with the site link attached — a push is the moment a student is most likely to
+    open the app, so every one of them carries the call to action."""
+    markup = kb.webapp_keyboard()
     sent = 0
     for chat_id, text in targets:
-        if await _send(bot, chat_id, text):
+        if await _send(bot, chat_id, text, reply_markup=markup):
             sent += 1
         await asyncio.sleep(SEND_DELAY_SECONDS)
     return sent

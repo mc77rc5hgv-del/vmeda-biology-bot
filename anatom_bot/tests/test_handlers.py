@@ -116,6 +116,59 @@ class DeadButtonTests(unittest.TestCase):
         return True
 
 
+class SiteLinkTests(unittest.TestCase):
+    """The site link must appear on every screen — driving students to the web app is the point."""
+
+    def _markups(self) -> dict[str, InlineKeyboardMarkup]:
+        module_rows = [
+            {"id": m.id, "title": m.title, "icon": m.icon, "passed": 1, "total": m.topic_count, "pct": 10}
+            for m in MODULES
+        ]
+        topics = content.topics_of("m1") or [{"num": 1, "name": "Тема"}]
+        results = [{"module_id": "m1", "num": 1, "topic": {"num": 1, "name": "Тема"}}]
+        return {
+            "main_menu": kb.main_menu(),
+            "back_home": kb.back_home(),
+            "learn_menu": kb.learn_menu_keyboard(),
+            "modules": kb.modules_keyboard(module_rows, "menu:module"),
+            "module_actions": kb.module_actions_keyboard("m1"),
+            "topics": kb.topics_keyboard("m1", topics, 0, set()),
+            "topic_actions": kb.topic_actions_keyboard("m1", 5),
+            "quiz_options": kb.quiz_options_keyboard(["а", "б", "в", "г"]),
+            "flash_reveal": kb.flash_reveal_keyboard(),
+            "flash_grade": kb.flash_grade_keyboard(),
+            "next_question": kb.next_question_keyboard(),
+            "after_session": kb.after_session_keyboard("learn:blitz"),
+            "settings": kb.settings_keyboard(True, "ru", True, True),
+            "timezone": kb.timezone_keyboard(),
+            "goal": kb.goal_keyboard(),
+            "review": kb.review_keyboard(True),
+            "search": kb.search_results_keyboard(results),
+            "webapp": kb.webapp_keyboard(),
+        }
+
+    def test_every_screen_links_to_the_site(self):
+        missing = [
+            name
+            for name, markup in self._markups().items()
+            if not any(
+                button.url == tb.WEBAPP_URL for row in markup.inline_keyboard for button in row
+            )
+        ]
+        self.assertEqual(missing, [], f"screens with no link to the site: {missing}")
+
+    def test_link_never_displaces_the_first_row(self):
+        """It sits last so it can't be tapped by accident instead of an answer or a menu item."""
+        for name, markup in self._markups().items():
+            if name == "webapp":
+                continue
+            first_row = markup.inline_keyboard[0]
+            self.assertFalse(
+                all(button.url for button in first_row),
+                f"{name}: the site link took over the first row",
+            )
+
+
 class TextRenderingTests(unittest.TestCase):
     """Every screen must render without raising, including from an empty state."""
 
