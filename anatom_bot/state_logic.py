@@ -15,7 +15,7 @@ from __future__ import annotations
 import datetime as dt
 from typing import Any, Optional
 
-from modules import MODULES, MODULES_BY_ID, PASS_THRESHOLD, SECTIONS_BY_MODULE, describe_key, parse_key
+from modules import MODULES, PASS_THRESHOLD, describe_key, parse_key
 
 _WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 _MONTHS = [
@@ -105,69 +105,3 @@ def module_progress(state: dict[str, Any]) -> list[dict[str, Any]]:
     return result
 
 
-def section_progress(state: dict[str, Any], module_id: str) -> list[dict[str, Any]]:
-    """Per-section passed/total breakdown within one module, for the module-detail screen."""
-    progress = state.get("progress") or {}
-    passed_nums: set[int] = set()
-    for key, entry in progress.items():
-        if not isinstance(entry, dict) or (entry.get("bestPct") or 0) < PASS_THRESHOLD:
-            continue
-        parsed = parse_key(key)
-        if parsed is None or parsed[0] != module_id:
-            continue
-        passed_nums.add(parsed[1])
-
-    result = []
-    for name, icon, lo, hi in SECTIONS_BY_MODULE.get(module_id, []):
-        total = hi - lo + 1
-        passed = sum(1 for n in passed_nums if lo <= n <= hi)
-        pct = round(passed / total * 100) if total else 0
-        result.append({"name": name, "icon": icon, "passed": passed, "total": total, "pct": pct})
-    return result
-
-
-def module_title(module_id: str) -> str:
-    module = MODULES_BY_ID.get(module_id)
-    return module.title if module else module_id
-
-
-def favorite_labels(state: dict[str, Any]) -> list[str]:
-    return [describe_key(key) for key in (state.get("favorites") or [])]
-
-
-def format_daily_reminder_text(due_count: int) -> str:
-    if due_count <= 0:
-        return "Пора закрепить анатомию 🦴 Загляни повторить пройденное."
-    return f"Пора закрепить анатомию 🦴 {due_count} тем ждут повторения"
-
-
-def format_streak_warning_text(streak: int) -> str:
-    return f"🔥 Серия {streak} дней под угрозой! 5 минут — и она сохранится"
-
-
-def format_inactivity_text(last_topic: Optional[dict[str, Any]]) -> str:
-    if isinstance(last_topic, dict) and last_topic.get("moduleId"):
-        parsed_key = f"{last_topic['moduleId']}:{(last_topic.get('topicIdx') or 0) + 1}"
-        return f"Скучаем! Продолжи с темы «{describe_key(parsed_key)}»."
-    return "Скучаем! Возвращайся к учёбе."
-
-
-def detect_new_achievements(old_state: dict[str, Any], new_state: dict[str, Any]) -> list[str]:
-    """Diff two state snapshots and return achievement messages for newly-passed topics
-    (bestPct crossing the site's own PASS_THRESHOLD, currently 75%)."""
-    old_progress = old_state.get("progress") or {}
-    new_progress = new_state.get("progress") or {}
-    messages: list[str] = []
-    for key, entry in new_progress.items():
-        if not isinstance(entry, dict):
-            continue
-        new_pct = entry.get("bestPct")
-        if not isinstance(new_pct, (int, float)) or new_pct < PASS_THRESHOLD:
-            continue
-        old_entry = old_progress.get(key)
-        old_pct = old_entry.get("bestPct") if isinstance(old_entry, dict) else None
-        if isinstance(old_pct, (int, float)) and old_pct >= PASS_THRESHOLD:
-            continue
-        suffix = " 💯" if new_pct >= 100 else ""
-        messages.append(f"Ты сдал тему «{describe_key(key)}» на {int(new_pct)}%{suffix} 🎉")
-    return messages

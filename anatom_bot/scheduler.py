@@ -20,18 +20,15 @@ from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy import select
 
-import achievements
 import config
 import db
 import keyboards as kb
 import texts
-from state_logic import (
+from state_logic import is_inactive, is_streak_at_risk, topics_due_for_review
+from texts import (
     format_daily_reminder_text,
     format_inactivity_text,
     format_streak_warning_text,
-    is_inactive,
-    is_streak_at_risk,
-    topics_due_for_review,
 )
 
 logger = logging.getLogger(__name__)
@@ -72,7 +69,7 @@ async def _send(bot: Bot, chat_id: Optional[int], text: str, **kwargs: Any) -> b
 async def _broadcast(bot: Bot, targets: Iterable[tuple[Optional[int], str]]) -> int:
     """Fan out with the site link attached — a push is the moment a student is most likely to
     open the app, so every one of them carries the call to action."""
-    markup = kb.webapp_keyboard()
+    markup = kb.open_app()
     sent = 0
     for chat_id, text in targets:
         if await _send(bot, chat_id, text, reply_markup=markup):
@@ -202,35 +199,6 @@ async def run_weekly_digest(bot: Bot) -> None:
         logger.info("Weekly digest: %s/%s sent", sent, len(payloads))
 
 
-async def run_badge_sweep(bot: Bot) -> None:
-    """Daily: congratulate badges earned by studying on the *website* (the bot congratulates its
-    own sessions inline, but progress made there would otherwise go unnoticed)."""
-    announcements: list[tuple[Optional[int], str]] = []
-
-    async with db.get_session_maker()() as session:
-        for user, state in await db.list_users_with_state(session):
-            if not user.chat_id or not state:
-                continue
-            prefs = user.prefs or {}
-            fresh = achievements.newly_earned(state, prefs.get("announced_badges") or [])
-            if not fresh:
-                continue
-            announced = list(prefs.get("announced_badges") or []) + [b.code for b in fresh]
-            await db.update_prefs(session, user.id, announced_badges=announced)
-            for badge in fresh:
-                announcements.append(
-                    (
-                        user.chat_id,
-                        f"🎉 Новое достижение!\n\n{badge.icon} <b>{badge.title}</b>\n{badge.description}",
-                    )
-                )
-        await session.commit()
-
-    if announcements:
-        sent = await _broadcast(bot, announcements)
-        logger.info("Badge sweep: %s/%s sent", sent, len(announcements))
-
-
 def start_scheduler(bot: Bot) -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler(timezone="UTC")
 
@@ -257,7 +225,6 @@ def start_scheduler(bot: Bot) -> AsyncIOScheduler:
     add("streak_protection", run_streak_protection, minute=5)
     add("term_of_the_day", run_term_of_the_day, minute=10)
     add("inactivity_winback", run_inactivity_winback, hour=INACTIVITY_CHECK_HOUR_UTC, minute=15)
-    add("badge_sweep", run_badge_sweep, hour=INACTIVITY_CHECK_HOUR_UTC, minute=25)
     add("weekly_digest", run_weekly_digest, day_of_week=DIGEST_WEEKDAY, hour=DIGEST_HOUR_UTC, minute=30)
 
     scheduler.start()

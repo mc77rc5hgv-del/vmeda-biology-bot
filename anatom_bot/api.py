@@ -9,15 +9,19 @@ from __future__ import annotations
 import datetime as dt
 import logging
 
-from aiogram import Bot
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 import config
 import db
-from auth import create_session_token, decode_session_token, generate_login_code, verify_telegram_auth
-from state_logic import detect_new_achievements
+from auth import (
+    create_session_token,
+    decode_session_token,
+    generate_login_code,
+    verify_telegram_auth,
+    verify_webapp_init_data,
+)
 from texts import display_name
 
 logger = logging.getLogger(__name__)
@@ -30,10 +34,6 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT"],
     allow_headers=["Authorization", "Content-Type"],
 )
-
-# Used only to push outgoing achievement notifications — this process never polls for updates,
-# so it can safely share the same bot token as the polling bot process in bot.py.
-_notify_bot = Bot(token=config.BOT_TOKEN)
 
 
 class TelegramAuthPayload(BaseModel):
@@ -97,6 +97,41 @@ async def auth_telegram(payload: TelegramAuthPayload) -> AuthResponse:
 
     token = create_session_token(payload.id, config.SESSION_SECRET, config.SESSION_TTL_SECONDS)
     return AuthResponse(token=token, user_id=payload.id)
+
+
+class WebAppAuthPayload(BaseModel):
+    init_data: str
+
+
+@app.post("/auth/telegram-webapp", response_model=AuthResponse)
+async def auth_telegram_webapp(payload: WebAppAuthPayload) -> AuthResponse:
+    """Log a student in from inside the Telegram MiniApp.
+
+    The MiniApp has no Login Widget: it posts `Telegram.WebApp.initData` here, which is signed
+    with a different scheme (see auth.verify_webapp_init_data). Returns the same session token
+    as the widget flow, so the app's existing /api/state calls work unchanged.
+    """
+    user = verify_webapp_init_data(
+        payload.init_data, config.BOT_TOKEN, max_age_seconds=config.TELEGRAM_AUTH_MAX_AGE_SECONDS
+    )
+    if user is None:
+        raise HTTPException(status_code=403, detail="initData verification failed")
+
+    user_id = int(user["id"])
+    session_maker = db.get_session_maker()
+    async with session_maker() as session:
+        async with session.begin():
+            await db.get_or_create_user(
+                session,
+                telegram_id=user_id,
+                username=user.get("username"),
+                first_name=user.get("first_name"),
+                last_name=user.get("last_name"),
+                photo_url=user.get("photo_url"),
+            )
+
+    token = create_session_token(user_id, config.SESSION_SECRET, config.SESSION_TTL_SECONDS)
+    return AuthResponse(token=token, user_id=user_id)
 
 
 @app.post("/auth/start", response_model=StartSessionResponse)
@@ -184,22 +219,12 @@ async def put_state(payload: StateEnvelope, user_id: int = Depends(current_user_
     state = payload.state
     session_maker = db.get_session_maker()
     async with session_maker() as session:
-        # No explicit session.begin() here: the read below autobegins the transaction, and
-        # opening a second one on the same session raises InvalidRequestError. Let autobegin
-        # own it and commit once at the end.
-        old_state = await db.get_state(session, user_id)
+        # No explicit session.begin(): get_or_create autobegins the transaction, and opening a
+        # second one on the same session raises InvalidRequestError. Commit once at the end.
         # user_state.user_id is an FK, so a token that outlives its users row (DB reset, manual
         # delete) would fail the insert instead of just saving state — reinstate the row first.
-        user = await db.get_or_create_user(session, telegram_id=user_id)
+        await db.get_or_create_user(session, telegram_id=user_id)
         await db.put_state(session, user_id, state)
         await session.commit()
-
-    for achievement_text in detect_new_achievements(old_state, state):
-        if not user or not user.chat_id:
-            break
-        try:
-            await _notify_bot.send_message(user.chat_id, achievement_text)
-        except Exception:
-            logger.exception("Failed to send achievement notification to chat_id=%s", user.chat_id)
 
     return {"ok": True}

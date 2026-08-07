@@ -23,7 +23,6 @@ EXPECTED_JOB_IDS = {
     "streak_protection",
     "term_of_the_day",
     "inactivity_winback",
-    "badge_sweep",
     "weekly_digest",
 }
 

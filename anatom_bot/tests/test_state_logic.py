@@ -5,17 +5,15 @@ import sys
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _bootstrap import tb  # noqa: F401,E402
 
 from state_logic import (  # noqa: E402
-    detect_new_achievements,
-    format_daily_reminder_text,
     is_inactive,
     is_streak_at_risk,
     js_date_string,
     module_progress,
     parse_js_date_string,
-    section_progress,
     topics_due_for_review,
 )
 
@@ -111,51 +109,6 @@ class ModuleProgressTests(unittest.TestCase):
     def test_empty_state_all_zero(self):
         rows = module_progress({})
         self.assertTrue(all(r["passed"] == 0 for r in rows))
-
-
-class SectionProgressTests(unittest.TestCase):
-    def test_passed_topic_counted_in_its_section(self):
-        state = {"progress": {"m1:6": {"bestPct": 90}}}  # falls in "Кости черепа" (5-24)
-        rows = {r["name"]: r for r in section_progress(state, "m1")}
-        self.assertEqual(rows["Кости черепа"]["passed"], 1)
-        self.assertEqual(rows["Общая остеология. Скелет туловища"]["passed"], 0)
-
-    def test_unknown_module_returns_empty(self):
-        self.assertEqual(section_progress({}, "does-not-exist"), [])
-
-
-class AchievementDiffTests(unittest.TestCase):
-    def test_newly_passed_topic_fires(self):
-        old = {"progress": {"m1:5": {"bestPct": 60}}}
-        new = {"progress": {"m1:5": {"bestPct": 92}}}
-        messages = detect_new_achievements(old, new)
-        self.assertEqual(len(messages), 1)
-        self.assertIn("92", messages[0])
-
-    def test_already_passed_does_not_refire(self):
-        old = {"progress": {"m1:5": {"bestPct": 80}}}
-        new = {"progress": {"m1:5": {"bestPct": 96}}}
-        self.assertEqual(detect_new_achievements(old, new), [])
-
-    def test_below_threshold_no_message(self):
-        old = {"progress": {"m1:5": {"bestPct": 30}}}
-        new = {"progress": {"m1:5": {"bestPct": 50}}}
-        self.assertEqual(detect_new_achievements(old, new), [])
-
-    def test_perfect_score_gets_extra_marker(self):
-        old = {"progress": {"m1:5": {"bestPct": 60}}}
-        new = {"progress": {"m1:5": {"bestPct": 100}}}
-        messages = detect_new_achievements(old, new)
-        self.assertIn("💯", messages[0])
-
-
-class MessageTemplateTests(unittest.TestCase):
-    def test_zero_due_topics_still_friendly(self):
-        text = format_daily_reminder_text(0)
-        self.assertNotIn("0 тем", text)
-
-    def test_positive_due_topics(self):
-        self.assertIn("3 тем", format_daily_reminder_text(3))
 
 
 if __name__ == "__main__":

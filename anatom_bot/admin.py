@@ -14,10 +14,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import config
-import content
 import db
 import texts
-from achievements import level_for_xp
 from state_logic import module_progress
 
 logger = logging.getLogger(__name__)
@@ -142,7 +140,6 @@ async def build_stats_text(session: AsyncSession) -> str:
     )
 
     rows = await db.top_users_by_xp(session, limit=5)
-    stats = content.counts()
 
     lines = [
         "📊 <b>Статистика АНАТОМ-бота</b>",
@@ -152,9 +149,6 @@ async def build_stats_text(session: AsyncSession) -> str:
         f"📈 Новых за сутки: {new_day} · за неделю: {new_week}",
         f"⚡ Активны за неделю: {active_week}",
         f"🔔 С напоминаниями: {reminders_on}",
-        "",
-        f"📚 Контент: {stats['topics']} тем · {stats['cards']} карточек · "
-        f"{stats['pairs']} терминов · {stats['tests']} вопросов",
     ]
 
     if rows:
@@ -204,7 +198,6 @@ async def build_user_summary_text(session: AsyncSession, target_id: int) -> str:
     name = texts.display_name(user.first_name, user.last_name, user.username)
     username = f"@{user.username}" if user.username else "—"
     xp = int(state.get("xp") or 0)
-    level_no, level_title, _, _ = level_for_xp(xp)
 
     reminder_text = "выключены"
     if reminder is not None and reminder.enabled:
@@ -220,7 +213,7 @@ async def build_user_summary_text(session: AsyncSession, target_id: int) -> str:
         f"ID: <code>{user.id}</code>",
         f"Регистрация: {user.created_at:%d.%m.%Y %H:%M}",
         "",
-        f"⭐ XP: {xp} · уровень {level_no} ({level_title})",
+        f"⭐ XP: {xp}",
         f"🔥 Серия: {state.get('streak', 0)}",
         f"📚 Пройдено: {passed}/{total}",
         f"❌ Ошибок: {len(state.get('mistakes') or [])}",
