@@ -45,7 +45,7 @@ def admin_menu_keyboard() -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton(text="🆕 Новые", callback_data="admin_recent"),
-                InlineKeyboardButton(text="🔍 Найти по ID", callback_data="admin_lookup"),
+                InlineKeyboardButton(text="🔍 Найти", callback_data="admin_lookup"),
             ],
             [InlineKeyboardButton(text="📢 Рассылка всем", callback_data="admin_broadcast")],
             [
@@ -162,6 +162,32 @@ async def build_stats_text(session: AsyncSession) -> str:
         for index, row in enumerate(rows, start=1):
             name = texts.display_name(row.get("first_name"), row.get("last_name"), row.get("username"))
             lines.append(f"{index}. {name} — {row['xp']} XP")
+    return "\n".join(lines)
+
+
+async def build_lookup_result_text(session: AsyncSession, raw: str) -> str:
+    """Resolve admin input (numeric ID or @username) to a user card.
+
+    On a miss, fall back to a loose search and offer candidates with their IDs instead of a bare
+    "not found" — usually the admin has the handle slightly wrong, not the wrong person.
+    """
+    user = await db.resolve_user(session, raw)
+    if user is not None:
+        return await build_user_summary_text(session, user.id)
+
+    candidates = await db.search_users(session, raw)
+    if not candidates:
+        return (
+            f"Никого не нашёл по запросу «{raw}».\n\n"
+            "Можно искать по числовому ID или по @username."
+        )
+
+    lines = [f"Точного совпадения по «{raw}» нет. Похожие:", ""]
+    for candidate in candidates:
+        name = texts.display_name(candidate.first_name, candidate.last_name, candidate.username)
+        handle = f" (@{candidate.username})" if candidate.username else ""
+        lines.append(f"• {name}{handle} — <code>{candidate.id}</code>")
+    lines += ["", "<i>Пришли ID или @username нужного, чтобы открыть карточку.</i>"]
     return "\n".join(lines)
 
 

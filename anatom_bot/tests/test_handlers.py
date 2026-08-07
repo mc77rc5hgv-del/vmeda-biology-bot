@@ -236,6 +236,73 @@ class AdminPanelTests(unittest.TestCase):
         self.assertIn("admin_bc_go:inactive", data)
 
 
+class UserLookupTests(unittest.TestCase):
+    """resolve_user must accept whichever identifier the admin happens to have."""
+
+    class FakeSession:
+        def __init__(self, found=None):
+            self.found = found
+            self.get_args = None
+            self.executed_sql = None
+
+        async def get(self, model, pk):
+            self.get_args = (model, pk)
+            return self.found
+
+        async def execute(self, statement):
+            from sqlalchemy.dialects import postgresql
+
+            self.executed_sql = str(statement.compile(dialect=postgresql.dialect()))
+            outer = self
+
+            class Result:
+                def scalar_one_or_none(self):
+                    return outer.found
+
+                def scalars(self):
+                    return self
+
+                def all(self):
+                    return [outer.found] if outer.found else []
+
+            return Result()
+
+    def _run(self, coro):
+        import asyncio
+
+        return asyncio.run(coro)
+
+    def test_numeric_input_looks_up_by_primary_key(self):
+        import db
+
+        session = self.FakeSession(found="user")
+        result = self._run(db.resolve_user(session, " 1326779223 "))
+        self.assertEqual(result, "user")
+        self.assertEqual(session.get_args[1], 1326779223)
+
+    def test_at_prefix_is_stripped_and_matched_case_insensitively(self):
+        import db
+
+        session = self.FakeSession(found="user")
+        self._run(db.resolve_user(session, "@SomeUser"))
+        self.assertIsNotNone(session.executed_sql)
+        self.assertIn("lower(users.username)", session.executed_sql)
+
+    def test_blank_input_resolves_to_nothing(self):
+        import db
+
+        for value in ("", "   ", "@"):
+            session = self.FakeSession(found="user")
+            self.assertIsNone(self._run(db.resolve_user(session, value)))
+
+    def test_fuzzy_search_needs_two_characters(self):
+        import db
+
+        session = self.FakeSession(found="user")
+        self.assertEqual(self._run(db.search_users(session, "a")), [])
+        self.assertIsNone(session.executed_sql, "should not hit the database at all")
+
+
 class SiteLinkTests(unittest.TestCase):
     """The site link must appear on every screen — driving students to the web app is the point."""
 

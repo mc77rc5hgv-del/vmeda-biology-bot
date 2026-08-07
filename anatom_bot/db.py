@@ -346,6 +346,51 @@ async def count_referrals(session: AsyncSession, user_id: int) -> int:
     return int(result.scalar_one() or 0)
 
 
+async def resolve_user(session: AsyncSession, raw: str) -> Optional[User]:
+    """Find a user from admin input: a numeric Telegram ID or a @username.
+
+    Mirrors the main bot's resolve_user_by_username so admins can paste whichever identifier
+    they happen to have. Username matching is case-insensitive because Telegram treats
+    usernames that way, and the stored casing is whatever the user typed when they signed up.
+    """
+    candidate = (raw or "").strip()
+    if not candidate:
+        return None
+
+    if candidate.isdigit():
+        return await session.get(User, int(candidate))
+
+    handle = candidate.lstrip("@")
+    if not handle:
+        return None
+    result = await session.execute(
+        select(User).where(func.lower(User.username) == handle.lower()).limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def search_users(session: AsyncSession, needle: str, limit: int = 10) -> list[User]:
+    """Loose fallback for when an exact ID/@username lookup misses — matches part of a username
+    or display name so the admin gets candidates instead of a dead end."""
+    handle = (needle or "").strip().lstrip("@")
+    if len(handle) < 2:
+        return []
+
+    pattern = f"%{handle}%"
+    result = await session.execute(
+        select(User)
+        .where(
+            _IS_REAL_USER,
+            User.username.ilike(pattern)
+            | User.first_name.ilike(pattern)
+            | User.last_name.ilike(pattern),
+        )
+        .order_by(User.created_at.desc())
+        .limit(limit)
+    )
+    return list(result.scalars().all())
+
+
 async def list_recent_users(session: AsyncSession, limit: int = 10) -> list[User]:
     result = await session.execute(
         select(User).where(_IS_REAL_USER).order_by(User.created_at.desc()).limit(limit)

@@ -1067,10 +1067,14 @@ async def cmd_admin(message: Message) -> None:
 
 
 async def _guard_admin(callback: CallbackQuery) -> bool:
-    if admin.is_admin(callback.from_user.id):
-        return True
-    await callback.answer("Недостаточно прав", show_alert=True)
-    return False
+    if not admin.is_admin(callback.from_user.id):
+        await callback.answer("Недостаточно прав", show_alert=True)
+        return False
+    # Any panel tap ends whatever input the panel was waiting for, so a half-finished lookup
+    # can't swallow the admin's next unrelated message. Handlers that need input set it again
+    # right after this guard; drafts are left alone so the confirm button still works.
+    admin.ADMIN_PENDING.pop(callback.from_user.id, None)
+    return True
 
 
 @dp.callback_query(F.data == "admin_home")
@@ -1167,8 +1171,10 @@ async def cb_admin_lookup(callback: CallbackQuery) -> None:
     admin.ADMIN_PENDING[callback.from_user.id] = {"action": "lookup"}
     await safe_edit(
         callback,
-        "🔍 Пришли Telegram ID пользователя числом.\n\n"
-        "<i>ID видно в списках «Топ-10» и «Новые».</i>",
+        "🔍 <b>Поиск пользователя</b>\n\n"
+        "Пришли <b>@username</b> или числовой <b>ID</b>.\n\n"
+        "<i>Если точного совпадения не будет — покажу похожих. "
+        "ID также видно в списках «Топ-10» и «Новые».</i>",
         admin.admin_menu_keyboard(),
     )
     await callback.answer()
@@ -1283,14 +1289,10 @@ async def handle_text(message: Message) -> None:
                 reply_markup=admin.broadcast_confirm_keyboard(cohort, recipients),
             )
         elif action == "lookup":
-            raw = message.text.strip()
-            if not raw.isdigit():
-                await message.answer(
-                    "ID должен быть числом.", reply_markup=admin.admin_menu_keyboard()
-                )
-                return
             async with db.get_session_maker()() as session:
-                text = await admin.build_user_summary_text(session, int(raw))
+                text = await admin.build_lookup_result_text(session, message.text.strip())
+            # Keep the prompt open: after a candidate list the admin usually looks one of them up.
+            admin.ADMIN_PENDING[user_id] = {"action": "lookup"}
             await message.answer(text, reply_markup=admin.admin_menu_keyboard())
         return
 
