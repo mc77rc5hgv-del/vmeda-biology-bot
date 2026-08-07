@@ -15,6 +15,7 @@ from typing import Any, Optional
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
+from aiogram.dispatcher.event.bases import SkipHandler
 from aiogram.enums import ParseMode
 from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.types import (
@@ -135,7 +136,7 @@ async def cmd_start(message: Message, command: CommandObject) -> None:
         "Я бот <b>АНАТОМ</b> — учись прямо здесь: тесты, флеш-карточки и латинские термины "
         "по всему курсу нормальной анатомии. Прогресс общий с сайтом: где бы ты ни занимался, "
         "XP, серия и повторения синхронизируются.",
-        reply_markup=kb.reply_nav(),
+        reply_markup=kb.reply_nav(is_admin=admin.is_admin(message.from_user.id)),
     )
     await message.answer("Выбери, с чего начать:", reply_markup=kb.main_menu())
 
@@ -900,7 +901,10 @@ async def cmd_menu(message: Message) -> None:
     await register_user(message)
     # Re-install the persistent navigation here too: it is the recovery path for anyone who
     # hid or cleared it, and for users who started the bot before it existed.
-    await message.answer("Навигация включена 👇", reply_markup=kb.reply_nav())
+    await message.answer(
+        "Навигация включена 👇",
+        reply_markup=kb.reply_nav(is_admin=admin.is_admin(message.from_user.id)),
+    )
     await message.answer("🏠 <b>Главное меню</b>", reply_markup=kb.main_menu())
 
 
@@ -1050,41 +1054,123 @@ async def cmd_help(message: Message) -> None:
 # ---------------------------------------------------------------- admin
 
 
+ADMIN_PANEL_TITLE = "⚙️ <b>Админ-панель</b>\n\nВыбери действие:"
+
+
 @dp.message(Command("admin"))
 async def cmd_admin(message: Message) -> None:
     if not admin.is_admin(message.from_user.id):
         return
-    await message.answer("⚙️ Админ-панель", reply_markup=admin.admin_menu_keyboard())
+    # Re-send the nav so the admin picks up the ⚙️ button the first time they open the panel.
+    await message.answer(ADMIN_PANEL_TITLE, reply_markup=kb.reply_nav(is_admin=True))
+    await message.answer("Действия:", reply_markup=admin.admin_menu_keyboard())
+
+
+async def _guard_admin(callback: CallbackQuery) -> bool:
+    if admin.is_admin(callback.from_user.id):
+        return True
+    await callback.answer("Недостаточно прав", show_alert=True)
+    return False
+
+
+@dp.callback_query(F.data == "admin_home")
+async def cb_admin_home(callback: CallbackQuery) -> None:
+    if not await _guard_admin(callback):
+        return
+    admin.ADMIN_PENDING.pop(callback.from_user.id, None)
+    admin.ADMIN_DRAFTS.pop(callback.from_user.id, None)
+    await safe_edit(callback, ADMIN_PANEL_TITLE, admin.admin_menu_keyboard())
+    await callback.answer()
 
 
 @dp.callback_query(F.data == "admin_stats")
 async def cb_admin_stats(callback: CallbackQuery) -> None:
-    if not admin.is_admin(callback.from_user.id):
-        await callback.answer()
+    if not await _guard_admin(callback):
         return
     async with db.get_session_maker()() as session:
         text = await admin.build_stats_text(session)
-    await callback.message.answer(text)
+    await safe_edit(callback, text, admin.admin_menu_keyboard())
     await callback.answer()
 
 
-@dp.callback_query(F.data == "admin_broadcast")
-async def cb_admin_broadcast(callback: CallbackQuery) -> None:
-    if not admin.is_admin(callback.from_user.id):
-        await callback.answer()
+@dp.callback_query(F.data == "admin_top")
+async def cb_admin_top(callback: CallbackQuery) -> None:
+    if not await _guard_admin(callback):
         return
-    admin.ADMIN_PENDING[callback.from_user.id] = "broadcast"
-    await callback.message.answer("Пришлите текст рассылки следующим сообщением.")
+    async with db.get_session_maker()() as session:
+        text = await admin.build_top_text(session)
+    await safe_edit(callback, text, admin.admin_menu_keyboard())
     await callback.answer()
+
+
+@dp.callback_query(F.data == "admin_recent")
+async def cb_admin_recent(callback: CallbackQuery) -> None:
+    if not await _guard_admin(callback):
+        return
+    async with db.get_session_maker()() as session:
+        text = await admin.build_recent_text(session)
+    await safe_edit(callback, text, admin.admin_menu_keyboard())
+    await callback.answer()
+
+
+@dp.callback_query(F.data.in_({"admin_broadcast", "admin_broadcast_inactive"}))
+async def cb_admin_broadcast(callback: CallbackQuery) -> None:
+    if not await _guard_admin(callback):
+        return
+    cohort = "inactive" if callback.data.endswith("inactive") else "all"
+    admin.ADMIN_PENDING[callback.from_user.id] = {"action": "broadcast", "cohort": cohort}
+
+    async with db.get_session_maker()() as session:
+        recipients = len(await admin.cohort_chat_ids(session, cohort))
+
+    audience = (
+        f"спящим ({admin.INACTIVE_DAYS}+ дней без занятий)" if cohort == "inactive" else "всем"
+    )
+    await safe_edit(
+        callback,
+        f"📢 Рассылка {audience}\nПолучателей сейчас: <b>{recipients}</b>\n\n"
+        "Пришли текст сообщения — покажу предпросмотр перед отправкой.",
+        admin.admin_menu_keyboard(),
+    )
+    await callback.answer()
+
+
+@dp.callback_query(F.data.startswith("admin_bc_go:"))
+async def cb_admin_broadcast_go(callback: CallbackQuery) -> None:
+    if not await _guard_admin(callback):
+        return
+
+    draft = admin.ADMIN_DRAFTS.pop(callback.from_user.id, None)
+    if not draft:
+        await callback.answer("Черновик устарел — начни заново", show_alert=True)
+        await safe_edit(callback, ADMIN_PANEL_TITLE, admin.admin_menu_keyboard())
+        return
+
+    cohort = draft["cohort"]
+    await callback.answer("Отправляю…")
+    await safe_edit(callback, "📢 Рассылка идёт, это может занять пару минут…", None)
+
+    async with db.get_session_maker()() as session:
+        sent, failed = await admin.broadcast_text(bot, session, draft["text"], cohort)
+
+    await callback.message.answer(
+        f"✅ Рассылка завершена\n\nДоставлено: <b>{sent}</b>\nНе доставлено: {failed}"
+        + ("\n\n<i>Недоставленные — те, кто заблокировал бота.</i>" if failed else ""),
+        reply_markup=admin.admin_menu_keyboard(),
+    )
 
 
 @dp.callback_query(F.data == "admin_lookup")
 async def cb_admin_lookup(callback: CallbackQuery) -> None:
-    if not admin.is_admin(callback.from_user.id):
-        await callback.answer()
+    if not await _guard_admin(callback):
         return
-    admin.ADMIN_PENDING[callback.from_user.id] = "lookup"
-    await callback.message.answer("Пришлите Telegram ID пользователя.")
+    admin.ADMIN_PENDING[callback.from_user.id] = {"action": "lookup"}
+    await safe_edit(
+        callback,
+        "🔍 Пришли Telegram ID пользователя числом.\n\n"
+        "<i>ID видно в списках «Топ-10» и «Новые».</i>",
+        admin.admin_menu_keyboard(),
+    )
     await callback.answer()
 
 
@@ -1092,6 +1178,16 @@ async def cb_admin_lookup(callback: CallbackQuery) -> None:
 #
 # These must be registered before the catch-all text handler below, which treats anything it
 # receives as a topic search — otherwise tapping a nav button would search for its own label.
+
+
+@dp.message(F.text == kb.NAV_ADMIN)
+async def nav_admin(message: Message) -> None:
+    # A reply button is just text, so anyone could type this — permission is checked here, not
+    # by the keyboard that offered it.
+    if not admin.is_admin(message.from_user.id):
+        raise SkipHandler
+    PENDING_INPUT.pop(message.from_user.id, None)
+    await message.answer(ADMIN_PANEL_TITLE, reply_markup=admin.admin_menu_keyboard())
 
 
 @dp.message(F.text == kb.NAV_MENU)
@@ -1172,19 +1268,30 @@ async def handle_text(message: Message) -> None:
 
     # 1. Admin flows take precedence so an admin isn't hijacked by their own pending prompt.
     if admin.is_admin(user_id) and user_id in admin.ADMIN_PENDING:
-        action = admin.ADMIN_PENDING.pop(user_id)
+        pending_admin = admin.ADMIN_PENDING.pop(user_id)
+        action = pending_admin.get("action")
+
         if action == "broadcast":
+            cohort = pending_admin.get("cohort", "all")
             async with db.get_session_maker()() as session:
-                sent, failed = await admin.broadcast_text(bot, session, message.text)
-            await message.answer(f"Разослано: {sent}, ошибок: {failed}")
+                recipients = len(await admin.cohort_chat_ids(session, cohort))
+            # Never send straight from the compose step: at this scale a mistyped or
+            # half-finished message would reach thousands of people irreversibly.
+            admin.ADMIN_DRAFTS[user_id] = {"text": message.text, "cohort": cohort}
+            await message.answer(
+                admin.broadcast_preview_text(message.text, cohort, recipients),
+                reply_markup=admin.broadcast_confirm_keyboard(cohort, recipients),
+            )
         elif action == "lookup":
             raw = message.text.strip()
             if not raw.isdigit():
-                await message.answer("ID должен быть числом.")
+                await message.answer(
+                    "ID должен быть числом.", reply_markup=admin.admin_menu_keyboard()
+                )
                 return
             async with db.get_session_maker()() as session:
                 text = await admin.build_user_summary_text(session, int(raw))
-            await message.answer(text)
+            await message.answer(text, reply_markup=admin.admin_menu_keyboard())
         return
 
     pending = PENDING_INPUT.get(user_id)

@@ -346,6 +346,28 @@ async def count_referrals(session: AsyncSession, user_id: int) -> int:
     return int(result.scalar_one() or 0)
 
 
+async def list_recent_users(session: AsyncSession, limit: int = 10) -> list[User]:
+    result = await session.execute(
+        select(User).where(_IS_REAL_USER).order_by(User.created_at.desc()).limit(limit)
+    )
+    return list(result.scalars().all())
+
+
+async def list_chat_ids_inactive(session: AsyncSession, days: int = 7) -> list[int]:
+    """Reachable users whose progress hasn't moved in `days` — includes those who never studied
+    at all (no user_state row), which is exactly the cohort a win-back message is aimed at."""
+    cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)
+    result = await session.execute(
+        select(User.chat_id)
+        .outerjoin(UserState, UserState.user_id == User.id)
+        .where(
+            User.chat_id.is_not(None),
+            (UserState.updated_at.is_(None)) | (UserState.updated_at < cutoff),
+        )
+    )
+    return [row[0] for row in result.all()]
+
+
 async def list_users_with_state(session: AsyncSession) -> list[tuple[User, dict[str, Any]]]:
     """Every user paired with their state — used by the nightly/weekly sweeps."""
     result = await session.execute(

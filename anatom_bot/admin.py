@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import logging
+from typing import Any
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter
@@ -21,10 +22,14 @@ from state_logic import module_progress
 
 logger = logging.getLogger(__name__)
 
-# user_id -> pending action ("broadcast" | "lookup"); mirrors the main bot's ADMIN_PENDING pattern.
-ADMIN_PENDING: dict[int, str] = {}
+# user_id -> what the panel is waiting for, e.g. {"action": "broadcast", "cohort": "all"}.
+ADMIN_PENDING: dict[int, dict[str, Any]] = {}
+# user_id -> a composed broadcast awaiting confirmation: {"text": ..., "cohort": ...}.
+ADMIN_DRAFTS: dict[int, dict[str, Any]] = {}
 
 BROADCAST_DELAY_SECONDS = 0.05  # ~20 msg/s — under Telegram's ~30/s bulk ceiling
+INACTIVE_DAYS = 7
+BROADCAST_PREVIEW_LIMIT = 500  # characters shown back to the admin before sending
 
 
 def is_admin(user_id: int) -> bool:
@@ -34,10 +39,84 @@ def is_admin(user_id: int) -> bool:
 def admin_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")],
+            [
+                InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats"),
+                InlineKeyboardButton(text="🏆 Топ-10", callback_data="admin_top"),
+            ],
+            [
+                InlineKeyboardButton(text="🆕 Новые", callback_data="admin_recent"),
+                InlineKeyboardButton(text="🔍 Найти по ID", callback_data="admin_lookup"),
+            ],
             [InlineKeyboardButton(text="📢 Рассылка всем", callback_data="admin_broadcast")],
-            [InlineKeyboardButton(text="🔍 Найти пользователя по ID", callback_data="admin_lookup")],
+            [
+                InlineKeyboardButton(
+                    text=f"💤 Рассылка спящим ({INACTIVE_DAYS}+ дней)",
+                    callback_data="admin_broadcast_inactive",
+                )
+            ],
+            [InlineKeyboardButton(text="🔄 Обновить", callback_data="admin_home")],
         ]
+    )
+
+
+def broadcast_confirm_keyboard(cohort: str, recipients: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=f"✅ Отправить ({recipients})", callback_data=f"admin_bc_go:{cohort}"
+                )
+            ],
+            [InlineKeyboardButton(text="❌ Отмена", callback_data="admin_home")],
+        ]
+    )
+
+
+async def build_top_text(session: AsyncSession, limit: int = 10) -> str:
+    rows = await db.top_users_by_xp(session, limit=limit)
+    if not rows:
+        return "🏆 Пока никто не набрал XP."
+
+    lines = ["🏆 <b>Топ по XP</b>", ""]
+    for index, row in enumerate(rows, start=1):
+        name = texts.display_name(row.get("first_name"), row.get("last_name"), row.get("username"))
+        handle = f" (@{row['username']})" if row.get("username") else ""
+        lines.append(f"{index}. {name}{handle} — {row['xp']} XP · <code>{row['id']}</code>")
+    return "\n".join(lines)
+
+
+async def build_recent_text(session: AsyncSession, limit: int = 10) -> str:
+    users = await db.list_recent_users(session, limit=limit)
+    if not users:
+        return "🆕 Пока нет пользователей."
+
+    lines = ["🆕 <b>Последние регистрации</b>", ""]
+    for user in users:
+        name = texts.display_name(user.first_name, user.last_name, user.username)
+        handle = f" (@{user.username})" if user.username else ""
+        lines.append(f"• {name}{handle} — {user.created_at:%d.%m %H:%M} · <code>{user.id}</code>")
+    return "\n".join(lines)
+
+
+async def cohort_chat_ids(session: AsyncSession, cohort: str) -> list[int]:
+    if cohort == "inactive":
+        return await db.list_chat_ids_inactive(session, days=INACTIVE_DAYS)
+    return await db.list_chat_ids(session)
+
+
+def broadcast_preview_text(text: str, cohort: str, recipients: int) -> str:
+    cohort_name = (
+        f"спящим ({INACTIVE_DAYS}+ дней без занятий)" if cohort == "inactive" else "всем пользователям"
+    )
+    preview = text[:BROADCAST_PREVIEW_LIMIT]
+    if len(text) > BROADCAST_PREVIEW_LIMIT:
+        preview += "…"
+    return (
+        f"📢 <b>Проверь рассылку</b>\n\n"
+        f"Кому: {cohort_name}\n"
+        f"Получателей: <b>{recipients}</b>\n\n"
+        f"━━━━━━━━━━━━━━\n{preview}\n━━━━━━━━━━━━━━\n\n"
+        f"Отправить?"
     )
 
 
@@ -129,9 +208,11 @@ async def build_user_summary_text(session: AsyncSession, target_id: int) -> str:
     return "\n".join(lines)
 
 
-async def broadcast_text(bot: Bot, session: AsyncSession, text: str) -> tuple[int, int]:
-    """Send `text` to every reachable chat, paced to stay inside Telegram's rate limits."""
-    chat_ids = await db.list_chat_ids(session)
+async def broadcast_text(
+    bot: Bot, session: AsyncSession, text: str, cohort: str = "all"
+) -> tuple[int, int]:
+    """Send `text` to the chosen cohort, paced to stay inside Telegram's rate limits."""
+    chat_ids = await cohort_chat_ids(session, cohort)
     sent = failed = 0
 
     for chat_id in chat_ids:

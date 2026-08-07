@@ -188,6 +188,54 @@ class BotCommandMenuTests(unittest.TestCase):
             self.assertLessEqual(len(command.description), 256, command.command)
 
 
+class AdminPanelTests(unittest.TestCase):
+    def test_admin_button_only_on_the_admin_keyboard(self):
+        plain = [b.text for row in kb.reply_nav().keyboard for b in row]
+        as_admin = [b.text for row in kb.reply_nav(is_admin=True).keyboard for b in row]
+        self.assertNotIn(kb.NAV_ADMIN, plain)
+        self.assertIn(kb.NAV_ADMIN, as_admin)
+
+    def test_admin_panel_buttons_all_have_handlers(self):
+        import admin
+
+        handlers = registered_callback_handlers()
+        data = collect_callback_data(admin.admin_menu_keyboard())
+        data |= collect_callback_data(admin.broadcast_confirm_keyboard("all", 10))
+        orphans = []
+        for item in sorted(data):
+            event = type("FakeQuery", (), {"data": item})()
+            if not any(DeadButtonTests._matches(handler, event) for handler in handlers):
+                orphans.append(item)
+        self.assertEqual(orphans, [], f"admin buttons with no handler: {orphans}")
+
+    def test_is_admin_matches_configured_ids(self):
+        import admin
+
+        for admin_id in tb.ADMIN_IDS:
+            self.assertTrue(admin.is_admin(admin_id))
+        self.assertFalse(admin.is_admin(-1))
+
+    def test_broadcast_preview_states_audience_and_size(self):
+        import admin
+
+        preview = admin.broadcast_preview_text("Привет всем!", "inactive", 137)
+        self.assertIn("137", preview)
+        self.assertIn("спящим", preview)
+        self.assertIn("Привет всем!", preview)
+
+    def test_broadcast_preview_truncates_long_text(self):
+        import admin
+
+        preview = admin.broadcast_preview_text("а" * 2000, "all", 5)
+        self.assertLess(len(preview), 1200, "preview must stay inside Telegram's message limit")
+
+    def test_confirm_button_carries_the_cohort(self):
+        import admin
+
+        data = collect_callback_data(admin.broadcast_confirm_keyboard("inactive", 3))
+        self.assertIn("admin_bc_go:inactive", data)
+
+
 class SiteLinkTests(unittest.TestCase):
     """The site link must appear on every screen — driving students to the web app is the point."""
 

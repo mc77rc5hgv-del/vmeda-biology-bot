@@ -30,22 +30,29 @@ NAV_REVIEW = "🔁 Повторить"
 NAV_PROGRESS = "📊 Прогресс"
 NAV_SITE = "🌐 Сайт"
 NAV_MENU = "🏠 Меню"
+NAV_ADMIN = "⚙️ Админ"
 
 NAV_BUTTONS = (NAV_LEARN, NAV_BLITZ, NAV_REVIEW, NAV_PROGRESS, NAV_SITE, NAV_MENU)
+NAV_BUTTONS_ADMIN = NAV_BUTTONS + (NAV_ADMIN,)
 
 
-def reply_nav() -> ReplyKeyboardMarkup:
+def reply_nav(is_admin: bool = False) -> ReplyKeyboardMarkup:
     """Always-available navigation next to the input field.
 
     `is_persistent` keeps it open instead of collapsing behind the keyboard icon, and
-    `resize_keyboard` keeps it to two compact rows rather than half the screen.
+    `resize_keyboard` keeps it to compact rows rather than half the screen. The admin row is
+    added only for admins — the handler behind it re-checks permission anyway, since a reply
+    button is just text and anyone could type it.
     """
+    keyboard = [
+        [KeyboardButton(text=NAV_LEARN), KeyboardButton(text=NAV_BLITZ)],
+        [KeyboardButton(text=NAV_REVIEW), KeyboardButton(text=NAV_PROGRESS)],
+        [KeyboardButton(text=NAV_SITE), KeyboardButton(text=NAV_MENU)],
+    ]
+    if is_admin:
+        keyboard.append([KeyboardButton(text=NAV_ADMIN)])
     return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text=NAV_LEARN), KeyboardButton(text=NAV_BLITZ)],
-            [KeyboardButton(text=NAV_REVIEW), KeyboardButton(text=NAV_PROGRESS)],
-            [KeyboardButton(text=NAV_SITE), KeyboardButton(text=NAV_MENU)],
-        ],
+        keyboard=keyboard,
         resize_keyboard=True,
         is_persistent=True,
         input_field_placeholder="Найти тему или выбрать кнопку…",
