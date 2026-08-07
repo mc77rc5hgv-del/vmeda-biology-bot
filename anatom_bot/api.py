@@ -18,6 +18,7 @@ import config
 import db
 from auth import create_session_token, decode_session_token, generate_login_code, verify_telegram_auth
 from state_logic import detect_new_achievements
+from texts import display_name
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +131,44 @@ async def auth_session_status(code: str) -> SessionStatusResponse:
 
 class StateEnvelope(BaseModel):
     state: dict
+
+
+@app.get("/api/leaderboard")
+async def get_leaderboard(limit: int = 20, authorization: str = Header(default="")) -> dict:
+    """Ranking over the shared Postgres state, so the site and the bot can show the same table.
+
+    The site currently ranks from its own Supabase profiles, which only ever sees students who
+    opened the website — anyone who studies solely in Telegram is invisible there, and the two
+    leaderboards disagree. Pointing the site at this endpoint makes both read one source.
+
+    Open on purpose (no token required): it returns only display names and XP, exactly what a
+    leaderboard shows anyway. Passing a bearer token additionally reports that user's own rank.
+    """
+    limit = max(1, min(limit, 100))
+    session_maker = db.get_session_maker()
+    async with session_maker() as session:
+        top = await db.top_users_by_xp(session, limit=limit)
+
+        me = None
+        if authorization.startswith("Bearer "):
+            token = authorization.removeprefix("Bearer ").strip()
+            user_id = decode_session_token(token, config.SESSION_SECRET)
+            if user_id is not None:
+                rank, xp, total = await db.user_rank_by_xp(session, user_id)
+                me = {"user_id": user_id, "rank": rank, "xp": xp, "total": total}
+
+    return {
+        "leaderboard": [
+            {
+                "user_id": row["id"],
+                "name": display_name(row.get("first_name"), row.get("last_name"), row.get("username")),
+                "username": row.get("username"),
+                "xp": row["xp"],
+            }
+            for row in top
+        ],
+        "me": me,
+    }
 
 
 @app.get("/api/state")

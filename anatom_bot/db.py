@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import copy
 import datetime as dt
+import logging
 from typing import Any, Optional
 
 from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, String, Time, func, select, text
@@ -16,6 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from config import DATABASE_URL
+
+logger = logging.getLogger(__name__)
 
 # Structure of `UserState.state` — owned by the frontend (anatomapp.ru), mirrored exactly from
 # its own `persist()` blob (do not rename/retype these keys without updating the site too):
@@ -135,14 +138,47 @@ _MIGRATIONS = [
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS prefs JSONB NOT NULL DEFAULT '{}'::jsonb",
 ]
 
+# Placeholder rows with no identity at all (no name, no username, no chat) can only be created by
+# put_state's defensive get_or_create when a token's users row is missing — never by a real login
+# or /start, both of which always carry a first_name. Left alone they surfaced in the leaderboard
+# as nameless "Студент" entries. The one-hour cutoff keeps this from racing a row that is being
+# populated right now.
+_GHOST_CLEANUP = [
+    """
+    DELETE FROM user_state WHERE user_id IN (
+        SELECT id FROM users
+        WHERE first_name IS NULL AND username IS NULL AND chat_id IS NULL
+          AND created_at < now() - interval '1 hour'
+    )
+    """,
+    """
+    DELETE FROM reminders WHERE user_id IN (
+        SELECT id FROM users
+        WHERE first_name IS NULL AND username IS NULL AND chat_id IS NULL
+          AND created_at < now() - interval '1 hour'
+    )
+    """,
+    """
+    DELETE FROM users
+    WHERE first_name IS NULL AND username IS NULL AND chat_id IS NULL
+      AND created_at < now() - interval '1 hour'
+    """,
+]
+
 
 async def init_models() -> None:
-    """Create tables if missing and apply additive column migrations. Call once at startup."""
+    """Create tables if missing, apply additive migrations, drop identity-less rows. Call at startup."""
     engine = get_engine()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         for statement in _MIGRATIONS:
             await conn.execute(text(statement))
+        removed = 0
+        for statement in _GHOST_CLEANUP:
+            result = await conn.execute(text(statement))
+            removed = max(removed, result.rowcount or 0)
+        if removed:
+            logger.info("Removed %s placeholder user rows with no identity", removed)
 
 
 def default_state() -> dict:
@@ -256,12 +292,18 @@ async def update_prefs(session: AsyncSession, user_id: int, **changes: Any) -> d
 # user's blob into Python — at a few thousand students that difference matters.
 _XP_EXPR = func.coalesce(func.nullif(UserState.state["xp"].astext, ""), "0").cast(BigInteger)
 
+# A real participant always has a name: Telegram requires first_name, and both the Login Widget
+# payload and /start carry it. A row with no name and no chat is a placeholder created by
+# put_state's defensive get_or_create for a token whose users row was missing — it has no human
+# behind it, so it must never occupy a place in the ranking (it used to show up as "Студент").
+_IS_REAL_USER = User.first_name.is_not(None) | User.username.is_not(None) | User.chat_id.is_not(None)
+
 
 async def top_users_by_xp(session: AsyncSession, limit: int = 10) -> list[dict[str, Any]]:
     result = await session.execute(
         select(User.id, User.first_name, User.last_name, User.username, _XP_EXPR.label("xp"))
         .join(UserState, UserState.user_id == User.id)
-        .where(_XP_EXPR > 0)
+        .where(_XP_EXPR > 0, _IS_REAL_USER)
         .order_by(_XP_EXPR.desc())
         .limit(limit)
     )
@@ -278,7 +320,10 @@ async def user_rank_by_xp(session: AsyncSession, user_id: int) -> tuple[Optional
     xp = int(state.get("xp") or 0)
 
     total_result = await session.execute(
-        select(func.count()).select_from(UserState).where(_XP_EXPR > 0)
+        select(func.count())
+        .select_from(UserState)
+        .join(User, User.id == UserState.user_id)
+        .where(_XP_EXPR > 0, _IS_REAL_USER)
     )
     total = int(total_result.scalar_one() or 0)
 
@@ -286,7 +331,10 @@ async def user_rank_by_xp(session: AsyncSession, user_id: int) -> tuple[Optional
         return None, 0, total
 
     ahead_result = await session.execute(
-        select(func.count()).select_from(UserState).where(_XP_EXPR > xp)
+        select(func.count())
+        .select_from(UserState)
+        .join(User, User.id == UserState.user_id)
+        .where(_XP_EXPR > xp, _IS_REAL_USER)
     )
     return int(ahead_result.scalar_one() or 0) + 1, xp, total
 
