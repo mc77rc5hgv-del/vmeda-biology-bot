@@ -8,13 +8,48 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    ReplyKeyboardMarkup,
+)
 
 import config
 from modules import MODULES, SECTIONS_BY_MODULE
 
 WEBAPP_BUTTON_TEXT = "🌐 Открыть АНАТОМ"
 PAGE_SIZE = 8
+
+# Persistent buttons shown above the input field. Deliberately only the handful of destinations
+# worth one tap from anywhere — the full functionality stays on the inline keyboards inside
+# messages, which have room for labels and context.
+NAV_LEARN = "🎓 Учиться"
+NAV_BLITZ = "⚡ Блиц"
+NAV_REVIEW = "🔁 Повторить"
+NAV_PROGRESS = "📊 Прогресс"
+NAV_SITE = "🌐 Сайт"
+NAV_MENU = "🏠 Меню"
+
+NAV_BUTTONS = (NAV_LEARN, NAV_BLITZ, NAV_REVIEW, NAV_PROGRESS, NAV_SITE, NAV_MENU)
+
+
+def reply_nav() -> ReplyKeyboardMarkup:
+    """Always-available navigation next to the input field.
+
+    `is_persistent` keeps it open instead of collapsing behind the keyboard icon, and
+    `resize_keyboard` keeps it to two compact rows rather than half the screen.
+    """
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=NAV_LEARN), KeyboardButton(text=NAV_BLITZ)],
+            [KeyboardButton(text=NAV_REVIEW), KeyboardButton(text=NAV_PROGRESS)],
+            [KeyboardButton(text=NAV_SITE), KeyboardButton(text=NAV_MENU)],
+        ],
+        resize_keyboard=True,
+        is_persistent=True,
+        input_field_placeholder="Найти тему или выбрать кнопку…",
+    )
 
 
 def _webapp_button(text: str = WEBAPP_BUTTON_TEXT) -> InlineKeyboardButton:

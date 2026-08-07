@@ -17,7 +17,13 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.filters import Command, CommandObject, CommandStart
-from aiogram.types import CallbackQuery, InlineKeyboardButton, Message
+from aiogram.types import (
+    BotCommand,
+    CallbackQuery,
+    InlineKeyboardButton,
+    MenuButtonCommands,
+    Message,
+)
 
 import achievements
 import admin
@@ -122,14 +128,16 @@ async def cmd_start(message: Message, command: CommandObject) -> None:
     else:
         await register_user(message)
 
+    # A message carries either the inline keyboard or the reply keyboard, never both, so the
+    # persistent navigation is installed by its own short message first.
     await message.answer(
         f"👋 Привет, {esc(user_display_name(message))}!\n\n"
         "Я бот <b>АНАТОМ</b> — учись прямо здесь: тесты, флеш-карточки и латинские термины "
         "по всему курсу нормальной анатомии. Прогресс общий с сайтом: где бы ты ни занимался, "
-        "XP, серия и повторения синхронизируются.\n\n"
-        "Выбери, с чего начать:",
-        reply_markup=kb.main_menu(),
+        "XP, серия и повторения синхронизируются.",
+        reply_markup=kb.reply_nav(),
     )
+    await message.answer("Выбери, с чего начать:", reply_markup=kb.main_menu())
 
 
 async def _handle_referral(message: Message, raw_id: str) -> None:
@@ -890,6 +898,9 @@ def _review_text(due: list[dict[str, Any]]) -> str:
 @dp.message(Command("menu"))
 async def cmd_menu(message: Message) -> None:
     await register_user(message)
+    # Re-install the persistent navigation here too: it is the recovery path for anyone who
+    # hid or cleared it, and for users who started the bot before it existed.
+    await message.answer("Навигация включена 👇", reply_markup=kb.reply_nav())
     await message.answer("🏠 <b>Главное меню</b>", reply_markup=kb.main_menu())
 
 
@@ -1077,6 +1088,65 @@ async def cb_admin_lookup(callback: CallbackQuery) -> None:
     await callback.answer()
 
 
+# ------------------------------------------------- persistent navigation buttons
+#
+# These must be registered before the catch-all text handler below, which treats anything it
+# receives as a topic search — otherwise tapping a nav button would search for its own label.
+
+
+@dp.message(F.text == kb.NAV_MENU)
+async def nav_menu(message: Message) -> None:
+    PENDING_INPUT.pop(message.from_user.id, None)
+    await message.answer("🏠 <b>Главное меню</b>", reply_markup=kb.main_menu())
+
+
+@dp.message(F.text == kb.NAV_LEARN)
+async def nav_learn(message: Message) -> None:
+    PENDING_INPUT.pop(message.from_user.id, None)
+    await message.answer(texts.course_overview_text(), reply_markup=kb.learn_menu_keyboard())
+
+
+@dp.message(F.text == kb.NAV_BLITZ)
+async def nav_blitz(message: Message) -> None:
+    PENDING_INPUT.pop(message.from_user.id, None)
+    session = quiz.start_blitz(message.from_user.id)
+    if session is None:
+        await message.answer("Вопросы пока недоступны.", reply_markup=kb.webapp_keyboard())
+        return
+    await _send_current_item(message, session)
+
+
+@dp.message(F.text == kb.NAV_REVIEW)
+async def nav_review(message: Message) -> None:
+    PENDING_INPUT.pop(message.from_user.id, None)
+    state = await load_state(message.from_user.id)
+    due = topics_due_for_review(state)
+    await message.answer(_review_text(due), reply_markup=kb.review_keyboard(bool(due)))
+
+
+@dp.message(F.text == kb.NAV_PROGRESS)
+async def nav_progress(message: Message) -> None:
+    PENDING_INPUT.pop(message.from_user.id, None)
+    state = await load_state(message.from_user.id)
+    await message.answer(
+        _progress_text(state),
+        reply_markup=kb.back_home(
+            [[InlineKeyboardButton(text="📈 Подробная статистика", callback_data="menu:stats")]]
+        ),
+    )
+
+
+@dp.message(F.text == kb.NAV_SITE)
+async def nav_site(message: Message) -> None:
+    PENDING_INPUT.pop(message.from_user.id, None)
+    await message.answer(
+        "🌐 <b>АНАТОМ</b> — полная версия\n\n"
+        "Теория, атлас, разбор тем и все тренировки. Прогресс общий с ботом: "
+        "продолжишь ровно с того места, где остановился.",
+        reply_markup=kb.webapp_keyboard(),
+    )
+
+
 # ---------------------------------------------------------------- free text
 
 
@@ -1167,12 +1237,45 @@ async def handle_text(message: Message) -> None:
     )
 
 
+BOT_COMMANDS = [
+    BotCommand(command="menu", description="🏠 Главное меню"),
+    BotCommand(command="study", description="🎓 Учиться: модули и темы"),
+    BotCommand(command="blitz", description="⚡ Блиц по всему курсу"),
+    BotCommand(command="review", description="🔁 Темы к повторению"),
+    BotCommand(command="progress", description="📊 Прогресс по модулям"),
+    BotCommand(command="stats", description="📈 Подробная статистика"),
+    BotCommand(command="profile", description="👤 Профиль и уровень"),
+    BotCommand(command="top", description="🏆 Рейтинг студентов"),
+    BotCommand(command="term", description="📖 Латинский термин дня"),
+    BotCommand(command="streak", description="🔥 Серия дней"),
+    BotCommand(command="exam", description="🎓 Отсчёт до экзамена"),
+    BotCommand(command="invite", description="🤝 Пригласить друга"),
+    BotCommand(command="reminder", description="⏰ Напоминания"),
+    BotCommand(command="help", description="❓ Справка"),
+]
+
+
+async def setup_bot_menu() -> None:
+    """Fill the ☰ menu next to the input field with the command list.
+
+    Both calls are best-effort: a transient Telegram error here must not stop the bot from
+    starting, and the menu simply keeps whatever it had.
+    """
+    try:
+        await bot.set_my_commands(BOT_COMMANDS)
+        await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
+        logger.info("Command menu published (%s commands)", len(BOT_COMMANDS))
+    except Exception:
+        logger.exception("Could not publish the command menu")
+
+
 async def main() -> None:
     logging.basicConfig(level=logging.INFO)
     await db.init_models()
     from scheduler import start_scheduler
 
     start_scheduler(bot)
+    await setup_bot_menu()
     logger.info(
         "anatom-bot starting; content: %s", content.counts() if content.has_content() else "MISSING"
     )

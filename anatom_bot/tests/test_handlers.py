@@ -116,6 +116,78 @@ class DeadButtonTests(unittest.TestCase):
         return True
 
 
+class ReplyNavigationTests(unittest.TestCase):
+    """The persistent buttons next to the input field must work from anywhere."""
+
+    def _message_handlers(self):
+        return bot_module.dp.observers["message"].handlers
+
+    def _matching_index(self, text: str):
+        """Index of the first message handler that accepts this text, or None."""
+        event = type("FakeMessage", (), {"text": text})()
+        for index, handler in enumerate(self._message_handlers()):
+            ok = True
+            for flt in handler.filters or []:
+                callback = getattr(flt, "callback", flt)
+                try:
+                    if not callback(event):
+                        ok = False
+                        break
+                except Exception:
+                    ok = False
+                    break
+            if ok:
+                return index
+        return None
+
+    def test_reply_keyboard_has_the_expected_buttons(self):
+        rendered = [button.text for row in kb.reply_nav().keyboard for button in row]
+        self.assertEqual(sorted(rendered), sorted(kb.NAV_BUTTONS))
+
+    def test_every_nav_button_has_a_handler(self):
+        orphans = [text for text in kb.NAV_BUTTONS if self._matching_index(text) is None]
+        self.assertEqual(orphans, [], f"nav buttons with no handler: {orphans}")
+
+    def test_nav_buttons_are_handled_before_the_search_fallback(self):
+        """Otherwise tapping a button would just search for its own label."""
+        fallback = self._matching_index("произвольный текст")
+        self.assertIsNotNone(fallback, "the catch-all search handler disappeared")
+        for text in kb.NAV_BUTTONS:
+            self.assertLess(
+                self._matching_index(text),
+                fallback,
+                f"'{text}' is shadowed by the search fallback",
+            )
+
+    def test_keyboard_stays_open_and_compact(self):
+        markup = kb.reply_nav()
+        self.assertTrue(markup.is_persistent, "keyboard would collapse behind the input icon")
+        self.assertTrue(markup.resize_keyboard, "keyboard would eat half the screen")
+
+
+class BotCommandMenuTests(unittest.TestCase):
+    def test_commands_are_declared_for_the_menu_button(self):
+        self.assertGreaterEqual(len(bot_module.BOT_COMMANDS), 10)
+
+    def test_every_declared_command_has_a_handler(self):
+        from aiogram.filters import Command
+
+        registered = set()
+        for handler in bot_module.dp.observers["message"].handlers:
+            for flt in handler.filters or []:
+                callback = getattr(flt, "callback", flt)
+                if isinstance(callback, Command):
+                    registered.update(str(c) for c in callback.commands)
+
+        missing = [c.command for c in bot_module.BOT_COMMANDS if c.command not in registered]
+        self.assertEqual(missing, [], f"commands listed in the menu but not implemented: {missing}")
+
+    def test_command_descriptions_fit_telegram_limits(self):
+        for command in bot_module.BOT_COMMANDS:
+            self.assertLessEqual(len(command.command), 32, command.command)
+            self.assertLessEqual(len(command.description), 256, command.command)
+
+
 class SiteLinkTests(unittest.TestCase):
     """The site link must appear on every screen — driving students to the web app is the point."""
 
