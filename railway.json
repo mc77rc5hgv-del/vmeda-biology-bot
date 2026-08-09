@@ -1,0 +1,7 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "deploy": {
+    "startCommand": "python3 telegram_bot.py",
+    "restartPolicyType": "ON_FAILURE"
+  }
+}
