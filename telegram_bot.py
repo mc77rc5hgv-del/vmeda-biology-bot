@@ -2138,6 +2138,8 @@ def get_main_menu(user_id: int = None):
     sub_histology = user_id is not None and has_subscription_histology_access(user_id)
     if user_id is not None and is_admin(user_id):
         anatomy_label = "🔥🦴 Анатомия (админ)"
+    elif ANATOMY_MAINTENANCE_MODE:
+        anatomy_label = "🦴 Анатомия (техобслуживание)"
     elif sub_anatomy:
         anatomy_label = "🔥🦴 Анатомия 💎"
     else:
@@ -6088,6 +6090,10 @@ async def cb_phystask_show(callback: CallbackQuery):
 
 # ==================== АНАТОМИЯ (В РАЗРАБОТКЕ, ПОКА ДОСТУПНО ТОЛЬКО АДМИНАМ) ====================
 ANATOMY_PUBLIC = False  # когда раздел будет готов для всех — переключить на True
+ANATOMY_MAINTENANCE_MODE = True  # временное технической закрытие всего раздела для всех, кроме админов —
+# переключить обратно на False, когда технические проблемы будут устранены. Гейтится в одном месте
+# (cb_anatomy_root), т.к. это единственная точка входа в раздел — anatomy_menu/anatomy_exam_menu и всё
+# вложенное (темы, кости, ТЕСТ) достижимы только через него, отдельных deep-link'ов в контент нет.
 
 ANATOMY_FLASH_SESSION_SIZE = 10
 ANATOMY_MATCH_SESSION_SIZE = 10
@@ -6828,9 +6834,29 @@ def get_anatomy_root_keyboard():
     builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
     return builder.as_markup()
 
+def get_anatomy_maintenance_text() -> str:
+    return (
+        f"🦴 <b>Анатомия</b>\n{DIVIDER}\n\n"
+        "Раздел временно недоступен по техническим причинам. Мы уже работаем над этим — "
+        "загляни немного позже."
+    )
+
+def get_anatomy_maintenance_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
+    return builder.as_markup()
+
 @dp.callback_query(F.data == "anatomy_root")
 async def cb_anatomy_root(callback: CallbackQuery):
     await callback.answer()
+    if ANATOMY_MAINTENANCE_MODE and not is_admin(callback.from_user.id):
+        await safe_edit_text(
+            callback.message,
+            get_anatomy_maintenance_text(),
+            parse_mode="HTML",
+            reply_markup=get_anatomy_maintenance_keyboard()
+        )
+        return
     await safe_edit_text(
         callback.message,
         f"🦴 <b>Анатомия</b>\n{DIVIDER}\n\nВыбери раздел:",

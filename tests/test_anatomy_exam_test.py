@@ -54,6 +54,11 @@ def kb_data(markup):
     return [b.callback_data for row in markup.inline_keyboard for b in row]
 
 async def main():
+    # This file exercises anatomy_root's normal (non-maintenance) content for a non-admin
+    # user — independent of the ANATOMY_MAINTENANCE_MODE on/off toggle, which has its own
+    # dedicated coverage in test_anatomy_maintenance.py.
+    tb.ANATOMY_MAINTENANCE_MODE = False
+
     # 0. data integrity: 10 parts, 1040 questions total, every question well-formed
     parts = tb.ANATOMY_EXAM_TEST_PARTS
     assert len(parts) == 10
