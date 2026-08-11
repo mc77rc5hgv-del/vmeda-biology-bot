@@ -127,6 +127,7 @@ def load_stats() -> dict:
             data.setdefault("usernames", {})
             data.setdefault("manual_access_granted", [])
             data.setdefault("manual_anatomy_demo_granted", [])
+            data.setdefault("assistant_admins", [])
             data.setdefault("referral_battle", None)
             data.setdefault("donations_stars_total", 0)
             data.setdefault("donations_stars_count", 0)
@@ -163,6 +164,7 @@ def load_stats() -> dict:
         "usernames": {},
         "manual_access_granted": [],
         "manual_anatomy_demo_granted": [],
+        "assistant_admins": [],
         "referral_battle": None,
         "donations_stars_total": 0,
         "donations_stars_count": 0,
@@ -581,7 +583,7 @@ def has_subject_access(user_id: int, subject: str) -> bool:
     """Доступ к конкретному гейтящемуся предмету (biology/physics/chemistry) — в отличие от
     has_free_access() учитывает, что тариф «3 дня, 1 предмет» открывает только ОДИН предмет."""
     if (
-        is_admin(user_id)
+        is_admin_or_assistant(user_id)
         or is_section_promo_active("global")
         or get_referral_count(user_id) >= REFERRAL_FULL_ACCESS_THRESHOLD
         or user_id in stats["manual_access_granted"]
@@ -634,7 +636,7 @@ def has_subscription_anatomy_access(user_id: int) -> bool:
     return _sub_has_anatomy(sub)
 
 def biology_tickets_download_ok(user_id: int) -> bool:
-    if is_admin(user_id):
+    if is_admin_or_assistant(user_id):
         return True
     sub = get_subscription(user_id)
     if not sub or not has_active_subscription(user_id):
@@ -672,7 +674,7 @@ def grant_subscription(user_id: int, tier: int, method: str, price: int, subject
 
 def has_free_access(user_id: int) -> bool:
     return (
-        is_admin(user_id)
+        is_admin_or_assistant(user_id)
         or is_section_promo_active("global")
         or get_referral_count(user_id) >= REFERRAL_FULL_ACCESS_THRESHOLD
         or user_id in stats["manual_access_granted"]
@@ -1922,6 +1924,17 @@ async def is_subscribed(user_id: int) -> bool:
 def is_admin(user_id: int) -> bool:
     return user_id in ADMIN_IDS
 
+def is_assistant_admin(user_id: int) -> bool:
+    return user_id in stats["assistant_admins"]
+
+def is_admin_or_assistant(user_id: int) -> bool:
+    """Полный админ ИЛИ помощник администратора — используется только в гейтах доступа к
+    контенту (Анатомия/Гистология/гейтящиеся предметы), НЕ в гейтах самой админ-панели.
+    Помощник получает доступ ко всем разделам, но не получает права полного админа
+    (выдача/отзыв доступа, рассылки, подписки и т.д. — только через отдельную,
+    ограниченную панель помощника, см. секцию «ПОМОЩНИК АДМИНИСТРАТОРА»)."""
+    return is_admin(user_id) or is_assistant_admin(user_id)
+
 CAPTION_LIMIT = 1024
 
 async def safe_edit_text(message, text, **kwargs) -> None:
@@ -2636,7 +2649,7 @@ def chemistry_tickets_access_ok(user_id: int) -> bool:
     Химии, включая ручной/временный доступ и промо) недостаточно. Сюда пускают только по
     REFERRAL_FULL_ACCESS_THRESHOLD рефералам либо по активной подписке ценой от 89₽ — то есть
     ручной/временный доступ и промо-акции ("Снять все ограничения") здесь не считаются."""
-    if is_admin(user_id):
+    if is_admin_or_assistant(user_id):
         return True
     if get_referral_count(user_id) >= REFERRAL_FULL_ACCESS_THRESHOLD:
         return True
@@ -2962,6 +2975,8 @@ def get_admin_menu():
     builder.button(text="🚫 Отозвать доступ по username/ID", callback_data="admin_revoke_prompt")
     builder.button(text="🦴 Дать демо-доступ к Анатомии", callback_data="admin_grant_anatomy_demo_prompt")
     builder.button(text="🦴🚫 Забрать демо-доступ к Анатомии", callback_data="admin_revoke_anatomy_demo_prompt")
+    builder.button(text="🧑‍💼 Назначить помощника админа", callback_data="admin_grant_assistant_prompt")
+    builder.button(text="🧑‍💼🚫 Снять помощника админа", callback_data="admin_revoke_assistant_prompt")
     builder.button(text="✉️ Написать пользователю", callback_data="admin_dm_prompt")
     builder.button(text="⚔️ Битва рефералов", callback_data="admin_battle_menu")
     builder.button(text="💰 Записать донат рублями", callback_data="admin_donation_prompt")
@@ -3060,7 +3075,8 @@ def format_user_line(user_id: int) -> str:
     refs = len(stats["referrals"].get(uid_str, []))
     granted = " 🔓" if user_id in stats["manual_access_granted"] else ""
     anatomy_demo = " 🦴" if user_id in stats["manual_anatomy_demo_granted"] else ""
-    return f"<code>{user_id}</code> — {handle} — {name} — реф: {refs}{granted}{anatomy_demo}"
+    assistant = " 🧑‍💼" if user_id in stats["assistant_admins"] else ""
+    return f"<code>{user_id}</code> — {handle} — {name} — реф: {refs}{granted}{anatomy_demo}{assistant}"
 
 def get_admin_userlist_page(page: int):
     all_ids = sorted(stats["total_users"])
@@ -3084,13 +3100,20 @@ def get_admin_userlist_page(page: int):
 
 @dp.message(Command("admin"))
 async def cmd_admin(message: Message):
-    if not is_admin(message.from_user.id):
+    user_id = message.from_user.id
+    if is_admin(user_id):
+        await message.answer(
+            f"🛠 <b>Админ-панель</b>\n{DIVIDER}\n\nВыбери действие:",
+            parse_mode="HTML",
+            reply_markup=get_admin_menu()
+        )
         return
-    await message.answer(
-        f"🛠 <b>Админ-панель</b>\n{DIVIDER}\n\nВыбери действие:",
-        parse_mode="HTML",
-        reply_markup=get_admin_menu()
-    )
+    if is_assistant_admin(user_id):
+        await message.answer(
+            get_assistant_admin_menu_text(),
+            parse_mode="HTML",
+            reply_markup=get_assistant_admin_menu_keyboard()
+        )
 
 @dp.callback_query(F.data == "admin_panel")
 async def cb_admin_panel(callback: CallbackQuery):
@@ -3692,6 +3715,38 @@ async def cb_admin_revoke_anatomy_demo_prompt(callback: CallbackQuery):
         reply_markup=get_admin_back_keyboard()
     )
 
+@dp.callback_query(F.data == "admin_grant_assistant_prompt")
+async def cb_admin_grant_assistant_prompt(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer()
+    ADMIN_PENDING[callback.from_user.id] = {"action": "grant_assistant_admin"}
+    await safe_edit_text(
+        callback.message,
+        "🧑‍💼 <b>Назначить помощника админа</b>\n\n"
+        "Помощник получит доступ ко всем разделам бота, ограниченную статистику и сможет "
+        "писать пользователям — но только с твоего подтверждения на каждое сообщение. "
+        "Полных прав админ-панели (выдача доступа, рассылки, подписки) у него не будет.\n\n"
+        "Отправь username пользователя (с @ или без, например <code>@ivanov</code>) или его числовой ID",
+        parse_mode="HTML",
+        reply_markup=get_admin_back_keyboard()
+    )
+
+@dp.callback_query(F.data == "admin_revoke_assistant_prompt")
+async def cb_admin_revoke_assistant_prompt(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer()
+    ADMIN_PENDING[callback.from_user.id] = {"action": "revoke_assistant_admin"}
+    await safe_edit_text(
+        callback.message,
+        "🧑‍💼🚫 <b>Снять помощника админа</b>\n\nОтправь username пользователя (с @ или без) или его числовой ID",
+        parse_mode="HTML",
+        reply_markup=get_admin_back_keyboard()
+    )
+
 @dp.callback_query(F.data == "admin_dm_prompt")
 async def cb_admin_dm_prompt(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
@@ -3984,6 +4039,7 @@ async def handle_admin_pending_action(message: Message):
 
     if action in (
         "grant", "revoke", "grant_anatomy_demo", "revoke_anatomy_demo",
+        "grant_assistant_admin", "revoke_assistant_admin",
         "dm_username", "record_donation_username", "record_subscription_username",
     ):
         raw_input = message.text.strip()
@@ -4054,6 +4110,31 @@ async def handle_admin_pending_action(message: Message):
                 save_stats()
             del ADMIN_PENDING[admin_id]
             await message.answer(f"✅ Демо-доступ к Анатомии для {label} отозван.", parse_mode="HTML")
+
+        elif action == "grant_assistant_admin":
+            if target_id not in stats["assistant_admins"]:
+                stats["assistant_admins"].append(target_id)
+                save_stats()
+            del ADMIN_PENDING[admin_id]
+            await message.answer(f"✅ {label} назначен(а) помощником администратора.", parse_mode="HTML")
+            try:
+                await bot.send_message(
+                    target_id,
+                    "🧑‍💼 Тебя назначили помощником администратора!\n\n"
+                    "Открой /admin — там доступна статистика бота и возможность написать "
+                    "пользователю (сообщение уйдёт только после подтверждения главным админом). "
+                    "Также у тебя теперь есть доступ ко всем разделам бота.",
+                    parse_mode="HTML"
+                )
+            except Exception:
+                logger.exception("Не удалось уведомить пользователя %s о назначении помощником", target_id)
+
+        elif action == "revoke_assistant_admin":
+            if target_id in stats["assistant_admins"]:
+                stats["assistant_admins"].remove(target_id)
+                save_stats()
+            del ADMIN_PENDING[admin_id]
+            await message.answer(f"✅ {label} больше не помощник администратора.", parse_mode="HTML")
 
         elif action == "dm_username":
             ADMIN_PENDING[admin_id] = {"action": "dm_message", "target_id": target_id, "target_label": label}
@@ -4205,6 +4286,240 @@ async def handle_admin_pending_action(message: Message):
             reply_markup=builder.as_markup()
         )
         return
+
+# ==================== ПОМОЩНИК АДМИНИСТРАТОРА ====================
+# Отдельная, сильно урезанная версия админ-панели для user_id из stats["assistant_admins"]
+# (назначаются/снимаются только полным админом — см. admin_grant_assistant_prompt/
+# admin_revoke_assistant_prompt выше). Помощник НЕ получает доступ к обычной админ-панели
+# (get_admin_menu/cb_admin_panel/handle_admin_pending_action остаются is_admin-only) — только
+# к своему собственному меню из двух пунктов: урезанная статистика и сообщение пользователю,
+# которое не уходит напрямую, а ставится на подтверждение всем ADMIN_IDS (одно-тап confirm/
+# reject, тот же паттерн гонки через pop(), что и у admin_confirm_sub/rollcall_confirm).
+# Доступ ко ВСЕМ разделам контента у помощника уже есть через is_admin_or_assistant() —
+# это отдельный, самостоятельный механизм, определённый в самом начале файла.
+ASSISTANT_PENDING: dict = {}  # assistant_id -> {"action": ..., ...}
+ASSISTANT_DM_REQUESTS: dict = {}  # request_id (str) -> {assistant_id, assistant_label, target_id, target_label, text_html}
+_assistant_dm_request_seq = 0
+
+def _next_assistant_dm_request_id() -> str:
+    global _assistant_dm_request_seq
+    _assistant_dm_request_seq += 1
+    return str(_assistant_dm_request_seq)
+
+def get_assistant_admin_menu_text() -> str:
+    return (
+        f"🧑‍💼 <b>Панель помощника</b>\n{DIVIDER}\n\n"
+        "Тебе доступна статистика бота и возможность написать пользователю — сообщение "
+        "уйдёт только после подтверждения главным админом.\n\nВыбери действие:"
+    )
+
+def get_assistant_admin_menu_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="📊 Статистика", callback_data="assistant_stats")
+    builder.button(text="✉️ Написать пользователю", callback_data="assistant_dm_prompt")
+    builder.adjust(1)
+    return builder.as_markup()
+
+def get_assistant_back_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="assistant_panel"))
+    return builder.as_markup()
+
+def get_assistant_stats_text() -> str:
+    """Та же арифметика, что и в cb_admin_stats, но выводится ровно урезанное подмножество
+    строк — без разделов «Подписки»/«Платежи» и без остальной админ-панели."""
+    total_referrals = sum(len(v) for v in stats["referrals"].values())
+    exhausted_free_uses = len(get_exhausted_users())
+    below_threshold_count = sum(
+        1 for uid in stats["total_users"] if get_referral_count(uid) < REFERRAL_FULL_ACCESS_THRESHOLD
+    )
+    return (
+        f"📊 <b>Статистика бота</b>\n{DIVIDER}\n\n"
+        f"👥 Уникальных пользователей: <b>{len(stats['total_users'])}</b>\n"
+        f"▶️ Запусков бота: <b>{stats['start_count']}</b>\n"
+        f"❓ Вопросов просмотрено: <b>{sum(stats['question_opened'].values())}</b>\n"
+        f"🎲 Случайных билетов открыто: <b>{stats['random_ticket_used']}</b>\n"
+        f"🎲 Случайных вопросов открыто: <b>{stats['random_question_used']}</b>\n"
+        f"📢 Рассылок отправлено: <b>{stats.get('broadcast_count', 0)}</b>\n"
+        f"🔗 Всего рефералов: <b>{total_referrals}</b>\n"
+        f"📉 Меньше {REFERRAL_FULL_ACCESS_THRESHOLD} рефералов: <b>{below_threshold_count}</b>\n"
+        f"🔓 Ручных доступов выдано: <b>{len(stats['manual_access_granted'])}</b>\n"
+        f"🦴 Демо-доступов к Анатомии выдано: <b>{len(stats['manual_anatomy_demo_granted'])}</b>\n"
+        f"🚫 Исчерпали бесплатные заходы без рефералов: <b>{exhausted_free_uses}</b>\n"
+        f"🪪 Известно username: <b>{len(stats['usernames'])}</b>"
+    )
+
+@dp.callback_query(F.data == "assistant_panel")
+async def cb_assistant_panel(callback: CallbackQuery):
+    if not is_assistant_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer()
+    ASSISTANT_PENDING.pop(callback.from_user.id, None)
+    await safe_edit_text(
+        callback.message,
+        get_assistant_admin_menu_text(),
+        parse_mode="HTML",
+        reply_markup=get_assistant_admin_menu_keyboard()
+    )
+
+@dp.callback_query(F.data == "assistant_stats")
+async def cb_assistant_stats(callback: CallbackQuery):
+    if not is_assistant_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer()
+    await safe_edit_text(
+        callback.message,
+        get_assistant_stats_text(),
+        parse_mode="HTML",
+        reply_markup=get_assistant_back_keyboard()
+    )
+
+@dp.callback_query(F.data == "assistant_dm_prompt")
+async def cb_assistant_dm_prompt(callback: CallbackQuery):
+    if not is_assistant_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer()
+    ASSISTANT_PENDING[callback.from_user.id] = {"action": "dm_username"}
+    await safe_edit_text(
+        callback.message,
+        "✉️ <b>Личное сообщение</b>\n\nОтправь username пользователя (с @ или без) или его "
+        "числовой ID. Сообщение будет отправлено только после подтверждения главным админом.",
+        parse_mode="HTML",
+        reply_markup=get_assistant_back_keyboard()
+    )
+
+async def notify_admins_of_assistant_dm_request(req_id: str) -> None:
+    req = ASSISTANT_DM_REQUESTS[req_id]
+    text = (
+        f"🧑‍💼 <b>Помощник просит согласовать сообщение</b>\n{DIVIDER}\n\n"
+        f"От: {req['assistant_label']}\n"
+        f"Кому: {req['target_label']}\n\n"
+        f"Текст:\n{req['text_html']}"
+    )
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Отправить", callback_data=f"assistant_dm_approve:{req_id}")
+    builder.button(text="❌ Отклонить", callback_data=f"assistant_dm_reject:{req_id}")
+    builder.adjust(1)
+    for admin_id in ADMIN_IDS:
+        try:
+            await bot.send_message(admin_id, text, parse_mode="HTML", reply_markup=builder.as_markup())
+        except Exception:
+            logger.exception("Не удалось уведомить админа %s о запросе помощника на сообщение", admin_id)
+
+@dp.message(F.text)
+async def handle_assistant_pending_action(message: Message):
+    assistant_id = message.from_user.id
+    if not is_assistant_admin(assistant_id) or assistant_id not in ASSISTANT_PENDING:
+        raise SkipHandler
+    if message.text.startswith("/"):
+        raise SkipHandler
+
+    pending = ASSISTANT_PENDING[assistant_id]
+    action = pending["action"]
+
+    if action == "dm_username":
+        raw_input = message.text.strip()
+        username, target_id = resolve_user_by_username(raw_input)
+        if not target_id:
+            identifier = raw_input.lstrip("@")
+            if identifier.isdigit():
+                await message.answer(f"⚠️ Пользователь с ID <code>{identifier}</code> не найден — он ещё не писал боту.", parse_mode="HTML")
+            else:
+                await message.answer(f"⚠️ Пользователь @{identifier} не найден — он ещё не писал боту, либо сменил username.", parse_mode="HTML")
+            return
+        label = format_admin_target_label(username, target_id)
+        ASSISTANT_PENDING[assistant_id] = {"action": "dm_message", "target_id": target_id, "target_label": label}
+        await message.answer(f"✅ Нашёл {label}. Теперь отправь текст сообщения для него.", parse_mode="HTML")
+        return
+
+    if action == "dm_message":
+        target_id = pending["target_id"]
+        target_label = pending["target_label"]
+        del ASSISTANT_PENDING[assistant_id]
+        assistant_label = format_admin_target_label(
+            stats["user_username"].get(str(assistant_id)), assistant_id
+        )
+        req_id = _next_assistant_dm_request_id()
+        ASSISTANT_DM_REQUESTS[req_id] = {
+            "assistant_id": assistant_id,
+            "assistant_label": assistant_label,
+            "target_id": target_id,
+            "target_label": target_label,
+            "text_html": message.html_text,
+        }
+        await message.answer(
+            f"✅ Запрос отправлен главному админу на согласование — сообщение для {target_label} "
+            "уйдёт после подтверждения.",
+            parse_mode="HTML"
+        )
+        await notify_admins_of_assistant_dm_request(req_id)
+        return
+
+@dp.callback_query(F.data.startswith("assistant_dm_approve:"))
+async def cb_assistant_dm_approve(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    req_id = callback.data.split(":", 1)[1]
+    req = ASSISTANT_DM_REQUESTS.pop(req_id, None)
+    if req is None:
+        await callback.answer("Заявка уже обработана (скорее всего, другим админом)", show_alert=True)
+        return
+    await callback.answer("Подтверждено ✅", show_alert=True)
+    try:
+        await bot.send_message(
+            req["target_id"],
+            f"✉️ <b>Личное сообщение от администрации</b>\n{DIVIDER}\n\n{req['text_html']}",
+            parse_mode="HTML"
+        )
+        await safe_edit_text(
+            callback.message,
+            f"✅ Отправлено {req['target_label']} (от помощника {req['assistant_label']}).",
+            parse_mode="HTML"
+        )
+    except Exception:
+        logger.exception("Не удалось отправить согласованное сообщение помощника пользователю %s", req["target_id"])
+        await safe_edit_text(
+            callback.message,
+            f"⚠️ Не удалось отправить сообщение {req['target_label']} — возможно, он заблокировал бота.",
+            parse_mode="HTML"
+        )
+    try:
+        await bot.send_message(
+            req["assistant_id"],
+            f"✅ Твоё сообщение для {req['target_label']} одобрено и отправлено.",
+            parse_mode="HTML"
+        )
+    except Exception:
+        logger.exception("Не удалось уведомить помощника %s об одобрении сообщения", req["assistant_id"])
+
+@dp.callback_query(F.data.startswith("assistant_dm_reject:"))
+async def cb_assistant_dm_reject(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    req_id = callback.data.split(":", 1)[1]
+    req = ASSISTANT_DM_REQUESTS.pop(req_id, None)
+    if req is None:
+        await callback.answer("Заявка уже обработана (скорее всего, другим админом)", show_alert=True)
+        return
+    await callback.answer("Заявка отклонена", show_alert=True)
+    await safe_edit_text(
+        callback.message,
+        f"❌ Отклонено — сообщение для {req['target_label']} от помощника {req['assistant_label']} не отправлено.",
+        parse_mode="HTML"
+    )
+    try:
+        await bot.send_message(
+            req["assistant_id"],
+            f"❌ Твой запрос на сообщение для {req['target_label']} отклонён администратором.",
+            parse_mode="HTML"
+        )
+    except Exception:
+        logger.exception("Не удалось уведомить помощника %s об отклонении сообщения", req["assistant_id"])
 
 # ==================== МЕНЮ ====================
 @dp.callback_query(F.data == "menu_biology")
@@ -6108,10 +6423,10 @@ ANATOMY_LATIN_SESSIONS: dict[int, dict] = {}
 def anatomy_access_ok(user_id: int) -> bool:
     # Раздел ещё в разработке — глобальное промо ("снять все ограничения") намеренно
     # его не открывает, в отличие от остальных предметов; только явный ANATOMY_PUBLIC,
-    # админ, подписка с anatomy=True, либо ручной демо-доступ по username.
+    # админ/помощник админа, подписка с anatomy=True, либо ручной демо-доступ по username.
     return (
         ANATOMY_PUBLIC
-        or is_admin(user_id)
+        or is_admin_or_assistant(user_id)
         or has_subscription_anatomy_access(user_id)
         or user_id in stats["manual_anatomy_demo_granted"]
     )
@@ -6849,7 +7164,7 @@ def get_anatomy_maintenance_keyboard():
 @dp.callback_query(F.data == "anatomy_root")
 async def cb_anatomy_root(callback: CallbackQuery):
     await callback.answer()
-    if ANATOMY_MAINTENANCE_MODE and not is_admin(callback.from_user.id):
+    if ANATOMY_MAINTENANCE_MODE and not is_admin_or_assistant(callback.from_user.id):
         await safe_edit_text(
             callback.message,
             get_anatomy_maintenance_text(),
@@ -8077,7 +8392,7 @@ def has_histology_temp_access(user_id: int) -> bool:
 def histology_permanently_unlocked(user_id: int) -> bool:
     """Доступ, не зависящий от тающего пробного окна (в отличие от has_histology_temp_access)."""
     return (
-        HISTOLOGY_PUBLIC or is_admin(user_id)
+        HISTOLOGY_PUBLIC or is_admin_or_assistant(user_id)
         or is_section_promo_active("histology") or is_section_promo_active("global")
         or has_subscription_histology_access(user_id)
         or get_referral_count(user_id) >= REFERRAL_FULL_ACCESS_THRESHOLD
