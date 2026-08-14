@@ -282,3 +282,32 @@ class UserLookupTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AllowedOriginTests(unittest.TestCase):
+    """A host that redirects apex -> www (Vercel's default) changes the page origin, so both
+    forms must be allowed or every state sync fails CORS after the migration."""
+
+    def test_both_apex_and_www_are_allowed(self):
+        import config
+
+        self.assertIn("https://anatomapp.ru", config._origin_variants("https://anatomapp.ru"))
+        self.assertIn("https://www.anatomapp.ru", config._origin_variants("https://anatomapp.ru"))
+
+    def test_www_input_also_yields_the_apex(self):
+        import config
+
+        variants = config._origin_variants("https://www.anatomapp.ru")
+        self.assertIn("https://anatomapp.ru", variants)
+        self.assertIn("https://www.anatomapp.ru", variants)
+
+    def test_trailing_slash_is_stripped(self):
+        import config
+
+        for origin in config._origin_variants("https://anatomapp.ru/"):
+            self.assertFalse(origin.endswith("/"), origin)
+
+    def test_blank_url_yields_nothing(self):
+        import config
+
+        self.assertEqual(config._origin_variants(""), [])

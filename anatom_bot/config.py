@@ -26,9 +26,35 @@ BOT_TOKEN = _env("ANATOM_BOT_TOKEN", required=True)
 BOT_USERNAME = _env("ANATOM_BOT_USERNAME", "Vmeda_anatom_bot")
 DATABASE_URL = _normalize_database_url(_env("DATABASE_URL", required=True))
 
-# Website origin the bot links out to (e.g. https://anatom.example.com). Used to build
-# the "Открыть АНАТОМ" button and the deep-link login URL.
+# Website origin the bot links out to (e.g. https://anatom.example.com). Used as the MiniApp URL
+# and as the CORS origin.
 WEBAPP_URL = _env("ANATOM_WEBAPP_URL", "https://anatom.dc.example")
+
+
+def _origin_variants(url: str) -> list[str]:
+    """Both the apex and the www form of the site's origin.
+
+    Hosts differ on which one is canonical and redirect to it (Vercel prefers www). After such a
+    redirect the page's origin is the *other* host, and a CORS allowlist naming only one of them
+    silently blocks every state sync. Allowing both costs nothing — they are the same site.
+    """
+    origin = (url or "").rstrip("/")
+    if not origin:
+        return []
+    scheme, _, host = origin.partition("://")
+    if not host:
+        return [origin]
+    other = host[4:] if host.startswith("www.") else f"www.{host}"
+    return [f"{scheme}://{host}", f"{scheme}://{other}"]
+
+
+# Extra origins allowed to call the API, comma-separated — for a preview deployment or a domain
+# migration where the site temporarily answers on more than one host.
+ALLOWED_ORIGINS = _origin_variants(WEBAPP_URL) + [
+    origin.strip().rstrip("/")
+    for origin in _env("ANATOM_EXTRA_ORIGINS", "").split(",")
+    if origin.strip()
+]
 
 # Secret used to sign session tokens handed to the web app after a successful login.
 SESSION_SECRET = _env("ANATOM_SESSION_SECRET", required=True)

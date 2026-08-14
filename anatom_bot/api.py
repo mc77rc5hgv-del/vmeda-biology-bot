@@ -30,7 +30,7 @@ app = FastAPI(title="anatom-bot auth/state API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[config.WEBAPP_URL],
+    allow_origins=config.ALLOWED_ORIGINS,
     allow_methods=["GET", "POST", "PUT"],
     allow_headers=["Authorization", "Content-Type"],
 )
