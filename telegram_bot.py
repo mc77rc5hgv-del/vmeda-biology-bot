@@ -6013,13 +6013,14 @@ AI_MODEL_VISION = "gpt-4o-mini"
 AI_PRICE_INPUT_PER_1M = 0.15   # $/1M input tokens, gpt-4o-mini — держать в синхроне с реальным прайсом OpenAI
 AI_PRICE_OUTPUT_PER_1M = 0.60  # $/1M output tokens
 
-# Grok (xAI) — код и маршрутизация полностью готовы (см. solve_ai_request), но по умолчанию
-# ВЫКЛЮЧЕНЫ: быстрый ответ (gpt-4o-mini) и подробный разбор (grok-4.3) — это два разных ИИ, и на
-# многошаговых расчётах они могут чуть разойтись в округлении (напр. 100,5°C vs 100,4°C на одной
-# и той же задаче) — в рамках ОДНОЙ сессии это выглядит как противоречащие друг другу ответы.
-# Решили пожертвовать более сильным рассуждением Grok ради полной самосогласованности быстрого и
-# подробного ответа. Ставь True, если снова захотим Grok на подробном разборе.
-AI_USE_GROK_FOR_DETAILED = False
+# Grok (xAI) — задействован ТОЛЬКО на "theory_complex" (см. _classify_quick_answer): развёрнутые
+# теоретические/тестовые вопросы, где быстрый ответ уже не голая буква, а формулировка, требующая
+# реального рассуждения — и где, по наблюдениям, Gemini иногда справляется слабее. НЕ трогает
+# "problem" (расчёты и многопунктные списки) — именно микс "быстрый на одной модели, подробный на
+# другой" по расчётам раньше давал расхождение в округлении (напр. 100,5°C vs 100,4°C на одной и
+# той же задаче) в рамках одной сессии, что и было причиной временно выключить Grok целиком; теперь
+# он используется только там, где такого риска нет. Ставь False, чтобы снова полностью выключить.
+AI_USE_GROK_FOR_DETAILED = True
 AI_MODEL_GROK = "grok-4.3"
 AI_GROK_PRICE_INPUT_PER_1M = 1.25   # $/1M input tokens, grok-4.3 — держать в синхроне с прайсом xAI
 AI_GROK_PRICE_OUTPUT_PER_1M = 2.50  # $/1M output tokens
@@ -6169,29 +6170,40 @@ async def _call_gemini(messages: list, max_tokens: int) -> tuple:
 
 _AI_PROBLEM_NUMBER_RE = re.compile(r"\d[.,]\d|\d{2,}")
 _AI_LIST_MARKER_RE = re.compile(r"(?m)^\s*\d+[.)]\s+")  # "9. ", "10. " — нумерация пунктов, не число-результат
+_AI_ANSWER_PREFIX_RE = re.compile(r"^(ответ|answer)\s*[:\-—]?\s*", re.IGNORECASE)
 AI_LIST_ANSWER_MIN_ITEMS_FOR_OPENAI = 3  # многопунктный список терминов — держим на OpenAI целиком
+AI_THEORY_SIMPLE_MAX_WORDS = 5  # "Ответ: Б", "3) Верно" — короче этого практически гарантированно
+# голый выбор варианта, а не развёрнутый факт, требующий реального рассуждения
 
 def _classify_quick_answer(answer: str) -> str:
     """Дешёвая эвристика по уже сгенерированному быстрому ответу — без единого лишнего токена.
     AI_QUICK_SUFFIX просит модель на первом ходу дать ЛИБО букву/номер варианта (тест/теория),
     ЛИБО финальный числовой результат с единицами (расчётная задача), ЛИБО (для вопросов с
-    несколькими терминами) короткий пронумерованный список.
+    несколькими терминами) короткий пронумерованный список. Возвращает один из трёх типов:
 
-    Список из AI_LIST_ANSWER_MIN_ITEMS_FOR_OPENAI+ пунктов классифицируется как "problem" (то
-    есть остаётся на OpenAI) НЕЗАВИСИМО от содержимого — не потому, что это расчёт, а по реальным
-    наблюдениям: Gemini на многопунктных перечнях терминов даёт более короткие и местами неточные
-    формулировки (например, спутал «Плевра» с «Плева» — совсем другой термин), чем OpenAI на том
-    же вопросе. Иначе — дробное число или число из 2+ цифр (после вырезания самой нумерации
-    пунктов, чтобы «10.» не путалось с результатом вычисления) — почти наверняка результат
-    вычисления, иначе — тест/теория. "problem" — безопасный вариант по умолчанию: при сомнении не
-    отправляем ответ в модель, которая на нём не проверялась (см. AI_USE_GROK_FOR_DETAILED про
-    этот же риск)."""
+    - "problem" — расчёт ИЛИ список из AI_LIST_ANSWER_MIN_ITEMS_FOR_OPENAI+ пунктов; остаётся на
+      OpenAI целиком. Список — не потому, что это расчёт, а по реальным наблюдениям: Gemini на
+      многопунктных перечнях терминов даёт более короткие и местами неточные формулировки
+      (например, спутал «Плевра» с «Плева»), чем OpenAI на том же вопросе. Расчёт определяется по
+      дробному числу или числу из 2+ цифр (после вырезания самой нумерации пунктов, чтобы «10.»
+      не путалось с результатом вычисления). Безопасный вариант по умолчанию: при сомнении не
+      отправляем ответ в модель, которая на нём не проверялась.
+    - "theory_simple" — голый выбор варианта («Ответ: Б», «3) Верно», не длиннее
+      AI_THEORY_SIMPLE_MAX_WORDS слов после отсечения "Ответ:"-префикса) — уходит в Gemini,
+      дешевле OpenAI и не требует глубокого рассуждения, чтобы не ошибиться.
+    - "theory_complex" — теоретический вопрос, где быстрый ответ уже развёрнутая формулировка
+      (определение, объяснение), не просто буква — уходит в Grok, если он подключён
+      (AI_USE_GROK_FOR_DETAILED): такие вопросы требуют более сильного рассуждения, чем Gemini
+      надёжно выдаёт, а платить за это здесь оправданно, в отличие от простых MCQ-ответов."""
     if len(_AI_LIST_MARKER_RE.findall(answer)) >= AI_LIST_ANSWER_MIN_ITEMS_FOR_OPENAI:
         return "problem"
-    answer = _AI_LIST_MARKER_RE.sub("", answer)
-    if _AI_PROBLEM_NUMBER_RE.search(answer):
+    stripped = _AI_LIST_MARKER_RE.sub("", answer)
+    if _AI_PROBLEM_NUMBER_RE.search(stripped):
         return "problem"
-    return "theory"
+    core = _AI_ANSWER_PREFIX_RE.sub("", stripped).strip()
+    if len(core.split()) <= AI_THEORY_SIMPLE_MAX_WORDS:
+        return "theory_simple"
+    return "theory_complex"
 
 def get_ai_usage_today(user_id: int) -> int:
     entry = stats["ai_usage"].get(str(user_id))
@@ -6469,10 +6481,12 @@ async def solve_ai_request(
     в формате messages OpenAI. quick=True — просит только краткий итоговый ответ на маленьком
     max_tokens (используется для самого первого сообщения новой сессии — экономит output-токены,
     которые у OpenAI дороже входных; полное решение по шагам генерируется отдельным запросом,
-    только если пользователь явно нажмёт «Показать решение»). task_type — "theory"/"problem"/None,
-    классификация быстрого ответа этой же сессии (см. _classify_quick_answer) — решает, можно ли
-    подробный разбор (quick=False) безопасно отдать Gemini (только "theory"); на quick=True не
-    влияет, короткий ответ всегда на OpenAI, он же и определяет task_type. rag_context — готовый
+    только если пользователь явно нажмёт «Показать решение»). task_type —
+    "theory_simple"/"theory_complex"/"problem"/None, классификация быстрого ответа этой же сессии
+    (см. _classify_quick_answer) — решает, куда уходит подробный разбор (quick=False):
+    "theory_simple" в Gemini, "theory_complex" в Grok (если AI_USE_GROK_FOR_DETAILED), иначе
+    OpenAI; на quick=True не влияет, короткий ответ всегда на OpenAI, он же и определяет task_type.
+    rag_context — готовый
     текст материалов ВМедА (см. _format_ai_rag_context), подмешивается ТОЛЬКО в отправляемый
     запрос при quick=False и НИКОГДА не попадает в возвращаемый user_turn — иначе он бы каждый раз
     заново пересылался из истории на следующих ходах сессии, как раньше раздувало фото/длинные
@@ -6508,15 +6522,16 @@ async def solve_ai_request(
 
     # Короткий первый ответ (quick=True) всегда идёт через дешёвый gpt-4o-mini — по форме этого
     # самого ответа потом и определяется task_type (см. _classify_quick_answer). Подробный разбор
-    # (quick=False) теоретического/тестового вопроса уходит в Gemini (дешевле OpenAI и не задета
-    # расчётами, где важна самосогласованность); расчётные задачи (task_type="problem"/None)
-    # остаются на OpenAI целиком. Grok — через AI_USE_GROK_FOR_DETAILED, по умолчанию выключен
-    # (см. комментарий у константы).
+    # (quick=False): простой MCQ/тест ("theory_simple") — в Gemini, дешевле OpenAI и не требует
+    # глубокого рассуждения; развёрнутый теоретический/тестовый вопрос ("theory_complex") — в
+    # Grok, если подключён (AI_USE_GROK_FOR_DETAILED), там, где Gemini надёжно слабее; расчётные
+    # задачи и многопунктные списки (task_type="problem"/None) остаются на OpenAI целиком —
+    # именно там важна самосогласованность быстрого и подробного ответа одной моделью.
     provider, model, active_client = "openai", AI_MODEL_VISION, get_openai_client()
     if not quick:
-        if task_type == "theory" and GEMINI_API_KEY:
+        if task_type == "theory_simple" and GEMINI_API_KEY:
             provider, model, active_client = "gemini", AI_MODEL_GEMINI, None
-        elif AI_USE_GROK_FOR_DETAILED:
+        elif task_type == "theory_complex" and AI_USE_GROK_FOR_DETAILED:
             grok_client = get_grok_client()
             if grok_client is not None:
                 provider, model, active_client = "grok", AI_MODEL_GROK, grok_client

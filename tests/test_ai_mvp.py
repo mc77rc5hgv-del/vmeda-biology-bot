@@ -499,11 +499,11 @@ async def main():
     assert usage19["provider"] == "openai"
     print("19. quick=True always stays on OpenAI, even with Grok configured: OK")
 
-    # ---- 19a. by default (AI_USE_GROK_FOR_DETAILED=False) quick=False ALSO stays on OpenAI —
-    # Grok's routing is fully wired but switched off, since a different model answering the
-    # detailed explanation than the quick answer could round a multi-step calculation slightly
-    # differently within the SAME session (e.g. 100,5°C vs 100,4°C on the same problem) ----
-    assert tb.AI_USE_GROK_FOR_DETAILED is False, "Grok routing for detailed answers must default to off"
+    # ---- 19a. task_type=None (unclassified) stays on OpenAI even with Grok configured and
+    # AI_USE_GROK_FOR_DETAILED on — Grok only engages for task_type=="theory_complex" specifically,
+    # never as a catch-all, so a mixed quick/detailed pair on a calculation can't reintroduce the
+    # rounding-mismatch bug (e.g. 100,5°C vs 100,4°C on the same problem) that got Grok disabled ----
+    assert tb.AI_USE_GROK_FOR_DETAILED is True, "Grok is enabled, scoped to theory_complex only"
     captured19a = {}
     class FakeCompletions19a:
         async def create(self, **kwargs):
@@ -525,9 +525,9 @@ async def main():
     _, _, usage19a = await orig_solve(text="подробный вопрос", quick=False)
     assert captured19a["model"] == tb.AI_MODEL_VISION
     assert usage19a["provider"] == "openai"
-    print("19a. by default, quick=False also stays on OpenAI — Grok wired but switched off: OK")
+    print("19a. task_type=None stays on OpenAI even with Grok enabled (scoped to theory_complex): OK")
 
-    # ---- 19b. with AI_USE_GROK_FOR_DETAILED explicitly on, quick=False routes to Grok ----
+    # ---- 19b. task_type="theory_complex" + AI_USE_GROK_FOR_DETAILED on -> routes to Grok ----
     tb.AI_USE_GROK_FOR_DETAILED = True
     captured_grok = {}
     class FakeGrokUsage:
@@ -559,7 +559,9 @@ async def main():
     tb.get_grok_client = lambda: FakeGrokClient()
     tb.get_openai_client = lambda: OpenAIMustNotBeCalledClient()
     tb.stats["ai_cost_totals"] = {"requests": 0, "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0}
-    answer_g, user_turn_g, usage_g = await orig_solve(text="подробный вопрос", quick=False)
+    answer_g, user_turn_g, usage_g = await orig_solve(
+        text="подробный вопрос", quick=False, task_type="theory_complex"
+    )
     assert captured_grok["model"] == tb.AI_MODEL_GROK
     assert usage_g == {"input_tokens": 300, "output_tokens": 120, "provider": "grok"}
     tb.record_ai_cost(usage_g)
@@ -594,7 +596,9 @@ async def main():
 
     tb.get_grok_client = lambda: FailingGrokClient()
     tb.get_openai_client = lambda: FallbackOpenAIClient()
-    answer_f, user_turn_f, usage_f = await orig_solve(text="подробный вопрос 2", quick=False)
+    answer_f, user_turn_f, usage_f = await orig_solve(
+        text="подробный вопрос 2", quick=False, task_type="theory_complex"
+    )
     assert len(grok_call_count) == 1, "must attempt Grok exactly once — not loop or retry it"
     assert fallback_models == [tb.AI_MODEL_VISION], "must fall back to OpenAI exactly once after the Grok failure"
     assert usage_f["provider"] == "openai", "usage must be attributed to whichever provider actually answered"
@@ -627,13 +631,19 @@ async def main():
     tb.get_openai_client = orig_get_client
     tb.get_grok_client = orig_get_grok_client
 
-    # ---- 21. _classify_quick_answer: cheap heuristic that gates Gemini eligibility ----
-    assert tb._classify_quick_answer("Ответ: Б") == "theory"
-    assert tb._classify_quick_answer("3) Верно") == "theory"
-    assert tb._classify_quick_answer("Ответ: В") == "theory"
+    # ---- 21. _classify_quick_answer: three-way heuristic — problem (OpenAI) / theory_simple
+    # (Gemini) / theory_complex (Grok) ----
+    assert tb._classify_quick_answer("Ответ: Б") == "theory_simple"
+    assert tb._classify_quick_answer("3) Верно") == "theory_simple"
+    assert tb._classify_quick_answer("Ответ: В") == "theory_simple"
     assert tb._classify_quick_answer("Температура кипения раствора составляет 100,5°C.") == "problem"
     assert tb._classify_quick_answer("Масса вещества ≈ 42 г") == "problem"
     assert tb._classify_quick_answer("pH раствора равен 3,2") == "problem"
+    # развёрнутая теоретическая формулировка (не голая буква/номер) — сложнее, чем бы надёжно
+    # выдал Gemini, уходит в Grok
+    assert tb._classify_quick_answer(
+        "Диффузия — самопроизвольное перемешивание частиц вещества из зоны высокой концентрации в зону низкой."
+    ) == "theory_complex"
     # многопунктный список (3+ пунктов) остаётся на OpenAI целиком НЕЗАВИСИМО от содержимого —
     # по реальным наблюдениям Gemini на таком контенте путает термины ("Плева" вместо "Плевра")
     # и даёт более куцые формулировки, чем OpenAI на том же вопросе
@@ -649,15 +659,17 @@ async def main():
         "to be less accurate/terser on this kind of answer"
     )
     # регрессия отдельно: номер пункта САМ ПО СЕБЕ (не число-результат) не должен путать
-    # классификатор даже в КОРОТКОМ списке (< 3 пунктов, не задета правилом выше)
+    # классификатор даже в КОРОТКОМ списке (< 3 пунктов, не задета правилом выше) — но развёрнутая
+    # формулировка внутри этого одного пункта всё равно делает его theory_complex, не simple
     short_list_no_numbers = "9. Грудная полость — пространство, в котором находятся лёгкие и сердце."
-    assert tb._classify_quick_answer(short_list_no_numbers) == "theory", (
-        "list-item numbering (\"9.\") alone must not be mistaken for a calculated result"
+    assert tb._classify_quick_answer(short_list_no_numbers) == "theory_complex", (
+        "list-item numbering (\"9.\") alone must not be mistaken for a calculated result, but the "
+        "definition itself is long enough to still count as theory_complex, not a bare MCQ answer"
     )
     # но реальное число-результат СРЕДИ пунктов короткого списка всё ещё должно быть "problem"
     short_list_with_number = "1. Первый пункт\n2. Масса раствора составляет 15,7 г"
     assert tb._classify_quick_answer(short_list_with_number) == "problem"
-    print("21. _classify_quick_answer tells theory/test answers from calculated ones: OK")
+    print("21. _classify_quick_answer tells problem/theory_simple/theory_complex apart: OK")
 
     # ---- 22. _openai_messages_to_gemini_contents: system extracted, roles mapped, images converted ----
     openai_style_messages = [
@@ -689,14 +701,14 @@ async def main():
     task_type_calls.clear()
     msg23 = FakeMsg(uid=uid, text="Что такое диффузия?")
     await tb.handle_ai_text_input(msg23)  # fake_solve's quick answer is the bare-letter "Ответ: Б"
-    assert tb.AI_SESSIONS[uid]["task_type"] == "theory", "a bare-letter quick answer must classify as theory"
+    assert tb.AI_SESSIONS[uid]["task_type"] == "theory_simple", "a bare-letter answer must classify as theory_simple"
     cb_explain23 = FakeCB("ai_show_explanation", uid=uid)
     await tb.cb_ai_show_explanation(cb_explain23)
-    assert task_type_calls[-1] == "theory", "the detailed call must receive the classified task_type"
+    assert task_type_calls[-1] == "theory_simple", "the detailed call must receive the classified task_type"
     print("23. task_type is classified from the quick answer and passed to the detailed call: OK")
     tb.stats["ai_usage"].pop(str(uid), None)
 
-    # ---- 24. the REAL solve_ai_request: quick=False + task_type="theory" + GEMINI_API_KEY set
+    # ---- 24. the REAL solve_ai_request: quick=False + task_type="theory_simple" + GEMINI_API_KEY set
     # routes to Gemini, priced at Gemini's own (cheaper) rates ----
     orig_gemini_key = tb.GEMINI_API_KEY
     tb.GEMINI_API_KEY = "fake-gemini-key-for-tests"
@@ -715,7 +727,7 @@ async def main():
         chat = OpenAIMustNotBeCalledChat24()
     tb.get_openai_client = lambda: OpenAIMustNotBeCalledClient24()
     tb.stats["ai_cost_totals"] = {"requests": 0, "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0}
-    answer_th, _, usage_th = await orig_solve(text="теоретический вопрос", quick=False, task_type="theory")
+    answer_th, _, usage_th = await orig_solve(text="теоретический вопрос", quick=False, task_type="theory_simple")
     assert usage_th == {"input_tokens": 150, "output_tokens": 40, "provider": "gemini"}
     assert len(gemini_calls) == 1
     tb.record_ai_cost(usage_th)
@@ -725,9 +737,9 @@ async def main():
     )
     assert abs(gemini_totals["cost_usd"] - expected_cost_gemini) < 1e-9, "Gemini usage must be priced at Gemini rates"
     assert "из них Gemini" in tb.get_ai_cost_stats_block(), "admin stats must break out Gemini spend separately"
-    print("24. quick=False + task_type=theory + GEMINI_API_KEY routes to Gemini, priced correctly: OK")
+    print("24. quick=False + task_type=theory_simple + GEMINI_API_KEY routes to Gemini, priced correctly: OK")
 
-    # ---- 24b. task_type="theory" but NO GEMINI_API_KEY still stays on OpenAI ----
+    # ---- 24b. task_type="theory_simple" but NO GEMINI_API_KEY still stays on OpenAI ----
     tb.GEMINI_API_KEY = None
     captured24b = {}
     class FakeCompletions24b:
@@ -740,11 +752,11 @@ async def main():
         chat = FakeChat24b()
     tb.get_openai_client = lambda: FakeOpenAIClient24b()
     gemini_calls.clear()
-    _, _, usage_24b = await orig_solve(text="теоретический вопрос", quick=False, task_type="theory")
+    _, _, usage_24b = await orig_solve(text="теоретический вопрос", quick=False, task_type="theory_simple")
     assert len(gemini_calls) == 0, "must not call Gemini when GEMINI_API_KEY is unset"
     assert usage_24b["provider"] == "openai"
     assert captured24b["model"] == tb.AI_MODEL_VISION
-    print("24b. task_type=theory without GEMINI_API_KEY still stays on OpenAI: OK")
+    print("24b. task_type=theory_simple without GEMINI_API_KEY still stays on OpenAI: OK")
     tb.GEMINI_API_KEY = "fake-gemini-key-for-tests"
 
     # ---- 24c. task_type="problem" stays on OpenAI even when Gemini IS configured — this is the
@@ -781,7 +793,7 @@ async def main():
         chat = FallbackChat24d()
     tb.get_openai_client = lambda: FallbackOpenAIClient24d()
     gemini_calls.clear()
-    _, _, usage_24d = await orig_solve(text="теоретический вопрос 2", quick=False, task_type="theory")
+    _, _, usage_24d = await orig_solve(text="теоретический вопрос 2", quick=False, task_type="theory_simple")
     assert len(gemini_calls) == 1, "must attempt Gemini exactly once — not loop or retry it"
     assert fallback_models_24d == [tb.AI_MODEL_VISION], "must fall back to OpenAI exactly once after Gemini fails"
     assert usage_24d["provider"] == "openai"
@@ -923,7 +935,7 @@ async def main():
         chat = GoodFallbackChat28b()
     tb.get_grok_client = lambda: GrokRefusalClient()
     tb.get_openai_client = lambda: GoodFallbackClient28b()
-    _, _, usage_28b = await orig_solve(text="анатомический вопрос", quick=False)
+    _, _, usage_28b = await orig_solve(text="анатомический вопрос", quick=False, task_type="theory_complex")
     assert len(fallback_calls_28b) == 1, "must fall back to OpenAI exactly once after Grok refuses"
     assert usage_28b["provider"] == "openai"
     print("28b. Grok refusal falls back to OpenAI once, which then answers normally: OK")
@@ -940,13 +952,13 @@ async def main():
     tb.get_grok_client = lambda: GrokRefusalClient()
     tb.get_openai_client = lambda: BadFallbackClient28c()
     try:
-        await orig_solve(text="анатомический вопрос", quick=False)
+        await orig_solve(text="анатомический вопрос", quick=False, task_type="theory_complex")
         raised28c = False
     except tb.AIRefusalError:
         raised28c = True
     assert raised28c, "must still raise AIRefusalError if even the OpenAI fallback refuses"
     print("28c. both primary and fallback refusing still raises AIRefusalError, no loop: OK")
-    tb.AI_USE_GROK_FOR_DETAILED = False
+    tb.AI_USE_GROK_FOR_DETAILED = True
     tb.get_openai_client = orig_get_client
     tb.get_grok_client = orig_get_grok_client
 
