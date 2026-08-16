@@ -145,6 +145,7 @@ def load_stats() -> dict:
             data.setdefault("anatomy_exam_test_mode", {})
             data.setdefault("anatomy_exam_flash_scores", {})
             data.setdefault("ai_usage", {})
+            data.setdefault("ai_cost_totals", {"requests": 0, "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0})
             return data
         except (json.JSONDecodeError, OSError):
             logger.exception("Не удалось прочитать %s, статистика будет создана заново", STATS_FILE)
@@ -182,6 +183,7 @@ def load_stats() -> dict:
         "anatomy_exam_test_mode": {},
         "anatomy_exam_flash_scores": {},
         "ai_usage": {},
+        "ai_cost_totals": {"requests": 0, "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0},
     }
 
 # Один воркер сериализует записи на диск и не даёт им блокировать event loop бота.
@@ -3629,7 +3631,8 @@ async def cb_admin_stats(callback: CallbackQuery):
         f"⭐ Донаты звёздами: <b>{donation_stars_total}</b> ({donation_stars_count} платежей)\n"
         f"💵 Донаты рублями: <b>{donation_rubles_total}</b>₽ ({donation_rubles_count} чел.)\n"
         f"⭐ Подписки звёздами: <b>{sub_revenue_stars}</b>\n"
-        f"💵 Подписки рублями: <b>{sub_revenue_rubles}</b>₽"
+        f"💵 Подписки рублями: <b>{sub_revenue_rubles}</b>₽\n"
+        f"{get_ai_cost_stats_block()}"
     )
     await safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=get_admin_back_keyboard())
 
@@ -5857,10 +5860,21 @@ async def handle_question_number(message: Message):
 # свои ключи в stats.json (ai_usage, через .setdefault — обычная миграция), не трогает
 # ни один существующий раздел/контент/тариф.
 AI_MODEL_VISION = "gpt-4o-mini"
+AI_PRICE_INPUT_PER_1M = 0.15   # $/1M input tokens, gpt-4o-mini — держать в синхроне с реальным прайсом OpenAI
+AI_PRICE_OUTPUT_PER_1M = 0.60  # $/1M output tokens
 AI_FREE_DAILY_LIMIT = 3
 AI_ANSWER_TELEGRAM_LIMIT = 3500  # с запасом от лимита Telegram в 4096 символов на сообщение
 AI_SESSION_TIMEOUT_SECONDS = 20 * 60  # диалог считается закрытым после 20 минут без сообщений
 AI_SESSIONS: dict = {}  # user_id -> {"messages": [...], "last_active": ts, "processing": bool} — открытый диалог с памятью
+AI_QUICK_MAX_TOKENS = 150   # короткий первый ответ — только итог, без хода решения
+AI_DETAILED_MAX_TOKENS = 1500
+
+AI_QUICK_SUFFIX = (
+    "\n\n(Важно: в этом ответе дай ТОЛЬКО краткий итоговый ответ, без хода решения и пояснений — "
+    "если тест с вариантами, укажи букву/номер варианта; если расчёт, только финальный результат "
+    "с единицами измерения. Одна-две строки.)"
+)
+AI_EXPLAIN_FOLLOWUP_TEXT = "Дай теперь подробное решение по шагам для этого задания."
 
 AI_SYSTEM_PROMPT = (
     "Ты — AI-помощник для студентов ВМедА (Военно-медицинская академия им. С.М. Кирова), "
@@ -5900,6 +5914,30 @@ def increment_ai_usage(user_id: int) -> None:
 
 def ai_requests_left(user_id: int) -> int:
     return max(0, AI_FREE_DAILY_LIMIT - get_ai_usage_today(user_id))
+
+def record_ai_cost(usage: dict) -> None:
+    """Копит агрегированную стоимость AI-запросов — не пишет по записи на каждый запрос
+    (раздуло бы stats.json), только бегущие суммы. Нужно, чтобы реально видеть эффект
+    любых будущих оптимизаций (короткие ответы, кэш и т.д.), а не гадать на глаз."""
+    input_tokens = usage.get("input_tokens", 0)
+    output_tokens = usage.get("output_tokens", 0)
+    cost = input_tokens * AI_PRICE_INPUT_PER_1M / 1_000_000 + output_tokens * AI_PRICE_OUTPUT_PER_1M / 1_000_000
+    totals = stats["ai_cost_totals"]
+    totals["requests"] += 1
+    totals["input_tokens"] += input_tokens
+    totals["output_tokens"] += output_tokens
+    totals["cost_usd"] += cost
+    save_stats()
+
+def get_ai_cost_stats_block() -> str:
+    totals = stats["ai_cost_totals"]
+    requests = totals["requests"]
+    avg = totals["cost_usd"] / requests if requests else 0.0
+    return (
+        f"\n🤖 <b>VMedA AI</b>\n"
+        f"Запросов: <b>{requests}</b> (вход {totals['input_tokens']:,} / выход {totals['output_tokens']:,} ток.)\n"
+        f"Расход: <b>${totals['cost_usd']:.4f}</b>, в среднем ${avg:.5f}/запрос"
+    ).replace(",", " ")
 
 def is_ai_session_active(user_id: int) -> bool:
     session = AI_SESSIONS.get(user_id)
@@ -5958,17 +5996,26 @@ def _resize_image_for_ai(image_bytes: bytes) -> bytes:
         logger.exception("Не удалось сжать фото перед AI-запросом, отправляю оригинал")
         return image_bytes
 
-async def solve_ai_request(*, image_bytes: bytes = None, text: str = None, history: list = None) -> tuple:
+async def solve_ai_request(
+    *, image_bytes: bytes = None, text: str = None, history: list = None, quick: bool = False
+) -> tuple:
     """history — предыдущие ходы этого диалога (без системного промпта, он добавляется здесь же),
-    в формате messages OpenAI. Возвращает (ответ, user_turn) — user_turn нужен вызывающему коду,
-    чтобы дописать этот ход в историю сессии вместе с ответом ассистента."""
+    в формате messages OpenAI. quick=True — просит только краткий итоговый ответ на маленьком
+    max_tokens (используется для самого первого сообщения новой сессии — экономит output-токены,
+    которые у OpenAI дороже входных; полное решение по шагам генерируется отдельным запросом,
+    только если пользователь явно нажмёт «Показать решение»). Возвращает (ответ, user_turn, usage)
+    — user_turn нужен вызывающему коду, чтобы дописать этот ход в историю сессии вместе с ответом
+    ассистента; usage — {"input_tokens", "output_tokens"} для учёта стоимости (record_ai_cost)."""
     client = get_openai_client()
     if client is None:
         raise RuntimeError("AI недоступен: не задан OPENAI_API_KEY")
 
+    text_part = text or ""
+    if quick:
+        text_part = (text_part + AI_QUICK_SUFFIX) if text_part else AI_QUICK_SUFFIX.strip()
     content = []
-    if text:
-        content.append({"type": "text", "text": text})
+    if text_part:
+        content.append({"type": "text", "text": text_part})
     if image_bytes:
         b64 = base64.b64encode(image_bytes).decode("ascii")
         content.append({
@@ -5982,19 +6029,25 @@ async def solve_ai_request(*, image_bytes: bytes = None, text: str = None, histo
     response = await client.chat.completions.create(
         model=AI_MODEL_VISION,
         messages=[{"role": "system", "content": AI_SYSTEM_PROMPT}, *(history or []), user_turn],
-        max_tokens=1500,
+        max_tokens=AI_QUICK_MAX_TOKENS if quick else AI_DETAILED_MAX_TOKENS,
     )
     answer = response.choices[0].message.content or "Не удалось получить ответ от AI."
     if len(answer) > AI_ANSWER_TELEGRAM_LIMIT:
         answer = answer[:AI_ANSWER_TELEGRAM_LIMIT] + "…\n\n(ответ обрезан)"
-    return answer, user_turn
+    usage = {
+        "input_tokens": getattr(response.usage, "prompt_tokens", 0) if response.usage else 0,
+        "output_tokens": getattr(response.usage, "completion_tokens", 0) if response.usage else 0,
+    }
+    return answer, user_turn, usage
 
-def get_ai_result_text(answer: str, user_id: int, session_active: bool) -> str:
+def get_ai_result_text(answer: str, user_id: int, session_active: bool, offer_explanation: bool = False) -> str:
     left = ai_requests_left(user_id)
-    continuation = (
-        "\n\n💬 Можешь сразу уточнить вопрос по этой же теме — я помню контекст диалога."
-        if session_active else ""
-    )
+    if offer_explanation:
+        continuation = "\n\n🧠 Это краткий ответ — нажми кнопку ниже, если нужно решение по шагам."
+    elif session_active:
+        continuation = "\n\n💬 Можешь сразу уточнить вопрос по этой же теме — я помню контекст диалога."
+    else:
+        continuation = ""
     return (
         f"🤖 <b>Ответ AI</b>\n{DIVIDER}\n\n{html.escape(answer)}\n\n"
         f"💡 Сверяй важные ответы с материалами курса.\n"
@@ -6002,8 +6055,10 @@ def get_ai_result_text(answer: str, user_id: int, session_active: bool) -> str:
         f"{continuation}"
     )
 
-def get_ai_result_keyboard(session_active: bool):
+def get_ai_result_keyboard(session_active: bool, offer_explanation: bool = False):
     builder = InlineKeyboardBuilder()
+    if offer_explanation and session_active:
+        builder.button(text="🧠 Показать решение по шагам", callback_data="ai_show_explanation")
     if session_active:
         builder.button(text="🔚 Закончить диалог", callback_data="ai_session_end")
     else:
@@ -6063,6 +6118,51 @@ async def cb_ai_session_end(callback: CallbackQuery):
         reply_markup=get_ai_menu_keyboard()
     )
 
+@dp.callback_query(F.data == "ai_show_explanation")
+async def cb_ai_show_explanation(callback: CallbackQuery):
+    """Второй, отдельный запрос — только по явному нажатию, только если после короткого
+    ответа ещё остался дневной лимит. Большинство тестовых вопросов на этом и заканчиваются,
+    не оплачивая длинный пошаговый разбор, который часто и не нужен."""
+    user_id = callback.from_user.id
+    if not is_ai_session_active(user_id):
+        await callback.answer("Диалог уже закрыт, начни заново через меню AI.", show_alert=True)
+        return
+    session = AI_SESSIONS[user_id]
+    if session["processing"]:
+        await callback.answer()
+        return
+    if ai_requests_left(user_id) <= 0:
+        end_ai_session(user_id)
+        await callback.answer("На сегодня бесплатные AI-запросы закончились, попробуй завтра.", show_alert=True)
+        return
+    await callback.answer()
+    session["processing"] = True
+    thinking = await callback.message.answer("🤖 Готовлю решение по шагам...")
+    try:
+        answer, user_turn, usage = await solve_ai_request(
+            text=AI_EXPLAIN_FOLLOWUP_TEXT, history=session["messages"], quick=False
+        )
+        increment_ai_usage(user_id)
+        record_ai_cost(usage)
+        session["messages"].append(user_turn)
+        session["messages"].append({"role": "assistant", "content": answer})
+        session["last_active"] = time.time()
+        session_active = ai_requests_left(user_id) > 0
+        if not session_active:
+            end_ai_session(user_id)
+        await safe_edit_text(
+            thinking,
+            get_ai_result_text(answer, user_id, session_active),
+            parse_mode="HTML",
+            reply_markup=get_ai_result_keyboard(session_active)
+        )
+    except Exception:
+        logger.exception("Ошибка при получении подробного решения для пользователя %s", user_id)
+        await safe_edit_text(thinking, "⚠️ Не удалось получить решение. Попробуй ещё раз позже.")
+    finally:
+        if user_id in AI_SESSIONS:
+            AI_SESSIONS[user_id]["processing"] = False
+
 @dp.message(F.photo)
 async def handle_ai_photo_input(message: Message):
     """Единственный обработчик входящих фото в боте — фото вне AI-режима бот
@@ -6077,16 +6177,18 @@ async def handle_ai_photo_input(message: Message):
         end_ai_session(user_id)
         await message.answer("На сегодня бесплатные AI-запросы закончились, попробуй завтра.")
         return
+    quick = not session["messages"]  # самое первое сообщение сессии — сперва только краткий ответ
     session["processing"] = True
     thinking = await message.answer("🤖 Разбираю задание, подожди немного...")
     try:
         photo = message.photo[-1]
         tg_file = await bot.get_file(photo.file_id)
         buf = await bot.download_file(tg_file.file_path)
-        answer, user_turn = await solve_ai_request(
-            image_bytes=_resize_image_for_ai(buf.read()), history=session["messages"]
+        answer, user_turn, usage = await solve_ai_request(
+            image_bytes=_resize_image_for_ai(buf.read()), history=session["messages"], quick=quick
         )
         increment_ai_usage(user_id)
+        record_ai_cost(usage)
         session["messages"].append(user_turn)
         session["messages"].append({"role": "assistant", "content": answer})
         session["last_active"] = time.time()
@@ -6095,9 +6197,9 @@ async def handle_ai_photo_input(message: Message):
             end_ai_session(user_id)
         await safe_edit_text(
             thinking,
-            get_ai_result_text(answer, user_id, session_active),
+            get_ai_result_text(answer, user_id, session_active, offer_explanation=quick),
             parse_mode="HTML",
-            reply_markup=get_ai_result_keyboard(session_active)
+            reply_markup=get_ai_result_keyboard(session_active, offer_explanation=quick)
         )
     except Exception:
         logger.exception("Ошибка при обработке AI-фото от пользователя %s", user_id)
@@ -6120,11 +6222,15 @@ async def handle_ai_text_input(message: Message):
         end_ai_session(user_id)
         await message.answer("На сегодня бесплатные AI-запросы закончились, попробуй завтра.")
         return
+    quick = not session["messages"]  # самое первое сообщение сессии — сперва только краткий ответ
     session["processing"] = True
     thinking = await message.answer("🤖 Разбираю задание, подожди немного...")
     try:
-        answer, user_turn = await solve_ai_request(text=message.text, history=session["messages"])
+        answer, user_turn, usage = await solve_ai_request(
+            text=message.text, history=session["messages"], quick=quick
+        )
         increment_ai_usage(user_id)
+        record_ai_cost(usage)
         session["messages"].append(user_turn)
         session["messages"].append({"role": "assistant", "content": answer})
         session["last_active"] = time.time()
@@ -6133,9 +6239,9 @@ async def handle_ai_text_input(message: Message):
             end_ai_session(user_id)
         await safe_edit_text(
             thinking,
-            get_ai_result_text(answer, user_id, session_active),
+            get_ai_result_text(answer, user_id, session_active, offer_explanation=quick),
             parse_mode="HTML",
-            reply_markup=get_ai_result_keyboard(session_active)
+            reply_markup=get_ai_result_keyboard(session_active, offer_explanation=quick)
         )
     except Exception:
         logger.exception("Ошибка при обработке AI-текста от пользователя %s", user_id)

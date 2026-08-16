@@ -65,9 +65,12 @@ def fake_user_turn(text=None, image_bytes=None):
         content.append({"type": "image_url", "image_url": {"url": "fake"}})
     return {"role": "user", "content": content}
 
+FAKE_USAGE = {"input_tokens": 1000, "output_tokens": 100}
+
 async def main():
     uid = NON_ADMIN
     tb.stats["ai_usage"].pop(str(uid), None)
+    tb.stats["ai_cost_totals"] = {"requests": 0, "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0}
     tb.end_ai_session(uid)
 
     # ---- 1. main menu always shows the AI entry point ----
@@ -77,13 +80,13 @@ async def main():
     print("1. main menu AI button: OK")
 
     # ---- 2. ai_menu screen shows quota and doesn't touch any existing stats key ----
-    other_keys_before = {k: v for k, v in tb.stats.items() if k != "ai_usage"}
+    other_keys_before = {k: v for k, v in tb.stats.items() if k not in ("ai_usage", "ai_cost_totals")}
     cb = FakeCB("ai_menu", uid=uid)
     await tb.cb_ai_menu(cb)
     text, kb = cb.message.edits[-1]
     assert f"{tb.AI_FREE_DAILY_LIMIT}/{tb.AI_FREE_DAILY_LIMIT}" in text
     assert "ai_solve_start" in kb_data(kb)
-    assert {k: v for k, v in tb.stats.items() if k != "ai_usage"} == other_keys_before
+    assert {k: v for k, v in tb.stats.items() if k not in ("ai_usage", "ai_cost_totals")} == other_keys_before
     print("2. ai_menu screen + no existing stats touched: OK")
 
     # ---- 3. without OPENAI_API_KEY, AI blocks with a clear error, not a crash ----
@@ -121,40 +124,58 @@ async def main():
     assert raised, "handler must SkipHandler when there's no active AI session, so keyword search still runs"
     print("6. non-AI text falls through via SkipHandler: OK")
 
-    # ---- 7. a full text solve round trip: quota decrements, session STAYS open, answer is shown ----
+    # ---- 7. FIRST message of a session -> quick=True, short answer, offers "show solution" ----
     tb.start_ai_session(uid)
     calls = []
-    async def fake_solve(*, image_bytes=None, text=None, history=None):
-        calls.append((image_bytes, text, list(history or [])))
-        return "Правильный ответ: Б", fake_user_turn(text=text, image_bytes=image_bytes)
+    async def fake_solve(*, image_bytes=None, text=None, history=None, quick=False):
+        calls.append((image_bytes, text, list(history or []), quick))
+        answer = "Ответ: Б" if quick else "Ответ: Б. Подробное решение по шагам: ..."
+        return answer, fake_user_turn(text=text, image_bytes=image_bytes), dict(FAKE_USAGE)
     orig_solve = tb.solve_ai_request
     tb.solve_ai_request = fake_solve
     before = tb.ai_requests_left(uid)
+    cost_before = tb.stats["ai_cost_totals"]["requests"]
     msg2 = FakeMsg(uid=uid, text="Реши задачу по химии")
     await tb.handle_ai_text_input(msg2)
     assert tb.is_ai_session_active(uid), "session must stay open for follow-ups after a successful answer"
-    assert calls[-1] == (None, "Реши задачу по химии", [])
+    assert calls[-1] == (None, "Реши задачу по химии", [], True), "the very first message of a session must be quick=True"
     assert tb.ai_requests_left(uid) == before - 1
     assert len(tb.AI_SESSIONS[uid]["messages"]) == 2, "user turn + assistant turn must be recorded"
     final_text, final_kb = msg2.last_child.edits[-1]
-    assert "Правильный ответ: Б" in final_text
+    assert "Ответ: Б" in final_text
     assert f"{tb.ai_requests_left(uid)}/{tb.AI_FREE_DAILY_LIMIT}" in final_text
-    assert "ai_session_end" in kb_data(final_kb), "must offer a way to end the still-open dialog"
-    print("7. text solve round trip: session stays open + quota decrement: OK")
+    assert "ai_show_explanation" in kb_data(final_kb), "a quick answer must offer the step-by-step explanation button"
+    assert "ai_session_end" in kb_data(final_kb)
+    assert tb.stats["ai_cost_totals"]["requests"] == cost_before + 1, "usage must be recorded into the cost totals"
+    assert tb.stats["ai_cost_totals"]["input_tokens"] >= FAKE_USAGE["input_tokens"]
+    print("7. first message is quick + records cost + offers explanation button: OK")
 
-    # ---- 7b. a follow-up message (no button press!) continues the SAME session with history ----
-    msg3 = FakeMsg(uid=uid, text="А теперь объясни подробнее")
-    await tb.handle_ai_text_input(msg3)
+    # ---- 7b. tapping "show explanation" makes a SEPARATE detailed (quick=False) call, spends 1 more request ----
+    before_explain = tb.ai_requests_left(uid)
+    cb_explain = FakeCB("ai_show_explanation", uid=uid)
+    await tb.cb_ai_show_explanation(cb_explain)
+    assert calls[-1][3] is False, "the explanation call must be quick=False (full step-by-step)"
+    assert calls[-1][1] == tb.AI_EXPLAIN_FOLLOWUP_TEXT
     assert calls[-1][2] == [
         fake_user_turn(text="Реши задачу по химии"),
-        {"role": "assistant", "content": "Правильный ответ: Б"},
-    ], "the follow-up call must receive the prior exchange as history"
+        {"role": "assistant", "content": "Ответ: Б"},
+    ], "the explanation call must carry the quick answer as history, so it doesn't re-explain from scratch"
+    assert tb.ai_requests_left(uid) == before_explain - 1, "showing the explanation spends its own quota unit"
     assert len(tb.AI_SESSIONS[uid]["messages"]) == 4
-    print("7b. follow-up text continues the dialog with memory, no button needed: OK")
+    explain_text, explain_kb = cb_explain.message.last_child.edits[-1]
+    assert "Подробное решение" in explain_text
+    print("7b. explanation button makes a separate detailed request + spends quota: OK")
 
-    # ---- 8. a photo solve round trip (mocking bot.get_file/download_file) ----
-    # reset just today's quota counter (not the session/history) so this round trip has room —
-    # tests 7/7b already spent 2 of the 3 free requests in this same session.
+    # ---- 7c. a genuine follow-up typed by the user (not the button) is NOT forced quick ----
+    tb.stats["ai_usage"].pop(str(uid), None)  # fresh quota room for this sub-test
+    msg3 = FakeMsg(uid=uid, text="А если бы было другое вещество?")
+    await tb.handle_ai_text_input(msg3)
+    assert calls[-1][3] is False, "a real follow-up question the user typed must get a normal (non-quick) answer"
+    print("7c. typed follow-up questions are not forced into quick mode: OK")
+
+    # ---- 8. a photo solve round trip (mocking bot.get_file/download_file), fresh session -> quick again ----
+    tb.end_ai_session(uid)
+    tb.start_ai_session(uid)
     tb.stats["ai_usage"].pop(str(uid), None)
     orig_get_file = tb.bot.get_file
     orig_download_file = tb.bot.download_file
@@ -168,12 +189,12 @@ async def main():
     photo_msg = FakeMsg(uid=uid, photo=[FakePhotoSize("f1"), FakePhotoSize("f2")])
     await tb.handle_ai_photo_input(photo_msg)
     assert tb.is_ai_session_active(uid)
-    assert calls[-1][0] == b"fake-jpeg-bytes" and calls[-1][1] is None
+    assert calls[-1][0] == b"fake-jpeg-bytes" and calls[-1][1] is None and calls[-1][3] is True
     assert tb.ai_requests_left(uid) == before2 - 1
-    assert "Правильный ответ: Б" in photo_msg.last_child.edits[-1][0]
+    assert "Ответ: Б" in photo_msg.last_child.edits[-1][0]
     tb.bot.get_file = orig_get_file
     tb.bot.download_file = orig_download_file
-    print("8. photo follow-up within the same session: OK")
+    print("8. fresh photo session is quick too: OK")
 
     # ---- 9. a photo sent OUTSIDE an AI session is silently ignored (no crash, nothing sent) ----
     tb.end_ai_session(uid)
@@ -191,7 +212,7 @@ async def main():
     assert cb_limit._answers[0][1] is True
     print("10. daily limit blocks new sessions: OK")
 
-    # ---- 10b. exhausting the quota MID-dialog auto-closes the session with a plain back button ----
+    # ---- 10b. exhausting the quota MID-dialog auto-closes the session, no explanation/continue buttons ----
     tb.stats["ai_usage"].pop(str(uid), None)
     tb.start_ai_session(uid)
     tb.stats["ai_usage"][str(uid)] = {"date": tb.date.today().isoformat(), "count": tb.AI_FREE_DAILY_LIMIT - 1}
@@ -200,8 +221,22 @@ async def main():
     assert not tb.is_ai_session_active(uid), "session must auto-close once the daily quota hits 0"
     last_text, last_kb = msg_last.last_child.edits[-1]
     assert "ai_session_end" not in kb_data(last_kb)
+    assert "ai_show_explanation" not in kb_data(last_kb), "no point offering an explanation with 0 quota left"
     assert "ai_menu" in kb_data(last_kb)
     print("10b. quota hitting 0 mid-dialog auto-closes the session: OK")
+    tb.stats["ai_usage"].pop(str(uid), None)
+
+    # ---- 10c. tapping "show explanation" with 0 quota left is blocked, not silently charged ----
+    tb.start_ai_session(uid)
+    tb.AI_SESSIONS[uid]["messages"] = [fake_user_turn(text="x"), {"role": "assistant", "content": "Ответ: А"}]
+    tb.stats["ai_usage"][str(uid)] = {"date": tb.date.today().isoformat(), "count": tb.AI_FREE_DAILY_LIMIT}
+    calls_before_10c = len(calls)
+    cb_explain_blocked = FakeCB("ai_show_explanation", uid=uid)
+    await tb.cb_ai_show_explanation(cb_explain_blocked)
+    assert len(calls) == calls_before_10c, "must not call the model when quota is already exhausted"
+    assert cb_explain_blocked._answers[0][1] is True
+    assert not tb.is_ai_session_active(uid)
+    print("10c. explanation button blocked once quota is exhausted: OK")
     tb.stats["ai_usage"].pop(str(uid), None)
 
     # ---- 11. a slash command during an active session falls through untouched (e.g. /start) ----
@@ -242,6 +277,15 @@ async def main():
     assert raised
     assert len(calls) == calls_before, "must not call the model while a previous message is still processing"
     print("13. concurrent duplicate message during processing is ignored: OK")
+
+    # ---- 14. record_ai_cost math is correct and cost block renders ----
+    tb.stats["ai_cost_totals"] = {"requests": 0, "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0}
+    tb.record_ai_cost({"input_tokens": 1_000_000, "output_tokens": 1_000_000})
+    expected_cost = tb.AI_PRICE_INPUT_PER_1M + tb.AI_PRICE_OUTPUT_PER_1M
+    assert abs(tb.stats["ai_cost_totals"]["cost_usd"] - expected_cost) < 1e-9
+    block = tb.get_ai_cost_stats_block()
+    assert "VMedA AI" in block and "1" in block
+    print("14. record_ai_cost math + stats block: OK")
 
     # cleanup
     tb.solve_ai_request = orig_solve
