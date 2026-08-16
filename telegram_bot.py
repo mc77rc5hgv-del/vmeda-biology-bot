@@ -6162,317 +6162,37 @@ async def handle_keyword_search(message: Message):
     await message.answer(text, parse_mode="HTML", reply_markup=get_search_results_keyboard(results))
 
 # ==================== ФИЗИКА ====================
-@dp.callback_query(F.data == "physics_tickets")
-async def cb_physics_tickets(callback: CallbackQuery):
-    await callback.answer()
-    await safe_edit_text(
-        callback.message,
-        f"📘 <b>Билеты по физике</b>\n{DIVIDER}\n\nВыбери раздел:",
-        parse_mode="HTML",
-        reply_markup=get_physics_tickets_menu()
-    )
+# Хендлеры (тестовая часть, билеты, задачи — все с уникальными callback_data-фильтрами, безопасно
+# для порядка dp) вынесены в handlers/physics.py (свой Router) — здесь только регистрация роутера
+# и реэкспорт имён. Клавиатурные билдеры остаются здесь (используются и cb_menu_physics/
+# download_physics_*, которые тоже остаются) — см. docstring handlers/physics.py.
+from handlers import physics as physics_handlers  # noqa: E402 — mid-file by design, see above
 
-@dp.callback_query(F.data == "physics_theory_tickets")
-async def cb_physics_theory_tickets(callback: CallbackQuery):
-    await callback.answer()
-    if not PHYSICS_THEORY_TICKETS:
-        builder = InlineKeyboardBuilder()
-        builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="physics_tickets"))
-        await safe_edit_text(
-            callback.message,
-            f"📖 <b>Билеты теоретической части</b>\n{DIVIDER}\n\n🚧 Скоро будут добавлены!",
-            parse_mode="HTML",
-            reply_markup=builder.as_markup()
-        )
-        return
-    await safe_edit_text(
-        callback.message,
-        f"📖 <b>Билеты теоретической части</b>\n{DIVIDER}\n\nВыбери билет:",
-        parse_mode="HTML",
-        reply_markup=get_physics_theory_tickets_keyboard()
-    )
+dp.include_router(physics_handlers.router)
 
-@dp.callback_query(F.data.startswith("phys_theory_ticket:"))
-async def cb_phys_theory_ticket(callback: CallbackQuery):
-    await callback.answer()
-    num = callback.data.split(":")[1]
-    ticket = PHYSICS_THEORY_TICKETS.get(num)
-    if not ticket:
-        await callback.answer("Билет не найден", show_alert=True)
-        return
-    await safe_edit_text(
-        callback.message,
-        f"📖 <b>{ticket['title']}</b>\n{DIVIDER}\n\nВыбери вопрос:",
-        parse_mode="HTML",
-        reply_markup=get_physics_theory_ticket_detail_keyboard(num)
-    )
-
-@dp.callback_query(F.data.startswith("phys_theory_q:"))
-async def cb_phys_theory_question(callback: CallbackQuery):
-    await callback.answer()
-    _, num, idx_s = callback.data.split(":")
-    idx = int(idx_s)
-    ticket = PHYSICS_THEORY_TICKETS.get(num)
-    if not ticket or idx >= len(ticket["questions"]):
-        await callback.answer("Вопрос не найден", show_alert=True)
-        return
-    q = ticket["questions"][idx]
-    header = f"📖 <b>{ticket['title']} — Вопрос {idx + 1}</b>"
-    body = f"{header}\n{DIVIDER}\n\n<b>{q['title']}</b>\n\n{q['answer']}"
-    await safe_edit_text(callback.message, body, parse_mode="HTML", reply_markup=get_physics_theory_question_keyboard(num, idx))
-
-@dp.callback_query(F.data == "physics_test_tickets")
-async def cb_physics_test_tickets(callback: CallbackQuery):
-    await callback.answer()
-    await safe_edit_text(
-        callback.message,
-        f"📝 <b>Тестовые билеты</b>\n{DIVIDER}\n\nВыбери вариант:",
-        parse_mode="HTML",
-        reply_markup=get_physics_test_tickets_keyboard()
-    )
-
-@dp.callback_query(F.data.startswith("phys_test_ticket:"))
-async def cb_phys_test_ticket(callback: CallbackQuery):
-    await callback.answer()
-    num = callback.data.split(":")[1]
-    ticket = PHYSICS_TEST_TICKETS.get(num)
-    if not ticket:
-        await callback.answer("Билет не найден", show_alert=True)
-        return
-    lines = [f"📄 <b>{ticket['title']}</b>", DIVIDER]
-    for question in ticket["questions"]:
-        lines.append(f"\n<b>{question['num']}.</b> {question['text']}")
-        for letter, option in question["options"].items():
-            marker = "✅ " if letter == question["correct"] else ""
-            lines.append(f"{marker}{letter}) {option}")
-    text = "\n".join(lines)
-    await safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=get_physics_test_ticket_detail_keyboard(num))
-
-@dp.callback_query(F.data.startswith("phys_test_ticket_tasks:"))
-async def cb_phys_test_ticket_tasks(callback: CallbackQuery):
-    await callback.answer()
-    num = callback.data.split(":")[1]
-    ticket = PHYSICS_TEST_TICKETS.get(num)
-    if not ticket or not ticket.get("tasks"):
-        await callback.answer("Задачи не найдены", show_alert=True)
-        return
-    text = f"🧮 <b>{ticket['title']} — Часть 2. Задачи</b>\n{DIVIDER}\n\nВыбери задачу:"
-    await safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=get_physics_test_ticket_task_list_keyboard(num))
-
-@dp.callback_query(F.data.startswith("phys_test_ticket_task_show:"))
-async def cb_phys_test_ticket_task_show(callback: CallbackQuery):
-    await callback.answer()
-    _, num, task_num_s = callback.data.split(":")
-    task_num = int(task_num_s)
-    ticket = PHYSICS_TEST_TICKETS.get(num)
-    if not ticket:
-        await callback.answer("Билет не найден", show_alert=True)
-        return
-    task = next((t for t in ticket.get("tasks", []) if t["num"] == task_num), None)
-    if not task:
-        await callback.answer("Задача не найдена", show_alert=True)
-        return
-    text = (
-        f"📝 <b>{ticket['title']} — Задача №{task['num']}</b> — {task.get('title', '')}\n{DIVIDER}\n\n"
-        f"<b>Условие:</b>\n<i>{task['condition']}</i>\n\n"
-        f"<b>Решение:</b>\n{task['solution']}"
-    )
-    await safe_edit_text(
-        callback.message, text, parse_mode="HTML",
-        reply_markup=get_physics_test_ticket_task_detail_keyboard(num, task_num)
-    )
-
-@dp.callback_query(F.data == "physics_task_tickets")
-async def cb_physics_task_tickets(callback: CallbackQuery):
-    await callback.answer()
-    await safe_edit_text(
-        callback.message,
-        f"🧮 <b>Билеты с задачами</b>\n{DIVIDER}\n\nВыбери билет:",
-        parse_mode="HTML",
-        reply_markup=get_physics_task_tickets_keyboard()
-    )
-
-@dp.callback_query(F.data.startswith("phys_task_ticket:"))
-async def cb_phys_task_ticket(callback: CallbackQuery):
-    await callback.answer()
-    num = callback.data.split(":")[1]
-    ticket = PHYSICS_TASK_TICKETS.get(num)
-    if not ticket:
-        await callback.answer("Билет не найден", show_alert=True)
-        return
-    text = f"🧮 <b>{ticket['title']}</b>\n{DIVIDER}\n\nВыбери задачу:"
-    await safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=get_physics_task_ticket_list_keyboard(num))
-
-@dp.callback_query(F.data.startswith("phys_task_ticket_show:"))
-async def cb_phys_task_ticket_show(callback: CallbackQuery):
-    await callback.answer()
-    _, num, task_num_s = callback.data.split(":")
-    task_num = int(task_num_s)
-    ticket = PHYSICS_TASK_TICKETS.get(num)
-    if not ticket:
-        await callback.answer("Билет не найден", show_alert=True)
-        return
-    task = next((t for t in ticket.get("tasks", []) if t["num"] == task_num), None)
-    if not task:
-        await callback.answer("Задача не найдена", show_alert=True)
-        return
-    text = (
-        f"📝 <b>{ticket['title']} — Задача №{task['num']}</b> — {task.get('title', '')}\n{DIVIDER}\n\n"
-        f"<b>Условие:</b>\n<i>{task['condition']}</i>\n\n"
-        f"<b>Решение:</b>\n{task['solution']}"
-    )
-    await safe_edit_text(
-        callback.message, text, parse_mode="HTML",
-        reply_markup=get_physics_task_ticket_detail_keyboard(num, task_num)
-    )
-
-@dp.callback_query(F.data == "physics_test")
-async def cb_physics_test(callback: CallbackQuery):
-    await callback.answer()
-    await safe_edit_text(
-        callback.message,
-        f"📝 <b>Тестовая часть — Физика</b>\n{DIVIDER}\n\nВыбери страницу:",
-        parse_mode="HTML",
-        reply_markup=get_physics_test_pages()
-    )
-
-@dp.callback_query(F.data.startswith("physics_page:"))
-async def cb_physics_page(callback: CallbackQuery):
-    page = int(callback.data.split(":")[1])
-    await callback.answer()
-    await safe_edit_text(
-        callback.message,
-        f"📄 <b>Физика — Страница {page}</b>\n{DIVIDER}",
-        parse_mode="HTML",
-        reply_markup=get_physics_question_keyboard(page)
-    )
-
-@dp.callback_query(F.data.startswith("physics_q:"))
-async def cb_physics_question(callback: CallbackQuery):
-    await callback.answer()
-    q_num = callback.data.split(":")[1]
-    if q_num in PHYSICS_QUESTIONS:
-        q = PHYSICS_QUESTIONS[q_num]
-        header = f"❓ <b>Вопрос {q_num}</b>"
-        body = f"{header}\n{DIVIDER}\n\n<b>{q.get('title', '')}</b>\n\n{q.get('answer', '')}"
-        short_caption = f"{header}\n{DIVIDER}\n\n<b>{q.get('title', '')}</b>"
-        await send_answer(callback.message, body, short_caption, q, get_physics_answer_keyboard(q_num), edit=True)
-    else:
-        await callback.answer("Вопрос пока не добавлен в файл", show_alert=True)
-
-@dp.callback_query(F.data == "physics_grade45")
-async def cb_physics_grade45(callback: CallbackQuery):
-    await callback.answer()
-    await safe_edit_text(
-        callback.message,
-        f"❓ <b>(60 вопросов) на 4/5</b>\n{DIVIDER}\n\nВыбери вопрос:",
-        parse_mode="HTML",
-        reply_markup=get_physics_grade45_keyboard()
-    )
-
-@dp.callback_query(F.data.startswith("physics45_q:"))
-async def cb_physics_grade45_question(callback: CallbackQuery):
-    await callback.answer()
-    q_num = callback.data.split(":")[1]
-    if q_num in PHYSICS_GRADE45_QUESTIONS:
-        q = PHYSICS_GRADE45_QUESTIONS[q_num]
-        header = f"❓ <b>Вопрос {q_num}</b>"
-        body = f"{header}\n{DIVIDER}\n\n<b>{q.get('title', '')}</b>\n\n{q.get('answer', '')}"
-        short_caption = f"{header}\n{DIVIDER}\n\n<b>{q.get('title', '')}</b>"
-        await send_answer(callback.message, body, short_caption, q, get_physics_grade45_answer_keyboard(q_num), edit=True)
-    else:
-        await callback.answer("Вопрос пока не добавлен в файл", show_alert=True)
-
-@dp.callback_query(F.data == "physics_extra")
-async def cb_physics_extra(callback: CallbackQuery):
-    await callback.answer()
-    await safe_edit_text(
-        callback.message,
-        f"⭐ <b>Доп. вопросы от преподавателей</b>\n{DIVIDER}\n\nВыбери вопрос:",
-        parse_mode="HTML",
-        reply_markup=get_physics_extra_keyboard()
-    )
-
-@dp.callback_query(F.data.startswith("physics_extra_q:"))
-async def cb_physics_extra_question(callback: CallbackQuery):
-    await callback.answer()
-    q_num = callback.data.split(":")[1]
-    if q_num in PHYSICS_EXTRA_QUESTIONS:
-        q = PHYSICS_EXTRA_QUESTIONS[q_num]
-        header = "⭐ <b>Доп. вопрос от преподавателей</b>"
-        body = f"{header}\n{DIVIDER}\n\n<b>{q.get('title', '')}</b>\n\n{q.get('answer', '')}"
-        short_caption = f"{header}\n{DIVIDER}\n\n<b>{q.get('title', '')}</b>"
-        await send_answer(callback.message, body, short_caption, q, get_physics_extra_answer_keyboard(q_num), edit=True)
-    else:
-        await callback.answer("Вопрос пока не добавлен в файл", show_alert=True)
-
-# ==================== ФИЗИКА - ЗАДАЧИ ====================
-@dp.callback_query(F.data == "physics_tasks")
-async def cb_physics_tasks(callback: CallbackQuery):
-    await callback.answer()
-    await safe_edit_text(
-        callback.message,
-        f"🧮 <b>Задачи по физике</b>\n{DIVIDER}\n\nВыбери тему:",
-        parse_mode="HTML",
-        reply_markup=get_physics_tasks_topics_keyboard()
-    )
-
-@dp.callback_query(F.data.startswith("phystask_topic:"))
-async def cb_phystask_topic(callback: CallbackQuery):
-    await callback.answer()
-    topic_num = callback.data.split(":")[1]
-    topic = PHYSICS_TASKS.get(topic_num)
-    if not topic:
-        await callback.answer("Тема не найдена", show_alert=True)
-        return
-    text = (
-        f"📂 <b>{topic['title']}</b>\n{DIVIDER}\n\n"
-        f"{topic.get('intro', '')}\n\n"
-        f"Всего типовых задач: {len(topic['tasks'])}"
-    )
-    await safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=get_physics_task_topic_keyboard(topic_num))
-
-@dp.callback_query(F.data.startswith("phystask_formulas:"))
-async def cb_phystask_formulas(callback: CallbackQuery):
-    await callback.answer()
-    topic_num = callback.data.split(":")[1]
-    topic = PHYSICS_TASKS.get(topic_num)
-    if not topic:
-        await callback.answer("Тема не найдена", show_alert=True)
-        return
-    text = f"📂 <b>{topic['title']}</b>\n{DIVIDER}\n\n{topic['formulas']}"
-    await safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=get_physics_formulas_keyboard(topic_num))
-
-@dp.callback_query(F.data.startswith("phystask_list:"))
-async def cb_phystask_list(callback: CallbackQuery):
-    await callback.answer()
-    topic_num = callback.data.split(":")[1]
-    topic = PHYSICS_TASKS.get(topic_num)
-    if not topic:
-        await callback.answer("Тема не найдена", show_alert=True)
-        return
-    text = f"📋 <b>{topic['title']} — список задач</b>\n{DIVIDER}\n\nВыбери задачу:"
-    await safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=get_physics_task_list_keyboard(topic_num))
-
-@dp.callback_query(F.data.startswith("phystask_show:"))
-async def cb_phystask_show(callback: CallbackQuery):
-    await callback.answer()
-    _, topic_num, task_num_s = callback.data.split(":")
-    task_num = int(task_num_s)
-    topic = PHYSICS_TASKS.get(topic_num)
-    if not topic:
-        await callback.answer("Тема не найдена", show_alert=True)
-        return
-    task = next((t for t in topic["tasks"] if t["num"] == task_num), None)
-    if not task:
-        await callback.answer("Задача не найдена", show_alert=True)
-        return
-    text = (
-        f"📝 <b>Задача №{task['num']}</b> — {task.get('title', '')}\n{DIVIDER}\n\n"
-        f"<b>Условие:</b>\n<i>{task['condition']}</i>\n\n"
-        f"<b>Решение:</b>\n{task['solution']}"
-    )
-    await safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=get_physics_task_detail_keyboard(topic_num, task_num))
+cb_physics_tickets = physics_handlers.cb_physics_tickets
+cb_physics_theory_tickets = physics_handlers.cb_physics_theory_tickets
+cb_phys_theory_ticket = physics_handlers.cb_phys_theory_ticket
+cb_phys_theory_question = physics_handlers.cb_phys_theory_question
+cb_physics_test_tickets = physics_handlers.cb_physics_test_tickets
+cb_phys_test_ticket = physics_handlers.cb_phys_test_ticket
+cb_phys_test_ticket_tasks = physics_handlers.cb_phys_test_ticket_tasks
+cb_phys_test_ticket_task_show = physics_handlers.cb_phys_test_ticket_task_show
+cb_physics_task_tickets = physics_handlers.cb_physics_task_tickets
+cb_phys_task_ticket = physics_handlers.cb_phys_task_ticket
+cb_phys_task_ticket_show = physics_handlers.cb_phys_task_ticket_show
+cb_physics_test = physics_handlers.cb_physics_test
+cb_physics_page = physics_handlers.cb_physics_page
+cb_physics_question = physics_handlers.cb_physics_question
+cb_physics_grade45 = physics_handlers.cb_physics_grade45
+cb_physics_grade45_question = physics_handlers.cb_physics_grade45_question
+cb_physics_extra = physics_handlers.cb_physics_extra
+cb_physics_extra_question = physics_handlers.cb_physics_extra_question
+cb_physics_tasks = physics_handlers.cb_physics_tasks
+cb_phystask_topic = physics_handlers.cb_phystask_topic
+cb_phystask_formulas = physics_handlers.cb_phystask_formulas
+cb_phystask_list = physics_handlers.cb_phystask_list
+cb_phystask_show = physics_handlers.cb_phystask_show
 
 # ==================== АНАТОМИЯ (В РАЗРАБОТКЕ, ПОКА ДОСТУПНО ТОЛЬКО АДМИНАМ) ====================
 # Хендлеры и вся логика раздела вынесены в handlers/anatomy.py (свой Router) — здесь только
