@@ -360,7 +360,7 @@ async def main():
     assert checker2.ok and not checker2.stack
     print("17. markdown-to-HTML formatting is real, balanced, and escape-safe: OK")
 
-    # ---- 18. the REAL solve_ai_request caps how much history it resends (cost-runaway guard) ----
+    # ---- 18. the REAL solve_ai_request compacts history before resending (cost-runaway guard) ----
     class FakeUsage:
         prompt_tokens = 42
         completion_tokens = 7
@@ -383,18 +383,48 @@ async def main():
 
     orig_get_client = tb.get_openai_client
     tb.get_openai_client = lambda: FakeOpenAIClient()
-    long_history = [
-        {"role": "user" if i % 2 == 0 else "assistant", "content": f"ход {i}"} for i in range(20)
-    ]
+    long_answer = "Подробный ход решения. " * 30  # заведомо длиннее AI_HISTORY_SUMMARY_CHARS
+    long_history = []
+    for i in range(20):
+        if i % 2 == 0:
+            content = [{"type": "text", "text": f"вопрос {i}"}]
+            if i == 16:  # внутри окна AI_HISTORY_MAX_MESSAGES — проверяем, что фото тут вырезается
+                content.append({"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,AAAA"}})
+            long_history.append({"role": "user", "content": content})
+        else:
+            long_history.append({"role": "assistant", "content": long_answer + f" #{i}"})
+
     answer_r, user_turn_r, usage_r = await orig_solve(text="новый вопрос", history=long_history)
     sent = captured["messages"]
     assert sent[0]["role"] == "system"
-    assert len(sent) == 1 + tb.AI_HISTORY_MAX_MESSAGES + 1, "must be system + capped history + current turn"
-    assert sent[1:-1] == long_history[-tb.AI_HISTORY_MAX_MESSAGES:], "must keep only the MOST RECENT turns"
+    assert len(sent) == 1 + tb.AI_HISTORY_MAX_MESSAGES + 1, "must be system + compacted history + current turn"
+    compacted = sent[1:-1]
     assert sent[-1] == user_turn_r
+
+    # ни один сохранённый ход истории не тащит картинку — самое дорогое по входным токенам
+    for msg in compacted:
+        content = msg["content"]
+        assert isinstance(content, str), "history entries must be compacted to plain text"
+        assert "image_url" not in content and "base64" not in content
+
+    user_msgs = {m["content"]: m for m in compacted if m["role"] == "user"}
+    assert any("вопрос 16" in c and "[ранее приложено фото задания]" in c for c in user_msgs), (
+        "user turn that had an image must keep a short text marker instead"
+    )
+    assert any(c == "вопрос 14" for c in user_msgs), "user turns without an image are passed through as-is"
+
+    # самый последний ответ ассистента в окне остаётся полным (может понадобиться модели целиком),
+    # более ранние в этом же окне — обрезаны до AI_HISTORY_SUMMARY_CHARS
+    assistant_msgs = [m["content"] for m in compacted if m["role"] == "assistant"]
+    assert len(assistant_msgs) >= 2
+    assert assistant_msgs[-1] == long_answer + " #19"
+    for shortened in assistant_msgs[:-1]:
+        assert len(shortened) <= tb.AI_HISTORY_SUMMARY_CHARS + 1
+        assert shortened.endswith("…")
+
     assert usage_r == {"input_tokens": 42, "output_tokens": 7}
     tb.get_openai_client = orig_get_client
-    print("18. long history is trimmed before resending to the model: OK")
+    print("18. long history is compacted (images stripped, old answers shortened) before resending: OK")
 
     # cleanup
     tb.solve_ai_request = orig_solve

@@ -5868,9 +5868,10 @@ AI_SESSION_TIMEOUT_SECONDS = 20 * 60  # диалог считается закр
 AI_SESSIONS: dict = {}  # user_id -> {"messages": [...], "last_active": ts, "processing": bool} — открытый диалог с памятью
 AI_QUICK_MAX_TOKENS = 150   # короткий первый ответ — только итог, без хода решения
 AI_DETAILED_MAX_TOKENS = 1500
-AI_HISTORY_MAX_MESSAGES = 6  # сколько последних сообщений истории реально пересылаем модели —
-# без этого потолка стоимость каждого следующего сообщения в долгой сессии растёт почти
-# квадратично: на каждый ход модели заново пересылается исходное фото и вся переписка целиком
+AI_HISTORY_MAX_MESSAGES = 6  # сколько последних сообщений истории берём как основу перед сжатием
+# (см. _compact_history) — без этого потолка стоимость каждого следующего сообщения в долгой
+# сессии растёт почти квадратично: на каждый ход модели заново пересылается исходное фото и вся
+# переписка целиком
 
 AI_QUICK_SUFFIX = (
     "\n\n(Важно: в этом ответе дай ТОЛЬКО краткий итоговый ответ, без хода решения и пояснений — "
@@ -6053,6 +6054,40 @@ def _clean_ai_answer(answer: str) -> str:
         answer = re.sub(pattern, repl, answer)
     return re.sub(r" {2,}", " ", answer)
 
+AI_HISTORY_SUMMARY_CHARS = 220  # до скольки символов ужимаем СТАРЫЕ ответы ассистента в истории —
+# самый свежий ответ всегда остаётся полным (модели он ещё может понадобиться целиком для
+# уточняющего вопроса), а более ранние в диалоге почти всегда нужны только как факт "это уже
+# решено и таким был ответ", не дословно
+
+def _compact_history(history: list) -> list:
+    """Ужимает историю перед пересылкой модели, поверх среза по AI_HISTORY_MAX_MESSAGES:
+    у пользовательских ходов убираем фото (самое дорогое по входным токенам — метка text
+    заменяет реальную картинку), у всех ответов ассистента, кроме самого последнего, обрезаем
+    текст до AI_HISTORY_SUMMARY_CHARS. Модели для продолжения диалога почти всегда достаточно
+    краткой памяти "что уже спросили и что уже ответили", а не полного текста каждого раунда
+    заново — это и есть основной резерв экономии токенов в многоходовых сессиях."""
+    trimmed = (history or [])[-AI_HISTORY_MAX_MESSAGES:]
+    last_assistant_idx = max(
+        (i for i, m in enumerate(trimmed) if m.get("role") == "assistant"), default=-1
+    )
+    compact = []
+    for i, msg in enumerate(trimmed):
+        role = msg.get("role")
+        content = msg.get("content")
+        if role == "user" and isinstance(content, list):
+            text_parts = [p.get("text", "") for p in content if p.get("type") == "text"]
+            had_image = any(p.get("type") == "image_url" for p in content)
+            text = " ".join(t for t in text_parts if t).strip()
+            if had_image:
+                text = (text + " [ранее приложено фото задания]").strip()
+            compact.append({"role": "user", "content": text or "[фото задания]"})
+        elif role == "assistant" and isinstance(content, str) and i != last_assistant_idx:
+            short = content if len(content) <= AI_HISTORY_SUMMARY_CHARS else content[:AI_HISTORY_SUMMARY_CHARS] + "…"
+            compact.append({"role": "assistant", "content": short})
+        else:
+            compact.append(msg)
+    return compact
+
 async def solve_ai_request(
     *, image_bytes: bytes = None, text: str = None, history: list = None, quick: bool = False
 ) -> tuple:
@@ -6083,7 +6118,7 @@ async def solve_ai_request(
         raise ValueError("Нет ни текста, ни фото для решения")
 
     user_turn = {"role": "user", "content": content}
-    trimmed_history = (history or [])[-AI_HISTORY_MAX_MESSAGES:]
+    trimmed_history = _compact_history(history)
     response = await client.chat.completions.create(
         model=AI_MODEL_VISION,
         messages=[{"role": "system", "content": AI_SYSTEM_PROMPT}, *trimmed_history, user_turn],
