@@ -970,9 +970,11 @@ async def main():
     tb.solve_ai_request = fake_solve
     tb.stats["ai_usage"].pop(str(uid), None)
 
-    # ---- 30. RAG regression: the actual anatomy question that produced a noisy false-positive
-    # match (respiratory-organ-evolution biology content for a body-cavity anatomy list) must no
-    # longer match anything, now that scoring is normalized by query length (IDF-weighted) ----
+    # ---- 30. RAG regression: the actual reported anatomy question no longer pulls in the OLD
+    # noisy false-positive biology matches (respiratory-organ-evolution content for a body-cavity
+    # anatomy list) — and now that ANATOMY is indexed too, it should instead ground on genuinely
+    # relevant anatomy material, with the correct spelling of terms the model got wrong live
+    # ("Плева"/"Брыжжа" instead of "Плевра"/"Брюшина") ----
     anatomy_regression_query = (
         "Перикард — серозная оболочка сердца. Полость перикарда — пространство между слоями "
         "перикарда. Средостение — пространство между лёгкими. Грудная полость — пространство, в "
@@ -981,11 +983,22 @@ async def main():
         "находятся органы мочеполовой системы. Промежность — область между анусом и половыми "
         "органами. Семенной каналикул — трубочки в яичках, где происходит сперматогенез."
     )
-    assert tb._search_ai_rag_snippets(anatomy_regression_query) == [], (
-        "a long multi-topic anatomy list (outside the RAG index's Biology/Physics/Chemistry "
-        "scope) must not pull in unrelated biology content just by sheer word-overlap volume"
+    anatomy_matches = tb._search_ai_rag_snippets(anatomy_regression_query)
+    matched_titles = {s["title"] for s in anatomy_matches}
+    assert "Эволюция органов дыхания у беспозвоночных (Типы Annelides, Mollusca, Arthropoda)" not in matched_titles
+    assert "Гисто- и органогенез. Производные зародышевых листков" not in matched_titles
+    assert anatomy_matches, "the reported real anatomy question should now ground on real anatomy material"
+    assert all(s["subject"] == "анатомия" for s in anatomy_matches)
+    print("30. RAG drops the old noisy biology matches and grounds anatomy questions on ANATOMY: OK")
+
+    # ---- 30b. RAG index now also covers Anatomy (real material + flashcards from ANATOMY) ----
+    idx = tb.get_ai_rag_index()
+    assert any(e["subject"] == "анатомия" for e in idx), "ANATOMY must be part of the RAG index"
+    pleura_snippets = tb._search_ai_rag_snippets("Что такое плевра, средостение и полость плевры?")
+    assert any("плевр" in s["title"].lower() or "плевр" in s["text"].lower() for s in pleura_snippets), (
+        "a focused anatomy question must ground on real anatomy content with the correct term spelling"
     )
-    print("30. RAG no longer returns noisy matches for the reported anatomy false-positive: OK")
+    print("30b. RAG index includes real Anatomy material/flashcards and grounds focused questions: OK")
 
     # cleanup
     tb.solve_ai_request = orig_solve
