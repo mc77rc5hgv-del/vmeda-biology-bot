@@ -5865,10 +5865,13 @@ AI_MODEL_VISION = "gpt-4o-mini"
 AI_PRICE_INPUT_PER_1M = 0.15   # $/1M input tokens, gpt-4o-mini — держать в синхроне с реальным прайсом OpenAI
 AI_PRICE_OUTPUT_PER_1M = 0.60  # $/1M output tokens
 
-# Grok (xAI) — используется ТОЛЬКО для подробного разбора по шагам (quick=False), не для короткого
-# первого ответа: он не дешевле gpt-4o-mini (наоборот, дороже — актуальные цены xAI выше mini-тарифов
-# OpenAI), это сознательная плата за более сильное рассуждение там, где оно реально важно, а не мера
-# экономии. См. solve_ai_request — маршрутизация и автоматический откат на OpenAI, если Grok недоступен.
+# Grok (xAI) — код и маршрутизация полностью готовы (см. solve_ai_request), но по умолчанию
+# ВЫКЛЮЧЕНЫ: быстрый ответ (gpt-4o-mini) и подробный разбор (grok-4.3) — это два разных ИИ, и на
+# многошаговых расчётах они могут чуть разойтись в округлении (напр. 100,5°C vs 100,4°C на одной
+# и той же задаче) — в рамках ОДНОЙ сессии это выглядит как противоречащие друг другу ответы.
+# Решили пожертвовать более сильным рассуждением Grok ради полной самосогласованности быстрого и
+# подробного ответа. Ставь True, если снова захотим Grok на подробном разборе.
+AI_USE_GROK_FOR_DETAILED = False
 AI_MODEL_GROK = "grok-4.3"
 AI_GROK_PRICE_INPUT_PER_1M = 1.25   # $/1M input tokens, grok-4.3 — держать в синхроне с прайсом xAI
 AI_GROK_PRICE_OUTPUT_PER_1M = 2.50  # $/1M output tokens
@@ -6177,11 +6180,11 @@ async def solve_ai_request(
     max_tokens = AI_QUICK_MAX_TOKENS if quick else AI_DETAILED_MAX_TOKENS
 
     # Короткий первый ответ (quick=True) всегда идёт через дешёвый gpt-4o-mini. Подробный разбор
-    # по шагам (quick=False) — через Grok, если он настроен: там качество рассуждения важнее
-    # цены за токен (см. AI_MODEL_GROK). Если XAI_API_KEY не задан, provider/model просто
-    # остаются на OpenAI — разбор продолжает работать как раньше.
+    # по шагам (quick=False) шёл бы через Grok, будь AI_USE_GROK_FOR_DETAILED включён — код и
+    # маршрутизация готовы, но сейчас выключены (см. комментарий у константы), так что оба ответа
+    # остаются на OpenAI и не расходятся между собой.
     provider, model, active_client = "openai", AI_MODEL_VISION, get_openai_client()
-    if not quick:
+    if not quick and AI_USE_GROK_FOR_DETAILED:
         grok_client = get_grok_client()
         if grok_client is not None:
             provider, model, active_client = "grok", AI_MODEL_GROK, grok_client

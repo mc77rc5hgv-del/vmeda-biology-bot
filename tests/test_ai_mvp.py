@@ -485,7 +485,36 @@ async def main():
     assert usage19["provider"] == "openai"
     print("19. quick=True always stays on OpenAI, even with Grok configured: OK")
 
-    # ---- 19b. quick=False (detailed explanation) routes to Grok when it's configured ----
+    # ---- 19a. by default (AI_USE_GROK_FOR_DETAILED=False) quick=False ALSO stays on OpenAI —
+    # Grok's routing is fully wired but switched off, since a different model answering the
+    # detailed explanation than the quick answer could round a multi-step calculation slightly
+    # differently within the SAME session (e.g. 100,5°C vs 100,4°C on the same problem) ----
+    assert tb.AI_USE_GROK_FOR_DETAILED is False, "Grok routing for detailed answers must default to off"
+    captured19a = {}
+    class FakeCompletions19a:
+        async def create(self, **kwargs):
+            captured19a["model"] = kwargs["model"]
+            return FakeOpenAIResponse()
+    class FakeChat19a:
+        completions = FakeCompletions19a()
+    class FakeOpenAIClient19a:
+        chat = FakeChat19a()
+    class GrokMustNotBeCalledCompletions19a:
+        async def create(self, **kwargs):
+            raise AssertionError("Grok must not be called while AI_USE_GROK_FOR_DETAILED is off")
+    class GrokMustNotBeCalledChat19a:
+        completions = GrokMustNotBeCalledCompletions19a()
+    class GrokMustNotBeCalledClient19a:
+        chat = GrokMustNotBeCalledChat19a()
+    tb.get_openai_client = lambda: FakeOpenAIClient19a()
+    tb.get_grok_client = lambda: GrokMustNotBeCalledClient19a()
+    _, _, usage19a = await orig_solve(text="подробный вопрос", quick=False)
+    assert captured19a["model"] == tb.AI_MODEL_VISION
+    assert usage19a["provider"] == "openai"
+    print("19a. by default, quick=False also stays on OpenAI — Grok wired but switched off: OK")
+
+    # ---- 19b. with AI_USE_GROK_FOR_DETAILED explicitly on, quick=False routes to Grok ----
+    tb.AI_USE_GROK_FOR_DETAILED = True
     captured_grok = {}
     class FakeGrokUsage:
         prompt_tokens = 300
@@ -559,6 +588,7 @@ async def main():
 
     tb.get_openai_client = orig_get_client
     tb.get_grok_client = orig_get_grok_client
+    tb.AI_USE_GROK_FOR_DETAILED = False
 
     # ---- 20. photos are sent at "detail": "low" — gpt-4o-mini bills high/auto detail at up to
     # 36 835 tokens per photo (2833 base + 5667 per 512px tile) vs a flat 2833 at low, by far the
