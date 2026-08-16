@@ -360,6 +360,42 @@ async def main():
     assert checker2.ok and not checker2.stack
     print("17. markdown-to-HTML formatting is real, balanced, and escape-safe: OK")
 
+    # ---- 18. the REAL solve_ai_request caps how much history it resends (cost-runaway guard) ----
+    class FakeUsage:
+        prompt_tokens = 42
+        completion_tokens = 7
+    class FakeChoiceMsg:
+        content = "Ответ: А"
+    class FakeChoice:
+        message = FakeChoiceMsg()
+    class FakeOpenAIResponse:
+        choices = [FakeChoice()]
+        usage = FakeUsage()
+    captured = {}
+    class FakeCompletions:
+        async def create(self, **kwargs):
+            captured["messages"] = kwargs["messages"]
+            return FakeOpenAIResponse()
+    class FakeChat:
+        completions = FakeCompletions()
+    class FakeOpenAIClient:
+        chat = FakeChat()
+
+    orig_get_client = tb.get_openai_client
+    tb.get_openai_client = lambda: FakeOpenAIClient()
+    long_history = [
+        {"role": "user" if i % 2 == 0 else "assistant", "content": f"ход {i}"} for i in range(20)
+    ]
+    answer_r, user_turn_r, usage_r = await orig_solve(text="новый вопрос", history=long_history)
+    sent = captured["messages"]
+    assert sent[0]["role"] == "system"
+    assert len(sent) == 1 + tb.AI_HISTORY_MAX_MESSAGES + 1, "must be system + capped history + current turn"
+    assert sent[1:-1] == long_history[-tb.AI_HISTORY_MAX_MESSAGES:], "must keep only the MOST RECENT turns"
+    assert sent[-1] == user_turn_r
+    assert usage_r == {"input_tokens": 42, "output_tokens": 7}
+    tb.get_openai_client = orig_get_client
+    print("18. long history is trimmed before resending to the model: OK")
+
     # cleanup
     tb.solve_ai_request = orig_solve
     tb.OPENAI_API_KEY = orig_key

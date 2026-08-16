@@ -5868,6 +5868,9 @@ AI_SESSION_TIMEOUT_SECONDS = 20 * 60  # диалог считается закр
 AI_SESSIONS: dict = {}  # user_id -> {"messages": [...], "last_active": ts, "processing": bool} — открытый диалог с памятью
 AI_QUICK_MAX_TOKENS = 150   # короткий первый ответ — только итог, без хода решения
 AI_DETAILED_MAX_TOKENS = 1500
+AI_HISTORY_MAX_MESSAGES = 6  # сколько последних сообщений истории реально пересылаем модели —
+# без этого потолка стоимость каждого следующего сообщения в долгой сессии растёт почти
+# квадратично: на каждый ход модели заново пересылается исходное фото и вся переписка целиком
 
 AI_QUICK_SUFFIX = (
     "\n\n(Важно: в этом ответе дай ТОЛЬКО краткий итоговый ответ, без хода решения и пояснений — "
@@ -6080,9 +6083,10 @@ async def solve_ai_request(
         raise ValueError("Нет ни текста, ни фото для решения")
 
     user_turn = {"role": "user", "content": content}
+    trimmed_history = (history or [])[-AI_HISTORY_MAX_MESSAGES:]
     response = await client.chat.completions.create(
         model=AI_MODEL_VISION,
-        messages=[{"role": "system", "content": AI_SYSTEM_PROMPT}, *(history or []), user_turn],
+        messages=[{"role": "system", "content": AI_SYSTEM_PROMPT}, *trimmed_history, user_turn],
         max_tokens=AI_QUICK_MAX_TOKENS if quick else AI_DETAILED_MAX_TOKENS,
         temperature=0,  # для расчётных задач нужен стабильный, воспроизводимый ход решения,
                         # не творческое разнообразие — без этого один и тот же вопрос давал
