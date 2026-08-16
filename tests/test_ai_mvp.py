@@ -1000,6 +1000,36 @@ async def main():
     )
     print("30b. RAG index includes real Anatomy material/flashcards and grounds focused questions: OK")
 
+    # ---- 30c. RAG regression: _search_ai_rag_snippets_multi finds matches for a REAL-shaped
+    # numbered list (one item per line, the actual quick-answer format the bot generates) where a
+    # single-blob search over the whole 13-item list finds NOTHING — this was the live bug: the
+    # model still wrote "Плева" instead of "Плевра" because no grounding material ever got hit ----
+    numbered_anatomy_list = (
+        "1. Брюшина — складка брюшины, соединяющая органы с задней стенкой живота.\n"
+        "2. Полость брюшины — пространство между стенками брюшной полости и органами.\n"
+        "3. Брюшная полость — часть тела, содержащая органы пищеварения, печени, селезёнки и почек.\n"
+        "4. Плевра — серозная оболочка, покрывающая легкие и внутреннюю поверхность грудной клетки.\n"
+        "5. Полость плевры — пространство между листками плевры, заполненное плевральной жидкостью.\n"
+        "6. Перикард — серозная оболочка, окружающая сердце.\n"
+        "7. Полость перикарда — пространство между слоями перикарда, содержащая перикардиальную жидкость.\n"
+        "8. Средостение — пространство между легкими, содержащее сердце, трахею и другие структуры.\n"
+        "9. Грудная полость — часть тела, содержащая легкие и сердце.\n"
+        "10. Забрюшинное пространство — область, расположенная за брюшной полостью.\n"
+        "11. Полость малого таза — пространство, содержащее органы мочеполовой системы и прямую кишку.\n"
+        "12. Промежность — область между анусом и половыми органами.\n"
+        "13. Семенной каналикул — трубочки в яичках, где происходит образование сперматозоидов."
+    )
+    assert tb._search_ai_rag_snippets(numbered_anatomy_list) == [], (
+        "sanity check: the whole 13-item blob as ONE query is too diffuse to match anything — "
+        "this is exactly the live bug, confirming the per-item fix below is actually needed"
+    )
+    multi_matches = tb._search_ai_rag_snippets_multi(numbered_anatomy_list)
+    assert multi_matches, "searching each list item separately must find real anatomy grounding"
+    assert all(s["subject"] == "анатомия" for s in multi_matches)
+    matched_blob = " ".join(s["title"] + " " + s["text"] for s in multi_matches).lower()
+    assert "плевр" in matched_blob, "must ground the pleura term specifically (the one the model got wrong live)"
+    print("30c. _search_ai_rag_snippets_multi finds per-item matches a single blob query misses: OK")
+
     # cleanup
     tb.solve_ai_request = orig_solve
     tb.OPENAI_API_KEY = orig_key

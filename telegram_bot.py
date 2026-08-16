@@ -1929,7 +1929,9 @@ def search_questions_by_keyword(query: str, limit: int = SEARCH_RESULTS_LIMIT):
 # кафедре, а не с общими знаниями модели. Поиск — тот же стеммированный keyword-matching, что и
 # выше (0 токенов, чистый Python); токены тратятся только на сам подмешанный текст, и только
 # тогда, когда что-то релевантное реально нашлось.
-AI_RAG_TOP_K = 2          # сколько фрагментов подмешиваем максимум за один подробный запрос
+AI_RAG_TOP_K = 3          # сколько фрагментов подмешиваем максимум за один подробный запрос —
+# на многопунктных списках (_search_ai_rag_snippets_multi) термины могут разбегаться по разным
+# темам (лёгкие/плевра, сердце/перикард, таз/промежность), 2 не хватало на покрытие
 AI_RAG_SNIPPET_MAX_CHARS = 600  # потолок длины ОДНОГО фрагмента — ограничивает добавленные токены
 AI_RAG_MIN_COMMON_STEMS = 2  # минимум РАЗНЫХ общих слов с запросом — иначе одно случайное слово
                               # уже может дать высокий взвешенный балл
@@ -2004,10 +2006,11 @@ def get_ai_rag_stem_idf() -> dict:
         _AI_RAG_STEM_IDF = _build_ai_rag_stem_idf(get_ai_rag_index())
     return _AI_RAG_STEM_IDF
 
-def _search_ai_rag_snippets(query_text: str, limit: int = AI_RAG_TOP_K) -> list:
-    """Возвращает до `limit` наиболее релевантных записей индекса по НОРМАЛИЗОВАННОМУ IDF-баллу
-    (сумма весов общих слов / число стеммов в запросе — см. AI_RAG_MIN_SCORE) — без обращения к
-    модели, чистое сравнение множеств + взвешенная сумма."""
+def _score_ai_rag_entries(query_text: str) -> list:
+    """Возвращает [(score, entry), ...], не отсортировано и без обрезки по limit — общая часть
+    для _search_ai_rag_snippets (один запрос целиком) и _search_ai_rag_snippets_multi (по
+    отдельным пунктам списка). score — НОРМАЛИЗОВАННЫЙ IDF-балл (сумма весов общих слов / число
+    стеммов в запросе, см. AI_RAG_MIN_SCORE) — без обращения к модели, чистое сравнение множеств."""
     query_stems = {_word_stem(w) for w in _extract_words(query_text) if len(w) >= 4}
     if not query_stems:
         return []
@@ -2020,6 +2023,32 @@ def _search_ai_rag_snippets(query_text: str, limit: int = AI_RAG_TOP_K) -> list:
         score = sum(idf.get(stem, 0.0) for stem in common) / len(query_stems)
         if score >= AI_RAG_MIN_SCORE:
             scored.append((score, entry))
+    return scored
+
+def _search_ai_rag_snippets(query_text: str, limit: int = AI_RAG_TOP_K) -> list:
+    """Возвращает до `limit` наиболее релевантных записей индекса для ОДНОГО запроса целиком."""
+    scored = _score_ai_rag_entries(query_text)
+    scored.sort(key=lambda x: -x[0])
+    return [entry for _, entry in scored[:limit]]
+
+def _search_ai_rag_snippets_multi(answer_text: str, limit: int = AI_RAG_TOP_K) -> list:
+    """Как _search_ai_rag_snippets, но для многопунктных ответов (список из нескольких терминов)
+    сначала бьёт текст на отдельные пункты и ищет по КАЖДОМУ пункту отдельно, а не по всему ответу
+    разом. Иначе короткое упоминание одного термина (например, «Плевра») тонет в общем запросе из
+    8-13 разных структур из разных систем органов и не проходит порог релевантности ни для одной
+    темы — реально наблюдалось: поиск по всему списку целиком находил 0 совпадений, хотя половина
+    терминов по отдельности легко находится в базе. Дедуп по (subject, title) с сохранением
+    лучшего балла, до `limit` записей суммарно по всем пунктам."""
+    items = [p.strip() for p in _AI_LIST_MARKER_RE.split(answer_text) if p.strip()]
+    if len(items) < 2:
+        return _search_ai_rag_snippets(answer_text, limit=limit)
+    best_by_key = {}
+    for item in items:
+        for score, entry in _score_ai_rag_entries(item):
+            key = (entry["subject"], entry["title"])
+            if key not in best_by_key or score > best_by_key[key][0]:
+                best_by_key[key] = (score, entry)
+    scored = list(best_by_key.values())
     scored.sort(key=lambda x: -x[0])
     return [entry for _, entry in scored[:limit]]
 
@@ -6676,7 +6705,7 @@ async def handle_ai_photo_input(message: Message):
         record_ai_cost(usage)
         if quick:
             session["task_type"] = _classify_quick_answer(answer)
-            session["rag_context"] = _format_ai_rag_context(_search_ai_rag_snippets(answer))
+            session["rag_context"] = _format_ai_rag_context(_search_ai_rag_snippets_multi(answer))
         session["messages"].append(user_turn)
         session["messages"].append({"role": "assistant", "content": answer})
         session["last_active"] = time.time()
@@ -6731,7 +6760,7 @@ async def handle_ai_text_input(message: Message):
         if quick:
             session["task_type"] = _classify_quick_answer(answer)
             session["rag_context"] = _format_ai_rag_context(
-                _search_ai_rag_snippets(f"{message.text} {answer}")
+                _search_ai_rag_snippets_multi(f"{message.text} {answer}")
             )
         session["messages"].append(user_turn)
         session["messages"].append({"role": "assistant", "content": answer})
