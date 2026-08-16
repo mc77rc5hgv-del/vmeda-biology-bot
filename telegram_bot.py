@@ -6044,6 +6044,12 @@ def get_ai_waiting_keyboard():
 
 AI_IMAGE_MAX_DIM = 1280  # достаточно для чтения печатного/рукописного текста, дальше — лишние input-токены
 
+# "detail": "low" у gpt-4o-mini — это ФИКСИРОВАННЫЕ 2833 токена на фото, а не 2833 + 5667×тайлы
+# (до 36 835 токенов при auto/high на наш же ресайз в 1280px) — самая дорогая часть всего
+# AI-запроса на порядок дороже, чем экономия от сжатия истории диалога. Риск — модель видит
+# уменьшенную версию фото и может хуже прочитать мелкий текст/подстрочные индексы в формулах.
+AI_IMAGE_DETAIL = "low"
+
 def _resize_image_for_ai(image_bytes: bytes) -> bytes:
     """Фото с телефона часто в разы больше, чем нужно vision-модели для распознавания текста —
     у OpenAI цена фото считается по числу тайлов, то есть растёт с разрешением. Сжимаем перед
@@ -6160,7 +6166,7 @@ async def solve_ai_request(
         b64 = base64.b64encode(image_bytes).decode("ascii")
         content.append({
             "type": "image_url",
-            "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
+            "image_url": {"url": f"data:image/jpeg;base64,{b64}", "detail": AI_IMAGE_DETAIL},
         })
     if not content:
         raise ValueError("Нет ни текста, ни фото для решения")

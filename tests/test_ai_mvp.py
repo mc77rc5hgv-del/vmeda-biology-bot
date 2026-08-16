@@ -560,6 +560,29 @@ async def main():
     tb.get_openai_client = orig_get_client
     tb.get_grok_client = orig_get_grok_client
 
+    # ---- 20. photos are sent at "detail": "low" — gpt-4o-mini bills high/auto detail at up to
+    # 36 835 tokens per photo (2833 base + 5667 per 512px tile) vs a flat 2833 at low, by far the
+    # single biggest cost lever in the whole feature (much bigger than history compaction) ----
+    captured20 = {}
+    class FakeCompletions20:
+        async def create(self, **kwargs):
+            captured20["messages"] = kwargs["messages"]
+            return FakeOpenAIResponse()
+    class FakeChat20:
+        completions = FakeCompletions20()
+    class FakeOpenAIClient20:
+        chat = FakeChat20()
+    tb.get_openai_client = lambda: FakeOpenAIClient20()
+    tb.get_grok_client = lambda: None
+    await orig_solve(image_bytes=b"fake-jpeg-bytes", quick=True)
+    sent_user_turn = captured20["messages"][-1]
+    image_block = next(p for p in sent_user_turn["content"] if p["type"] == "image_url")
+    assert image_block["image_url"]["detail"] == tb.AI_IMAGE_DETAIL == "low"
+    print("20. photos are sent at detail=low to cut the dominant image-token cost: OK")
+
+    tb.get_openai_client = orig_get_client
+    tb.get_grok_client = orig_get_grok_client
+
     # cleanup
     tb.solve_ai_request = orig_solve
     tb.OPENAI_API_KEY = orig_key
