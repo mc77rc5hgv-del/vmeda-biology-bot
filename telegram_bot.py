@@ -5925,6 +5925,28 @@ def get_ai_waiting_keyboard():
     builder.adjust(1)
     return builder.as_markup()
 
+AI_IMAGE_MAX_DIM = 1280  # достаточно для чтения печатного/рукописного текста, дальше — лишние input-токены
+
+def _resize_image_for_ai(image_bytes: bytes) -> bytes:
+    """Фото с телефона часто в разы больше, чем нужно vision-модели для распознавания текста —
+    у OpenAI цена фото считается по числу тайлов, то есть растёт с разрешением. Сжимаем перед
+    отправкой; при любой ошибке разбора шлём оригинал как есть, не роняя запрос."""
+    try:
+        from PIL import Image, ImageOps
+        im = Image.open(io.BytesIO(image_bytes))
+        im = ImageOps.exif_transpose(im)
+        im = im.convert("RGB")
+        w, h = im.size
+        if max(w, h) > AI_IMAGE_MAX_DIM:
+            scale = AI_IMAGE_MAX_DIM / max(w, h)
+            im = im.resize((round(w * scale), round(h * scale)), Image.LANCZOS)
+        out = io.BytesIO()
+        im.save(out, "JPEG", quality=82, optimize=True)
+        return out.getvalue()
+    except Exception:
+        logger.exception("Не удалось сжать фото перед AI-запросом, отправляю оригинал")
+        return image_bytes
+
 async def solve_ai_request(*, image_bytes: bytes = None, text: str = None) -> str:
     client = get_openai_client()
     if client is None:
@@ -6019,7 +6041,7 @@ async def handle_ai_photo_input(message: Message):
         photo = message.photo[-1]
         tg_file = await bot.get_file(photo.file_id)
         buf = await bot.download_file(tg_file.file_path)
-        answer = await solve_ai_request(image_bytes=buf.read())
+        answer = await solve_ai_request(image_bytes=_resize_image_for_ai(buf.read()))
         increment_ai_usage(user_id)
         await safe_edit_text(thinking, get_ai_result_text(answer, user_id), parse_mode="HTML")
     except Exception:
