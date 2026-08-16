@@ -35,6 +35,7 @@ from ai.providers import xai as ai_xai
 from ai.router import AIRefusalError
 from ai.service import solve as solve_ai_request
 from ai.vision import resize_image as resize_image_for_ai
+from repositories import knowledge
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -60,63 +61,30 @@ ANATOMY_IMAGES_DIR = os.path.join(IMAGES_DIR, "anatomy")
 HISTOLOGY_IMAGES_DIR = os.path.join(IMAGES_DIR, "histology")
 
 # ==================== ЗАГРУЗКА ДАННЫХ ====================
-with open("tickets.json", "r", encoding="utf-8") as f:
-    TICKETS = json.load(f)
-TICKETS_DICT = {str(t["num"]): t for t in TICKETS}
-
-with open("questions.json", "r", encoding="utf-8") as f:
-    QUESTIONS = json.load(f)
-
-with open("physics_questions.json", "r", encoding="utf-8") as f:
-    PHYSICS_QUESTIONS = json.load(f)
-
-with open("physics_grade45.json", "r", encoding="utf-8") as f:
-    PHYSICS_GRADE45_QUESTIONS = json.load(f)
-
-with open("physics_extra_questions.json", "r", encoding="utf-8") as f:
-    PHYSICS_EXTRA_QUESTIONS = json.load(f)
-
-with open("chemistry_labs.json", "r", encoding="utf-8") as f:
-    CHEMISTRY_LABS = json.load(f)
-
-with open("chemistry_theory.json", "r", encoding="utf-8") as f:
-    CHEMISTRY_THEORY = json.load(f)["topics"]
-
-with open("chemistry_tasks.json", "r", encoding="utf-8") as f:
-    CHEMISTRY_TASKS = json.load(f)["topics"]
-
-with open("chemistry_theory_tickets.json", "r", encoding="utf-8") as f:
-    CHEMISTRY_THEORY_TICKETS = json.load(f)["tickets"]
-
-with open("chemistry_practice_tickets.json", "r", encoding="utf-8") as f:
-    CHEMISTRY_PRACTICE_TICKETS = json.load(f)["tickets"]
-
-with open("physics_tasks.json", "r", encoding="utf-8") as f:
-    PHYSICS_TASKS = json.load(f)["topics"]
-
-with open("physics_test_tickets.json", "r", encoding="utf-8") as f:
-    PHYSICS_TEST_TICKETS = json.load(f)["tickets"]
-
-with open("physics_task_tickets.json", "r", encoding="utf-8") as f:
-    PHYSICS_TASK_TICKETS = json.load(f)["tickets"]
-
-with open("physics_theory_tickets.json", "r", encoding="utf-8") as f:
-    PHYSICS_THEORY_TICKETS = json.load(f)["tickets"]
-
-with open("anatomy.json", "r", encoding="utf-8") as f:
-    ANATOMY = json.load(f)
-
-with open("anatomy_exam_test.json", "r", encoding="utf-8") as f:
-    ANATOMY_EXAM_TEST_PARTS = json.load(f)["parts"]
-
-with open("anatomy_exam_theory.json", "r", encoding="utf-8") as f:
-    ANATOMY_EXAM_THEORY_SECTIONS = json.load(f)["sections"]
-
-with open("anatomy_exam_practice.json", "r", encoding="utf-8") as f:
-    ANATOMY_EXAM_PRACTICE_SECTIONS = json.load(f)["sections"]
-
-with open("histology.json", "r", encoding="utf-8") as f:
-    HISTOLOGY = json.load(f)
+# Контент (билеты/вопросы/теория/анатомия/гистология) грузится из JSON в repositories/knowledge.py
+# (импортирован выше вместе с остальными модулями) — здесь только реэкспорт тех же имён под теми
+# же названиями, чтобы все обращения по всему файлу (QUESTIONS[...], ANATOMY[...] и т.д.) остались
+# без изменений.
+TICKETS = knowledge.TICKETS
+TICKETS_DICT = knowledge.TICKETS_DICT
+QUESTIONS = knowledge.QUESTIONS
+PHYSICS_QUESTIONS = knowledge.PHYSICS_QUESTIONS
+PHYSICS_GRADE45_QUESTIONS = knowledge.PHYSICS_GRADE45_QUESTIONS
+PHYSICS_EXTRA_QUESTIONS = knowledge.PHYSICS_EXTRA_QUESTIONS
+CHEMISTRY_LABS = knowledge.CHEMISTRY_LABS
+CHEMISTRY_THEORY = knowledge.CHEMISTRY_THEORY
+CHEMISTRY_TASKS = knowledge.CHEMISTRY_TASKS
+CHEMISTRY_THEORY_TICKETS = knowledge.CHEMISTRY_THEORY_TICKETS
+CHEMISTRY_PRACTICE_TICKETS = knowledge.CHEMISTRY_PRACTICE_TICKETS
+PHYSICS_TASKS = knowledge.PHYSICS_TASKS
+PHYSICS_TEST_TICKETS = knowledge.PHYSICS_TEST_TICKETS
+PHYSICS_TASK_TICKETS = knowledge.PHYSICS_TASK_TICKETS
+PHYSICS_THEORY_TICKETS = knowledge.PHYSICS_THEORY_TICKETS
+ANATOMY = knowledge.ANATOMY
+ANATOMY_EXAM_TEST_PARTS = knowledge.ANATOMY_EXAM_TEST_PARTS
+ANATOMY_EXAM_THEORY_SECTIONS = knowledge.ANATOMY_EXAM_THEORY_SECTIONS
+ANATOMY_EXAM_PRACTICE_SECTIONS = knowledge.ANATOMY_EXAM_PRACTICE_SECTIONS
+HISTOLOGY = knowledge.HISTOLOGY
 
 ai_rag.configure(
     questions=QUESTIONS, physics_questions=PHYSICS_QUESTIONS, chemistry_theory=CHEMISTRY_THEORY,
