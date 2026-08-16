@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+import random
+
 from _bootstrap import tb
 
 topic_key = "unpaired_skull_bones"
@@ -72,7 +74,7 @@ assert msess["bone_id"] is None
 pair = msess["queue"][0]
 term, correct_def = pair["term"], pair["definition"]
 distractor_pool = [p["definition"] for p in msess["all_pairs"] if p["definition"] != correct_def]
-distractors = tb.random.sample(distractor_pool, min(3, len(distractor_pool)))
+distractors = random.sample(distractor_pool, min(3, len(distractor_pool)))
 print("pooled match OK, term:", term[:40])
 tb.ANATOMY_MATCH_SESSIONS.pop(555111, None)
 

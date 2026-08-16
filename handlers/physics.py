@@ -1,14 +1,14 @@
-"""Раздел «Физика» (тестовая часть, билеты всех видов, задачи по темам) — Router вместо прямой
-регистрации на глобальном dp (Phase 3 рефакторинга, см. CLAUDE.md — та же схема, что у Гистологии/
-Анатомии/Биологии). Импортирует telegram_bot как tb — циклическая связь разрешается тем, что этот
-импорт стоит там же, где раньше стояла эта секция (см. блок "ФИЗИКА" в telegram_bot.py), когда все
-нужные отсюда имена уже определены в его модульном пространстве имён.
+"""Раздел «Физика» (тестовая часть, билеты всех видов, задачи по темам, главное меню предмета,
+скачивание файлов) — Router вместо прямой регистрации на глобальном dp (Phase 3 рефакторинга, см.
+CLAUDE.md — та же схема, что у Гистологии/Анатомии/Биологии/Химии). Импортирует telegram_bot как
+tb — циклическая связь разрешается тем, что этот импорт стоит там же, где раньше стояла эта секция,
+когда все нужные отсюда имена уже определены в его модульном пространстве имён.
 
-Узкий срез, как и с Биологией: сюда вынесены только сами callback_query-хендлеры (все с
-уникальными фильтрами, безопасно для порядка dp — здесь нет ни одного @dp.message). Клавиатурные
-билдеры (get_physics_menu, get_physics_tickets_menu и т.д., секция "ФИЗИКА" в начале файла) НЕ
-перенесены — они используются и хендлерами отсюда, и cb_menu_physics/download_physics_* (которые
-остаются в telegram_bot.py), так что их разумнее оставить на месте и обращаться к ним как tb.*."""
+Все хендлеры здесь — callback_query с уникальными фильтрами, безопасно для порядка dp (здесь нет
+ни одного @dp.message). Клавиатурные билдеры (get_physics_menu, get_physics_tickets_menu и т.д.,
+секция "ФИЗИКА" в начале telegram_bot.py) и файловые билдеры (build_physics_full_file и т.д.,
+секция "ВЫГРУЗКА РАЗДЕЛОВ В WORD-ФАЙЛ") НЕ перенесены — используются в основном другими,
+неперемещёнными частями файла, так что их разумнее оставить на месте и обращаться к ним как tb.*."""
 from aiogram import F, Router
 from aiogram.types import CallbackQuery, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -329,4 +329,48 @@ async def cb_phystask_show(callback: CallbackQuery):
         f"<b>Решение:</b>\n{task['solution']}"
     )
     await tb.safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=tb.get_physics_task_detail_keyboard(topic_num, task_num))
+
+
+# ==================== ФИЗИКА — ГЛАВНОЕ МЕНЮ / СКАЧИВАНИЕ ====================
+@router.callback_query(F.data == "menu_physics")
+async def cb_menu_physics(callback: CallbackQuery):
+    await callback.answer()
+    await tb.safe_edit_text(
+        callback.message,
+        f"⚛️ <b>Физика</b>\n{tb.DIVIDER}\n\nВыбери раздел:",
+        parse_mode="HTML",
+        reply_markup=tb.get_physics_menu()
+    )
+
+@router.callback_query(F.data == "download_physics_full")
+async def cb_download_physics_full(callback: CallbackQuery):
+    await callback.answer()
+    await callback.message.answer_document(
+        tb.build_physics_full_file(),
+        caption=f"📄 Физика: тестовая часть (186 вопросов) + шаблоны решения задач по всем темам.\n\n@{tb.BOT_USERNAME}"
+    )
+
+@router.callback_query(F.data == "download_physics_grade45")
+async def cb_download_physics_grade45(callback: CallbackQuery):
+    await callback.answer()
+    await callback.message.answer_document(
+        tb.build_physics_grade45_file(),
+        caption=f"📄 Физика — «(60 вопросов) на 4/5», все вопросы и ответы.\n\n@{tb.BOT_USERNAME}"
+    )
+
+@router.callback_query(F.data == "download_physics_ticket_tasks")
+async def cb_download_physics_ticket_tasks(callback: CallbackQuery):
+    await callback.answer()
+    await callback.message.answer_document(
+        tb.build_physics_ticket_tasks_file(),
+        caption=f"📄 Ответы на задачи (Часть 2) билетов 66-69.\n\n@{tb.BOT_USERNAME}"
+    )
+
+@router.callback_query(F.data == "download_physics_tasks_cheatsheet")
+async def cb_download_physics_tasks_cheatsheet(callback: CallbackQuery):
+    await callback.answer()
+    await callback.message.answer_document(
+        tb.build_physics_tasks_cheatsheet_file(),
+        caption=f"📄 Шпаргалка по всем типам задач по физике — формулы и обозначения.\n\n@{tb.BOT_USERNAME}"
+    )
 

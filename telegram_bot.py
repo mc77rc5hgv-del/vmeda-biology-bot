@@ -4,7 +4,6 @@ import html
 import io
 import json
 import logging
-import random
 import re
 import os
 import time
@@ -2203,114 +2202,9 @@ def get_referral_full_access_keyboard(user_id: int = None):
     builder.adjust(1)
     return builder.as_markup()
 
-def get_biology_menu():
-    builder = InlineKeyboardBuilder()
-    builder.button(text="📘 Билеты", callback_data="menu_tickets")
-    builder.button(text="📝 Вопросы", callback_data="menu_questions")
-    builder.button(text="🎯 Опрос (10 вопросов)", callback_data="quiz_start")
-    builder.button(text="📄 Все билеты (текстовый файл)", callback_data="download_biology_tickets")
-    builder.adjust(1)
-    builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
-    return builder.as_markup()
-
-# ==================== БИОЛОГИЯ — РЕЖИМ ОПРОСА (ФЛЭШ-КАРТОЧКИ) ====================
-QUIZ_SESSION_SIZE = 10
-QUIZ_SESSIONS: dict[int, dict] = {}
-
-def get_quiz_question_keyboard():
-    builder = InlineKeyboardBuilder()
-    builder.button(text="🙈 Показать ответ", callback_data="quiz_show_answer")
-    builder.button(text="🛑 Закончить опрос", callback_data="quiz_stop")
-    builder.adjust(1)
-    return builder.as_markup()
-
-def get_quiz_answer_keyboard():
-    builder = InlineKeyboardBuilder()
-    builder.button(text="✅ Знаю", callback_data="quiz_know")
-    builder.button(text="❌ Не знаю", callback_data="quiz_dont_know")
-    builder.adjust(2)
-    builder.row(InlineKeyboardButton(text="🛑 Закончить опрос", callback_data="quiz_stop"))
-    return builder.as_markup()
-
-def get_quiz_summary_keyboard():
-    builder = InlineKeyboardBuilder()
-    builder.button(text="🔁 Пройти ещё раз", callback_data="quiz_start")
-    builder.button(text="🔙 К биологии", callback_data="menu_biology")
-    builder.adjust(1)
-    return builder.as_markup()
-
-def start_quiz_session(user_id: int):
-    pool = list(QUESTIONS.keys())
-    size = min(QUIZ_SESSION_SIZE, len(pool))
-    QUIZ_SESSIONS[user_id] = {
-        "questions": random.sample(pool, size),
-        "index": 0,
-        "know": 0,
-        "dont_know": 0,
-    }
-
-async def render_quiz_question(message, user_id: int):
-    session = QUIZ_SESSIONS[user_id]
-    total = len(session["questions"])
-    q_num = session["questions"][session["index"]]
-    q = QUESTIONS[q_num]
-    text = (
-        f"🎯 <b>Опрос — вопрос {session['index'] + 1}/{total}</b>\n{DIVIDER}\n\n"
-        f"<b>{q['title']}</b>"
-    )
-    await safe_edit_text(message, text, parse_mode="HTML", reply_markup=get_quiz_question_keyboard())
-
-async def render_quiz_answer(message, user_id: int):
-    session = QUIZ_SESSIONS[user_id]
-    total = len(session["questions"])
-    q_num = session["questions"][session["index"]]
-    q = QUESTIONS[q_num]
-    header = f"🎯 <b>Опрос — вопрос {session['index'] + 1}/{total}</b>"
-    body = f"{header}\n{DIVIDER}\n\n<b>{q['title']}</b>\n\n{q['answer']}\n\n{DIVIDER}\nТы знал(а) ответ?"
-    short_caption = f"{header}\n{DIVIDER}\n\n<b>{q['title']}</b>"
-    await send_answer(message, body, short_caption, q, get_quiz_answer_keyboard(), edit=True)
-
-async def render_quiz_summary(message, user_id: int, aborted: bool = False):
-    session = QUIZ_SESSIONS.pop(user_id, None)
-    if not session:
-        await safe_edit_text(
-            message,
-            f"🧬 <b>Биология</b>\n{DIVIDER}\n\nВыбери формат подготовки:",
-            parse_mode="HTML",
-            reply_markup=get_biology_menu()
-        )
-        return
-    answered = session["know"] + session["dont_know"]
-    title = "🛑 <b>Опрос прерван</b>" if aborted else "🏁 <b>Опрос завершён!</b>"
-    text = (
-        f"{title}\n{DIVIDER}\n\n"
-        f"Отвечено вопросов: <b>{answered}</b>\n"
-        f"✅ Знаю: <b>{session['know']}</b>\n"
-        f"❌ Не знаю: <b>{session['dont_know']}</b>"
-    )
-    await safe_edit_text(message, text, parse_mode="HTML", reply_markup=get_quiz_summary_keyboard())
-
-def get_ticket_keyboard():
-    builder = InlineKeyboardBuilder()
-    for num in VISIBLE_TICKET_NUMS:
-        builder.button(text=f"🟢 {num}", callback_data=f"ticket:{num}")
-    builder.adjust(4)
-    builder.row(InlineKeyboardButton(text="🎲 Случайный билет", callback_data="random_ticket"))
-    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="menu_biology"))
-    return builder.as_markup()
-
-def get_questions_main_menu():
-    builder = InlineKeyboardBuilder()
-    builder.button(text="📄 Страница 1 (1-50)", callback_data="qpage:1")
-    builder.button(text="📄 Страница 2 (51-100)", callback_data="qpage:2")
-    builder.button(text="📄 Страница 3 (101-150)", callback_data="qpage:3")
-    builder.button(text="📄 Страница 4 (151-185)", callback_data="qpage:4")
-    builder.button(text="🎲 Случайный вопрос", callback_data="question_random")
-    builder.button(text="🔢 Ввести номер вручную", callback_data="question_by_number")
-    builder.button(text="🔍 Поиск по ключевым словам", callback_data="question_search")
-    builder.adjust(1)
-    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="menu_biology"))
-    return builder.as_markup()
+# Главное меню Биологии, режим опроса (флэш-карточки) и клавиатуры билетов/списка вопросов
+# перенесены в handlers/biology.py — см. dp.include_router(biology_handlers.router) и реэкспорт
+# дальше по файлу.
 
 def get_search_results_keyboard(nums: list):
     builder = InlineKeyboardBuilder()
@@ -4516,113 +4410,8 @@ async def cb_assistant_dm_reject(callback: CallbackQuery):
         logger.exception("Не удалось уведомить помощника %s об отклонении сообщения", req["assistant_id"])
 
 # ==================== МЕНЮ ====================
-@dp.callback_query(F.data == "menu_biology")
-async def cb_menu_biology(callback: CallbackQuery):
-    await callback.answer()
-    await safe_edit_text(
-        callback.message,
-        f"🧬 <b>Биология</b>\n{DIVIDER}\n\nВыбери формат подготовки:",
-        parse_mode="HTML",
-        reply_markup=get_biology_menu()
-    )
-
-def get_biology_tickets_locked_text() -> str:
-    tier_lines = "\n".join(
-        f"«{cfg['emoji']} {cfg['title']}» ({cfg['price_rub']}₽ / {cfg['price_stars']}⭐)"
-        for cfg in ACTIVE_SUBSCRIPTION_TIERS.values() if cfg.get("biology_download")
-    )
-    return (
-        f"📄 <b>Билеты по биологии — файл с ответами</b>\n{DIVIDER}\n\n"
-        "Скачивание готового файла со всеми вопросами и ответами доступно по подписке:\n\n"
-        f"{tier_lines}\n\n"
-        "Само прохождение билетов и вопросов в боте остаётся доступным как обычно — "
-        "подписка нужна только для скачивания файла."
-    )
-
-def get_biology_tickets_locked_keyboard():
-    builder = InlineKeyboardBuilder()
-    builder.button(text="💎 Оформить подписку", callback_data="subscription_menu")
-    builder.button(text="🔙 Назад к Биологии", callback_data="menu_biology")
-    builder.adjust(1)
-    return builder.as_markup()
-
-@dp.callback_query(F.data == "download_biology_tickets")
-async def cb_download_biology_tickets(callback: CallbackQuery):
-    if not biology_tickets_download_ok(callback.from_user.id):
-        await callback.answer()
-        await safe_edit_text(
-            callback.message,
-            get_biology_tickets_locked_text(),
-            parse_mode="HTML",
-            reply_markup=get_biology_tickets_locked_keyboard()
-        )
-        return
-    await callback.answer()
-    await callback.message.answer_document(
-        build_biology_tickets_file(),
-        caption=f"📄 Все билеты по биологии — вопросы и ответы.\n\n@{BOT_USERNAME}"
-    )
-
-@dp.callback_query(F.data == "quiz_start")
-async def cb_quiz_start(callback: CallbackQuery):
-    if not QUESTIONS:
-        await callback.answer("Вопросы ещё не загружены", show_alert=True)
-        return
-    await callback.answer()
-    start_quiz_session(callback.from_user.id)
-    await render_quiz_question(callback.message, callback.from_user.id)
-
-@dp.callback_query(F.data == "quiz_show_answer")
-async def cb_quiz_show_answer(callback: CallbackQuery):
-    user_id = callback.from_user.id
-    if user_id not in QUIZ_SESSIONS:
-        await callback.answer("Сессия опроса истекла, начни заново", show_alert=True)
-        return
-    await callback.answer()
-    await render_quiz_answer(callback.message, user_id)
-
-@dp.callback_query(F.data.in_({"quiz_know", "quiz_dont_know"}))
-async def cb_quiz_answer(callback: CallbackQuery):
-    user_id = callback.from_user.id
-    session = QUIZ_SESSIONS.get(user_id)
-    if not session:
-        await callback.answer("Сессия опроса истекла, начни заново", show_alert=True)
-        return
-    await callback.answer()
-    if callback.data == "quiz_know":
-        session["know"] += 1
-    else:
-        session["dont_know"] += 1
-    session["index"] += 1
-    if session["index"] >= len(session["questions"]):
-        await render_quiz_summary(callback.message, user_id)
-    else:
-        await render_quiz_question(callback.message, user_id)
-
-@dp.callback_query(F.data == "quiz_stop")
-async def cb_quiz_stop(callback: CallbackQuery):
-    await callback.answer()
-    await render_quiz_summary(callback.message, callback.from_user.id, aborted=True)
-
-@dp.callback_query(F.data == "menu_tickets")
-async def cb_menu_tickets(callback: CallbackQuery):
-    await callback.answer()
-    await safe_edit_text(
-        callback.message,
-        f"📘 <b>Билеты — Биология</b>\n{DIVIDER}\n\nВыбери билет:",
-        parse_mode="HTML",
-        reply_markup=get_ticket_keyboard()
-    )
-
-@dp.callback_query(F.data == "menu_questions")
-async def cb_menu_questions(callback: CallbackQuery):
-    await callback.answer()
-    await safe_edit_text(
-        callback.message,
-        f"📝 <b>Вопросы — Биология</b>\n{DIVIDER}\n\nВыбери страницу:",
-        parse_mode="HTML",
-        reply_markup=get_questions_main_menu()
-    )
+# Главное меню Биологии и режим опроса (quiz_*) перенесены в handlers/biology.py вместе с
+# билетами/вопросами — см. dp.include_router(biology_handlers.router) и реэкспорт дальше по файлу.
 
 @dp.callback_query(F.data == "back_to_main")
 async def cb_back_to_main(callback: CallbackQuery):
@@ -5352,73 +5141,11 @@ async def handle_donation_pending_amount(message: Message):
             reply_markup=get_rubles_visibility_keyboard(amount)
         )
 
-@dp.callback_query(F.data == "menu_physics")
-async def cb_menu_physics(callback: CallbackQuery):
-    await callback.answer()
-    await safe_edit_text(
-        callback.message,
-        f"⚛️ <b>Физика</b>\n{DIVIDER}\n\nВыбери раздел:",
-        parse_mode="HTML",
-        reply_markup=get_physics_menu()
-    )
+# Главное меню Физики и скачивание файлов перенесены в handlers/physics.py — см.
+# dp.include_router(physics_handlers.router) и реэкспорт дальше по файлу.
 
-@dp.callback_query(F.data == "download_physics_full")
-async def cb_download_physics_full(callback: CallbackQuery):
-    await callback.answer()
-    await callback.message.answer_document(
-        build_physics_full_file(),
-        caption=f"📄 Физика: тестовая часть (186 вопросов) + шаблоны решения задач по всем темам.\n\n@{BOT_USERNAME}"
-    )
-
-@dp.callback_query(F.data == "download_physics_grade45")
-async def cb_download_physics_grade45(callback: CallbackQuery):
-    await callback.answer()
-    await callback.message.answer_document(
-        build_physics_grade45_file(),
-        caption=f"📄 Физика — «(60 вопросов) на 4/5», все вопросы и ответы.\n\n@{BOT_USERNAME}"
-    )
-
-@dp.callback_query(F.data == "download_physics_ticket_tasks")
-async def cb_download_physics_ticket_tasks(callback: CallbackQuery):
-    await callback.answer()
-    await callback.message.answer_document(
-        build_physics_ticket_tasks_file(),
-        caption=f"📄 Ответы на задачи (Часть 2) билетов 66-69.\n\n@{BOT_USERNAME}"
-    )
-
-@dp.callback_query(F.data == "download_physics_tasks_cheatsheet")
-async def cb_download_physics_tasks_cheatsheet(callback: CallbackQuery):
-    await callback.answer()
-    await callback.message.answer_document(
-        build_physics_tasks_cheatsheet_file(),
-        caption=f"📄 Шпаргалка по всем типам задач по физике — формулы и обозначения.\n\n@{BOT_USERNAME}"
-    )
-
-@dp.callback_query(F.data == "menu_chemistry")
-async def cb_menu_chemistry(callback: CallbackQuery):
-    await callback.answer()
-    await safe_edit_text(
-        callback.message,
-        f"🧪 <b>Химия</b>\n{DIVIDER}\n\nВыбери раздел:",
-        parse_mode="HTML",
-        reply_markup=get_chemistry_menu()
-    )
-
-@dp.callback_query(F.data == "download_chemistry_labs")
-async def cb_download_chemistry_labs(callback: CallbackQuery):
-    await callback.answer()
-    await callback.message.answer_document(
-        build_chemistry_labs_file(),
-        caption=f"📄 Все лабораторные работы по химии.\n\n@{BOT_USERNAME}"
-    )
-
-@dp.callback_query(F.data == "download_chemistry_tasks")
-async def cb_download_chemistry_tasks(callback: CallbackQuery):
-    await callback.answer()
-    await callback.message.answer_document(
-        build_chemistry_tasks_file(),
-        caption=f"📄 Все задачи по химии.\n\n@{BOT_USERNAME}"
-    )
+# Главное меню Химии и скачивание файлов перенесены в handlers/chemistry.py — см.
+# dp.include_router(chemistry_handlers.router) и реэкспорт дальше по файлу.
 
 # ==================== ХИМИЯ ====================
 # Хендлеры (теория с навигацией, билеты, задачи, лабораторные работы — все с уникальными
@@ -5449,6 +5176,9 @@ cb_show_lab = chemistry_handlers.cb_show_lab
 cb_lab_summary = chemistry_handlers.cb_lab_summary
 cb_lab_experiments = chemistry_handlers.cb_lab_experiments
 cb_lab_calculations = chemistry_handlers.cb_lab_calculations
+cb_menu_chemistry = chemistry_handlers.cb_menu_chemistry
+cb_download_chemistry_labs = chemistry_handlers.cb_download_chemistry_labs
+cb_download_chemistry_tasks = chemistry_handlers.cb_download_chemistry_tasks
 
 # ==================== БИОЛОГИЯ — БИЛЕТЫ / ВОПРОСЫ ====================
 # Билеты и вопросы (уникальные callback_data-фильтры, безопасно для порядка dp) вынесены в
@@ -5468,6 +5198,28 @@ cb_show_question = biology_handlers.cb_show_question
 cb_question_random = biology_handlers.cb_question_random
 cb_question_by_number = biology_handlers.cb_question_by_number
 cb_question_search = biology_handlers.cb_question_search
+get_biology_menu = biology_handlers.get_biology_menu
+QUIZ_SESSION_SIZE = biology_handlers.QUIZ_SESSION_SIZE
+QUIZ_SESSIONS = biology_handlers.QUIZ_SESSIONS
+get_quiz_question_keyboard = biology_handlers.get_quiz_question_keyboard
+get_quiz_answer_keyboard = biology_handlers.get_quiz_answer_keyboard
+get_quiz_summary_keyboard = biology_handlers.get_quiz_summary_keyboard
+start_quiz_session = biology_handlers.start_quiz_session
+render_quiz_question = biology_handlers.render_quiz_question
+render_quiz_answer = biology_handlers.render_quiz_answer
+render_quiz_summary = biology_handlers.render_quiz_summary
+get_ticket_keyboard = biology_handlers.get_ticket_keyboard
+get_questions_main_menu = biology_handlers.get_questions_main_menu
+get_biology_tickets_locked_text = biology_handlers.get_biology_tickets_locked_text
+get_biology_tickets_locked_keyboard = biology_handlers.get_biology_tickets_locked_keyboard
+cb_menu_biology = biology_handlers.cb_menu_biology
+cb_download_biology_tickets = biology_handlers.cb_download_biology_tickets
+cb_quiz_start = biology_handlers.cb_quiz_start
+cb_quiz_show_answer = biology_handlers.cb_quiz_show_answer
+cb_quiz_answer = biology_handlers.cb_quiz_answer
+cb_quiz_stop = biology_handlers.cb_quiz_stop
+cb_menu_tickets = biology_handlers.cb_menu_tickets
+cb_menu_questions = biology_handlers.cb_menu_questions
 
 @dp.message(F.text.isdigit())
 async def handle_question_number(message: Message):
@@ -5927,6 +5679,11 @@ cb_phystask_topic = physics_handlers.cb_phystask_topic
 cb_phystask_formulas = physics_handlers.cb_phystask_formulas
 cb_phystask_list = physics_handlers.cb_phystask_list
 cb_phystask_show = physics_handlers.cb_phystask_show
+cb_menu_physics = physics_handlers.cb_menu_physics
+cb_download_physics_full = physics_handlers.cb_download_physics_full
+cb_download_physics_grade45 = physics_handlers.cb_download_physics_grade45
+cb_download_physics_ticket_tasks = physics_handlers.cb_download_physics_ticket_tasks
+cb_download_physics_tasks_cheatsheet = physics_handlers.cb_download_physics_tasks_cheatsheet
 
 # ==================== АНАТОМИЯ (В РАЗРАБОТКЕ, ПОКА ДОСТУПНО ТОЛЬКО АДМИНАМ) ====================
 # Хендлеры и вся логика раздела вынесены в handlers/anatomy.py (свой Router) — здесь только

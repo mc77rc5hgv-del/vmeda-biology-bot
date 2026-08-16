@@ -1,12 +1,14 @@
-"""Раздел «Химия» (теория с навигацией, билеты, задачи, лабораторные работы) — Router вместо
-прямой регистрации на глобальном dp (Phase 3 рефакторинга, см. CLAUDE.md — та же схема, что у
-Гистологии/Анатомии/Биологии/Физики). Импортирует telegram_bot как tb — циклическая связь
-разрешается тем, что этот импорт стоит там же, где раньше стояла эта секция.
+"""Раздел «Химия» (теория с навигацией, билеты, задачи, лабораторные работы, главное меню
+предмета, скачивание файлов) — Router вместо прямой регистрации на глобальном dp (Phase 3
+рефакторинга, см. CLAUDE.md — та же схема, что у Гистологии/Анатомии/Биологии/Физики). Импортирует
+telegram_bot как tb — циклическая связь разрешается тем, что этот импорт стоит там же, где раньше
+стояла эта секция.
 
-Узкий срез, как и с Биологией/Физикой: только сами callback_query-хендлеры (все с уникальными
-фильтрами, безопасно для порядка dp — здесь нет ни одного @dp.message). Клавиатурные билдеры и
-`chemistry_tickets_access_ok` (секция "ХИМИЯ" в начале файла) НЕ перенесены — используются и
-хендлерами отсюда, и cb_menu_chemistry/download_chemistry_*, которые остаются в telegram_bot.py."""
+Все хендлеры здесь — callback_query с уникальными фильтрами, безопасно для порядка dp (здесь нет
+ни одного @dp.message). Клавиатурные билдеры, `chemistry_tickets_access_ok` (секция "ХИМИЯ" в
+начале telegram_bot.py) и файловые билдеры (build_chemistry_labs_file и т.д., секция "ВЫГРУЗКА
+РАЗДЕЛОВ В WORD-ФАЙЛ") НЕ перенесены — используются в основном другими, неперемещёнными частями
+файла, так что их разумнее оставить на месте и обращаться к ним как tb.*."""
 from aiogram import F, Router
 from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -310,4 +312,32 @@ async def cb_lab_calculations(callback: CallbackQuery):
     builder = InlineKeyboardBuilder()
     builder.button(text="🔙 Назад", callback_data=f"lab:{lab_num}")
     await tb.safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=builder.as_markup())
+
+
+# ==================== ХИМИЯ — ГЛАВНОЕ МЕНЮ / СКАЧИВАНИЕ ====================
+@router.callback_query(F.data == "menu_chemistry")
+async def cb_menu_chemistry(callback: CallbackQuery):
+    await callback.answer()
+    await tb.safe_edit_text(
+        callback.message,
+        f"🧪 <b>Химия</b>\n{tb.DIVIDER}\n\nВыбери раздел:",
+        parse_mode="HTML",
+        reply_markup=tb.get_chemistry_menu()
+    )
+
+@router.callback_query(F.data == "download_chemistry_labs")
+async def cb_download_chemistry_labs(callback: CallbackQuery):
+    await callback.answer()
+    await callback.message.answer_document(
+        tb.build_chemistry_labs_file(),
+        caption=f"📄 Все лабораторные работы по химии.\n\n@{tb.BOT_USERNAME}"
+    )
+
+@router.callback_query(F.data == "download_chemistry_tasks")
+async def cb_download_chemistry_tasks(callback: CallbackQuery):
+    await callback.answer()
+    await callback.message.answer_document(
+        tb.build_chemistry_tasks_file(),
+        caption=f"📄 Все задачи по химии.\n\n@{tb.BOT_USERNAME}"
+    )
 
