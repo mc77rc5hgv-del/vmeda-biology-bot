@@ -950,6 +950,52 @@ async def main():
     tb.get_openai_client = orig_get_client
     tb.get_grok_client = orig_get_grok_client
 
+    # ---- 28d. OpenAI refusing on an already-openai primary attempt (e.g. task_type="problem", a
+    # multi-item list — where Gemini normally isn't used) now tries Gemini as a genuine LAST
+    # RESORT if configured, instead of giving up immediately — a refusal is worse for the user
+    # than a slightly less polished but real answer ----
+    orig_gemini_key_28d = tb.GEMINI_API_KEY
+    tb.GEMINI_API_KEY = "fake-gemini-key-for-tests"
+    class RefusingOpenAICompletions28d:
+        async def create(self, **kwargs):
+            return RefusalResponse()
+    class RefusingOpenAIChat28d:
+        completions = RefusingOpenAICompletions28d()
+    class RefusingOpenAIClient28d:
+        chat = RefusingOpenAIChat28d()
+    tb.get_openai_client = lambda: RefusingOpenAIClient28d()
+    gemini_calls_28d = []
+    async def fake_call_gemini_success_28d(messages, max_tokens):
+        gemini_calls_28d.append(1)
+        return "Реальный ответ от Gemini, не отказ.", {"input_tokens": 80, "output_tokens": 30}
+    orig_call_gemini_28d = tb._call_gemini
+    tb._call_gemini = fake_call_gemini_success_28d
+    answer_28d, _, usage_28d = await orig_solve(text="анатомический вопрос", quick=False)
+    assert len(gemini_calls_28d) == 1, "must try Gemini exactly once after OpenAI refuses"
+    assert usage_28d["provider"] == "gemini"
+    assert answer_28d == "Реальный ответ от Gemini, не отказ."
+    print("28d. OpenAI refusal falls back to Gemini as last resort, which answers for real: OK")
+
+    # ---- 28e. if Gemini ALSO refuses after OpenAI, AIRefusalError still propagates — exactly 2
+    # attempts total (openai, then gemini), no loop ----
+    async def fake_call_gemini_refuses_28e(messages, max_tokens):
+        gemini_calls_28d.append(1)
+        return "Извините, но я не могу помочь с этой просьбой.", {"input_tokens": 40, "output_tokens": 10}
+    tb._call_gemini = fake_call_gemini_refuses_28e
+    gemini_calls_28d.clear()
+    try:
+        await orig_solve(text="анатомический вопрос", quick=False)
+        raised28e = False
+    except tb.AIRefusalError:
+        raised28e = True
+    assert raised28e, "must still raise AIRefusalError if Gemini also refuses"
+    assert len(gemini_calls_28d) == 1, "must try Gemini exactly once, not loop"
+    print("28e. Gemini also refusing after OpenAI still raises AIRefusalError, no loop: OK")
+
+    tb._call_gemini = orig_call_gemini_28d
+    tb.get_openai_client = orig_get_client
+    tb.GEMINI_API_KEY = orig_gemini_key_28d
+
     # ---- 29. handler level: AIRefusalError shows a clear message, does NOT charge the daily
     # quota, and leaves the session alive so the user can rephrase and retry ----
     tb.end_ai_session(uid)

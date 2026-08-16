@@ -6440,6 +6440,27 @@ async def _call_provider(provider: str, model: str, client, messages: list, max_
     }
     return answer, usage
 
+async def _try_ai_providers(attempts: list, messages: list, max_tokens: int) -> tuple:
+    """attempts — [(provider, model, client), ...] в порядке приоритета. Пробует по очереди, пока
+    один не ответит успешно (без исключения и без признаков отказа контент-фильтра) — не ретрай в
+    цикле, максимум len(attempts) попыток, каждая на другом провайдере/ключе. Возвращает (provider,
+    answer_raw, usage) первой удавшейся попытки; если ВСЕ попытки исчерпаны — поднимает исключение
+    последней (обычно AIRefusalError, если дело было в контент-фильтре, а не в сбое сети)."""
+    last_exc = None
+    for provider, model, client in attempts:
+        try:
+            answer_raw, usage = await _call_provider(provider, model, client, messages, max_tokens)
+            # temperature=0 (внутри _call_provider/_call_gemini) — для расчётных задач нужен
+            # стабильный, воспроизводимый ход решения: без этого один и тот же вопрос давал
+            # разный метод и разный ответ при каждом новом запросе
+            if _looks_like_ai_refusal(answer_raw):
+                raise AIRefusalError(f"{provider} отказался отвечать (похоже на срабатывание контент-фильтра)")
+            return provider, answer_raw, usage
+        except Exception as exc:
+            logger.exception("%s недоступен или отказал, пробую следующий вариант, если есть", provider)
+            last_exc = exc
+    raise last_exc
+
 async def solve_ai_request(
     *, image_bytes: bytes = None, text: str = None, history: list = None, quick: bool = False,
     task_type: str = None, rag_context: str = None,
@@ -6503,27 +6524,23 @@ async def solve_ai_request(
     if provider != "gemini" and active_client is None:
         raise RuntimeError("AI недоступен: не задан OPENAI_API_KEY")
 
-    try:
-        answer_raw, usage = await _call_provider(provider, model, active_client, messages, max_tokens)
-        # temperature=0 (внутри _call_provider/_call_gemini) — для расчётных задач нужен
-        # стабильный, воспроизводимый ход решения, не творческое разнообразие: без этого один и
-        # тот же вопрос давал разный метод и разный ответ при каждом новом запросе
-        if _looks_like_ai_refusal(answer_raw):
-            raise AIRefusalError(f"{provider} отказался отвечать (похоже на срабатывание контент-фильтра)")
-    except Exception:
-        if provider == "openai":
-            raise
+    attempts = [(provider, model, active_client)]
+    if provider != "openai":
         # Grok/Gemini недоступны или отказали (невалидный ключ, сбой у провайдера, контент-фильтр
-        # и т.п.) — один запасной запрос через OpenAI, чтобы ответ не переставал приходить
-        # пользователю. Не ретрай в цикле — ровно одна дополнительная попытка на другом провайдере.
-        logger.exception("%s недоступен или отказал, откатываюсь на OpenAI для этого запроса", provider)
+        # и т.п.) — запасной вариант через OpenAI, чтобы ответ не переставал приходить пользователю.
         fallback_client = get_openai_client()
-        if fallback_client is None:
-            raise
-        provider, model = "openai", AI_MODEL_VISION
-        answer_raw, usage = await _call_provider(provider, model, fallback_client, messages, max_tokens)
-        if _looks_like_ai_refusal(answer_raw):
-            raise AIRefusalError(f"{provider} тоже отказался отвечать на этот вопрос")
+        if fallback_client is not None:
+            attempts.append(("openai", AI_MODEL_VISION, fallback_client))
+    elif GEMINI_API_KEY:
+        # OpenAI отказал (контент-фильтр) — Gemini как последний резерв, даже для расчётных/
+        # многопунктных ответов, где обычно не используется из соображений качества/
+        # самосогласованности: отказ пользователю хуже, чем чуть менее аккуратный, но реальный
+        # ответ. Не влияет на случай, когда OpenAI просто недоступен по ключу — это отдельная
+        # ветка выше по функции (RuntimeError до этого места).
+        attempts.append(("gemini", AI_MODEL_GEMINI, None))
+    # Не ретрай в цикле — максимум len(attempts) попыток (обычно 1-2), каждая на другом провайдере.
+
+    provider, answer_raw, usage = await _try_ai_providers(attempts, messages, max_tokens)
 
     answer = _clean_ai_answer(answer_raw)
     if len(answer) > AI_ANSWER_TELEGRAM_LIMIT:
