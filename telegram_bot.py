@@ -5859,7 +5859,8 @@ async def handle_question_number(message: Message):
 AI_MODEL_VISION = "gpt-4o-mini"
 AI_FREE_DAILY_LIMIT = 3
 AI_ANSWER_TELEGRAM_LIMIT = 3500  # с запасом от лимита Telegram в 4096 символов на сообщение
-AI_PENDING: set = set()  # user_id тех, кто нажал "Отправить фото/текст" и ждём их следующее сообщение
+AI_SESSION_TIMEOUT_SECONDS = 20 * 60  # диалог считается закрытым после 20 минут без сообщений
+AI_SESSIONS: dict = {}  # user_id -> {"messages": [...], "last_active": ts, "processing": bool} — открытый диалог с памятью
 
 AI_SYSTEM_PROMPT = (
     "Ты — AI-помощник для студентов ВМедА (Военно-медицинская академия им. С.М. Кирова), "
@@ -5899,6 +5900,16 @@ def increment_ai_usage(user_id: int) -> None:
 
 def ai_requests_left(user_id: int) -> int:
     return max(0, AI_FREE_DAILY_LIMIT - get_ai_usage_today(user_id))
+
+def is_ai_session_active(user_id: int) -> bool:
+    session = AI_SESSIONS.get(user_id)
+    return bool(session) and time.time() - session["last_active"] < AI_SESSION_TIMEOUT_SECONDS
+
+def start_ai_session(user_id: int) -> None:
+    AI_SESSIONS[user_id] = {"messages": [], "last_active": time.time(), "processing": False}
+
+def end_ai_session(user_id: int) -> None:
+    AI_SESSIONS.pop(user_id, None)
 
 def get_ai_menu_text(user_id: int) -> str:
     left = ai_requests_left(user_id)
@@ -5947,7 +5958,10 @@ def _resize_image_for_ai(image_bytes: bytes) -> bytes:
         logger.exception("Не удалось сжать фото перед AI-запросом, отправляю оригинал")
         return image_bytes
 
-async def solve_ai_request(*, image_bytes: bytes = None, text: str = None) -> str:
+async def solve_ai_request(*, image_bytes: bytes = None, text: str = None, history: list = None) -> tuple:
+    """history — предыдущие ходы этого диалога (без системного промпта, он добавляется здесь же),
+    в формате messages OpenAI. Возвращает (ответ, user_turn) — user_turn нужен вызывающему коду,
+    чтобы дописать этот ход в историю сессии вместе с ответом ассистента."""
     client = get_openai_client()
     if client is None:
         raise RuntimeError("AI недоступен: не задан OPENAI_API_KEY")
@@ -5964,31 +5978,43 @@ async def solve_ai_request(*, image_bytes: bytes = None, text: str = None) -> st
     if not content:
         raise ValueError("Нет ни текста, ни фото для решения")
 
+    user_turn = {"role": "user", "content": content}
     response = await client.chat.completions.create(
         model=AI_MODEL_VISION,
-        messages=[
-            {"role": "system", "content": AI_SYSTEM_PROMPT},
-            {"role": "user", "content": content},
-        ],
+        messages=[{"role": "system", "content": AI_SYSTEM_PROMPT}, *(history or []), user_turn],
         max_tokens=1500,
     )
     answer = response.choices[0].message.content or "Не удалось получить ответ от AI."
     if len(answer) > AI_ANSWER_TELEGRAM_LIMIT:
         answer = answer[:AI_ANSWER_TELEGRAM_LIMIT] + "…\n\n(ответ обрезан)"
-    return answer
+    return answer, user_turn
 
-def get_ai_result_text(answer: str, user_id: int) -> str:
+def get_ai_result_text(answer: str, user_id: int, session_active: bool) -> str:
     left = ai_requests_left(user_id)
+    continuation = (
+        "\n\n💬 Можешь сразу уточнить вопрос по этой же теме — я помню контекст диалога."
+        if session_active else ""
+    )
     return (
         f"🤖 <b>Ответ AI</b>\n{DIVIDER}\n\n{html.escape(answer)}\n\n"
         f"💡 Сверяй важные ответы с материалами курса.\n"
         f"Осталось бесплатных запросов сегодня: {left}/{AI_FREE_DAILY_LIMIT}"
+        f"{continuation}"
     )
+
+def get_ai_result_keyboard(session_active: bool):
+    builder = InlineKeyboardBuilder()
+    if session_active:
+        builder.button(text="🔚 Закончить диалог", callback_data="ai_session_end")
+    else:
+        builder.button(text="🔙 Назад в меню", callback_data="ai_menu")
+    builder.adjust(1)
+    return builder.as_markup()
 
 @dp.callback_query(F.data == "ai_menu")
 async def cb_ai_menu(callback: CallbackQuery):
     await callback.answer()
-    AI_PENDING.discard(callback.from_user.id)
+    end_ai_session(callback.from_user.id)
     await safe_edit_text(
         callback.message,
         get_ai_menu_text(callback.from_user.id),
@@ -6006,18 +6032,30 @@ async def cb_ai_solve_start(callback: CallbackQuery):
         await callback.answer("На сегодня бесплатные AI-запросы закончились, попробуй завтра.", show_alert=True)
         return
     await callback.answer()
-    AI_PENDING.add(user_id)
+    start_ai_session(user_id)
     await safe_edit_text(
         callback.message,
-        f"📷 <b>Жду задание</b>\n{DIVIDER}\n\nПришли фото задания или напиши его текстом одним сообщением.",
+        f"📷 <b>Жду задание</b>\n{DIVIDER}\n\nПришли фото задания или напиши его текстом одним сообщением. "
+        "Дальше можно будет уточнять вопросы по теме — контекст диалога сохранится.",
         parse_mode="HTML",
         reply_markup=get_ai_waiting_keyboard()
     )
 
 @dp.callback_query(F.data == "ai_solve_cancel")
 async def cb_ai_solve_cancel(callback: CallbackQuery):
-    AI_PENDING.discard(callback.from_user.id)
+    end_ai_session(callback.from_user.id)
     await callback.answer()
+    await safe_edit_text(
+        callback.message,
+        get_ai_menu_text(callback.from_user.id),
+        parse_mode="HTML",
+        reply_markup=get_ai_menu_keyboard()
+    )
+
+@dp.callback_query(F.data == "ai_session_end")
+async def cb_ai_session_end(callback: CallbackQuery):
+    end_ai_session(callback.from_user.id)
+    await callback.answer("Диалог закончен")
     await safe_edit_text(
         callback.message,
         get_ai_menu_text(callback.from_user.id),
@@ -6030,43 +6068,81 @@ async def handle_ai_photo_input(message: Message):
     """Единственный обработчик входящих фото в боте — фото вне AI-режима бот
     никогда раньше не принимал, поэтому конфликтов с другими хендлерами нет."""
     user_id = message.from_user.id
-    if user_id not in AI_PENDING:
+    if not is_ai_session_active(user_id):
         return
-    AI_PENDING.discard(user_id)
+    session = AI_SESSIONS[user_id]
+    if session["processing"]:
+        return  # предыдущее сообщение этого диалога ещё обрабатывается — вероятный случайный дубль
     if ai_requests_left(user_id) <= 0:
+        end_ai_session(user_id)
         await message.answer("На сегодня бесплатные AI-запросы закончились, попробуй завтра.")
         return
+    session["processing"] = True
     thinking = await message.answer("🤖 Разбираю задание, подожди немного...")
     try:
         photo = message.photo[-1]
         tg_file = await bot.get_file(photo.file_id)
         buf = await bot.download_file(tg_file.file_path)
-        answer = await solve_ai_request(image_bytes=_resize_image_for_ai(buf.read()))
+        answer, user_turn = await solve_ai_request(
+            image_bytes=_resize_image_for_ai(buf.read()), history=session["messages"]
+        )
         increment_ai_usage(user_id)
-        await safe_edit_text(thinking, get_ai_result_text(answer, user_id), parse_mode="HTML")
+        session["messages"].append(user_turn)
+        session["messages"].append({"role": "assistant", "content": answer})
+        session["last_active"] = time.time()
+        session_active = ai_requests_left(user_id) > 0
+        if not session_active:
+            end_ai_session(user_id)
+        await safe_edit_text(
+            thinking,
+            get_ai_result_text(answer, user_id, session_active),
+            parse_mode="HTML",
+            reply_markup=get_ai_result_keyboard(session_active)
+        )
     except Exception:
         logger.exception("Ошибка при обработке AI-фото от пользователя %s", user_id)
         await safe_edit_text(thinking, "⚠️ Не удалось обработать фото. Попробуй ещё раз или пришли текстом.")
+    finally:
+        if user_id in AI_SESSIONS:
+            AI_SESSIONS[user_id]["processing"] = False
 
 @dp.message(F.text)
 async def handle_ai_text_input(message: Message):
     user_id = message.from_user.id
-    if user_id not in AI_PENDING:
+    if not is_ai_session_active(user_id):
         raise SkipHandler  # не AI-режим — пусть сообщение обработают остальные текстовые хендлеры
     if message.text.startswith("/"):
         raise SkipHandler
-    AI_PENDING.discard(user_id)
+    session = AI_SESSIONS[user_id]
+    if session["processing"]:
+        raise SkipHandler  # предыдущее сообщение этого диалога ещё обрабатывается — вероятный случайный дубль
     if ai_requests_left(user_id) <= 0:
+        end_ai_session(user_id)
         await message.answer("На сегодня бесплатные AI-запросы закончились, попробуй завтра.")
         return
+    session["processing"] = True
     thinking = await message.answer("🤖 Разбираю задание, подожди немного...")
     try:
-        answer = await solve_ai_request(text=message.text)
+        answer, user_turn = await solve_ai_request(text=message.text, history=session["messages"])
         increment_ai_usage(user_id)
-        await safe_edit_text(thinking, get_ai_result_text(answer, user_id), parse_mode="HTML")
+        session["messages"].append(user_turn)
+        session["messages"].append({"role": "assistant", "content": answer})
+        session["last_active"] = time.time()
+        session_active = ai_requests_left(user_id) > 0
+        if not session_active:
+            end_ai_session(user_id)
+        await safe_edit_text(
+            thinking,
+            get_ai_result_text(answer, user_id, session_active),
+            parse_mode="HTML",
+            reply_markup=get_ai_result_keyboard(session_active)
+        )
     except Exception:
         logger.exception("Ошибка при обработке AI-текста от пользователя %s", user_id)
         await safe_edit_text(thinking, "⚠️ Не удалось получить ответ от AI. Попробуй ещё раз позже.")
+    finally:
+        if user_id in AI_SESSIONS:
+            AI_SESSIONS[user_id]["processing"] = False
 
 # ==================== СКРЫТАЯ ФУНКЦИЯ (ВРЕМЕННО) ====================
 # Если написать боту номер билета текстом (например "20А"), в чат придут все
