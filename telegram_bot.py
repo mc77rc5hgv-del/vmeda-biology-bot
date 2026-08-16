@@ -6,6 +6,7 @@ import json
 import logging
 import re
 import os
+import sys
 import time
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
@@ -35,6 +36,18 @@ from ai.router import AIRefusalError
 from ai.service import solve as solve_ai_request
 from ai.vision import resize_image as resize_image_for_ai
 from repositories import knowledge
+
+# Когда файл запущен напрямую (python3 telegram_bot.py — так его стартует Railway, см.
+# railway.json), Python грузит его как модуль "__main__", а не "telegram_bot". Но handlers/*.py
+# и services/access.py делают `import telegram_bot as tb` — без этой строки такой импорт не
+# находит "telegram_bot" в sys.modules и запускает ВТОРОЕ, вложенное выполнение этого же файла
+# с нуля (под именем "telegram_bot"), которое тут же падает с AttributeError на первом же
+# собственном `from handlers import ...`/`from services import ...` (модуль ещё не доинициализирован
+# в момент обращения к его атрибутам). Алиас ниже говорит импорт-системе, что "telegram_bot" —
+# это тот же самый уже выполняющийся модуль, а не что-то, что надо импортировать заново. Должен
+# стоять до первого `from services import ...`/`from handlers import ...` ниже по файлу — но не
+# обязательно раньше ai/repositories (они telegram_bot не импортируют).
+sys.modules.setdefault("telegram_bot", sys.modules[__name__])
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
