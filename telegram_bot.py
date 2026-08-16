@@ -5420,301 +5420,35 @@ async def cb_download_chemistry_tasks(callback: CallbackQuery):
         caption=f"📄 Все задачи по химии.\n\n@{BOT_USERNAME}"
     )
 
-# ==================== ХИМИЯ - ТЕОРИЯ (С НАВИГАЦИЕЙ) ====================
-@dp.callback_query(F.data == "chemistry_theory")
-async def cb_chemistry_theory(callback: CallbackQuery):
-    await callback.answer()
-    await safe_edit_text(
-        callback.message,
-        f"📚 <b>Теория по химии</b>\n{DIVIDER}\n\nВыбери тему:",
-        parse_mode="HTML",
-        reply_markup=get_chemistry_theory_list()
-    )
+# ==================== ХИМИЯ ====================
+# Хендлеры (теория с навигацией, билеты, задачи, лабораторные работы — все с уникальными
+# callback_data-фильтрами, безопасно для порядка dp) вынесены в handlers/chemistry.py (свой
+# Router) — здесь только регистрация роутера и реэкспорт имён. Клавиатурные билдеры и
+# chemistry_tickets_access_ok остаются здесь (используются и cb_menu_chemistry/
+# download_chemistry_*, которые тоже остаются) — см. docstring handlers/chemistry.py.
+from handlers import chemistry as chemistry_handlers  # noqa: E402 — mid-file by design, see above
 
-@dp.callback_query(F.data.startswith("chem_theory:"))
-async def cb_show_theory_topic(callback: CallbackQuery):
-    await callback.answer()
-    num = int(callback.data.split(":")[1])
-    topic = CHEMISTRY_THEORY.get(str(num))
-    if not topic:
-        await callback.answer("Тема не найдена", show_alert=True)
-        return
-    text = f"📖 <b>{topic['title']}</b>\n{DIVIDER}\n\n{topic['content']}"
-    await safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=get_theory_navigation(num))
+dp.include_router(chemistry_handlers.router)
 
-@dp.callback_query(F.data == "chemistry_theory_list")
-async def cb_theory_list(callback: CallbackQuery):
-    await callback.answer()
-    await safe_edit_text(
-        callback.message,
-        f"📚 <b>Теория по химии</b>\n{DIVIDER}\n\nВыбери тему:",
-        parse_mode="HTML",
-        reply_markup=get_chemistry_theory_list()
-    )
-
-# ==================== ХИМИЯ - БИЛЕТЫ ====================
-@dp.callback_query(F.data == "chemistry_tickets")
-async def cb_chemistry_tickets(callback: CallbackQuery):
-    await callback.answer()
-    if not chemistry_tickets_access_ok(callback.from_user.id):
-        await safe_edit_text(
-            callback.message,
-            get_chemistry_tickets_locked_text(),
-            parse_mode="HTML",
-            reply_markup=get_chemistry_tickets_locked_keyboard()
-        )
-        return
-    await safe_edit_text(
-        callback.message,
-        f"🎫 <b>Билеты по химии</b>\n{DIVIDER}\n\nВыбери раздел:",
-        parse_mode="HTML",
-        reply_markup=get_chemistry_tickets_menu()
-    )
-
-@dp.callback_query(F.data == "chem_theory_tickets")
-async def cb_chem_theory_tickets(callback: CallbackQuery):
-    await callback.answer()
-    if not chemistry_tickets_access_ok(callback.from_user.id):
-        await safe_edit_text(
-            callback.message,
-            get_chemistry_tickets_locked_text(),
-            parse_mode="HTML",
-            reply_markup=get_chemistry_tickets_locked_keyboard()
-        )
-        return
-    await safe_edit_text(
-        callback.message,
-        f"📖 <b>Билеты теории</b>\n{DIVIDER}\n\nВыбери билет:",
-        parse_mode="HTML",
-        reply_markup=get_chemistry_theory_tickets_keyboard()
-    )
-
-@dp.callback_query(F.data.startswith("chem_theory_ticket:"))
-async def cb_chem_theory_ticket(callback: CallbackQuery):
-    await callback.answer()
-    if not chemistry_tickets_access_ok(callback.from_user.id):
-        await safe_edit_text(
-            callback.message,
-            get_chemistry_tickets_locked_text(),
-            parse_mode="HTML",
-            reply_markup=get_chemistry_tickets_locked_keyboard()
-        )
-        return
-    num = callback.data.split(":")[1]
-    ticket = CHEMISTRY_THEORY_TICKETS.get(num)
-    if not ticket:
-        await callback.answer("Билет не найден", show_alert=True)
-        return
-    await safe_edit_text(
-        callback.message,
-        f"📖 <b>{ticket['title']}</b>\n{DIVIDER}\n\nВыбери вопрос:",
-        parse_mode="HTML",
-        reply_markup=get_chemistry_theory_ticket_detail_keyboard(num)
-    )
-
-@dp.callback_query(F.data.startswith("chem_theory_q:"))
-async def cb_chem_theory_question(callback: CallbackQuery):
-    await callback.answer()
-    if not chemistry_tickets_access_ok(callback.from_user.id):
-        await safe_edit_text(
-            callback.message,
-            get_chemistry_tickets_locked_text(),
-            parse_mode="HTML",
-            reply_markup=get_chemistry_tickets_locked_keyboard()
-        )
-        return
-    _, num, idx_s = callback.data.split(":")
-    idx = int(idx_s)
-    ticket = CHEMISTRY_THEORY_TICKETS.get(num)
-    if not ticket or idx >= len(ticket["questions"]):
-        await callback.answer("Вопрос не найден", show_alert=True)
-        return
-    q = ticket["questions"][idx]
-    header = f"📖 <b>{ticket['title']} — Вопрос {idx + 1}</b>"
-    body = f"{header}\n{DIVIDER}\n\n<b>{q['title']}</b>\n\n{q['answer']}"
-    await safe_edit_text(callback.message, body, parse_mode="HTML", reply_markup=get_chemistry_theory_question_keyboard(num, idx))
-
-@dp.callback_query(F.data == "chem_practice_tickets")
-async def cb_chem_practice_tickets(callback: CallbackQuery):
-    await callback.answer()
-    if not chemistry_tickets_access_ok(callback.from_user.id):
-        await safe_edit_text(
-            callback.message,
-            get_chemistry_tickets_locked_text(),
-            parse_mode="HTML",
-            reply_markup=get_chemistry_tickets_locked_keyboard()
-        )
-        return
-    await safe_edit_text(
-        callback.message,
-        f"🧮 <b>Билеты практики</b>\n{DIVIDER}\n\nВыбери билет:",
-        parse_mode="HTML",
-        reply_markup=get_chemistry_practice_tickets_keyboard()
-    )
-
-@dp.callback_query(F.data.startswith("chem_practice_ticket:"))
-async def cb_chem_practice_ticket(callback: CallbackQuery):
-    await callback.answer()
-    if not chemistry_tickets_access_ok(callback.from_user.id):
-        await safe_edit_text(
-            callback.message,
-            get_chemistry_tickets_locked_text(),
-            parse_mode="HTML",
-            reply_markup=get_chemistry_tickets_locked_keyboard()
-        )
-        return
-    num = callback.data.split(":")[1]
-    ticket = CHEMISTRY_PRACTICE_TICKETS.get(num)
-    if not ticket:
-        await callback.answer("Билет не найден", show_alert=True)
-        return
-    text = f"🧮 <b>{ticket['title']}</b>\n{DIVIDER}\n\n{ticket['content']}"
-    await safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=get_chemistry_practice_ticket_keyboard())
-
-# ==================== ХИМИЯ - ЗАДАЧИ ====================
-@dp.callback_query(F.data == "chemistry_tasks")
-async def cb_chemistry_tasks(callback: CallbackQuery):
-    await callback.answer()
-    await safe_edit_text(
-        callback.message,
-        f"📝 <b>Задачи по химии</b>\n{DIVIDER}\n\nВыбери тему:",
-        parse_mode="HTML",
-        reply_markup=get_chemistry_tasks_topics_keyboard()
-    )
-
-@dp.callback_query(F.data.startswith("chemtask_topic:"))
-async def cb_chemtask_topic(callback: CallbackQuery):
-    await callback.answer()
-    topic_num = callback.data.split(":")[1]
-    topic = CHEMISTRY_TASKS.get(topic_num)
-    if not topic:
-        await callback.answer("Тема не найдена", show_alert=True)
-        return
-    text = (
-        f"📂 <b>{topic['title']}</b>\n{DIVIDER}\n\n"
-        f"{topic.get('intro', '')}\n\n"
-        f"Всего типовых задач: {len(topic['tasks'])}"
-    )
-    await safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=get_chemistry_task_topic_keyboard(topic_num))
-
-@dp.callback_query(F.data.startswith("chemtask_formulas:"))
-async def cb_chemtask_formulas(callback: CallbackQuery):
-    await callback.answer()
-    topic_num = callback.data.split(":")[1]
-    topic = CHEMISTRY_TASKS.get(topic_num)
-    if not topic:
-        await callback.answer("Тема не найдена", show_alert=True)
-        return
-    text = f"📂 <b>{topic['title']}</b>\n{DIVIDER}\n\n{topic['formulas']}"
-    await safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=get_chemistry_formulas_keyboard(topic_num))
-
-@dp.callback_query(F.data.startswith("chemtask_list:"))
-async def cb_chemtask_list(callback: CallbackQuery):
-    await callback.answer()
-    topic_num = callback.data.split(":")[1]
-    topic = CHEMISTRY_TASKS.get(topic_num)
-    if not topic:
-        await callback.answer("Тема не найдена", show_alert=True)
-        return
-    text = f"📋 <b>{topic['title']} — список задач</b>\n{DIVIDER}\n\nВыбери задачу:"
-    await safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=get_chemistry_task_list_keyboard(topic_num))
-
-@dp.callback_query(F.data.startswith("chemtask_show:"))
-async def cb_chemtask_show(callback: CallbackQuery):
-    await callback.answer()
-    _, topic_num, task_num_s = callback.data.split(":")
-    task_num = int(task_num_s)
-    topic = CHEMISTRY_TASKS.get(topic_num)
-    if not topic:
-        await callback.answer("Тема не найдена", show_alert=True)
-        return
-    task = next((t for t in topic["tasks"] if t["num"] == task_num), None)
-    if not task:
-        await callback.answer("Задача не найдена", show_alert=True)
-        return
-    text = (
-        f"📝 <b>Задача №{task['num']}</b> — {task.get('title', '')}\n{DIVIDER}\n\n"
-        f"<b>Условие:</b>\n<i>{task['condition']}</i>\n\n"
-        f"<b>Решение:</b>\n{task['solution']}"
-    )
-    await safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=get_chemistry_task_detail_keyboard(topic_num, task_num))
-
-# ==================== ХИМИЯ - ЛАБОРАТОРНЫЕ РАБОТЫ ====================
-@dp.callback_query(F.data == "chemistry_labs")
-async def cb_chemistry_labs(callback: CallbackQuery):
-    await callback.answer()
-    await safe_edit_text(
-        callback.message,
-        f"🧪 <b>Лабораторные работы по химии</b>\n{DIVIDER}\n\nВыбери лабораторную работу:",
-        parse_mode="HTML",
-        reply_markup=get_labs_keyboard()
-    )
-
-@dp.callback_query(F.data.startswith("lab:"))
-async def cb_show_lab(callback: CallbackQuery):
-    await callback.answer()
-    lab_num = int(callback.data.split(":")[1])
-    lab = next((entry for entry in CHEMISTRY_LABS["labs"] if entry["number"] == lab_num), None)
-    if not lab:
-        await callback.answer("Лабораторная работа не найдена", show_alert=True)
-        return
-    text = (
-        f"🧪 <b>Лабораторная работа {lab['number']}</b>\n"
-        f"{DIVIDER}\n\n"
-        f"<b>Тема:</b> {lab.get('theme', '')}\n\n"
-        f"<b>Условие:</b>\n{lab.get('condition', '')}"
-    )
-    builder = InlineKeyboardBuilder()
-    if lab.get("experiments"):
-        builder.button(text="🔬 Опыты", callback_data=f"lab_exp:{lab_num}")
-    if lab.get("calculations"):
-        builder.button(text="📐 Расчёты", callback_data=f"lab_calc:{lab_num}")
-    if lab.get("summary"):
-        builder.button(text="📝 Кратко (конспект)", callback_data=f"lab_summary:{lab_num}")
-    builder.button(text="🔙 Назад к лабам", callback_data="chemistry_labs")
-    builder.adjust(1)
-    await safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=builder.as_markup())
-
-@dp.callback_query(F.data.startswith("lab_summary:"))
-async def cb_lab_summary(callback: CallbackQuery):
-    await callback.answer()
-    lab_num = int(callback.data.split(":")[1])
-    lab = next((entry for entry in CHEMISTRY_LABS["labs"] if entry["number"] == lab_num), None)
-    if not lab or not lab.get("summary"):
-        await callback.answer("Конспект не найден", show_alert=True)
-        return
-    text = f"📝 <b>Кратко — Лабораторная работа {lab_num}</b>\n{DIVIDER}\n\n{lab['summary']}"
-    builder = InlineKeyboardBuilder()
-    builder.button(text="🔙 Назад", callback_data=f"lab:{lab_num}")
-    await safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=builder.as_markup())
-
-@dp.callback_query(F.data.startswith("lab_exp:"))
-async def cb_lab_experiments(callback: CallbackQuery):
-    await callback.answer()
-    lab_num = int(callback.data.split(":")[1])
-    lab = next((entry for entry in CHEMISTRY_LABS["labs"] if entry["number"] == lab_num), None)
-    if not lab or not lab.get("experiments"):
-        await callback.answer("Опыты не найдены", show_alert=True)
-        return
-    text = f"🔬 <b>Опыты — Лабораторная работа {lab_num}</b>\n{DIVIDER}\n\n"
-    for exp in lab["experiments"]:
-        text += f"<b>{exp.get('name', '')}</b>\n{exp.get('description', '')}\n\n"
-    builder = InlineKeyboardBuilder()
-    builder.button(text="🔙 Назад", callback_data=f"lab:{lab_num}")
-    await safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=builder.as_markup())
-
-@dp.callback_query(F.data.startswith("lab_calc:"))
-async def cb_lab_calculations(callback: CallbackQuery):
-    await callback.answer()
-    lab_num = int(callback.data.split(":")[1])
-    lab = next((entry for entry in CHEMISTRY_LABS["labs"] if entry["number"] == lab_num), None)
-    if not lab or not lab.get("calculations"):
-        await callback.answer("Расчёты не найдены", show_alert=True)
-        return
-    text = f"📐 <b>Расчёты — Лабораторная работа {lab_num}</b>\n{DIVIDER}\n\n{lab['calculations']}"
-    builder = InlineKeyboardBuilder()
-    builder.button(text="🔙 Назад", callback_data=f"lab:{lab_num}")
-    await safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=builder.as_markup())
+cb_chemistry_theory = chemistry_handlers.cb_chemistry_theory
+cb_show_theory_topic = chemistry_handlers.cb_show_theory_topic
+cb_theory_list = chemistry_handlers.cb_theory_list
+cb_chemistry_tickets = chemistry_handlers.cb_chemistry_tickets
+cb_chem_theory_tickets = chemistry_handlers.cb_chem_theory_tickets
+cb_chem_theory_ticket = chemistry_handlers.cb_chem_theory_ticket
+cb_chem_theory_question = chemistry_handlers.cb_chem_theory_question
+cb_chem_practice_tickets = chemistry_handlers.cb_chem_practice_tickets
+cb_chem_practice_ticket = chemistry_handlers.cb_chem_practice_ticket
+cb_chemistry_tasks = chemistry_handlers.cb_chemistry_tasks
+cb_chemtask_topic = chemistry_handlers.cb_chemtask_topic
+cb_chemtask_formulas = chemistry_handlers.cb_chemtask_formulas
+cb_chemtask_list = chemistry_handlers.cb_chemtask_list
+cb_chemtask_show = chemistry_handlers.cb_chemtask_show
+cb_chemistry_labs = chemistry_handlers.cb_chemistry_labs
+cb_show_lab = chemistry_handlers.cb_show_lab
+cb_lab_summary = chemistry_handlers.cb_lab_summary
+cb_lab_experiments = chemistry_handlers.cb_lab_experiments
+cb_lab_calculations = chemistry_handlers.cb_lab_calculations
 
 # ==================== БИОЛОГИЯ — БИЛЕТЫ / ВОПРОСЫ ====================
 # Билеты и вопросы (уникальные callback_data-фильтры, безопасно для порядка dp) вынесены в
