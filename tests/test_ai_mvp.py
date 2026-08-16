@@ -382,7 +382,9 @@ async def main():
         chat = FakeChat()
 
     orig_get_client = tb.get_openai_client
+    orig_get_grok_client = tb.get_grok_client
     tb.get_openai_client = lambda: FakeOpenAIClient()
+    tb.get_grok_client = lambda: None  # Grok не настроен в этом под-тесте — чистая проверка сжатия истории
     long_answer = "Подробный ход решения. " * 30  # заведомо длиннее AI_HISTORY_SUMMARY_CHARS
     long_history = []
     for i in range(20):
@@ -422,9 +424,108 @@ async def main():
         assert len(shortened) <= tb.AI_HISTORY_SUMMARY_CHARS + 1
         assert shortened.endswith("…")
 
-    assert usage_r == {"input_tokens": 42, "output_tokens": 7}
-    tb.get_openai_client = orig_get_client
+    assert usage_r == {"input_tokens": 42, "output_tokens": 7, "provider": "openai"}
     print("18. long history is compacted (images stripped, old answers shortened) before resending: OK")
+
+    # ---- 19. quick=True (short first answer) always stays on cheap OpenAI, even if Grok is configured ----
+    captured19 = {}
+    class FakeCompletions19:
+        async def create(self, **kwargs):
+            captured19["model"] = kwargs["model"]
+            return FakeOpenAIResponse()
+    class FakeChat19:
+        completions = FakeCompletions19()
+    class FakeOpenAIClient19:
+        chat = FakeChat19()
+    class GrokMustNotBeCalledCompletions:
+        async def create(self, **kwargs):
+            raise AssertionError("Grok must never be called for a quick=True request")
+    class GrokMustNotBeCalledChat:
+        completions = GrokMustNotBeCalledCompletions()
+    class GrokMustNotBeCalledClient:
+        chat = GrokMustNotBeCalledChat()
+
+    tb.get_openai_client = lambda: FakeOpenAIClient19()
+    tb.get_grok_client = lambda: GrokMustNotBeCalledClient()
+    answer19, _, usage19 = await orig_solve(text="краткий вопрос", quick=True)
+    assert captured19["model"] == tb.AI_MODEL_VISION
+    assert usage19["provider"] == "openai"
+    print("19. quick=True always stays on OpenAI, even with Grok configured: OK")
+
+    # ---- 19b. quick=False (detailed explanation) routes to Grok when it's configured ----
+    captured_grok = {}
+    class FakeGrokUsage:
+        prompt_tokens = 300
+        completion_tokens = 120
+    class FakeGrokChoiceMsg:
+        content = "Ответ: Б. Подробный разбор по шагам."
+    class FakeGrokChoice:
+        message = FakeGrokChoiceMsg()
+    class FakeGrokResponse:
+        choices = [FakeGrokChoice()]
+        usage = FakeGrokUsage()
+    class FakeGrokCompletions:
+        async def create(self, **kwargs):
+            captured_grok["model"] = kwargs["model"]
+            return FakeGrokResponse()
+    class FakeGrokChat:
+        completions = FakeGrokCompletions()
+    class FakeGrokClient:
+        chat = FakeGrokChat()
+    class OpenAIMustNotBeCalledCompletions:
+        async def create(self, **kwargs):
+            raise AssertionError("OpenAI must not be called when Grok is configured and succeeds")
+    class OpenAIMustNotBeCalledChat:
+        completions = OpenAIMustNotBeCalledCompletions()
+    class OpenAIMustNotBeCalledClient:
+        chat = OpenAIMustNotBeCalledChat()
+
+    tb.get_grok_client = lambda: FakeGrokClient()
+    tb.get_openai_client = lambda: OpenAIMustNotBeCalledClient()
+    tb.stats["ai_cost_totals"] = {"requests": 0, "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0}
+    answer_g, user_turn_g, usage_g = await orig_solve(text="подробный вопрос", quick=False)
+    assert captured_grok["model"] == tb.AI_MODEL_GROK
+    assert usage_g == {"input_tokens": 300, "output_tokens": 120, "provider": "grok"}
+    tb.record_ai_cost(usage_g)
+    grok_totals = tb.stats["ai_cost_totals"]["by_provider"]["grok"]
+    expected_cost = (
+        300 * tb.AI_GROK_PRICE_INPUT_PER_1M / 1_000_000 + 120 * tb.AI_GROK_PRICE_OUTPUT_PER_1M / 1_000_000
+    )
+    assert grok_totals["requests"] == 1
+    assert abs(grok_totals["cost_usd"] - expected_cost) < 1e-9, "Grok usage must be priced at Grok's own rates"
+    assert "из них Grok" in tb.get_ai_cost_stats_block(), "admin stats must break out Grok spend separately"
+    print("19b. quick=False routes to Grok when configured, priced at Grok rates: OK")
+
+    # ---- 19c. Grok failing falls back to OpenAI exactly once — no retry loop, no doubled token burn ----
+    grok_call_count = []
+    class FailingGrokCompletions:
+        async def create(self, **kwargs):
+            grok_call_count.append(1)
+            raise RuntimeError("simulated xAI outage")
+    class FailingGrokChat:
+        completions = FailingGrokCompletions()
+    class FailingGrokClient:
+        chat = FailingGrokChat()
+    fallback_models = []
+    class FallbackCompletions:
+        async def create(self, **kwargs):
+            fallback_models.append(kwargs["model"])
+            return FakeOpenAIResponse()
+    class FallbackChat:
+        completions = FallbackCompletions()
+    class FallbackOpenAIClient:
+        chat = FallbackChat()
+
+    tb.get_grok_client = lambda: FailingGrokClient()
+    tb.get_openai_client = lambda: FallbackOpenAIClient()
+    answer_f, user_turn_f, usage_f = await orig_solve(text="подробный вопрос 2", quick=False)
+    assert len(grok_call_count) == 1, "must attempt Grok exactly once — not loop or retry it"
+    assert fallback_models == [tb.AI_MODEL_VISION], "must fall back to OpenAI exactly once after the Grok failure"
+    assert usage_f["provider"] == "openai", "usage must be attributed to whichever provider actually answered"
+    print("19c. Grok failure falls back to OpenAI exactly once, no retry loop: OK")
+
+    tb.get_openai_client = orig_get_client
+    tb.get_grok_client = orig_get_grok_client
 
     # cleanup
     tb.solve_ai_request = orig_solve

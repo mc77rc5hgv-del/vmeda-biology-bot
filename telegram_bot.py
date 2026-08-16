@@ -40,6 +40,8 @@ ADMIN_IDS = {1326779223, 8601892147}
 STATS_DIR = os.getenv("STATS_DIR", ".")
 STATS_FILE = os.path.join(STATS_DIR, "stats.json")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")  # без него AI-раздел показывает "временно недоступен"
+XAI_API_KEY = os.getenv("XAI_API_KEY")  # опционально — Grok (xAI) для подробного разбора, см. solve_ai_request;
+# без него подробный разбор просто продолжает идти через OpenAI, как и раньше
 
 DIVIDER = "━━━━━━━━━━━━━━"
 IMAGES_DIR = "images"
@@ -5862,6 +5864,14 @@ async def handle_question_number(message: Message):
 AI_MODEL_VISION = "gpt-4o-mini"
 AI_PRICE_INPUT_PER_1M = 0.15   # $/1M input tokens, gpt-4o-mini — держать в синхроне с реальным прайсом OpenAI
 AI_PRICE_OUTPUT_PER_1M = 0.60  # $/1M output tokens
+
+# Grok (xAI) — используется ТОЛЬКО для подробного разбора по шагам (quick=False), не для короткого
+# первого ответа: он не дешевле gpt-4o-mini (наоборот, дороже — актуальные цены xAI выше mini-тарифов
+# OpenAI), это сознательная плата за более сильное рассуждение там, где оно реально важно, а не мера
+# экономии. См. solve_ai_request — маршрутизация и автоматический откат на OpenAI, если Grok недоступен.
+AI_MODEL_GROK = "grok-4.3"
+AI_GROK_PRICE_INPUT_PER_1M = 1.25   # $/1M input tokens, grok-4.3 — держать в синхроне с прайсом xAI
+AI_GROK_PRICE_OUTPUT_PER_1M = 2.50  # $/1M output tokens
 AI_FREE_DAILY_LIMIT = 3
 AI_ANSWER_TELEGRAM_LIMIT = 3500  # с запасом от лимита Telegram в 4096 символов на сообщение
 AI_SESSION_TIMEOUT_SECONDS = 20 * 60  # диалог считается закрытым после 20 минут без сообщений
@@ -5914,6 +5924,18 @@ def get_openai_client():
         _openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
     return _openai_client
 
+_grok_client = None
+
+def get_grok_client():
+    """Grok API (xAI) OpenAI-совместим — тот же пакет openai, просто другой base_url и ключ,
+    отдельный пакет в requirements.txt не нужен. None, если XAI_API_KEY не задан — тогда
+    solve_ai_request просто продолжает работать через OpenAI."""
+    global _grok_client
+    if _grok_client is None and XAI_API_KEY:
+        from openai import AsyncOpenAI
+        _grok_client = AsyncOpenAI(api_key=XAI_API_KEY, base_url="https://api.x.ai/v1")
+    return _grok_client
+
 def get_ai_usage_today(user_id: int) -> int:
     entry = stats["ai_usage"].get(str(user_id))
     if not entry or entry.get("date") != date.today().isoformat():
@@ -5941,29 +5963,50 @@ def ai_quota_ok(user_id: int) -> bool:
 def get_ai_quota_label(user_id: int) -> str:
     return "♾ безлимит (админ)" if has_unlimited_ai(user_id) else f"{ai_requests_left(user_id)}/{AI_FREE_DAILY_LIMIT}"
 
+_AI_PROVIDER_PRICES = {
+    "openai": (AI_PRICE_INPUT_PER_1M, AI_PRICE_OUTPUT_PER_1M),
+    "grok": (AI_GROK_PRICE_INPUT_PER_1M, AI_GROK_PRICE_OUTPUT_PER_1M),
+}
+
 def record_ai_cost(usage: dict) -> None:
     """Копит агрегированную стоимость AI-запросов — не пишет по записи на каждый запрос
     (раздуло бы stats.json), только бегущие суммы. Нужно, чтобы реально видеть эффект
-    любых будущих оптимизаций (короткие ответы, кэш и т.д.), а не гадать на глаз."""
+    любых будущих оптимизаций (короткие ответы, кэш и т.д.), а не гадать на глаз.
+    usage["provider"] ("openai"/"grok", по умолчанию "openai") выбирает прайс — у каждого
+    провайдера своя цена за токен, общие totals остаются суммой по всем провайдерам, а
+    by_provider хранит разбивку, чтобы в статистике было видно, во сколько обходится Grok
+    отдельно от OpenAI."""
     input_tokens = usage.get("input_tokens", 0)
     output_tokens = usage.get("output_tokens", 0)
-    cost = input_tokens * AI_PRICE_INPUT_PER_1M / 1_000_000 + output_tokens * AI_PRICE_OUTPUT_PER_1M / 1_000_000
+    provider = usage.get("provider", "openai")
+    price_in, price_out = _AI_PROVIDER_PRICES.get(provider, _AI_PROVIDER_PRICES["openai"])
+    cost = input_tokens * price_in / 1_000_000 + output_tokens * price_out / 1_000_000
     totals = stats["ai_cost_totals"]
     totals["requests"] += 1
     totals["input_tokens"] += input_tokens
     totals["output_tokens"] += output_tokens
     totals["cost_usd"] += cost
+    by_provider = totals.setdefault("by_provider", {})
+    p = by_provider.setdefault(provider, {"requests": 0, "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0})
+    p["requests"] += 1
+    p["input_tokens"] += input_tokens
+    p["output_tokens"] += output_tokens
+    p["cost_usd"] += cost
     save_stats()
 
 def get_ai_cost_stats_block() -> str:
     totals = stats["ai_cost_totals"]
     requests = totals["requests"]
     avg = totals["cost_usd"] / requests if requests else 0.0
-    return (
+    block = (
         f"\n🤖 <b>VMedA AI</b>\n"
         f"Запросов: <b>{requests}</b> (вход {totals['input_tokens']:,} / выход {totals['output_tokens']:,} ток.)\n"
         f"Расход: <b>${totals['cost_usd']:.4f}</b>, в среднем ${avg:.5f}/запрос"
-    ).replace(",", " ")
+    )
+    grok = totals.get("by_provider", {}).get("grok")
+    if grok and grok["requests"]:
+        block += f"\n  из них Grok: {grok['requests']} запр., ${grok['cost_usd']:.4f}"
+    return block.replace(",", " ")
 
 def is_ai_session_active(user_id: int) -> bool:
     session = AI_SESSIONS.get(user_id)
@@ -6097,11 +6140,8 @@ async def solve_ai_request(
     которые у OpenAI дороже входных; полное решение по шагам генерируется отдельным запросом,
     только если пользователь явно нажмёт «Показать решение»). Возвращает (ответ, user_turn, usage)
     — user_turn нужен вызывающему коду, чтобы дописать этот ход в историю сессии вместе с ответом
-    ассистента; usage — {"input_tokens", "output_tokens"} для учёта стоимости (record_ai_cost)."""
-    client = get_openai_client()
-    if client is None:
-        raise RuntimeError("AI недоступен: не задан OPENAI_API_KEY")
-
+    ассистента; usage — {"input_tokens", "output_tokens", "provider"} для учёта стоимости
+    (record_ai_cost — provider выбирает, по какому прайсу считать $)."""
     text_part = text or ""
     if quick:
         text_part = (text_part + AI_QUICK_SUFFIX) if text_part else AI_QUICK_SUFFIX.strip()
@@ -6119,14 +6159,46 @@ async def solve_ai_request(
 
     user_turn = {"role": "user", "content": content}
     trimmed_history = _compact_history(history)
-    response = await client.chat.completions.create(
-        model=AI_MODEL_VISION,
-        messages=[{"role": "system", "content": AI_SYSTEM_PROMPT}, *trimmed_history, user_turn],
-        max_tokens=AI_QUICK_MAX_TOKENS if quick else AI_DETAILED_MAX_TOKENS,
-        temperature=0,  # для расчётных задач нужен стабильный, воспроизводимый ход решения,
-                        # не творческое разнообразие — без этого один и тот же вопрос давал
-                        # разный метод и разный ответ при каждом новом запросе
-    )
+    messages = [{"role": "system", "content": AI_SYSTEM_PROMPT}, *trimmed_history, user_turn]
+    max_tokens = AI_QUICK_MAX_TOKENS if quick else AI_DETAILED_MAX_TOKENS
+
+    # Короткий первый ответ (quick=True) всегда идёт через дешёвый gpt-4o-mini. Подробный разбор
+    # по шагам (quick=False) — через Grok, если он настроен: там качество рассуждения важнее
+    # цены за токен (см. AI_MODEL_GROK). Если XAI_API_KEY не задан, provider/model просто
+    # остаются на OpenAI — разбор продолжает работать как раньше.
+    provider, model, active_client = "openai", AI_MODEL_VISION, get_openai_client()
+    if not quick:
+        grok_client = get_grok_client()
+        if grok_client is not None:
+            provider, model, active_client = "grok", AI_MODEL_GROK, grok_client
+
+    if active_client is None:
+        raise RuntimeError("AI недоступен: не задан OPENAI_API_KEY")
+
+    try:
+        response = await active_client.chat.completions.create(
+            model=model,
+            messages=messages,
+            max_tokens=max_tokens,
+            temperature=0,  # для расчётных задач нужен стабильный, воспроизводимый ход решения,
+                            # не творческое разнообразие — без этого один и тот же вопрос давал
+                            # разный метод и разный ответ при каждом новом запросе
+        )
+    except Exception:
+        if provider == "openai":
+            raise
+        # Grok недоступен (ключ невалиден, сбой у xAI и т.п.) — один запасной запрос через
+        # OpenAI, чтобы разбор не переставал работать для пользователя. Не ретрай в цикле —
+        # ровно одна дополнительная попытка на другом провайдере.
+        logger.exception("Grok недоступен, откатываюсь на OpenAI для этого запроса")
+        fallback_client = get_openai_client()
+        if fallback_client is None:
+            raise
+        provider, model = "openai", AI_MODEL_VISION
+        response = await fallback_client.chat.completions.create(
+            model=model, messages=messages, max_tokens=max_tokens, temperature=0,
+        )
+
     answer = response.choices[0].message.content or "Не удалось получить ответ от AI."
     answer = _clean_ai_answer(answer)
     if len(answer) > AI_ANSWER_TELEGRAM_LIMIT:
@@ -6134,6 +6206,7 @@ async def solve_ai_request(
     usage = {
         "input_tokens": getattr(response.usage, "prompt_tokens", 0) if response.usage else 0,
         "output_tokens": getattr(response.usage, "completion_tokens", 0) if response.usage else 0,
+        "provider": provider,
     }
     return answer, user_turn, usage
 
