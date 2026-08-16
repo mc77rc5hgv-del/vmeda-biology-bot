@@ -325,6 +325,41 @@ async def main():
     assert "моль/кг" in cleaned and "°C" in cleaned  # \text{} unwrapped
     print("16. LaTeX cleanup strips backslash markup and produces readable text: OK")
 
+    # ---- 17. lightweight markdown -> real Telegram HTML tags, always well-balanced ----
+    from html.parser import HTMLParser
+
+    class _BalanceChecker(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.stack = []
+            self.ok = True
+        def handle_starttag(self, tag, attrs):
+            self.stack.append(tag)
+        def handle_endtag(self, tag):
+            if not self.stack or self.stack[-1] != tag:
+                self.ok = False
+            else:
+                self.stack.pop()
+
+    md = "1. **Молекулярная масса:**\n- K: 39,1 г/моль\n- S: 32,1 г/моль\n\nИтог: **174,3 г/моль**."
+    formatted = tb._format_ai_answer_html(md)
+    assert "<b>Молекулярная масса:</b>" in formatted
+    assert "<b>174,3 г/моль</b>" in formatted
+    assert "• K: 39,1 г/моль" in formatted and "• S: 32,1 г/моль" in formatted
+    assert "**" not in formatted, "no raw markdown asterisks should remain"
+    checker = _BalanceChecker()
+    checker.feed(formatted)
+    assert checker.ok and not checker.stack, f"unbalanced HTML: {formatted!r}"
+
+    # a stray "<"/"&" from the model must be escaped, never treated as a real tag
+    unsafe = "Если n < 5, реакция не идёт (K & Na реагируют иначе)."
+    formatted_unsafe = tb._format_ai_answer_html(unsafe)
+    assert "&lt;" in formatted_unsafe and "&amp;" in formatted_unsafe
+    checker2 = _BalanceChecker()
+    checker2.feed(formatted_unsafe)
+    assert checker2.ok and not checker2.stack
+    print("17. markdown-to-HTML formatting is real, balanced, and escape-safe: OK")
+
     # cleanup
     tb.solve_ai_request = orig_solve
     tb.OPENAI_API_KEY = orig_key
