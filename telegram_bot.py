@@ -8544,406 +8544,54 @@ async def cb_anatomy_exam_test_mistakes(callback: CallbackQuery):
     )
 
 # ==================== ГИСТОЛОГИЯ ====================
-HISTOLOGY_PUBLIC = False  # когда раздел будет готов для всех — переключить на True
-HISTOLOGY_PROMO_SECONDS = 24 * 60 * 60
-HISTOLOGY_WARNING_THRESHOLD = REFERRAL_WARNING_THRESHOLD  # 3 предупреждения, как у Биологии/Физики/Химии
-HISTOLOGY_WARNING_COOLDOWN_SECONDS = REFERRAL_WARNING_COOLDOWN_SECONDS  # не чаще раза в 4ч
+# Хендлеры и вся логика раздела вынесены в handlers/histology.py (свой Router) — здесь только
+# регистрация роутера на dp и реэкспорт имён, на которые ссылается остальной код файла (главное
+# меню, админ-панель) и тесты, обращающиеся к ним как tb.<имя>. Сам импорт стоит здесь (в самом
+# конце файла, как и раньше стояла вся секция), чтобы handlers/histology.py при своём импорте
+# уже видел все нужные ему имена (stats, save_stats, DIVIDER, REFERRAL_* и т.д.) определёнными в
+# этом модуле.
+from handlers import histology as histology_handlers  # noqa: E402 — deliberately late, see above
 
-def get_histology_temp_expiry(user_id: int) -> float:
-    return stats["histology_temp_access"].get(str(user_id), 0)
+dp.include_router(histology_handlers.router)
 
-def has_histology_temp_access(user_id: int) -> bool:
-    return time.time() < get_histology_temp_expiry(user_id)
-
-def histology_permanently_unlocked(user_id: int) -> bool:
-    """Доступ, не зависящий от тающего пробного окна (в отличие от has_histology_temp_access)."""
-    return (
-        HISTOLOGY_PUBLIC or is_admin_or_assistant(user_id)
-        or is_section_promo_active("histology") or is_section_promo_active("global")
-        or has_subscription_histology_access(user_id)
-        or get_referral_count(user_id) >= REFERRAL_FULL_ACCESS_THRESHOLD
-    )
-
-def histology_access_ok(user_id: int) -> bool:
-    return histology_permanently_unlocked(user_id) or has_histology_temp_access(user_id)
-
-async def histology_gate_ok(callback: CallbackQuery) -> bool:
-    """Единый шлюз для контента гистологии — как у Биологии/Физики/Химии, только пробное окно
-    без рефералов/подписки ограничено неделей, а не только числом предупреждений:
-    1) первый визит — молча выдаём неделю пробного доступа (TEMP_ACCESS_GRANT_SECONDS);
-    2) дальше — до HISTOLOGY_WARNING_THRESHOLD (3) предупреждений с кулдауном между ними;
-    3) блок наступает по любому из двух условий: предупреждения исчерпаны ИЛИ неделя истекла —
-       и снимается только рефералами (REFERRAL_FULL_ACCESS_THRESHOLD) или подпиской.
-    Возвращает True, если хендлер должен продолжить (и сам обязан вызвать callback.answer()).
-    Возвращает False, если гейт уже сам ответил на callback и отредактировал сообщение."""
-    user_id = callback.from_user.id
-    user_id_str = str(user_id)
-
-    if histology_permanently_unlocked(user_id):
-        return True
-
-    if not has_histology_temp_access(user_id) and user_id_str not in stats["histology_warnings"]:
-        stats["histology_temp_access"][user_id_str] = time.time() + TEMP_ACCESS_GRANT_SECONDS
-        save_stats()
-        return True
-
-    entry = stats["histology_warnings"].get(user_id_str, {"count": 0, "last_warn_at": 0})
-
-    if not has_histology_temp_access(user_id) or entry["count"] >= HISTOLOGY_WARNING_THRESHOLD:
-        await callback.answer("🚨 Гистология закрыта — пригласи друзей или оформи подписку!", show_alert=True)
-        await safe_edit_text(
-            callback.message,
-            get_histology_locked_text(),
-            parse_mode="HTML",
-            reply_markup=get_histology_locked_keyboard()
-        )
-        return False
-
-    now = time.time()
-    if now - entry.get("last_warn_at", 0) >= HISTOLOGY_WARNING_COOLDOWN_SECONDS:
-        entry["count"] += 1
-        entry["last_warn_at"] = now
-        stats["histology_warnings"][user_id_str] = entry
-        save_stats()
-        remaining = HISTOLOGY_WARNING_THRESHOLD - entry["count"]
-        days_left = max(int((get_histology_temp_expiry(user_id) - now) // 86400), 0)
-        cheapest_histology = cheapest_histology_tier()
-        price_rub = cheapest_histology["price_rub"]
-        price_stars = cheapest_histology["price_stars"]
-        if remaining > 0:
-            warn_text = (
-                "⚠️❗️ <b>Гистология скоро закроется!</b> ❗️⚠️\n\n"
-                f"Бесплатный пробный доступ действует ещё примерно <b>{days_left} дн.</b> Пригласи "
-                f"{REFERRAL_FULL_ACCESS_THRESHOLD} друзей или оформи подписку от <b>{price_rub}₽ / {price_stars}⭐</b> — "
-                "и раздел останется открытым навсегда."
-            )
-        else:
-            warn_text = (
-                "🚨‼️ <b>ПОСЛЕДНЕЕ ПРЕДУПРЕЖДЕНИЕ!</b> ‼️🚨\n\n"
-                f"В следующий раз доступ к Гистологии закроется, если не пригласишь "
-                f"{REFERRAL_FULL_ACCESS_THRESHOLD} друзей или не оформишь подписку от "
-                f"<b>{price_rub}₽ / {price_stars}⭐</b>."
-            )
-        try:
-            await callback.message.answer(warn_text, parse_mode="HTML", reply_markup=get_histology_locked_keyboard())
-        except Exception:
-            logger.exception("Не удалось отправить предупреждение о гистологии пользователю %s", user_id)
-
-    return True
-
-def get_histology_specimen(diag_key: str, spec_id: str):
-    diag = HISTOLOGY.get(diag_key)
-    if not diag:
-        return None
-    for spec in diag["specimens"]:
-        if spec["id"] == spec_id:
-            return spec
-    return None
-
-def get_histology_locked_text() -> str:
-    cheapest = cheapest_histology_tier()
-    return (
-        f"🔬 <b>Гистология</b>\n{DIVIDER}\n\n"
-        "✅ Раздел уже полностью готов и проработан: все микрофотографии и "
-        "протоколы-описания взяты именно с препаратов академии, а содержание "
-        "сверено с преподавателями.\n\n"
-        f"Открывается бесплатно — как Биология, Физика и Химия — после "
-        f"<b>{REFERRAL_FULL_ACCESS_THRESHOLD}</b> приглашённых друзей, либо сразу по подписке от "
-        f"<b>{cheapest['price_rub']}₽ / {cheapest['price_stars']}⭐</b> "
-        f"(тариф «{cheapest['title']}») и выше.\n\n"
-        f"Новым пользователям раздел открыт бесплатно на пробный период (до недели)."
-    )
-
-def get_histology_locked_keyboard():
-    builder = InlineKeyboardBuilder()
-    builder.button(text="👥 Пригласить друзей", callback_data="referral_info")
-    builder.button(text="💎 Оформить подписку", callback_data="subscription_menu")
-    builder.button(text="🔙 Назад в меню", callback_data="back_to_main")
-    builder.adjust(1)
-    return builder.as_markup()
-
-async def announce_histology_promo_start() -> None:
-    builder = InlineKeyboardBuilder()
-    builder.button(text="🔬 Гистология", callback_data="histology_menu")
-    text = (
-        "🔬🎉 <b>ГИСТОЛОГИЯ ОТКРЫТА ДЛЯ ВСЕХ!</b> 🎉🔬\n"
-        f"{DIVIDER}\n\n"
-        "На <b>24 часа</b> раздел «Гистология» — все препараты, микрофотографии и разборы — "
-        "доступен абсолютно бесплатно, без рефералов и подписки.\n\n"
-        f"После этого доступ, как обычно: {REFERRAL_FULL_ACCESS_THRESHOLD} реферала или подписка.\n\n"
-        "Успей посмотреть, пока открыто! 🚀"
-    )
-    await _broadcast(text, builder.as_markup())
-
-def get_histology_menu_keyboard():
-    builder = InlineKeyboardBuilder()
-    for diag_key, diag in HISTOLOGY.items():
-        builder.button(text=diag.get("menu_title", diag["title"]), callback_data=f"histology_topic:{diag_key}")
-    builder.button(text="🎯 Угадай препарат (все разделы)", callback_data="histology_guess_start:all")
-    builder.adjust(1)
-    builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
-    return builder.as_markup()
-
-def get_histology_topic_text(diag_key: str) -> str:
-    diag = HISTOLOGY[diag_key]
-    n = len(diag["specimens"])
-    total = diag.get("total_official")
-    progress = f"{n}" if not total or n >= total else f"{n} из {total}"
-    note = "" if not total or n >= total else "\n\nОстальные препараты добавим по мере поступления презентаций."
-    return (
-        f"🔬 <b>{diag['title']}</b>\n{DIVIDER}\n\n"
-        f"Препаратов доступно: <b>{progress}</b>{note}\n\n"
-        "Выбери препарат:"
-    )
-
-def get_histology_topic_keyboard(diag_key: str):
-    diag = HISTOLOGY[diag_key]
-    builder = InlineKeyboardBuilder()
-    builder.button(text="🎯 Угадай препарат", callback_data=f"histology_guess_start:{diag_key}")
-    for spec in diag["specimens"]:
-        builder.button(text=f"№{spec['number']}. {spec['title']}", callback_data=f"histology_specimen:{diag_key}:{spec['id']}")
-    builder.adjust(1)
-    builder.row(InlineKeyboardButton(text="🔙 К разделу", callback_data="histology_menu"))
-    return builder.as_markup()
-
-def get_histology_specimen_text(diag_key: str, spec_id: str) -> str:
-    spec = get_histology_specimen(diag_key, spec_id)
-    lines = [f"🔬 <b>№{spec['number']}. {spec['title']}</b>\n{DIVIDER}\n"]
-    if spec.get("stain"):
-        lines.append(f"Окраска: {spec['stain']}")
-    if spec.get("magnification"):
-        lines.append(f"Увеличение: {spec['magnification']}")
-    lines.append("")
-    lines.append(spec["protocol"] or "Протокол-описание пока не добавлено.")
-    return "\n".join(lines)
-
-def get_histology_specimen_keyboard(diag_key: str, spec_id: str):
-    spec = get_histology_specimen(diag_key, spec_id)
-    builder = InlineKeyboardBuilder()
-    n_img = len(spec.get("images", []))
-    if n_img:
-        builder.button(text=f"🖼 Микрофото ({n_img})", callback_data=f"histology_img:{diag_key}:{spec_id}:0")
-    builder.adjust(1)
-    builder.row(InlineKeyboardButton(text="🔙 К списку препаратов", callback_data=f"histology_topic:{diag_key}"))
-    return builder.as_markup()
-
-def get_histology_image_keyboard(diag_key: str, spec_id: str, idx: int, total: int):
-    builder = InlineKeyboardBuilder()
-    nav = []
-    if idx > 0:
-        nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"histology_img:{diag_key}:{spec_id}:{idx-1}"))
-    if idx < total - 1:
-        nav.append(InlineKeyboardButton(text="➡️", callback_data=f"histology_img:{diag_key}:{spec_id}:{idx+1}"))
-    if nav:
-        builder.row(*nav)
-    builder.row(InlineKeyboardButton(text="🔙 К препарату", callback_data=f"histology_specimen:{diag_key}:{spec_id}"))
-    return builder.as_markup()
-
-async def render_histology_image(callback: CallbackQuery, diag_key: str, spec_id: str, idx: int):
-    spec = get_histology_specimen(diag_key, spec_id)
-    images = spec.get("images", [])
-    caption = f"🔬 №{spec['number']}. {spec['title']}\n\n{idx + 1}/{len(images)}"
-    keyboard = get_histology_image_keyboard(diag_key, spec_id, idx, len(images))
-    photo = FSInputFile(os.path.join(HISTOLOGY_IMAGES_DIR, images[idx]))
-    await callback.message.delete()
-    await callback.message.answer_photo(photo, caption=caption, reply_markup=keyboard)
-
-@dp.callback_query(F.data == "histology_menu")
-async def cb_histology_menu(callback: CallbackQuery):
-    if not await histology_gate_ok(callback):
-        return
-    await callback.answer()
-    await safe_edit_text(
-        callback.message,
-        f"🔬 <b>Гистология</b>\n{DIVIDER}\n\nВыбери диагностику:",
-        parse_mode="HTML",
-        reply_markup=get_histology_menu_keyboard()
-    )
-
-@dp.callback_query(F.data.startswith("histology_topic:"))
-async def cb_histology_topic(callback: CallbackQuery):
-    if not await histology_gate_ok(callback):
-        return
-    diag_key = callback.data.split(":")[1]
-    if diag_key not in HISTOLOGY:
-        await callback.answer("Раздел не найден", show_alert=True)
-        return
-    await callback.answer()
-    await safe_edit_text(
-        callback.message,
-        get_histology_topic_text(diag_key),
-        parse_mode="HTML",
-        reply_markup=get_histology_topic_keyboard(diag_key)
-    )
-
-@dp.callback_query(F.data.startswith("histology_specimen:"))
-async def cb_histology_specimen(callback: CallbackQuery):
-    if not await histology_gate_ok(callback):
-        return
-    _, diag_key, spec_id = callback.data.split(":")
-    spec = get_histology_specimen(diag_key, spec_id)
-    if not spec:
-        await callback.answer("Препарат не найден", show_alert=True)
-        return
-    await callback.answer()
-    await safe_edit_text(
-        callback.message,
-        get_histology_specimen_text(diag_key, spec_id),
-        parse_mode="HTML",
-        reply_markup=get_histology_specimen_keyboard(diag_key, spec_id)
-    )
-
-@dp.callback_query(F.data.startswith("histology_img:"))
-async def cb_histology_img(callback: CallbackQuery):
-    if not await histology_gate_ok(callback):
-        return
-    _, diag_key, spec_id, idx_s = callback.data.split(":")
-    idx = int(idx_s)
-    spec = get_histology_specimen(diag_key, spec_id)
-    images = spec.get("images", []) if spec else []
-    if not images or not (0 <= idx < len(images)):
-        await callback.answer("Фото для этого препарата пока нет", show_alert=True)
-        return
-    await callback.answer()
-    await render_histology_image(callback, diag_key, spec_id, idx)
-
-# ---- Угадай препарат ----
-HISTOLOGY_GUESS_SESSION_SIZE = 10
-HISTOLOGY_GUESS_SESSIONS: dict[int, dict] = {}
-
-def get_histology_guess_pool(scope: str):
-    # only specimens with a verified label-free "guess_image" are eligible --
-    # many source slides bake the answer or structure labels into every available
-    # photo, so those specimens are deliberately left out of this mode.
-    if scope == "all":
-        return [(diag_key, spec["id"]) for diag_key, diag in HISTOLOGY.items()
-                 for spec in diag["specimens"] if spec.get("guess_image")]
-    diag = HISTOLOGY.get(scope)
-    if not diag:
-        return []
-    return [(scope, spec["id"]) for spec in diag["specimens"] if spec.get("guess_image")]
-
-def start_histology_guess_session(user_id: int, scope: str) -> bool:
-    pool = get_histology_guess_pool(scope)
-    if not pool:
-        return False
-    size = min(HISTOLOGY_GUESS_SESSION_SIZE, len(pool))
-    HISTOLOGY_GUESS_SESSIONS[user_id] = {
-        "scope": scope,
-        "items": random.sample(pool, size),
-        "index": 0,
-        "know": 0,
-        "dont_know": 0,
-    }
-    return True
-
-def get_histology_guess_question_keyboard():
-    builder = InlineKeyboardBuilder()
-    builder.button(text="🙈 Показать ответ", callback_data="histology_guess_show_answer")
-    builder.button(text="🛑 Закончить", callback_data="histology_guess_stop")
-    builder.adjust(1)
-    return builder.as_markup()
-
-def get_histology_guess_answer_keyboard():
-    builder = InlineKeyboardBuilder()
-    builder.button(text="✅ Угадал(а)", callback_data="histology_guess_know")
-    builder.button(text="❌ Не угадал(а)", callback_data="histology_guess_dont_know")
-    builder.adjust(2)
-    builder.row(InlineKeyboardButton(text="🛑 Закончить", callback_data="histology_guess_stop"))
-    return builder.as_markup()
-
-def get_histology_guess_summary_keyboard(scope: str):
-    builder = InlineKeyboardBuilder()
-    builder.button(text="🔁 Пройти ещё раз", callback_data=f"histology_guess_start:{scope}")
-    if scope == "all":
-        builder.button(text="🔙 К разделу", callback_data="histology_menu")
-    else:
-        builder.button(text="🔙 К разделу", callback_data=f"histology_topic:{scope}")
-    builder.adjust(1)
-    return builder.as_markup()
-
-async def render_histology_guess_question(callback: CallbackQuery, user_id: int):
-    session = HISTOLOGY_GUESS_SESSIONS[user_id]
-    total = len(session["items"])
-    diag_key, spec_id = session["items"][session["index"]]
-    spec = get_histology_specimen(diag_key, spec_id)
-    caption = f"🎯 Угадай препарат — {session['index'] + 1}/{total}\n\nЧто это за препарат?"
-    photo = FSInputFile(os.path.join(HISTOLOGY_IMAGES_DIR, spec["guess_image"]))
-    await callback.message.delete()
-    sent = await callback.message.answer_photo(photo, caption=caption, reply_markup=get_histology_guess_question_keyboard())
-    session["msg"] = sent
-
-async def render_histology_guess_answer(user_id: int):
-    session = HISTOLOGY_GUESS_SESSIONS[user_id]
-    total = len(session["items"])
-    diag_key, spec_id = session["items"][session["index"]]
-    spec = get_histology_specimen(diag_key, spec_id)
-    lines = [f"🎯 Угадай препарат — {session['index'] + 1}/{total}", "", f"№{spec['number']}. {spec['title']}"]
-    if spec.get("stain"):
-        lines.append(f"Окраска: {spec['stain']}")
-    if spec.get("magnification"):
-        lines.append(f"Увеличение: {spec['magnification']}")
-    lines.append("")
-    lines.append("Ты угадал(а)?")
-    await session["msg"].edit_caption(caption="\n".join(lines), reply_markup=get_histology_guess_answer_keyboard())
-
-async def render_histology_guess_summary(user_id: int, aborted: bool = False):
-    session = HISTOLOGY_GUESS_SESSIONS.pop(user_id, None)
-    if not session:
-        return
-    scope = session["scope"]
-    answered = session["know"] + session["dont_know"]
-    title = "🛑 Прервано" if aborted else "🏁 Препараты закончились!"
-    caption = (
-        f"{title}\n\n"
-        f"Отвечено: {answered}\n✅ Угадано: {session['know']}\n❌ Не угадано: {session['dont_know']}"
-    )
-    await session["msg"].edit_caption(caption=caption, reply_markup=get_histology_guess_summary_keyboard(scope))
-
-@dp.callback_query(F.data.startswith("histology_guess_start:"))
-async def cb_histology_guess_start(callback: CallbackQuery):
-    if not await histology_gate_ok(callback):
-        return
-    scope = callback.data.split(":", 1)[1]
-    user_id = callback.from_user.id
-    if not start_histology_guess_session(user_id, scope):
-        await callback.answer("Препаратов пока нет", show_alert=True)
-        return
-    await callback.answer()
-    await render_histology_guess_question(callback, user_id)
-
-@dp.callback_query(F.data == "histology_guess_show_answer")
-async def cb_histology_guess_show_answer(callback: CallbackQuery):
-    user_id = callback.from_user.id
-    if user_id not in HISTOLOGY_GUESS_SESSIONS:
-        await callback.answer("Сессия истекла, начни заново", show_alert=True)
-        return
-    await callback.answer()
-    await render_histology_guess_answer(user_id)
-
-@dp.callback_query(F.data.in_({"histology_guess_know", "histology_guess_dont_know"}))
-async def cb_histology_guess_answer(callback: CallbackQuery):
-    user_id = callback.from_user.id
-    session = HISTOLOGY_GUESS_SESSIONS.get(user_id)
-    if not session:
-        await callback.answer("Сессия истекла, начни заново", show_alert=True)
-        return
-    await callback.answer()
-    if callback.data == "histology_guess_know":
-        session["know"] += 1
-    else:
-        session["dont_know"] += 1
-    session["index"] += 1
-    if session["index"] >= len(session["items"]):
-        await render_histology_guess_summary(user_id)
-    else:
-        await render_histology_guess_question(callback, user_id)
-
-@dp.callback_query(F.data == "histology_guess_stop")
-async def cb_histology_guess_stop(callback: CallbackQuery):
-    await callback.answer()
-    if callback.from_user.id in HISTOLOGY_GUESS_SESSIONS:
-        await render_histology_guess_summary(callback.from_user.id, aborted=True)
+HISTOLOGY_PUBLIC = histology_handlers.HISTOLOGY_PUBLIC
+HISTOLOGY_PROMO_SECONDS = histology_handlers.HISTOLOGY_PROMO_SECONDS
+HISTOLOGY_WARNING_THRESHOLD = histology_handlers.HISTOLOGY_WARNING_THRESHOLD
+HISTOLOGY_WARNING_COOLDOWN_SECONDS = histology_handlers.HISTOLOGY_WARNING_COOLDOWN_SECONDS
+HISTOLOGY_GUESS_SESSION_SIZE = histology_handlers.HISTOLOGY_GUESS_SESSION_SIZE
+HISTOLOGY_GUESS_SESSIONS = histology_handlers.HISTOLOGY_GUESS_SESSIONS
+get_histology_temp_expiry = histology_handlers.get_histology_temp_expiry
+has_histology_temp_access = histology_handlers.has_histology_temp_access
+histology_permanently_unlocked = histology_handlers.histology_permanently_unlocked
+histology_access_ok = histology_handlers.histology_access_ok
+histology_gate_ok = histology_handlers.histology_gate_ok
+get_histology_specimen = histology_handlers.get_histology_specimen
+get_histology_locked_text = histology_handlers.get_histology_locked_text
+get_histology_locked_keyboard = histology_handlers.get_histology_locked_keyboard
+announce_histology_promo_start = histology_handlers.announce_histology_promo_start
+get_histology_menu_keyboard = histology_handlers.get_histology_menu_keyboard
+get_histology_topic_text = histology_handlers.get_histology_topic_text
+get_histology_topic_keyboard = histology_handlers.get_histology_topic_keyboard
+get_histology_specimen_text = histology_handlers.get_histology_specimen_text
+get_histology_specimen_keyboard = histology_handlers.get_histology_specimen_keyboard
+get_histology_image_keyboard = histology_handlers.get_histology_image_keyboard
+render_histology_image = histology_handlers.render_histology_image
+get_histology_guess_pool = histology_handlers.get_histology_guess_pool
+start_histology_guess_session = histology_handlers.start_histology_guess_session
+get_histology_guess_question_keyboard = histology_handlers.get_histology_guess_question_keyboard
+get_histology_guess_answer_keyboard = histology_handlers.get_histology_guess_answer_keyboard
+get_histology_guess_summary_keyboard = histology_handlers.get_histology_guess_summary_keyboard
+render_histology_guess_question = histology_handlers.render_histology_guess_question
+render_histology_guess_answer = histology_handlers.render_histology_guess_answer
+render_histology_guess_summary = histology_handlers.render_histology_guess_summary
+cb_histology_menu = histology_handlers.cb_histology_menu
+cb_histology_topic = histology_handlers.cb_histology_topic
+cb_histology_specimen = histology_handlers.cb_histology_specimen
+cb_histology_img = histology_handlers.cb_histology_img
+cb_histology_guess_start = histology_handlers.cb_histology_guess_start
+cb_histology_guess_show_answer = histology_handlers.cb_histology_guess_show_answer
+cb_histology_guess_answer = histology_handlers.cb_histology_guess_answer
+cb_histology_guess_stop = histology_handlers.cb_histology_guess_stop
 
 # ==================== ЗАПУСК ====================
 async def setup_bot_commands() -> None:
