@@ -624,6 +624,21 @@ async def main():
     assert tb._classify_quick_answer("Температура кипения раствора составляет 100,5°C.") == "problem"
     assert tb._classify_quick_answer("Масса вещества ≈ 42 г") == "problem"
     assert tb._classify_quick_answer("pH раствора равен 3,2") == "problem"
+    # регрессия: пронумерованный список из 10+ пунктов (список терминов, не расчёт) — номера
+    # пунктов ≥10 сами по себе двузначные и раньше ложно классифицировались как "problem"
+    numbered_list_answer = (
+        "9. Грудная полость — пространство, в котором находятся лёгкие и сердце.\n"
+        "10. Забрюшинное пространство — область за брюшиной, содержащая жировую ткань и сосуды.\n"
+        "11. Полость малого таза — пространство, в котором находятся органы мочеполовой системы.\n"
+        "12. Промежность — область между анусом и половыми органами.\n"
+        "13. Семенной каналикул — трубочки в яичках, где происходит сперматогенез."
+    )
+    assert tb._classify_quick_answer(numbered_list_answer) == "theory", (
+        "list-item numbering (9., 10., 11. ...) must not be mistaken for a calculated result"
+    )
+    # но реальное число-результат СРЕДИ пунктов списка всё ещё должно определяться как problem
+    numbered_list_with_number = "1. Первый пункт\n2. Масса раствора составляет 15,7 г\n3. Третий пункт"
+    assert tb._classify_quick_answer(numbered_list_with_number) == "problem"
     print("21. _classify_quick_answer tells theory/test answers from calculated ones: OK")
 
     # ---- 22. _openai_messages_to_gemini_contents: system extracted, roles mapped, images converted ----
@@ -831,6 +846,128 @@ async def main():
 
     tb.get_openai_client = orig_get_client
     tb.get_grok_client = orig_get_grok_client
+
+    # ---- 27. _looks_like_ai_refusal: detects real refusal phrasing, not "не может"-style facts ----
+    assert tb._looks_like_ai_refusal("Извините, но я не могу помочь с этой просьбой.")
+    assert tb._looks_like_ai_refusal("I'm sorry, but I can't help with that request.")
+    assert not tb._looks_like_ai_refusal("Молекула не может изменить свою конформацию без затрат энергии.")
+    assert not tb._looks_like_ai_refusal("Ответ: Б")
+    assert not tb._looks_like_ai_refusal("Температура кипения раствора составляет 100,378°C.")
+    print("27. _looks_like_ai_refusal flags real refusals, not 3rd-person facts: OK")
+
+    # ---- 28. the REAL solve_ai_request: a refusal from the primary (already-openai) provider
+    # raises AIRefusalError instead of being silently shown as a normal answer ----
+    class RefusalChoiceMsg:
+        content = "Извините, но я не могу помочь с этой просьбой."
+    class RefusalChoice:
+        message = RefusalChoiceMsg()
+    class RefusalUsage:
+        prompt_tokens = 50
+        completion_tokens = 10
+    class RefusalResponse:
+        choices = [RefusalChoice()]
+        usage = RefusalUsage()
+    class RefusingOpenAICompletions:
+        async def create(self, **kwargs):
+            return RefusalResponse()
+    class RefusingOpenAIChat:
+        completions = RefusingOpenAICompletions()
+    class RefusingOpenAIClient:
+        chat = RefusingOpenAIChat()
+    tb.get_openai_client = lambda: RefusingOpenAIClient()
+    tb.get_grok_client = lambda: None
+    try:
+        await orig_solve(text="анатомический вопрос", quick=False)
+        raised = False
+    except tb.AIRefusalError:
+        raised = True
+    assert raised, "a refusal from OpenAI (no further fallback) must raise AIRefusalError"
+    print("28. OpenAI refusal (no further fallback available) raises AIRefusalError: OK")
+
+    # ---- 28b. a refusal from Grok falls back to OpenAI once; if OpenAI then answers normally,
+    # the caller gets a normal answer, not an error ----
+    tb.AI_USE_GROK_FOR_DETAILED = True
+    class GrokRefusalCompletions:
+        async def create(self, **kwargs):
+            return RefusalResponse()
+    class GrokRefusalChat:
+        completions = GrokRefusalCompletions()
+    class GrokRefusalClient:
+        chat = GrokRefusalChat()
+    fallback_calls_28b = []
+    class GoodFallbackCompletions28b:
+        async def create(self, **kwargs):
+            fallback_calls_28b.append(kwargs["model"])
+            return FakeOpenAIResponse()
+    class GoodFallbackChat28b:
+        completions = GoodFallbackCompletions28b()
+    class GoodFallbackClient28b:
+        chat = GoodFallbackChat28b()
+    tb.get_grok_client = lambda: GrokRefusalClient()
+    tb.get_openai_client = lambda: GoodFallbackClient28b()
+    _, _, usage_28b = await orig_solve(text="анатомический вопрос", quick=False)
+    assert len(fallback_calls_28b) == 1, "must fall back to OpenAI exactly once after Grok refuses"
+    assert usage_28b["provider"] == "openai"
+    print("28b. Grok refusal falls back to OpenAI once, which then answers normally: OK")
+
+    # ---- 28c. if BOTH the primary provider and the OpenAI fallback refuse, AIRefusalError still
+    # propagates — exactly 2 attempts total, no infinite retry loop ----
+    class BadFallbackCompletions28c:
+        async def create(self, **kwargs):
+            return RefusalResponse()
+    class BadFallbackChat28c:
+        completions = BadFallbackCompletions28c()
+    class BadFallbackClient28c:
+        chat = BadFallbackChat28c()
+    tb.get_grok_client = lambda: GrokRefusalClient()
+    tb.get_openai_client = lambda: BadFallbackClient28c()
+    try:
+        await orig_solve(text="анатомический вопрос", quick=False)
+        raised28c = False
+    except tb.AIRefusalError:
+        raised28c = True
+    assert raised28c, "must still raise AIRefusalError if even the OpenAI fallback refuses"
+    print("28c. both primary and fallback refusing still raises AIRefusalError, no loop: OK")
+    tb.AI_USE_GROK_FOR_DETAILED = False
+    tb.get_openai_client = orig_get_client
+    tb.get_grok_client = orig_get_grok_client
+
+    # ---- 29. handler level: AIRefusalError shows a clear message, does NOT charge the daily
+    # quota, and leaves the session alive so the user can rephrase and retry ----
+    tb.end_ai_session(uid)
+    tb.start_ai_session(uid)
+    tb.stats["ai_usage"].pop(str(uid), None)
+    async def refusing_solve(**kwargs):
+        raise tb.AIRefusalError("simulated content-filter refusal")
+    tb.solve_ai_request = refusing_solve
+    before29 = tb.ai_requests_left(uid)
+    msg29 = FakeMsg(uid=uid, text="анатомический вопрос про промежность")
+    await tb.handle_ai_text_input(msg29)
+    assert tb.ai_requests_left(uid) == before29, "a refused attempt must not spend the daily quota"
+    assert tb.is_ai_session_active(uid), "session must stay open so the user can rephrase"
+    assert tb.AI_SESSIONS[uid]["messages"] == [], "a refused attempt must not be recorded into history"
+    final_text29 = msg29.last_child.edits[-1][0]
+    assert "фильтр" in final_text29
+    print("29. AIRefusalError shows a clear message, doesn't charge quota, session stays alive: OK")
+    tb.solve_ai_request = fake_solve
+    tb.stats["ai_usage"].pop(str(uid), None)
+
+    # ---- 30. RAG regression: the actual anatomy question that produced a noisy false-positive
+    # match (respiratory-organ-evolution biology content for a body-cavity anatomy list) must no
+    # longer match anything, now that scoring is normalized by query length (IDF-weighted) ----
+    anatomy_regression_query = (
+        "Перикард — серозная оболочка сердца. Полость перикарда — пространство между слоями "
+        "перикарда. Средостение — пространство между лёгкими. Грудная полость — пространство, в "
+        "котором находятся лёгкие и сердце. Забрюшинное пространство — область за брюшиной, "
+        "содержащая жировую ткань и сосуды. Полость малого таза — пространство, в котором "
+        "находятся органы мочеполовой системы. Промежность — область между анусом и половыми "
+        "органами. Семенной каналикул — трубочки в яичках, где происходит сперматогенез."
+    )
+    assert tb._search_ai_rag_snippets(anatomy_regression_query) == [], (
+        "a long multi-topic anatomy list (outside the RAG index's Biology/Physics/Chemistry "
+        "scope) must not pull in unrelated biology content just by sheer word-overlap volume"
+    )
+    print("30. RAG no longer returns noisy matches for the reported anatomy false-positive: OK")
 
     # cleanup
     tb.solve_ai_request = orig_solve

@@ -6,6 +6,7 @@ import io
 import json
 import logging
 import aiohttp
+import math
 import random
 import re
 import os
@@ -1930,7 +1931,17 @@ def search_questions_by_keyword(query: str, limit: int = SEARCH_RESULTS_LIMIT):
 # тогда, когда что-то релевантное реально нашлось.
 AI_RAG_TOP_K = 2          # сколько фрагментов подмешиваем максимум за один подробный запрос
 AI_RAG_SNIPPET_MAX_CHARS = 600  # потолок длины ОДНОГО фрагмента — ограничивает добавленные токены
-AI_RAG_MIN_SCORE = 2      # минимум общих стеммов с запросом, иначе слишком шумно/случайно
+AI_RAG_MIN_COMMON_STEMS = 2  # минимум РАЗНЫХ общих слов с запросом — иначе одно случайное слово
+                              # уже может дать высокий взвешенный балл
+# Порог по НОРМАЛИЗОВАННОМУ баллу (сумма IDF общих слов / число стеммов в запросе), не по сырой
+# сумме: длинный многопунктный ответ (например, список из 9+ анатомических терминов) набирает
+# сырую сумму выше короткого точного вопроса просто за счёт объёма слов, даже когда реально
+# релевантной темы в индексе вообще нет — на реальном вопросе так подмешался явно посторонний
+# материал (эволюция органов дыхания у беспозвоночных вместо анатомии полостей тела). На тех же
+# реальных вопросах у настоящих совпадений (митохондрии, коллигативные свойства, закон Ома)
+# нормализованный балл 1.3-3.5, у случайных многословных совпадений — 0.8-0.9: порог 1.2 чисто
+# разделяет эти два случая.
+AI_RAG_MIN_SCORE = 1.2
 
 def _entry_stems(title: str, text: str) -> set:
     words = _extract_words(title) + _extract_words(text)
@@ -1965,17 +1976,43 @@ def get_ai_rag_index() -> list:
         _AI_RAG_INDEX = _build_ai_rag_index()
     return _AI_RAG_INDEX
 
+def _build_ai_rag_stem_idf(index: list) -> dict:
+    """Обычные IDF-веса: слова, встречающиеся почти в каждой записи («который», «между»,
+    «строение», «функции» — типичные связки для формулировок в стиле «Х, его строение и
+    функции») получают низкий вес и почти не влияют на совпадение; редкие тематические слова
+    («перикард», «диссоциация», «коллигативные») — высокий. Без этого длинный ответ совпадал по
+    общим словам с случайными, вообще не связанными темами (наблюдалось на реальном вопросе)."""
+    doc_freq = {}
+    for entry in index:
+        for stem in entry["stems"]:
+            doc_freq[stem] = doc_freq.get(stem, 0) + 1
+    n_docs = max(len(index), 1)
+    return {stem: math.log((n_docs + 1) / (df + 1)) + 1 for stem, df in doc_freq.items()}
+
+_AI_RAG_STEM_IDF = None
+
+def get_ai_rag_stem_idf() -> dict:
+    global _AI_RAG_STEM_IDF
+    if _AI_RAG_STEM_IDF is None:
+        _AI_RAG_STEM_IDF = _build_ai_rag_stem_idf(get_ai_rag_index())
+    return _AI_RAG_STEM_IDF
+
 def _search_ai_rag_snippets(query_text: str, limit: int = AI_RAG_TOP_K) -> list:
-    """Возвращает до `limit` наиболее релевантных записей индекса по числу общих стеммов с
-    query_text — без обращения к модели, чистое сравнение множеств."""
+    """Возвращает до `limit` наиболее релевантных записей индекса по НОРМАЛИЗОВАННОМУ IDF-баллу
+    (сумма весов общих слов / число стеммов в запросе — см. AI_RAG_MIN_SCORE) — без обращения к
+    модели, чистое сравнение множеств + взвешенная сумма."""
     query_stems = {_word_stem(w) for w in _extract_words(query_text) if len(w) >= 4}
     if not query_stems:
         return []
-    scored = [
-        (len(query_stems & entry["stems"]), entry)
-        for entry in get_ai_rag_index()
-    ]
-    scored = [(score, entry) for score, entry in scored if score >= AI_RAG_MIN_SCORE]
+    idf = get_ai_rag_stem_idf()
+    scored = []
+    for entry in get_ai_rag_index():
+        common = query_stems & entry["stems"]
+        if len(common) < AI_RAG_MIN_COMMON_STEMS:
+            continue
+        score = sum(idf.get(stem, 0.0) for stem in common) / len(query_stems)
+        if score >= AI_RAG_MIN_SCORE:
+            scored.append((score, entry))
     scored.sort(key=lambda x: -x[0])
     return [entry for _, entry in scored[:limit]]
 
@@ -6092,14 +6129,20 @@ async def _call_gemini(messages: list, max_tokens: int) -> tuple:
     return text, usage
 
 _AI_PROBLEM_NUMBER_RE = re.compile(r"\d[.,]\d|\d{2,}")
+_AI_LIST_MARKER_RE = re.compile(r"(?m)^\s*\d+[.)]\s+")  # "9. ", "10. " — нумерация пунктов, не число-результат
 
 def _classify_quick_answer(answer: str) -> str:
     """Дешёвая эвристика по уже сгенерированному быстрому ответу — без единого лишнего токена.
     AI_QUICK_SUFFIX просит модель на первом ходу дать ЛИБО букву/номер варианта (тест/теория),
-    ЛИБО финальный числовой результат с единицами (расчётная задача) — по форме заметно, что
-    перед нами: дробное число или число из 2+ цифр — почти наверняка результат вычисления,
-    иначе — тест/теория. "problem" — безопасный вариант по умолчанию: при сомнении не отправляем
-    расчёт в модель, которая на нём не проверялась (см. AI_USE_GROK_FOR_DETAILED про этот же риск)."""
+    ЛИБО финальный числовой результат с единицами (расчётная задача), ЛИБО (для вопросов с
+    несколькими терминами) короткий пронумерованный список — по форме заметно, что перед нами:
+    дробное число или число из 2+ цифр — почти наверняка результат вычисления, иначе — тест/
+    теория. Нумерацию пунктов списка («9. Термин — ...») сначала вырезаем — иначе номер пункта
+    ≥10 сам по себе (два знака) ложно распознавался бы как результат расчёта, отправляя список
+    терминов в OpenAI вместо более дешёвого Gemini. "problem" — безопасный вариант по умолчанию:
+    при сомнении не отправляем расчёт в модель, которая на нём не проверялась (см.
+    AI_USE_GROK_FOR_DETAILED про этот же риск)."""
+    answer = _AI_LIST_MARKER_RE.sub("", answer)
     if _AI_PROBLEM_NUMBER_RE.search(answer):
         return "problem"
     return "theory"
@@ -6316,6 +6359,24 @@ def _compact_history(history: list) -> list:
             compact.append(msg)
     return compact
 
+class AIRefusalError(RuntimeError):
+    """Провайдер ответил без ошибки, но это отказ от контент-фильтра ("Извините, но я не могу
+    помочь с этой просьбой"), а не реальный разбор задания — отдельный тип, чтобы вызывающий код
+    не показывал этот текст как обычный ответ и не списывал за него дневную квоту пользователя."""
+
+_AI_REFUSAL_RE = re.compile(
+    r"не могу (помочь|предоставить|ответить|обсуждать|выполнить эт)|"
+    r"i (?:can'?t|cannot|am unable to|won'?t) (?:help|assist|provide|answer)",
+    re.IGNORECASE,
+)
+
+def _looks_like_ai_refusal(answer: str) -> bool:
+    """«Не могу» (1-е лицо, сама модель о себе) — надёжный маркер отказа; «не может»/«не могут»
+    (3-е лицо, про молекулы/организмы в самом объяснении) под него не попадает. Смотрим только на
+    начало ответа — отказы провайдеры дают сразу, не посреди корректного объяснения, поэтому не
+    рискуем ложным срабатыванием на длинных настоящих ответах."""
+    return bool(_AI_REFUSAL_RE.search(answer[:150]))
+
 async def _call_provider(provider: str, model: str, client, messages: list, max_tokens: int) -> tuple:
     """Единая точка вызова модели независимо от провайдера — OpenAI-совместимые (openai/grok,
     через клиент AsyncOpenAI) и Gemini (свой формат запроса/ответа, прямой HTTP — см.
@@ -6401,18 +6462,22 @@ async def solve_ai_request(
         # temperature=0 (внутри _call_provider/_call_gemini) — для расчётных задач нужен
         # стабильный, воспроизводимый ход решения, не творческое разнообразие: без этого один и
         # тот же вопрос давал разный метод и разный ответ при каждом новом запросе
+        if _looks_like_ai_refusal(answer_raw):
+            raise AIRefusalError(f"{provider} отказался отвечать (похоже на срабатывание контент-фильтра)")
     except Exception:
         if provider == "openai":
             raise
-        # Grok/Gemini недоступны (невалидный ключ, сбой у провайдера и т.п.) — один запасной
-        # запрос через OpenAI, чтобы ответ не переставал приходить пользователю. Не ретрай в
-        # цикле — ровно одна дополнительная попытка на другом провайдере.
-        logger.exception("%s недоступен, откатываюсь на OpenAI для этого запроса", provider)
+        # Grok/Gemini недоступны или отказали (невалидный ключ, сбой у провайдера, контент-фильтр
+        # и т.п.) — один запасной запрос через OpenAI, чтобы ответ не переставал приходить
+        # пользователю. Не ретрай в цикле — ровно одна дополнительная попытка на другом провайдере.
+        logger.exception("%s недоступен или отказал, откатываюсь на OpenAI для этого запроса", provider)
         fallback_client = get_openai_client()
         if fallback_client is None:
             raise
         provider, model = "openai", AI_MODEL_VISION
         answer_raw, usage = await _call_provider(provider, model, fallback_client, messages, max_tokens)
+        if _looks_like_ai_refusal(answer_raw):
+            raise AIRefusalError(f"{provider} тоже отказался отвечать на этот вопрос")
 
     answer = _clean_ai_answer(answer_raw)
     if len(answer) > AI_ANSWER_TELEGRAM_LIMIT:
@@ -6548,6 +6613,14 @@ async def cb_ai_show_explanation(callback: CallbackQuery):
             parse_mode="HTML",
             reply_markup=get_ai_result_keyboard(session_active)
         )
+    except AIRefusalError:
+        logger.warning("AI отказался дать подробный разбор пользователю %s", user_id)
+        await safe_edit_text(
+            thinking,
+            "⚠️ AI отказался отвечать на этот конкретный вопрос — похоже, сработал фильтр "
+            "содержимого провайдера (так бывает на некоторых медицинских формулировках). "
+            "Эта попытка не списана с дневного лимита — попробуй переформулировать вопрос."
+        )
     except Exception:
         logger.exception("Ошибка при получении подробного решения для пользователя %s", user_id)
         await safe_edit_text(thinking, "⚠️ Не удалось получить решение. Попробуй ещё раз позже.")
@@ -6597,6 +6670,14 @@ async def handle_ai_photo_input(message: Message):
             parse_mode="HTML",
             reply_markup=get_ai_result_keyboard(session_active, offer_explanation=quick)
         )
+    except AIRefusalError:
+        logger.warning("AI отказался разобрать фото от пользователя %s", user_id)
+        await safe_edit_text(
+            thinking,
+            "⚠️ AI отказался отвечать на это фото — похоже, сработал фильтр содержимого "
+            "провайдера (так бывает на некоторых медицинских формулировках). Эта попытка не "
+            "списана с дневного лимита — попробуй прислать вопрос текстом или переформулировать."
+        )
     except Exception:
         logger.exception("Ошибка при обработке AI-фото от пользователя %s", user_id)
         await safe_edit_text(thinking, "⚠️ Не удалось обработать фото. Попробуй ещё раз или пришли текстом.")
@@ -6644,6 +6725,14 @@ async def handle_ai_text_input(message: Message):
             get_ai_result_text(answer, user_id, session_active, offer_explanation=quick),
             parse_mode="HTML",
             reply_markup=get_ai_result_keyboard(session_active, offer_explanation=quick)
+        )
+    except AIRefusalError:
+        logger.warning("AI отказался ответить на текст от пользователя %s", user_id)
+        await safe_edit_text(
+            thinking,
+            "⚠️ AI отказался отвечать на этот конкретный вопрос — похоже, сработал фильтр "
+            "содержимого провайдера (так бывает на некоторых медицинских формулировках). "
+            "Эта попытка не списана с дневного лимита — попробуй переформулировать вопрос."
         )
     except Exception:
         logger.exception("Ошибка при обработке AI-текста от пользователя %s", user_id)
