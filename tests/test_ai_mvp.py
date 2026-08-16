@@ -309,6 +309,22 @@ async def main():
     tb.stats["ai_usage"].pop(str(ADMIN_ID), None)
     print("15. admin has unlimited AI requests: OK")
 
+    # ---- 16. LaTeX cleanup: real formulas the model has actually produced, made readable ----
+    raw = (
+        r"\( i = 1 + 2 \cdot (0,96) = 2,92 \)."
+        r" \( m = \frac{n}{m_{\text{растворителя, кг}}} \approx 0,246 \, \text{моль/кг} \)."
+        r" Сульфат калия SO4^{2-} и K^{+}, \Delta T_b \approx 0,37 \, \text{°C}."
+    )
+    cleaned = tb._clean_ai_answer(raw)
+    for bad in ("\\(", "\\)", "\\cdot", "\\frac", "\\text", "\\Delta", "\\,", "$"):
+        assert bad not in cleaned, f"{bad!r} leaked into cleaned output: {cleaned!r}"
+    assert "×" in cleaned  # \cdot -> ×
+    assert "≈" in cleaned  # \approx -> ≈
+    assert "SO4(2-)" in cleaned and "K(+)" in cleaned  # ^{...} -> (...)
+    assert "Δ" in cleaned  # \Delta -> Δ
+    assert "моль/кг" in cleaned and "°C" in cleaned  # \text{} unwrapped
+    print("16. LaTeX cleanup strips backslash markup and produces readable text: OK")
+
     # cleanup
     tb.solve_ai_request = orig_solve
     tb.OPENAI_API_KEY = orig_key
