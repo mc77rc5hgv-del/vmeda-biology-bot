@@ -5912,8 +5912,17 @@ def increment_ai_usage(user_id: int) -> None:
     stats["ai_usage"][str(user_id)] = entry
     save_stats()
 
+def has_unlimited_ai(user_id: int) -> bool:
+    return is_admin(user_id)
+
 def ai_requests_left(user_id: int) -> int:
     return max(0, AI_FREE_DAILY_LIMIT - get_ai_usage_today(user_id))
+
+def ai_quota_ok(user_id: int) -> bool:
+    return has_unlimited_ai(user_id) or ai_requests_left(user_id) > 0
+
+def get_ai_quota_label(user_id: int) -> str:
+    return "♾ безлимит (админ)" if has_unlimited_ai(user_id) else f"{ai_requests_left(user_id)}/{AI_FREE_DAILY_LIMIT}"
 
 def record_ai_cost(usage: dict) -> None:
     """Копит агрегированную стоимость AI-запросов — не пишет по записи на каждый запрос
@@ -5950,14 +5959,13 @@ def end_ai_session(user_id: int) -> None:
     AI_SESSIONS.pop(user_id, None)
 
 def get_ai_menu_text(user_id: int) -> str:
-    left = ai_requests_left(user_id)
     availability = "" if OPENAI_API_KEY else "\n\n🔧 Идут финальные настройки — совсем скоро запустим."
     return (
         f"🤖 <b>VMedA AI</b>\n{DIVIDER}\n\n"
         "AI-помощник, который разбирает задание по фото или тексту и сразу выдаёт решение: "
         "чёткий ответ и объяснение по шагам. Работает по биологии, физике и химии — тесты, "
         "билеты, контрольные, летучки. Просто присылаешь фото — получаешь разбор.\n\n"
-        f"Бесплатных запросов сегодня: <b>{left}/{AI_FREE_DAILY_LIMIT}</b>"
+        f"Бесплатных запросов сегодня: <b>{get_ai_quota_label(user_id)}</b>"
         f"{availability}"
     )
 
@@ -6041,7 +6049,6 @@ async def solve_ai_request(
     return answer, user_turn, usage
 
 def get_ai_result_text(answer: str, user_id: int, session_active: bool, offer_explanation: bool = False) -> str:
-    left = ai_requests_left(user_id)
     if offer_explanation:
         continuation = "\n\n🧠 Это краткий ответ — нажми кнопку ниже, если нужно решение по шагам."
     elif session_active:
@@ -6051,7 +6058,7 @@ def get_ai_result_text(answer: str, user_id: int, session_active: bool, offer_ex
     return (
         f"🤖 <b>Ответ AI</b>\n{DIVIDER}\n\n{html.escape(answer)}\n\n"
         f"💡 Сверяй важные ответы с материалами курса.\n"
-        f"Осталось бесплатных запросов сегодня: {left}/{AI_FREE_DAILY_LIMIT}"
+        f"Осталось бесплатных запросов сегодня: {get_ai_quota_label(user_id)}"
         f"{continuation}"
     )
 
@@ -6083,7 +6090,7 @@ async def cb_ai_solve_start(callback: CallbackQuery):
     if not OPENAI_API_KEY:
         await callback.answer("AI сейчас на техническом обслуживании, загляни позже.", show_alert=True)
         return
-    if ai_requests_left(user_id) <= 0:
+    if not ai_quota_ok(user_id):
         await callback.answer("На сегодня бесплатные AI-запросы закончились, попробуй завтра.", show_alert=True)
         return
     await callback.answer()
@@ -6131,7 +6138,7 @@ async def cb_ai_show_explanation(callback: CallbackQuery):
     if session["processing"]:
         await callback.answer()
         return
-    if ai_requests_left(user_id) <= 0:
+    if not ai_quota_ok(user_id):
         end_ai_session(user_id)
         await callback.answer("На сегодня бесплатные AI-запросы закончились, попробуй завтра.", show_alert=True)
         return
@@ -6147,7 +6154,7 @@ async def cb_ai_show_explanation(callback: CallbackQuery):
         session["messages"].append(user_turn)
         session["messages"].append({"role": "assistant", "content": answer})
         session["last_active"] = time.time()
-        session_active = ai_requests_left(user_id) > 0
+        session_active = ai_quota_ok(user_id)
         if not session_active:
             end_ai_session(user_id)
         await safe_edit_text(
@@ -6173,7 +6180,7 @@ async def handle_ai_photo_input(message: Message):
     session = AI_SESSIONS[user_id]
     if session["processing"]:
         return  # предыдущее сообщение этого диалога ещё обрабатывается — вероятный случайный дубль
-    if ai_requests_left(user_id) <= 0:
+    if not ai_quota_ok(user_id):
         end_ai_session(user_id)
         await message.answer("На сегодня бесплатные AI-запросы закончились, попробуй завтра.")
         return
@@ -6192,7 +6199,7 @@ async def handle_ai_photo_input(message: Message):
         session["messages"].append(user_turn)
         session["messages"].append({"role": "assistant", "content": answer})
         session["last_active"] = time.time()
-        session_active = ai_requests_left(user_id) > 0
+        session_active = ai_quota_ok(user_id)
         if not session_active:
             end_ai_session(user_id)
         await safe_edit_text(
@@ -6218,7 +6225,7 @@ async def handle_ai_text_input(message: Message):
     session = AI_SESSIONS[user_id]
     if session["processing"]:
         raise SkipHandler  # предыдущее сообщение этого диалога ещё обрабатывается — вероятный случайный дубль
-    if ai_requests_left(user_id) <= 0:
+    if not ai_quota_ok(user_id):
         end_ai_session(user_id)
         await message.answer("На сегодня бесплатные AI-запросы закончились, попробуй завтра.")
         return
@@ -6234,7 +6241,7 @@ async def handle_ai_text_input(message: Message):
         session["messages"].append(user_turn)
         session["messages"].append({"role": "assistant", "content": answer})
         session["last_active"] = time.time()
-        session_active = ai_requests_left(user_id) > 0
+        session_active = ai_quota_ok(user_id)
         if not session_active:
             end_ai_session(user_id)
         await safe_edit_text(

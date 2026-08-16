@@ -4,6 +4,7 @@ from _bootstrap import tb
 from aiogram.dispatcher.event.bases import SkipHandler
 
 NON_ADMIN = 55501122
+ADMIN_ID = next(iter(tb.ADMIN_IDS))
 
 class FakeUser:
     def __init__(self, uid):
@@ -286,6 +287,27 @@ async def main():
     block = tb.get_ai_cost_stats_block()
     assert "VMedA AI" in block and "1" in block
     print("14. record_ai_cost math + stats block: OK")
+
+    # ---- 15. admin has unlimited AI requests, even at/over the daily quota ----
+    tb.end_ai_session(ADMIN_ID)
+    tb.stats["ai_usage"][str(ADMIN_ID)] = {"date": tb.date.today().isoformat(), "count": tb.AI_FREE_DAILY_LIMIT + 5}
+    tb.stats["ai_usage"][str(uid)] = {"date": tb.date.today().isoformat(), "count": tb.AI_FREE_DAILY_LIMIT}
+    assert tb.has_unlimited_ai(ADMIN_ID)
+    assert tb.ai_quota_ok(ADMIN_ID)
+    assert not tb.has_unlimited_ai(uid) and not tb.ai_quota_ok(uid), "regular user stays capped as before"
+    assert "безлимит" in tb.get_ai_quota_label(ADMIN_ID)
+    cb_admin_start = FakeCB("ai_solve_start", uid=ADMIN_ID)
+    await tb.cb_ai_solve_start(cb_admin_start)
+    assert tb.is_ai_session_active(ADMIN_ID), "admin must be able to start a session past the daily cap"
+    admin_msg = FakeMsg(uid=ADMIN_ID, text="Ещё один вопрос сверх лимита")
+    await tb.handle_ai_text_input(admin_msg)
+    assert tb.is_ai_session_active(ADMIN_ID), "admin's session must not auto-close from quota exhaustion"
+    admin_text, admin_kb = admin_msg.last_child.edits[-1]
+    assert "безлимит" in admin_text
+    assert "ai_session_end" in kb_data(admin_kb)
+    tb.end_ai_session(ADMIN_ID)
+    tb.stats["ai_usage"].pop(str(ADMIN_ID), None)
+    print("15. admin has unlimited AI requests: OK")
 
     # cleanup
     tb.solve_ai_request = orig_solve
