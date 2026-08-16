@@ -42,10 +42,10 @@ def kb_data(markup):
     return [b.callback_data for row in markup.inline_keyboard for b in row]
 
 async def main():
-    orig_mode = tb.ANATOMY_MAINTENANCE_MODE
+    orig_mode = tb.anatomy_handlers.ANATOMY_MAINTENANCE_MODE
 
     # ---- 1. maintenance ON: non-admin gets the closed screen, no course/exam entry points ----
-    tb.ANATOMY_MAINTENANCE_MODE = True
+    tb.anatomy_handlers.ANATOMY_MAINTENANCE_MODE = True
     cb = FakeCB("anatomy_root", uid=NON_ADMIN)
     await tb.cb_anatomy_root(cb)
     text, kb = cb.message.edits[-1]
@@ -72,7 +72,7 @@ async def main():
     print("3. main menu label: non-admin sees maintenance, admin sees normal (админ) label: OK")
 
     # ---- 4. maintenance OFF: behaves exactly as before for non-admin too ----
-    tb.ANATOMY_MAINTENANCE_MODE = False
+    tb.anatomy_handlers.ANATOMY_MAINTENANCE_MODE = False
     cb2 = FakeCB("anatomy_root", uid=NON_ADMIN)
     await tb.cb_anatomy_root(cb2)
     text2, kb2 = cb2.message.edits[-1]
@@ -82,7 +82,7 @@ async def main():
     assert not any("техобслуживание" in t for t in kb_texts(menu_non_admin_off))
     print("4. maintenance OFF restores normal behavior: OK")
 
-    tb.ANATOMY_MAINTENANCE_MODE = orig_mode
+    tb.anatomy_handlers.ANATOMY_MAINTENANCE_MODE = orig_mode
     print("\nAll anatomy maintenance-mode tests passed!")
 
 if __name__ == "__main__":

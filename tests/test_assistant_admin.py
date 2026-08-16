@@ -92,13 +92,13 @@ async def main():
     print("3. assistant gets access to every gated section: OK")
 
     # ---- 3b. assistant also bypasses the anatomy maintenance-mode closure, like a real admin ----
-    orig_maint = tb.ANATOMY_MAINTENANCE_MODE
-    tb.ANATOMY_MAINTENANCE_MODE = True
+    orig_maint = tb.anatomy_handlers.ANATOMY_MAINTENANCE_MODE
+    tb.anatomy_handlers.ANATOMY_MAINTENANCE_MODE = True
     cb_root = FakeCB("anatomy_root", uid=assistant_id)
     await tb.cb_anatomy_root(cb_root)
     text_root, kb_root = cb_root.message.edits[-1]
     assert "anatomy_menu" in kb_data(kb_root), "assistant must not be blocked by the maintenance screen"
-    tb.ANATOMY_MAINTENANCE_MODE = orig_maint
+    tb.anatomy_handlers.ANATOMY_MAINTENANCE_MODE = orig_maint
     print("3b. assistant bypasses anatomy maintenance mode: OK")
 
     # ---- 4. cmd_admin routes: real admin -> full panel, assistant -> limited panel, nobody else ----
