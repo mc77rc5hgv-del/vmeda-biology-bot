@@ -23,7 +23,7 @@ import sys
 from pathlib import Path
 
 OPENAI_MODEL = "gpt-4o-mini"
-GEMINI_MODEL = "gemini-2.5-flash-lite"
+GEMINI_MODEL = "gemini-flash-lite-latest"  # gemini-2.5-flash-lite вернул 404 для новых API-ключей
 
 # Same system prompt as the live bot's AI feature (telegram_bot.py, AI_SYSTEM_PROMPT) --
 # kept as a plain copy here on purpose, so this script never has to import telegram_bot.py
@@ -80,7 +80,12 @@ async def ask_gemini(case: dict) -> str:
         return "(пропущено — GEMINI_API_KEY не задан)"
     from google import genai
     from google.genai import types
-    client = genai.Client(api_key=api_key)
+    # trust_env=True — иначе aiohttp внутри SDK игнорирует HTTPS_PROXY и не может достучаться
+    # до Google из окружений с обязательным исходящим прокси.
+    client = genai.Client(
+        api_key=api_key,
+        http_options=types.HttpOptions(async_client_args={"trust_env": True}),
+    )
     parts = []
     if case["text"]:
         parts.append(case["text"])

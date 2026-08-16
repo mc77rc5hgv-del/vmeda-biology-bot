@@ -3,3 +3,4 @@ __pycache__/
 stats.json
 stats.json.tmp
 .env
+scripts/ai_model_compare_results.txt
