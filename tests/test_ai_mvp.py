@@ -128,8 +128,10 @@ async def main():
     # ---- 7. FIRST message of a session -> quick=True, short answer, offers "show solution" ----
     tb.start_ai_session(uid)
     calls = []
-    async def fake_solve(*, image_bytes=None, text=None, history=None, quick=False):
+    task_type_calls = []
+    async def fake_solve(*, image_bytes=None, text=None, history=None, quick=False, task_type=None):
         calls.append((image_bytes, text, list(history or []), quick))
+        task_type_calls.append(task_type)
         answer = "Ответ: Б" if quick else "Ответ: Б. Подробное решение по шагам: ..."
         return answer, fake_user_turn(text=text, image_bytes=image_bytes), dict(FAKE_USAGE)
     orig_solve = tb.solve_ai_request
@@ -612,6 +614,147 @@ async def main():
 
     tb.get_openai_client = orig_get_client
     tb.get_grok_client = orig_get_grok_client
+
+    # ---- 21. _classify_quick_answer: cheap heuristic that gates Gemini eligibility ----
+    assert tb._classify_quick_answer("Ответ: Б") == "theory"
+    assert tb._classify_quick_answer("3) Верно") == "theory"
+    assert tb._classify_quick_answer("Ответ: В") == "theory"
+    assert tb._classify_quick_answer("Температура кипения раствора составляет 100,5°C.") == "problem"
+    assert tb._classify_quick_answer("Масса вещества ≈ 42 г") == "problem"
+    assert tb._classify_quick_answer("pH раствора равен 3,2") == "problem"
+    print("21. _classify_quick_answer tells theory/test answers from calculated ones: OK")
+
+    # ---- 22. _openai_messages_to_gemini_contents: system extracted, roles mapped, images converted ----
+    openai_style_messages = [
+        {"role": "system", "content": "СИСТЕМНЫЙ ПРОМПТ"},
+        {"role": "user", "content": "старый текстовый вопрос"},
+        {"role": "assistant", "content": "старый ответ"},
+        {"role": "user", "content": [
+            {"type": "text", "text": "новый вопрос"},
+            {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,QUJD", "detail": "low"}},
+        ]},
+    ]
+    system_text, contents = tb._openai_messages_to_gemini_contents(openai_style_messages)
+    assert system_text == "СИСТЕМНЫЙ ПРОМПТ"
+    assert [c["role"] for c in contents] == ["user", "model", "user"], "assistant maps to model, system is separate"
+    assert contents[0]["parts"] == [{"text": "старый текстовый вопрос"}]
+    assert contents[1]["parts"] == [{"text": "старый ответ"}]
+    last_parts = contents[2]["parts"]
+    assert {"text": "новый вопрос"} in last_parts
+    image_part = next(p for p in last_parts if "inline_data" in p)
+    assert image_part["inline_data"] == {"mime_type": "image/jpeg", "data": "QUJD"}
+    print("22. _openai_messages_to_gemini_contents converts roles/system/images correctly: OK")
+
+    # ---- 23. task_type is classified from the quick answer's shape and passed through to the
+    # detailed explanation call — this is what lets solve_ai_request route theory/test questions
+    # to Gemini while calc problems stay on OpenAI ----
+    tb.end_ai_session(uid)
+    tb.start_ai_session(uid)
+    tb.stats["ai_usage"].pop(str(uid), None)
+    task_type_calls.clear()
+    msg23 = FakeMsg(uid=uid, text="Что такое диффузия?")
+    await tb.handle_ai_text_input(msg23)  # fake_solve's quick answer is the bare-letter "Ответ: Б"
+    assert tb.AI_SESSIONS[uid]["task_type"] == "theory", "a bare-letter quick answer must classify as theory"
+    cb_explain23 = FakeCB("ai_show_explanation", uid=uid)
+    await tb.cb_ai_show_explanation(cb_explain23)
+    assert task_type_calls[-1] == "theory", "the detailed call must receive the classified task_type"
+    print("23. task_type is classified from the quick answer and passed to the detailed call: OK")
+    tb.stats["ai_usage"].pop(str(uid), None)
+
+    # ---- 24. the REAL solve_ai_request: quick=False + task_type="theory" + GEMINI_API_KEY set
+    # routes to Gemini, priced at Gemini's own (cheaper) rates ----
+    orig_gemini_key = tb.GEMINI_API_KEY
+    tb.GEMINI_API_KEY = "fake-gemini-key-for-tests"
+    gemini_calls = []
+    async def fake_call_gemini_success(messages, max_tokens):
+        gemini_calls.append((messages, max_tokens))
+        return "Правильный вариант: В (эволюционная теория)", {"input_tokens": 150, "output_tokens": 40}
+    orig_call_gemini = tb._call_gemini
+    tb._call_gemini = fake_call_gemini_success
+    class OpenAIMustNotBeCalledCompletions24:
+        async def create(self, **kwargs):
+            raise AssertionError("OpenAI must not be called when Gemini handles a theory question")
+    class OpenAIMustNotBeCalledChat24:
+        completions = OpenAIMustNotBeCalledCompletions24()
+    class OpenAIMustNotBeCalledClient24:
+        chat = OpenAIMustNotBeCalledChat24()
+    tb.get_openai_client = lambda: OpenAIMustNotBeCalledClient24()
+    tb.stats["ai_cost_totals"] = {"requests": 0, "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0}
+    answer_th, _, usage_th = await orig_solve(text="теоретический вопрос", quick=False, task_type="theory")
+    assert usage_th == {"input_tokens": 150, "output_tokens": 40, "provider": "gemini"}
+    assert len(gemini_calls) == 1
+    tb.record_ai_cost(usage_th)
+    gemini_totals = tb.stats["ai_cost_totals"]["by_provider"]["gemini"]
+    expected_cost_gemini = (
+        150 * tb.AI_GEMINI_PRICE_INPUT_PER_1M / 1_000_000 + 40 * tb.AI_GEMINI_PRICE_OUTPUT_PER_1M / 1_000_000
+    )
+    assert abs(gemini_totals["cost_usd"] - expected_cost_gemini) < 1e-9, "Gemini usage must be priced at Gemini rates"
+    assert "из них Gemini" in tb.get_ai_cost_stats_block(), "admin stats must break out Gemini spend separately"
+    print("24. quick=False + task_type=theory + GEMINI_API_KEY routes to Gemini, priced correctly: OK")
+
+    # ---- 24b. task_type="theory" but NO GEMINI_API_KEY still stays on OpenAI ----
+    tb.GEMINI_API_KEY = None
+    captured24b = {}
+    class FakeCompletions24b:
+        async def create(self, **kwargs):
+            captured24b["model"] = kwargs["model"]
+            return FakeOpenAIResponse()
+    class FakeChat24b:
+        completions = FakeCompletions24b()
+    class FakeOpenAIClient24b:
+        chat = FakeChat24b()
+    tb.get_openai_client = lambda: FakeOpenAIClient24b()
+    gemini_calls.clear()
+    _, _, usage_24b = await orig_solve(text="теоретический вопрос", quick=False, task_type="theory")
+    assert len(gemini_calls) == 0, "must not call Gemini when GEMINI_API_KEY is unset"
+    assert usage_24b["provider"] == "openai"
+    assert captured24b["model"] == tb.AI_MODEL_VISION
+    print("24b. task_type=theory without GEMINI_API_KEY still stays on OpenAI: OK")
+    tb.GEMINI_API_KEY = "fake-gemini-key-for-tests"
+
+    # ---- 24c. task_type="problem" stays on OpenAI even when Gemini IS configured — this is the
+    # self-consistency guarantee for calculations ----
+    captured24c = {}
+    class FakeCompletions24c:
+        async def create(self, **kwargs):
+            captured24c["model"] = kwargs["model"]
+            return FakeOpenAIResponse()
+    class FakeChat24c:
+        completions = FakeCompletions24c()
+    class FakeOpenAIClient24c:
+        chat = FakeChat24c()
+    tb.get_openai_client = lambda: FakeOpenAIClient24c()
+    gemini_calls.clear()
+    _, _, usage_24c = await orig_solve(text="расчётная задача", quick=False, task_type="problem")
+    assert len(gemini_calls) == 0, "calculation problems must never be routed to Gemini"
+    assert usage_24c["provider"] == "openai"
+    print("24c. task_type=problem stays on OpenAI even when Gemini is configured: OK")
+
+    # ---- 24d. Gemini failing falls back to OpenAI exactly once — no retry loop ----
+    async def fake_call_gemini_failing(messages, max_tokens):
+        gemini_calls.append((messages, max_tokens))
+        raise RuntimeError("simulated Gemini outage")
+    tb._call_gemini = fake_call_gemini_failing
+    fallback_models_24d = []
+    class FallbackCompletions24d:
+        async def create(self, **kwargs):
+            fallback_models_24d.append(kwargs["model"])
+            return FakeOpenAIResponse()
+    class FallbackChat24d:
+        completions = FallbackCompletions24d()
+    class FallbackOpenAIClient24d:
+        chat = FallbackChat24d()
+    tb.get_openai_client = lambda: FallbackOpenAIClient24d()
+    gemini_calls.clear()
+    _, _, usage_24d = await orig_solve(text="теоретический вопрос 2", quick=False, task_type="theory")
+    assert len(gemini_calls) == 1, "must attempt Gemini exactly once — not loop or retry it"
+    assert fallback_models_24d == [tb.AI_MODEL_VISION], "must fall back to OpenAI exactly once after Gemini fails"
+    assert usage_24d["provider"] == "openai"
+    print("24d. Gemini failure falls back to OpenAI exactly once, no retry loop: OK")
+
+    tb._call_gemini = orig_call_gemini
+    tb.get_openai_client = orig_get_client
+    tb.GEMINI_API_KEY = orig_gemini_key
 
     # cleanup
     tb.solve_ai_request = orig_solve

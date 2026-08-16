@@ -5,6 +5,7 @@ import html
 import io
 import json
 import logging
+import aiohttp
 import random
 import re
 import os
@@ -42,6 +43,8 @@ STATS_FILE = os.path.join(STATS_DIR, "stats.json")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")  # без него AI-раздел показывает "временно недоступен"
 XAI_API_KEY = os.getenv("XAI_API_KEY")  # опционально — Grok (xAI) для подробного разбора, см. solve_ai_request;
 # без него подробный разбор просто продолжает идти через OpenAI, как и раньше
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")  # опционально — Gemini для теоретических/тестовых
+# вопросов (см. solve_ai_request/_classify_quick_answer); без него такие вопросы тоже остаются на OpenAI
 
 DIVIDER = "━━━━━━━━━━━━━━"
 IMAGES_DIR = "images"
@@ -5875,6 +5878,17 @@ AI_USE_GROK_FOR_DETAILED = False
 AI_MODEL_GROK = "grok-4.3"
 AI_GROK_PRICE_INPUT_PER_1M = 1.25   # $/1M input tokens, grok-4.3 — держать в синхроне с прайсом xAI
 AI_GROK_PRICE_OUTPUT_PER_1M = 2.50  # $/1M output tokens
+
+# Gemini 2.5 Flash-Lite — реально ДЕШЕВЛЕ gpt-4o-mini ($0.10/$0.40 vs $0.15/$0.60 за 1М токенов,
+# в отличие от Grok выше), поэтому берёт на себя подробный разбор ТОЛЬКО теоретических/тестовых
+# вопросов (см. _classify_quick_answer/solve_ai_request) — расчётные задачи по-прежнему целиком
+# остаются на OpenAI (и быстрый, и подробный ответ), чтобы не повторить баг с расхождением чисел
+# между моделями на многошаговой арифметике. Gemini не OpenAI-совместим (свой формат запроса/
+# ответа) — обращаемся к нему напрямую через aiohttp (см. _call_gemini), в обход google-genai SDK,
+# который конфликтует с версией pydantic, зафиксированной aiogram.
+AI_MODEL_GEMINI = "gemini-2.5-flash-lite"
+AI_GEMINI_PRICE_INPUT_PER_1M = 0.10   # $/1M input tokens — держать в синхроне с прайсом Google AI
+AI_GEMINI_PRICE_OUTPUT_PER_1M = 0.40  # $/1M output tokens
 AI_FREE_DAILY_LIMIT = 3
 AI_ANSWER_TELEGRAM_LIMIT = 3500  # с запасом от лимита Telegram в 4096 символов на сообщение
 AI_SESSION_TIMEOUT_SECONDS = 20 * 60  # диалог считается закрытым после 20 минут без сообщений
@@ -5939,6 +5953,77 @@ def get_grok_client():
         _grok_client = AsyncOpenAI(api_key=XAI_API_KEY, base_url="https://api.x.ai/v1")
     return _grok_client
 
+GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+
+def _openai_messages_to_gemini_contents(messages: list) -> tuple:
+    """Gemini не понимает наш OpenAI-формат messages (roles user/assistant/system, content —
+    строка или список text/image_url блоков) — у него свой contents[]/systemInstruction формат
+    с ролями user/model. Возвращает (system_text, contents) — на вход всегда идёт то же самое
+    messages, что строится в solve_ai_request что для OpenAI, что для Grok (оба OpenAI-совместимы),
+    так что конвертация нужна только на этой одной границе."""
+    system_text = ""
+    contents = []
+    for msg in messages:
+        role = msg.get("role")
+        content = msg.get("content")
+        if role == "system":
+            system_text = content if isinstance(content, str) else ""
+            continue
+        gemini_role = "model" if role == "assistant" else "user"
+        if isinstance(content, str):
+            parts = [{"text": content}]
+        else:
+            parts = []
+            for block in content:
+                if block.get("type") == "text" and block.get("text"):
+                    parts.append({"text": block["text"]})
+                elif block.get("type") == "image_url":
+                    url = block.get("image_url", {}).get("url", "")
+                    if url.startswith("data:"):
+                        header, _, b64_data = url.partition(",")
+                        mime_type = header[len("data:"):].split(";")[0] or "image/jpeg"
+                        parts.append({"inline_data": {"mime_type": mime_type, "data": b64_data}})
+            if not parts:
+                parts = [{"text": ""}]
+        contents.append({"role": gemini_role, "parts": parts})
+    return system_text, contents
+
+async def _call_gemini(messages: list, max_tokens: int) -> tuple:
+    """Прямой HTTP-вызов Gemini API (в обход google-genai SDK — он требует pydantic>=2.12.5,
+    несовместимую с версией, зафиксированной aiogram). trust_env=True обязателен, иначе aiohttp
+    игнорирует HTTPS_PROXY окружения. Возвращает (текст_ответа, usage) — usage в том же формате
+    {"input_tokens", "output_tokens"}, что и у OpenAI-совместимых провайдеров."""
+    system_text, contents = _openai_messages_to_gemini_contents(messages)
+    payload = {"contents": contents, "generationConfig": {"temperature": 0, "maxOutputTokens": max_tokens}}
+    if system_text:
+        payload["systemInstruction"] = {"parts": [{"text": system_text}]}
+    url = GEMINI_API_URL.format(model=AI_MODEL_GEMINI)
+    timeout = aiohttp.ClientTimeout(total=30)
+    async with aiohttp.ClientSession(trust_env=True, timeout=timeout) as session:
+        async with session.post(url, params={"key": GEMINI_API_KEY}, json=payload) as resp:
+            resp.raise_for_status()
+            data = await resp.json()
+    text = data["candidates"][0]["content"]["parts"][0]["text"]
+    usage_meta = data.get("usageMetadata", {})
+    usage = {
+        "input_tokens": usage_meta.get("promptTokenCount", 0),
+        "output_tokens": usage_meta.get("candidatesTokenCount", 0),
+    }
+    return text, usage
+
+_AI_PROBLEM_NUMBER_RE = re.compile(r"\d[.,]\d|\d{2,}")
+
+def _classify_quick_answer(answer: str) -> str:
+    """Дешёвая эвристика по уже сгенерированному быстрому ответу — без единого лишнего токена.
+    AI_QUICK_SUFFIX просит модель на первом ходу дать ЛИБО букву/номер варианта (тест/теория),
+    ЛИБО финальный числовой результат с единицами (расчётная задача) — по форме заметно, что
+    перед нами: дробное число или число из 2+ цифр — почти наверняка результат вычисления,
+    иначе — тест/теория. "problem" — безопасный вариант по умолчанию: при сомнении не отправляем
+    расчёт в модель, которая на нём не проверялась (см. AI_USE_GROK_FOR_DETAILED про этот же риск)."""
+    if _AI_PROBLEM_NUMBER_RE.search(answer):
+        return "problem"
+    return "theory"
+
 def get_ai_usage_today(user_id: int) -> int:
     entry = stats["ai_usage"].get(str(user_id))
     if not entry or entry.get("date") != date.today().isoformat():
@@ -5969,15 +6054,16 @@ def get_ai_quota_label(user_id: int) -> str:
 _AI_PROVIDER_PRICES = {
     "openai": (AI_PRICE_INPUT_PER_1M, AI_PRICE_OUTPUT_PER_1M),
     "grok": (AI_GROK_PRICE_INPUT_PER_1M, AI_GROK_PRICE_OUTPUT_PER_1M),
+    "gemini": (AI_GEMINI_PRICE_INPUT_PER_1M, AI_GEMINI_PRICE_OUTPUT_PER_1M),
 }
 
 def record_ai_cost(usage: dict) -> None:
     """Копит агрегированную стоимость AI-запросов — не пишет по записи на каждый запрос
     (раздуло бы stats.json), только бегущие суммы. Нужно, чтобы реально видеть эффект
     любых будущих оптимизаций (короткие ответы, кэш и т.д.), а не гадать на глаз.
-    usage["provider"] ("openai"/"grok", по умолчанию "openai") выбирает прайс — у каждого
-    провайдера своя цена за токен, общие totals остаются суммой по всем провайдерам, а
-    by_provider хранит разбивку, чтобы в статистике было видно, во сколько обходится Grok
+    usage["provider"] ("openai"/"grok"/"gemini", по умолчанию "openai") выбирает прайс — у
+    каждого провайдера своя цена за токен, общие totals остаются суммой по всем провайдерам, а
+    by_provider хранит разбивку, чтобы в статистике было видно расход каждого провайдера
     отдельно от OpenAI."""
     input_tokens = usage.get("input_tokens", 0)
     output_tokens = usage.get("output_tokens", 0)
@@ -6006,9 +6092,11 @@ def get_ai_cost_stats_block() -> str:
         f"Запросов: <b>{requests}</b> (вход {totals['input_tokens']:,} / выход {totals['output_tokens']:,} ток.)\n"
         f"Расход: <b>${totals['cost_usd']:.4f}</b>, в среднем ${avg:.5f}/запрос"
     )
-    grok = totals.get("by_provider", {}).get("grok")
-    if grok and grok["requests"]:
-        block += f"\n  из них Grok: {grok['requests']} запр., ${grok['cost_usd']:.4f}"
+    by_provider = totals.get("by_provider", {})
+    for provider, label in (("grok", "Grok"), ("gemini", "Gemini")):
+        p = by_provider.get(provider)
+        if p and p["requests"]:
+            block += f"\n  из них {label}: {p['requests']} запр., ${p['cost_usd']:.4f}"
     return block.replace(",", " ")
 
 def is_ai_session_active(user_id: int) -> bool:
@@ -6148,17 +6236,38 @@ def _compact_history(history: list) -> list:
             compact.append(msg)
     return compact
 
+async def _call_provider(provider: str, model: str, client, messages: list, max_tokens: int) -> tuple:
+    """Единая точка вызова модели независимо от провайдера — OpenAI-совместимые (openai/grok,
+    через клиент AsyncOpenAI) и Gemini (свой формат запроса/ответа, прямой HTTP — см.
+    _call_gemini). Всегда возвращает (текст_ответа, usage) в одном формате, чтобы
+    solve_ai_request не дублировал разбор ответа для каждого случая отдельно."""
+    if provider == "gemini":
+        return await _call_gemini(messages, max_tokens)
+    response = await client.chat.completions.create(
+        model=model, messages=messages, max_tokens=max_tokens, temperature=0,
+    )
+    answer = response.choices[0].message.content or "Не удалось получить ответ от AI."
+    usage = {
+        "input_tokens": getattr(response.usage, "prompt_tokens", 0) if response.usage else 0,
+        "output_tokens": getattr(response.usage, "completion_tokens", 0) if response.usage else 0,
+    }
+    return answer, usage
+
 async def solve_ai_request(
-    *, image_bytes: bytes = None, text: str = None, history: list = None, quick: bool = False
+    *, image_bytes: bytes = None, text: str = None, history: list = None, quick: bool = False,
+    task_type: str = None,
 ) -> tuple:
     """history — предыдущие ходы этого диалога (без системного промпта, он добавляется здесь же),
     в формате messages OpenAI. quick=True — просит только краткий итоговый ответ на маленьком
     max_tokens (используется для самого первого сообщения новой сессии — экономит output-токены,
     которые у OpenAI дороже входных; полное решение по шагам генерируется отдельным запросом,
-    только если пользователь явно нажмёт «Показать решение»). Возвращает (ответ, user_turn, usage)
-    — user_turn нужен вызывающему коду, чтобы дописать этот ход в историю сессии вместе с ответом
-    ассистента; usage — {"input_tokens", "output_tokens", "provider"} для учёта стоимости
-    (record_ai_cost — provider выбирает, по какому прайсу считать $)."""
+    только если пользователь явно нажмёт «Показать решение»). task_type — "theory"/"problem"/None,
+    классификация быстрого ответа этой же сессии (см. _classify_quick_answer) — решает, можно ли
+    подробный разбор (quick=False) безопасно отдать Gemini (только "theory"); на quick=True не
+    влияет, короткий ответ всегда на OpenAI, он же и определяет task_type. Возвращает (ответ,
+    user_turn, usage) — user_turn нужен вызывающему коду, чтобы дописать этот ход в историю сессии
+    вместе с ответом ассистента; usage — {"input_tokens", "output_tokens", "provider"} для учёта
+    стоимости (record_ai_cost — provider выбирает, по какому прайсу считать $)."""
     text_part = text or ""
     if quick:
         text_part = (text_part + AI_QUICK_SUFFIX) if text_part else AI_QUICK_SUFFIX.strip()
@@ -6179,52 +6288,46 @@ async def solve_ai_request(
     messages = [{"role": "system", "content": AI_SYSTEM_PROMPT}, *trimmed_history, user_turn]
     max_tokens = AI_QUICK_MAX_TOKENS if quick else AI_DETAILED_MAX_TOKENS
 
-    # Короткий первый ответ (quick=True) всегда идёт через дешёвый gpt-4o-mini. Подробный разбор
-    # по шагам (quick=False) шёл бы через Grok, будь AI_USE_GROK_FOR_DETAILED включён — код и
-    # маршрутизация готовы, но сейчас выключены (см. комментарий у константы), так что оба ответа
-    # остаются на OpenAI и не расходятся между собой.
+    # Короткий первый ответ (quick=True) всегда идёт через дешёвый gpt-4o-mini — по форме этого
+    # самого ответа потом и определяется task_type (см. _classify_quick_answer). Подробный разбор
+    # (quick=False) теоретического/тестового вопроса уходит в Gemini (дешевле OpenAI и не задета
+    # расчётами, где важна самосогласованность); расчётные задачи (task_type="problem"/None)
+    # остаются на OpenAI целиком. Grok — через AI_USE_GROK_FOR_DETAILED, по умолчанию выключен
+    # (см. комментарий у константы).
     provider, model, active_client = "openai", AI_MODEL_VISION, get_openai_client()
-    if not quick and AI_USE_GROK_FOR_DETAILED:
-        grok_client = get_grok_client()
-        if grok_client is not None:
-            provider, model, active_client = "grok", AI_MODEL_GROK, grok_client
+    if not quick:
+        if task_type == "theory" and GEMINI_API_KEY:
+            provider, model, active_client = "gemini", AI_MODEL_GEMINI, None
+        elif AI_USE_GROK_FOR_DETAILED:
+            grok_client = get_grok_client()
+            if grok_client is not None:
+                provider, model, active_client = "grok", AI_MODEL_GROK, grok_client
 
-    if active_client is None:
+    if provider != "gemini" and active_client is None:
         raise RuntimeError("AI недоступен: не задан OPENAI_API_KEY")
 
     try:
-        response = await active_client.chat.completions.create(
-            model=model,
-            messages=messages,
-            max_tokens=max_tokens,
-            temperature=0,  # для расчётных задач нужен стабильный, воспроизводимый ход решения,
-                            # не творческое разнообразие — без этого один и тот же вопрос давал
-                            # разный метод и разный ответ при каждом новом запросе
-        )
+        answer_raw, usage = await _call_provider(provider, model, active_client, messages, max_tokens)
+        # temperature=0 (внутри _call_provider/_call_gemini) — для расчётных задач нужен
+        # стабильный, воспроизводимый ход решения, не творческое разнообразие: без этого один и
+        # тот же вопрос давал разный метод и разный ответ при каждом новом запросе
     except Exception:
         if provider == "openai":
             raise
-        # Grok недоступен (ключ невалиден, сбой у xAI и т.п.) — один запасной запрос через
-        # OpenAI, чтобы разбор не переставал работать для пользователя. Не ретрай в цикле —
-        # ровно одна дополнительная попытка на другом провайдере.
-        logger.exception("Grok недоступен, откатываюсь на OpenAI для этого запроса")
+        # Grok/Gemini недоступны (невалидный ключ, сбой у провайдера и т.п.) — один запасной
+        # запрос через OpenAI, чтобы ответ не переставал приходить пользователю. Не ретрай в
+        # цикле — ровно одна дополнительная попытка на другом провайдере.
+        logger.exception("%s недоступен, откатываюсь на OpenAI для этого запроса", provider)
         fallback_client = get_openai_client()
         if fallback_client is None:
             raise
         provider, model = "openai", AI_MODEL_VISION
-        response = await fallback_client.chat.completions.create(
-            model=model, messages=messages, max_tokens=max_tokens, temperature=0,
-        )
+        answer_raw, usage = await _call_provider(provider, model, fallback_client, messages, max_tokens)
 
-    answer = response.choices[0].message.content or "Не удалось получить ответ от AI."
-    answer = _clean_ai_answer(answer)
+    answer = _clean_ai_answer(answer_raw)
     if len(answer) > AI_ANSWER_TELEGRAM_LIMIT:
         answer = answer[:AI_ANSWER_TELEGRAM_LIMIT] + "…\n\n(ответ обрезан)"
-    usage = {
-        "input_tokens": getattr(response.usage, "prompt_tokens", 0) if response.usage else 0,
-        "output_tokens": getattr(response.usage, "completion_tokens", 0) if response.usage else 0,
-        "provider": provider,
-    }
+    usage["provider"] = provider
     return answer, user_turn, usage
 
 def _format_ai_answer_html(answer: str) -> str:
@@ -6338,7 +6441,8 @@ async def cb_ai_show_explanation(callback: CallbackQuery):
     thinking = await callback.message.answer("🤖 Готовлю решение по шагам...")
     try:
         answer, user_turn, usage = await solve_ai_request(
-            text=AI_EXPLAIN_FOLLOWUP_TEXT, history=session["messages"], quick=False
+            text=AI_EXPLAIN_FOLLOWUP_TEXT, history=session["messages"], quick=False,
+            task_type=session.get("task_type"),
         )
         increment_ai_usage(user_id)
         record_ai_cost(usage)
@@ -6383,10 +6487,13 @@ async def handle_ai_photo_input(message: Message):
         tg_file = await bot.get_file(photo.file_id)
         buf = await bot.download_file(tg_file.file_path)
         answer, user_turn, usage = await solve_ai_request(
-            image_bytes=_resize_image_for_ai(buf.read()), history=session["messages"], quick=quick
+            image_bytes=_resize_image_for_ai(buf.read()), history=session["messages"], quick=quick,
+            task_type=session.get("task_type"),
         )
         increment_ai_usage(user_id)
         record_ai_cost(usage)
+        if quick:
+            session["task_type"] = _classify_quick_answer(answer)
         session["messages"].append(user_turn)
         session["messages"].append({"role": "assistant", "content": answer})
         session["last_active"] = time.time()
@@ -6425,10 +6532,13 @@ async def handle_ai_text_input(message: Message):
     thinking = await message.answer("🤖 Разбираю задание, подожди немного...")
     try:
         answer, user_turn, usage = await solve_ai_request(
-            text=message.text, history=session["messages"], quick=quick
+            text=message.text, history=session["messages"], quick=quick,
+            task_type=session.get("task_type"),
         )
         increment_ai_usage(user_id)
         record_ai_cost(usage)
+        if quick:
+            session["task_type"] = _classify_quick_answer(answer)
         session["messages"].append(user_turn)
         session["messages"].append({"role": "assistant", "content": answer})
         session["last_active"] = time.time()
