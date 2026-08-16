@@ -60,11 +60,16 @@ def has_temp_access(user_id: int) -> bool:
     return time.time() < get_temp_access_expiry(user_id)
 
 # ==================== ПЛАТНАЯ ПОДПИСКА ====================
-# Тарифы 1-4 — старая линейка (историческая). Тариф 1 остаётся в продаже (тариф «Месяц»),
-# тарифы 2/3/4 сняты с продажи ("retired": True) — их условия НЕ меняются задним числом,
-# они просто больше не показываются в меню покупки. У уже купивших их людей доступ
-# продолжает работать ровно как был обещан на момент покупки.
-# Тарифы 5-10 — новая линейка (актуальный прайс-лист).
+# Тарифы 1-11 — старая линейка (историческая, "subscription_version" не хранился в записи, что
+# читается как version=1 через .get("subscription_version", 1)). ВСЕ сняты с продажи
+# ("retired": True) — их условия НЕ меняются задним числом, они просто больше не показываются в
+# магазине. У уже купивших их людей (и у уже выданных вручную/подарочных подписок) доступ
+# продолжает работать ровно как был обещан на момент покупки — ни срок, ни права не трогаются
+# задним числом, никакой миграции записей stats["subscriptions"] на новые tier id не производится.
+# Тарифы 20-28 — новая линейка (актуальный прайс-лист, "subscription_version": 2 на новых выдачах).
+# Никогда не переиспользуй id 1-19 для нового смысла — старые записи хранят только числовой tier id,
+# и часть кода живьём резолвит его через SUBSCRIPTION_TIERS, так что переиспользование id задним
+# числом переинтерпретировало бы то, что реальный покупатель уже оплатил.
 TIER1_HISTOLOGY_DEADLINE = time.mktime(date(2027, 1, 1).timetuple())  # легаси: гистология по СТАРЫМ выдачам тарифа 1 — до конца 2026 года
 JULY_END_2026 = time.mktime(date(2026, 8, 1).timetuple())  # тариф «Месяц» — предпросмотр Гистологии до конца июля 2026
 OCT_2026_CUTOFF = time.mktime(date(2026, 10, 1).timetuple())  # тариф 239₽ — до 1 октября 2026
@@ -72,10 +77,25 @@ NOV_END_2026_CUTOFF = time.mktime(date(2026, 12, 1).timetuple())  # тариф 3
 FEB_2027_CUTOFF = time.mktime(date(2027, 2, 1).timetuple())  # тариф 749₽ — до февраля 2027
 # «До конца второго курса» — точная дата учебного календаря не была уточнена, взята оценка
 # (конец лета 2027). Поправь SECOND_YEAR_END_2027, если известна точная дата окончания 2 курса.
+# Используется и старым тарифом 9, и новым тарифом 26 — дата единая для обоих, менять с осторожностью:
+# сдвиг задним числом изменил бы срок уже выданных подписок тарифа 9.
 SECOND_YEAR_END_2027 = time.mktime(date(2027, 9, 1).timetuple())
+
+# --- Новая линейка (тарифы 20-28) ---
+NOV_1_2026_CUTOFF = time.mktime(date(2026, 11, 1).timetuple())  # тариф 22 «Все пересдачи» — до конца октября 2026
+JAN_1_2027_CUTOFF = time.mktime(date(2027, 1, 1).timetuple())  # тариф 23 «До зачёта по химии» — до конца декабря 2026
+MAR_1_2027_CUTOFF = time.mktime(date(2027, 3, 1).timetuple())  # тариф 24 «Зимняя сессия» — до конца февраля 2027
+FIRST_YEAR_END_2027 = time.mktime(date(2027, 8, 1).timetuple())  # тариф 25 «Весь первый курс» — до летних экзаменов 2027
+
+# Старым платным подпискам (subscription_version 1, т.е. поле отсутствует в записи) — небольшой
+# фиксированный AI-бонус поверх обычного бесплатного дневного лимита, не завязанный ни на один
+# сохранённый в их записи тариф/поле (см. get_ai_plan() в telegram_bot.py). Контентные права такой
+# подписки (anatomy/histology/scope/...) этот бонус никак не трогает.
+LEGACY_PAID_AI_MONTHLY_BONUS = 60
 
 SUBSCRIPTION_TIERS = {
     1: {
+        "retired": True,
         "title": "Месяц — Биология, Физика, Химия",
         "short": "1 месяц, 3 экзамена",
         "emoji": "🔓",
@@ -170,6 +190,7 @@ SUBSCRIPTION_TIERS = {
         ],
     },
     6: {
+        "retired": True,
         "title": "До октября — Биология, Физика, Химия + Гистология",
         "short": "4 экзамена, до окт. 2026",
         "emoji": "🔬",
@@ -191,6 +212,7 @@ SUBSCRIPTION_TIERS = {
         ],
     },
     7: {
+        "retired": True,
         "title": "До конца ноября — все 5 экзаменов",
         "short": "5 экзаменов, до нояб. 2026",
         "emoji": "🚀",
@@ -213,6 +235,7 @@ SUBSCRIPTION_TIERS = {
         ],
     },
     8: {
+        "retired": True,
         "title": "До февраля 2027 — все 5 экзаменов",
         "short": "5 экзаменов, до февр. 2027",
         "emoji": "🎯",
@@ -234,6 +257,7 @@ SUBSCRIPTION_TIERS = {
         ],
     },
     9: {
+        "retired": True,
         "title": "До конца 2 курса — всё, включая зачёты и диагностики",
         "short": "всё + зачёты, до конца 2 курса",
         "emoji": "👑",
@@ -257,6 +281,7 @@ SUBSCRIPTION_TIERS = {
         ],
     },
     10: {
+        "retired": True,
         "title": "6 лет — абсолютно всё",
         "short": "6 лет, абсолютно всё",
         "emoji": "💎",
@@ -281,6 +306,7 @@ SUBSCRIPTION_TIERS = {
         ],
     },
     11: {
+        "retired": True,
         "title": "2 года — абсолютно всё",
         "short": "2 года, абсолютно всё",
         "emoji": "🏆",
@@ -300,6 +326,235 @@ SUBSCRIPTION_TIERS = {
             "Один платёж на 2 года учёбы — включая всё, что появится в боте позже",
             "Скачивание всех файлов с ответами и готовых шпаргалок для распечатки",
             "Подходит и для подготовки к текущим практическим занятиям",
+        ],
+    },
+    # --- Новая линейка (2026/27 учебный год), tier id 20-28 ---
+    20: {
+        "title": "Пересдача — 7 дней, один предмет",
+        "short": "7 дней, 1 предмет",
+        "emoji": "⚡",
+        "price_rub": 99,
+        "price_stars": 99,
+        "duration_days": 7,
+        "expires_at": None,
+        "subject_choice_required": True,
+        "histology_until_rule": None,
+        "anatomy": False,
+        "biology_download": False,
+        "cheat_sheets": False,
+        "ai_limit_type": "period",
+        "ai_limit": 30,
+        "subscription_version": 2,
+        "menu_number": 1,
+        "benefits": [
+            "Доступ только к ОДНОМУ предмету на выбор — Биология, Физика или Химия — на 7 дней",
+            "Полный доступ к материалам, задачам, вопросам и билетам выбранного предмета",
+            "VMedA AI (решение заданий по фото) — 30 запросов на весь срок подписки",
+            "Идеально для подготовки к пересдаче одного экзамена",
+        ],
+    },
+    21: {
+        "title": "30 дней — Биология, Физика, Химия",
+        "short": "30 дней",
+        "emoji": "🔓",
+        "price_rub": 129,
+        "price_stars": 129,
+        "duration_days": 30,
+        "expires_at": None,
+        "subject_choice_required": False,
+        "histology_until_rule": None,
+        "anatomy": False,
+        "biology_download": False,
+        "cheat_sheets": False,
+        "ai_limit_type": "period",
+        "ai_limit": 110,
+        "subscription_version": 2,
+        "menu_number": 2,
+        "benefits": [
+            "Полный доступ к Биологии, Физике и Химии на 30 дней",
+            "Основные материалы, экзаменационные вопросы и задачи",
+            "VMedA AI (решение заданий по фото) — 110 запросов на весь срок подписки",
+            "Подходит и для подготовки к текущим практическим занятиям",
+        ],
+    },
+    22: {
+        "title": "Все пересдачи — Биология, Физика и Химия",
+        "short": "до конца октября",
+        "emoji": "🔥",
+        "price_rub": 249,
+        "price_stars": 249,
+        "duration_days": None,
+        "expires_at": NOV_1_2026_CUTOFF,
+        "subject_choice_required": False,
+        "histology_until_rule": None,
+        "anatomy": False,
+        "biology_download": False,
+        "cheat_sheets": False,
+        "ai_limit_type": "period",
+        "ai_limit": 225,
+        "subscription_version": 2,
+        "badge": "РЕКОМЕНДОВАНО ДЛЯ ПЕРЕСДАЧ",
+        "menu_number": 3,
+        "benefits": [
+            "Полный доступ к Биологии, Физике и Химии на весь период пересдач",
+            "Действует до конца октября 2026 года",
+            "VMedA AI (решение заданий по фото) — 225 запросов на весь срок подписки",
+            "Для 2 курса — оптимально на весь сезон пересдач",
+        ],
+    },
+    23: {
+        "title": "До зачёта по химии — Биология, Физика, Химия",
+        "short": "до зачёта по химии",
+        "emoji": "🧪",
+        "price_rub": 299,
+        "price_stars": 299,
+        "duration_days": None,
+        "expires_at": JAN_1_2027_CUTOFF,
+        "subject_choice_required": False,
+        "histology_until_rule": None,
+        "anatomy": False,
+        "biology_download": False,
+        "cheat_sheets": False,
+        "ai_limit_type": "period",
+        "ai_limit": 225,
+        "subscription_version": 2,
+        "menu_number": 4,
+        "benefits": [
+            "Полный доступ к Биологии, Физике и Химии — подготовка к зачёту по химии",
+            "Действует до конца декабря 2026 года",
+            "Текущие материалы первого семестра первого курса",
+            "VMedA AI (решение заданий по фото) — 225 запросов на весь срок подписки",
+        ],
+    },
+    24: {
+        "title": "Зимняя сессия — Анатомия, Гистология, Биология, Физика, Химия",
+        "short": "зимняя сессия",
+        "emoji": "🧠",
+        "price_rub": 599,
+        "price_stars": 599,
+        "duration_days": None,
+        "expires_at": MAR_1_2027_CUTOFF,
+        "subject_choice_required": False,
+        "histology_until_rule": "expiry",
+        "anatomy": True,
+        "biology_download": False,
+        "cheat_sheets": False,
+        "ai_limit_type": "period",
+        "ai_limit": 450,
+        "subscription_version": 2,
+        # Философия и другие будущие разделы 2 курса — как только появятся в боте, попадут сюда
+        # автоматически (флаг ничего не открывает сам по себе, пока раздела физически нет).
+        "future_second_year_sections": True,
+        "menu_number": 5,
+        "benefits": [
+            "Анатомия, Гистология, Биология, Физика и Химия — текущие зачёты зимней сессии",
+            "Действует до конца февраля 2027 года",
+            "Философия и другие новые разделы 2 курса — автоматически, как только появятся в боте",
+            "VMedA AI (решение заданий по фото) — 450 запросов на весь срок подписки",
+        ],
+    },
+    25: {
+        "title": "Весь первый курс — Биология, Физика, Химия",
+        "short": "весь первый курс",
+        "emoji": "🎓",
+        "price_rub": 849,
+        "price_stars": 849,
+        "duration_days": None,
+        "expires_at": FIRST_YEAR_END_2027,
+        "subject_choice_required": False,
+        "histology_until_rule": None,
+        "anatomy": False,
+        "biology_download": False,
+        "cheat_sheets": False,
+        "ai_limit_type": "monthly",
+        "ai_limit": 150,
+        "subscription_version": 2,
+        "badge": "⭐ РЕКОМЕНДОВАНО ДЛЯ 1 КУРСА",
+        "menu_number": 6,
+        "benefits": [
+            "Биология, Физика и Химия — зачёт по химии, летние экзамены, весь учебный год",
+            "Действует до завершения экзаменов первого курса летом 2027 года",
+            "Билеты, контрольные и все новые материалы первого курса по мере появления",
+            "VMedA AI (решение заданий по фото) — 150 запросов в месяц",
+        ],
+    },
+    26: {
+        "title": "До конца второго курса — всё, включая зачёты и диагностики",
+        "short": "всё, до конца 2 курса",
+        "emoji": "👑",
+        "price_rub": 1290,
+        "price_stars": 1290,
+        "duration_days": None,
+        "expires_at": SECOND_YEAR_END_2027,
+        "subject_choice_required": False,
+        "histology_until_rule": "expiry",
+        "anatomy": True,
+        "biology_download": True,
+        "cheat_sheets": True,
+        "ai_limit_type": "monthly",
+        "ai_limit": 225,
+        "subscription_version": 2,
+        "future_second_year_sections": True,
+        "badge": "🔥 ЛУЧШИЙ ВЫБОР",
+        "menu_number": 7,
+        "benefits": [
+            "Полный доступ ко всем предметам — Биология, Физика, Химия, Гистология, Анатомия",
+            "Философия и другие новые разделы 1-2 курса — автоматически, как только появятся в боте",
+            "Все текущие зачёты, контрольные и диагностики по мере их появления в боте",
+            "Скачивание файлов с ответами и готовых шпаргалок для распечатки",
+            "Действует до конца второго курса",
+            "VMedA AI (решение заданий по фото) — 225 запросов в месяц",
+        ],
+    },
+    27: {
+        "title": "VMedA MAX — 2 года",
+        "short": "2 года MAX",
+        "emoji": "🏆",
+        "price_rub": 1690,
+        "price_stars": 1690,
+        "duration_days": 2 * 365,
+        "expires_at": None,
+        "subject_choice_required": False,
+        "histology_until_rule": "expiry",
+        "anatomy": True,
+        "biology_download": True,
+        "cheat_sheets": True,
+        "ai_limit_type": "monthly",
+        "ai_limit": 375,
+        "subscription_version": 2,
+        "future_second_year_sections": True,
+        "menu_number": 8,
+        "benefits": [
+            "Полный доступ ко всем существующим предметам — Биология, Физика, Химия, Гистология, Анатомия",
+            "Все будущие предметы, зачёты, контрольные и экзамены — сразу, без ожидания и доплаты",
+            "Скачивание всех файлов с ответами и шпаргалок для распечатки",
+            "Ранний доступ (early access) к новым разделам бота",
+            "VMedA AI (решение заданий по фото) — 375 запросов в месяц",
+        ],
+    },
+    28: {
+        "title": "Вся академия",
+        "short": "вся академия",
+        "emoji": "💎",
+        "price_rub": 2990,
+        "price_stars": 2990,
+        "duration_days": 6 * 365,
+        "expires_at": None,
+        "subject_choice_required": False,
+        "histology_until_rule": "expiry",
+        "anatomy": True,
+        "biology_download": True,
+        "cheat_sheets": True,
+        "ai_limit_type": "monthly",
+        "ai_limit": 375,
+        "subscription_version": 2,
+        "future_second_year_sections": True,
+        "menu_number": 9,
+        "benefits": [
+            "Абсолютно полный доступ ко всем существующим и будущим разделам бота",
+            "Все экзамены, зачёты, контрольные и диагностики — на весь срок обучения в академии",
+            "Скачивание всех файлов с ответами и шпаргалок для распечатки",
+            "VMedA AI (решение заданий по фото) — 375 запросов в месяц (fair use)",
         ],
     },
 }
@@ -444,6 +699,11 @@ def grant_subscription(user_id: int, tier: int, method: str, price: int, subject
         "anatomy": cfg.get("anatomy", False),
         "biology_download": cfg.get("biology_download", False),
         "cheat_sheets": cfg.get("cheat_sheets", False),
+        # subscription_version у легаси-тарифов (1-11) в cfg отсутствует — .get(..., 1) даёт version 1,
+        # ровно то же самое, что и старое поведение .get("subscription_version", 1) при чтении записи
+        # без этого поля вообще. Явно писать его в запись безопасно и для старых tier id: их 100%
+        # не продают заново, а если когда-то и продадут вручную — это и будет version 1, как раньше.
+        "subscription_version": cfg.get("subscription_version", 1),
         "purchased_at": now,
         "method": method,
         "price": price,
@@ -556,7 +816,13 @@ def chemistry_tickets_access_ok(user_id: int) -> bool:
     гейта по предмету (референт REFERRAL_FULL_ACCESS_THRESHOLD рефералов ИЛИ любой доступ к
     Химии, включая ручной/временный доступ и промо) недостаточно. Сюда пускают только по
     REFERRAL_FULL_ACCESS_THRESHOLD рефералам либо по активной подписке ценой от 89₽ — то есть
-    ручной/временный доступ и промо-акции ("Снять все ограничения") здесь не считаются."""
+    ручной/временный доступ и промо-акции ("Снять все ограничения") здесь не считаются. Порог
+    89₽ — историческая цена самого дешёвого тарифа, открывавшего все три гейтящихся предмета
+    разом (не привязан к текущему каталогу тарифов) — новый тариф 20 (99₽) уже проходит его
+    без изменений. Дополнительно уважает restricted_subject: тариф с выбором ОДНОГО предмета
+    (например 20 или легаси 5) открывает билеты по химии, только если выбрана именно химия —
+    без этой проверки подписка на Биологию/Физику той же ценовой категории ошибочно тоже
+    открывала бы билеты по химии (пред-существовавший пробел, здесь же и закрытый)."""
     if is_admin_or_assistant(user_id):
         return True
     if get_referral_count(user_id) >= REFERRAL_FULL_ACCESS_THRESHOLD:
@@ -564,6 +830,7 @@ def chemistry_tickets_access_ok(user_id: int) -> bool:
     sub = get_subscription(user_id)
     if sub and has_active_subscription(user_id):
         cfg = SUBSCRIPTION_TIERS.get(sub.get("tier"), {})
-        if cfg.get("price_rub", 0) >= 89:
+        restricted = sub.get("restricted_subject")
+        if cfg.get("price_rub", 0) >= 89 and (restricted is None or restricted == "chemistry"):
             return True
     return False

@@ -274,31 +274,46 @@ all (subscription or admin only) — biology ticket *downloads* are always paid,
 
 ### Subscriptions (`SUBSCRIPTION_TIERS`)
 
-Ten dict entries keyed 1-10. **Tiers 2/3/4 are retired** (`"retired": True`) — the original 239₽/899₽/2499₽
-lineup, kept in the dict forever so historical buyers' grants still resolve to the correct title/price/benefits,
-but excluded from every purchase-facing surface (`ACTIVE_SUBSCRIPTION_TIERS = {t: cfg for t, cfg in
+Twenty dict entries. **Tiers 1-11 are the old lineup, ALL retired** (`"retired": True`) — kept in the dict
+forever, unchanged, so historical buyers' grants (and any admin/gift subscriptions already recorded in
+`stats["subscriptions"]`) keep resolving to the exact title/price/expiry/entitlements they were sold, but
+excluded from every purchase-facing surface (`ACTIVE_SUBSCRIPTION_TIERS = {t: cfg for t, cfg in
 SUBSCRIPTION_TIERS.items() if not cfg.get("retired")}`, iterated by all menus/keyboards/announcements instead of
-the raw dict). **Never repurpose a retired tier's numeric key for a different product** — `stats["subscriptions"]`
-only stores the tier id, and some display paths re-derive text by looking the id back up in `SUBSCRIPTION_TIERS`
-live, so reusing an id would silently reinterpret what an existing payer already bought. Tier 1 (89₽, unchanged
-from the original lineup) is the one exception that stayed in place because its price/scope didn't change — only
-its Histology bonus window did (see below). Active tiers today: 1 (89₽), 5 (49₽), 6 (239₽), 7 (389₽), 8 (749₽), 9
-(1119₽), 10 (3899₽, `"badge": "🔥 HOT 🔥"`) — add a new one with a fresh unused key, never reuse a retired one.
+the raw dict). **Tiers 20-28 are the current lineup** (2026/27 academic year — a "pick your course" set,
+see below). **Never repurpose a retired (or any existing) tier's numeric key for a different product** —
+`stats["subscriptions"]` only stores the tier id, and some display paths re-derive text by looking the id back up
+in `SUBSCRIPTION_TIERS` live, so reusing an id would silently reinterpret what an existing payer already bought.
+IDs 12-19 are deliberately skipped (reserved/unused) between the two lineups. Active tiers today: 20 (99₽, 7-day
+one-subject "Пересдача"), 21 (129₽, 30-day B+P+C), 22 (249₽, "Все пересдачи" until `NOV_1_2026_CUTOFF`), 23 (299₽,
+until `JAN_1_2027_CUTOFF`), 24 (599₽, "Зимняя сессия", adds Anatomy+Histology, until `MAR_1_2027_CUTOFF`), 25
+(849₽, "Весь первый курс", until `FIRST_YEAR_END_2027`), 26 (1290₽, "До конца второго курса", full scope +
+downloads + cheat_sheets, until `SECOND_YEAR_END_2027` — **the same cutoff constant retired tier 9 uses**, since
+both promise "through the end of 2nd year"; do not change it without checking tier-9 holders too), 27 (1690₽,
+"VMedA MAX", `2*365` days, full scope), 28 (2990₽, "Вся академия", `6*365` days, full scope, deliberately **not**
+shown in the curated per-course screens or badged "HOT" — see the shop UI note below). Add a new tier with a
+fresh unused key above 28, never reuse 1-11 or a retired id.
+
+**Migrating pricing/lineups**: when retiring a whole generation of tiers in favor of a new one (as happened going
+from 1-11 to 20-28), never rewrite existing `stats["subscriptions"]` records to point at new tier ids, and never
+touch a retired tier's stored fields — the whole point of the retire-and-add-new pattern is that old grants keep
+resolving via their own frozen `SUBSCRIPTION_TIERS[old_id]` entry, forever, with zero migration step.
 
 Each tier is a dict of `title/short/price_rub/price_stars/emoji/benefits/...` plus:
 - **Expiry** — `duration_days` (relative, from purchase) XOR `expires_at` (a fixed absolute timestamp constant —
-  `OCT_2026_CUTOFF`, `NOV_END_2026_CUTOFF`, `FEB_2027_CUTOFF`, `SECOND_YEAR_END_2027` — for the tiers priced
-  around "до октября/до конца ноября/до февраля/до конца 2 курса"). `grant_subscription()` resolves whichever is
-  set into the stored `sub["expires"]`; `format_subscription_expiry()` doesn't care which path produced it.
-- **`subject_choice_required`** — only tier 5 (49₽, 3 days). The buyer picks exactly one of biology/physics/
-  chemistry before paying (`sub_subject:{tier}:{subject}` → `buy_sub_stars_subj:`/`buy_sub_rubles_subj:`, the
-  Stars invoice payload becomes `sub_stars_{tier}_{subject|-}_{chat_id}_{ts}`); the choice is stored as
-  `sub["restricted_subject"]`. This is why the referral gate had to become subject-aware (see above) — it's the
-  only tier that doesn't unlock all three gated subjects at once.
+  `OCT_2026_CUTOFF`, `NOV_END_2026_CUTOFF`, `FEB_2027_CUTOFF`, `SECOND_YEAR_END_2027` for the retired 1-11 lineup;
+  `NOV_1_2026_CUTOFF`, `JAN_1_2027_CUTOFF`, `MAR_1_2027_CUTOFF`, `FIRST_YEAR_END_2027` for the current 20-28
+  lineup — all defined in `services/access.py`). `grant_subscription()` resolves whichever is set into the stored
+  `sub["expires"]`; `format_subscription_expiry()` doesn't care which path produced it.
+- **`subject_choice_required`** — currently only tier 20 (99₽, 7 days; tier 5, 49₽/3 days, played this role in the
+  retired lineup). The buyer picks exactly one of biology/physics/chemistry before paying
+  (`sub_subject:{tier}:{subject}` → `buy_sub_stars_subj:`/`buy_sub_rubles_subj:`, the Stars invoice payload
+  becomes `sub_stars_{tier}_{subject|-}_{chat_id}_{ts}`); the choice is stored as `sub["restricted_subject"]`.
+  This is why the referral gate had to become subject-aware (see above) — it's the only kind of tier that doesn't
+  unlock all three gated subjects at once.
 - **`histology_until_rule`** — `None` (no Histology), `"expiry"` (Histology lasts exactly as long as the
-  subscription itself), or a literal timestamp (an independent, possibly-earlier cutoff — tier 1 uses
-  `JULY_END_2026` for new purchases). `grant_subscription()` snapshots this into `sub["histology_access"]` (bool)
-  + `sub["histology_until"]` (timestamp or `None` = "tied to the subscription's own `expires`") **at grant time**
+  subscription itself), or a literal timestamp (an independent, possibly-earlier cutoff — retired tier 1 uses
+  `JULY_END_2026`). `grant_subscription()` snapshots this into `sub["histology_access"]` (bool) +
+  `sub["histology_until"]` (timestamp or `None` = "tied to the subscription's own `expires`") **at grant time**
   — never re-derive it from a live global constant, or changing that constant later would retroactively shrink a
   promise already sold to existing payers. (`TIER1_HISTOLOGY_DEADLINE`, end of 2026, is kept only as a read-only
   fallback for tier-1 grants made *before* this snapshot field existed — `_sub_has_histology()` checks
@@ -308,6 +323,45 @@ Each tier is a dict of `title/short/price_rub/price_stars/emoji/benefits/...` pl
   at grant time (`_sub_has_anatomy()`/`_sub_has_biology_download()` fall back to legacy `scope == "all"` for
   pre-migration grants, same reasoning as Histology above). `cheat_sheets` only gates a menu entry/flag so far —
   the actual printable-cheat-sheet *content* doesn't exist yet, that's a separate content-authoring task.
+- **`subscription_version`** — `2` on every tier in the current (20-28) lineup; absent on every retired (1-11)
+  tier. `grant_subscription()` snapshots `cfg.get("subscription_version", 1)` onto the sub record at grant time —
+  so a *fresh* grant of an old tier id (e.g. an admin comping a legacy tier by hand) still ends up correctly
+  tagged version 1, matching a pre-existing record that never had the field at all. Nothing reads this field to
+  gate content access — it exists purely to select which VMedA AI quota plan applies (see below); never let it
+  leak into content-access predicates.
+- **`ai_limit_type`** (`"period"` — a fixed pool for the whole subscription lifetime, no reset; or `"monthly"` —
+  resets every calendar month) **+ `ai_limit`** (int) — present on every tier in the 20-28 lineup, absent from
+  1-11. This is a completely separate quota system from the AI section's ordinary free daily limit
+  (`AI_FREE_DAILY_LIMIT`, `get_ai_usage_today`/`increment_ai_usage`/`stats["ai_usage"]`) — see
+  `_sub_ai_plan()`/`sub_ai_requests_left()`/`_increment_sub_ai_usage()` in the "VMedA AI" section of
+  `telegram_bot.py`. `_sub_ai_plan(user_id)` returns `(None, None)` for anyone without an active
+  `subscription_version >= 2` subscription, in which case `ai_requests_left()` transparently falls back to the
+  ordinary free daily limit — content-access rights and AI-request rights are deliberately independent axes.
+  Usage counters (`ai_used_period` int, or `ai_used_monthly: {"month": "YYYY-MM", "count": int}`) live *inside*
+  the subscription record itself, so they reset automatically whenever the user buys a new subscription (a fresh
+  `grant_subscription()` call overwrites the whole record). **Legacy paid subscriptions** (`subscription_version`
+  absent, i.e. reads as `1`) get a flat `LEGACY_PAID_AI_MONTHLY_BONUS` (currently 60/month) on top of their
+  frozen content rights — this bonus is computed at read time, never written into the old record, so it can't
+  violate the "never touch an existing sub record" rule.
+
+### Subscription shop UI — course picker (2026/27 lineup)
+
+The "💎 Подписка" entry point (`subscription_menu` callback, `cb_subscription_menu`) opens a **course picker**
+first (`get_subscription_course_picker_text/_keyboard` — "1️⃣ Первый курс" / "2️⃣ Второй курс" / "📦 Все тарифы"),
+not a flat tier list directly — with 9 active tiers a single undifferentiated screen was both unreadable and not
+targeted at what a given student actually needs. Nothing about the choice is persisted; it lives entirely in
+callback_data for that one screen transition. `subscription_course:{year1|year2}` renders a curated ≤4-tier list
+per `FIRST_YEAR_TIER_IDS`/`SECOND_YEAR_AUTUMN_TIER_IDS`/`SECOND_YEAR_WINTER_TIER_IDS` (`_course_tier_ids()`); the
+2nd-course list itself flips from the autumn/resit set to the winter set at `NOV_1_2026_CUTOFF` (`_second_year_tier_ids()`)
+— the same instant tier 22 "Все пересдачи" itself expires, so the shop stops recommending a resit-season tier the
+moment resit season is over. `subscription_all_tiers` (`cb_subscription_all_tiers`) is the *original* flat-list
+screen — `get_subscription_menu_text`/`_keyboard` themselves are unchanged in behavior, just no longer the direct
+target of the main entry point; every course screen and the picker itself link to it as a "not what I wanted"
+escape hatch. Tier 28 ("Вся академия") is deliberately **absent** from every curated course screen (only reachable
+via "📦 Все тарифы") and carries no badge — it's positioned as an upsell/premium option, not a default recommendation.
+Because 9 tiers' full benefit lists no longer fit Telegram's 4096-char cap on one screen, the flat "все тарифы"
+view shows only each tier's *first* benefit line + price; the full list is one tap away on the tier's own detail
+screen (`get_sub_tier_text`, unchanged, still shows every benefit).
 
 Never hardcode a price/tier list in marketing copy — use `cheapest_active_tier(predicate)` (and its shortcuts
 `cheapest_gated3_tier()`/`cheapest_histology_tier()`/`cheapest_anatomy_tier()`/`cheapest_biology_download_tier()`)

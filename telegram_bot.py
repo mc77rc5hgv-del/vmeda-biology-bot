@@ -237,6 +237,11 @@ OCT_2026_CUTOFF = access.OCT_2026_CUTOFF
 NOV_END_2026_CUTOFF = access.NOV_END_2026_CUTOFF
 FEB_2027_CUTOFF = access.FEB_2027_CUTOFF
 SECOND_YEAR_END_2027 = access.SECOND_YEAR_END_2027
+NOV_1_2026_CUTOFF = access.NOV_1_2026_CUTOFF
+JAN_1_2027_CUTOFF = access.JAN_1_2027_CUTOFF
+MAR_1_2027_CUTOFF = access.MAR_1_2027_CUTOFF
+FIRST_YEAR_END_2027 = access.FIRST_YEAR_END_2027
+LEGACY_PAID_AI_MONTHLY_BONUS = access.LEGACY_PAID_AI_MONTHLY_BONUS
 SUBSCRIPTION_TIERS = access.SUBSCRIPTION_TIERS
 ACTIVE_SUBSCRIPTION_TIERS = access.ACTIVE_SUBSCRIPTION_TIERS
 SEPTEMBER_PRICE_INCREASE = access.SEPTEMBER_PRICE_INCREASE
@@ -413,9 +418,9 @@ def get_referral_status_text(user_id: int) -> str:
         f"Приглашено друзей: <b>{count}</b> из {REFERRAL_FULL_ACCESS_THRESHOLD}\n"
         f"Осталось бесплатных заходов без рефералов: <b>{remaining_free}</b>\n\n"
         f"💎 Не хочешь ждать друзей? Открой доступ сразу оплатой!\n\n"
-        f"🔥 Самые выгодные варианты — «{SUBSCRIPTION_TIERS[7]['short']}» за "
-        f"{SUBSCRIPTION_TIERS[7]['price_rub']}₽ или «{SUBSCRIPTION_TIERS[9]['short']}» за "
-        f"{SUBSCRIPTION_TIERS[9]['price_rub']}₽ ({SUBSCRIPTION_TIERS[9]['badge']}).\n\n"
+        f"🔥 Самые выгодные варианты — «{SUBSCRIPTION_TIERS[21]['short']}» за "
+        f"{SUBSCRIPTION_TIERS[21]['price_rub']}₽ или «{SUBSCRIPTION_TIERS[26]['short']}» за "
+        f"{SUBSCRIPTION_TIERS[26]['price_rub']}₽ ({SUBSCRIPTION_TIERS[26]['badge']}).\n\n"
         f"Также доступна подписка от {cheapest_gated3_tier()['price_rub']}₽. "
         "Жми «💎 Открыть доступ без рефералов» ниже.\n\n"
         "🌐 А ещё рекомендуем пользоваться @Medical_vpn_bot — жми «🚀 Запустить Medical_vpn_bot» ниже."
@@ -747,16 +752,16 @@ def get_referral_reminder_broadcast_keyboard():
     builder.adjust(1)
     return builder.as_markup()
 
-DISCOUNT_PROMO_TIER_IDS = (7, 9)  # какие тарифы предлагаются со скидкой в этой рассылке
+DISCOUNT_PROMO_TIER_IDS = (21, 26)  # какие тарифы предлагаются со скидкой в этой рассылке
 
 def get_discount_promo_broadcast_text() -> str:
-    t7, t9 = (SUBSCRIPTION_TIERS[t] for t in DISCOUNT_PROMO_TIER_IDS)
+    t21, t26 = (SUBSCRIPTION_TIERS[t] for t in DISCOUNT_PROMO_TIER_IDS)
     return (
         f"🔥 <b>Скидка {int(DISCOUNT_RATE * 100)}% специально для тебя!</b>\n{DIVIDER}\n\n"
         "Ты ещё не пригласил друзей и пока не открыл доступ к боту — специально для тебя разовая "
         f"скидка {int(DISCOUNT_RATE * 100)}% на два самых выгодных тарифа:\n\n"
-        f"{t7['emoji']} «{t7['title']}» — <s>{t7['price_rub']}₽</s> <b>{discount_price(t7['price_rub'])}₽</b>\n"
-        f"{t9['emoji']} «{t9['title']}» — <s>{t9['price_rub']}₽</s> <b>{discount_price(t9['price_rub'])}₽</b>\n\n"
+        f"{t21['emoji']} «{t21['title']}» — <s>{t21['price_rub']}₽</s> <b>{discount_price(t21['price_rub'])}₽</b>\n"
+        f"{t26['emoji']} «{t26['title']}» — <s>{t26['price_rub']}₽</s> <b>{discount_price(t26['price_rub'])}₽</b>\n\n"
         "Жми на кнопку ниже, чтобы забрать скидку — предложение разовое!"
     )
 
@@ -3106,22 +3111,20 @@ def get_subscription_menu_text(user_id: int) -> str:
         "и ограничений. Выбери вариант:\n\n"
         "⏳ Зачёркнутая цена — во сколько подписка будет обходиться с сентября, успей купить сейчас!\n"
     )
-    best7, best9 = SUBSCRIPTION_TIERS[7], SUBSCRIPTION_TIERS[9]
+    best21, best26 = SUBSCRIPTION_TIERS[21], SUBSCRIPTION_TIERS[26]
     lines.append(
         "🏆 <b>ТОП-2 предложения:</b>\n"
-        f"👉 «{best7['emoji']} {best7['title']}» — {best7['price_rub']}₽, "
-        f"или «{best9['emoji']} {best9['title']}» — {best9['price_rub']}₽ — закрывают всё сразу! 🔥\n"
+        f"👉 «{best21['emoji']} {best21['title']}» — {best21['price_rub']}₽, "
+        f"или «{best26['emoji']} {best26['title']}» — {best26['price_rub']}₽ — закрывает всё сразу! 🔥\n"
     )
     for tier_id, cfg in sorted_active_tiers():
         if cfg.get("badge"):
             lines.append(f"<b>{cfg['badge']}</b>")
         lines.append(f"{cfg['emoji']} <b>{cfg['title']}</b> — {get_tier_price_line(cfg)}")
-        if cfg.get("joke"):
-            lines.append(f"<i>{cfg['joke']}</i>")
-        for b in cfg["benefits"]:
-            lines.append(f"• {b}")
+        lines.append(f"• {cfg['benefits'][0]}")
         lines.append("")
     lines.append(
+        "👆 Полное описание каждого тарифа — при выборе ниже.\n\n"
         "После оплаты правило про рефералов для тебя больше не действует — доступ "
         "открывается сразу и держится всё оплаченное время."
     )
@@ -3137,6 +3140,78 @@ def get_subscription_menu_keyboard():
         )
     builder.adjust(1)
     builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
+    return builder.as_markup()
+
+# ==================== ВЫБОР КУРСА (витрина подписки) ====================
+# "subscription_menu" (главная точка входа — кнопка "💎 Подписка" в главном меню, тизеры, все
+# "Назад" в экранах покупки) теперь сначала показывает выбор курса, а не сразу плоский список
+# всех активных тарифов — 9 карточек одним экраном плохо читаются, когда линейка выросла с 7 до
+# 9 тарифов и стала курс-специфичной (см. спецификацию новой тарифной системы). Плоский список
+# (get_subscription_menu_text/_keyboard выше, поведение не менялось) остаётся доступен через
+# кнопку "📦 Все тарифы" на любом экране курса. Выбор курса нигде не сохраняется — состояние
+# целиком живёт в callback_data, ничего не пишется в stats.
+FIRST_YEAR_TIER_IDS = (21, 23, 25, 26)  # Месяц / До зачёта по химии / Весь 1 курс / До конца 2 курса
+SECOND_YEAR_AUTUMN_TIER_IDS = (20, 22, 24, 26)  # Пересдача 7 дней / Все пересдачи / Зимняя сессия / До конца 2 курса
+SECOND_YEAR_WINTER_TIER_IDS = (21, 24, 26, 27)  # Месяц / Зимняя сессия / До конца 2 курса / 2 года MAX
+_COURSE_TITLES = {"year1": "1 курс", "year2": "2 курс"}
+
+def _second_year_tier_ids() -> tuple[int, ...]:
+    """До 1 ноября 2026 — сезон пересдач (август-октябрь), после — обычная витрина 2 курса
+    (см. NOV_1_2026_CUTOFF — тот же рубеж, на котором истекает тариф 22 "Все пересдачи")."""
+    return SECOND_YEAR_AUTUMN_TIER_IDS if time.time() < NOV_1_2026_CUTOFF else SECOND_YEAR_WINTER_TIER_IDS
+
+def _course_tier_ids(course: str) -> tuple[int, ...]:
+    if course == "year1":
+        return FIRST_YEAR_TIER_IDS
+    if course == "year2":
+        return _second_year_tier_ids()
+    return ()
+
+def get_subscription_course_picker_text(user_id: int) -> str:
+    lines = [f"💎 <b>Подписка без рефералов</b>\n{DIVIDER}\n"]
+    status = get_my_subscription_status_block(user_id)
+    if status:
+        lines.append(status)
+    lines.append("🎓 Выбери свой курс — покажем подходящие тарифы:")
+    return "\n".join(lines)
+
+def get_subscription_course_picker_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="1️⃣ Первый курс", callback_data="subscription_course:year1")
+    builder.button(text="2️⃣ Второй курс", callback_data="subscription_course:year2")
+    builder.button(text="📦 Все тарифы", callback_data="subscription_all_tiers")
+    builder.adjust(1)
+    builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
+    return builder.as_markup()
+
+def get_subscription_course_tiers_text(user_id: int, course: str) -> str:
+    lines = [f"💎 <b>Подписка — {_COURSE_TITLES.get(course, course)}</b>\n{DIVIDER}\n"]
+    status = get_my_subscription_status_block(user_id)
+    if status:
+        lines.append(status)
+    for tier_id in _course_tier_ids(course):
+        cfg = SUBSCRIPTION_TIERS[tier_id]
+        if cfg.get("badge"):
+            lines.append(f"<b>{cfg['badge']}</b>")
+        lines.append(f"{cfg['emoji']} <b>{cfg['title']}</b> — {get_tier_price_line(cfg)}")
+        for b in cfg["benefits"]:
+            lines.append(f"• {b}")
+        lines.append("")
+    lines.append("📦 Не подошёл ни один вариант? Смотри «Все тарифы» ниже.")
+    return "\n".join(lines)
+
+def get_subscription_course_tiers_keyboard(course: str):
+    builder = InlineKeyboardBuilder()
+    for tier_id in _course_tier_ids(course):
+        cfg = SUBSCRIPTION_TIERS[tier_id]
+        badge = f"{cfg['badge']} — " if cfg.get("badge") else ""
+        builder.button(
+            text=f"{badge}{cfg['emoji']} {cfg['short']} — {cfg['price_rub']}₽/{cfg['price_stars']}⭐",
+            callback_data=f"sub_tier:{tier_id}"
+        )
+    builder.button(text="📦 Все тарифы", callback_data="subscription_all_tiers")
+    builder.adjust(1)
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="subscription_menu"))
     return builder.as_markup()
 
 def get_sub_tier_text(tier_id: int) -> str:
@@ -3273,9 +3348,35 @@ async def cb_subscription_menu(callback: CallbackQuery):
     await callback.answer()
     await safe_edit_text(
         callback.message,
+        get_subscription_course_picker_text(callback.from_user.id),
+        parse_mode="HTML",
+        reply_markup=get_subscription_course_picker_keyboard(),
+        disable_web_page_preview=True,
+    )
+
+@dp.callback_query(F.data == "subscription_all_tiers")
+async def cb_subscription_all_tiers(callback: CallbackQuery):
+    await callback.answer()
+    await safe_edit_text(
+        callback.message,
         get_subscription_menu_text(callback.from_user.id),
         parse_mode="HTML",
         reply_markup=get_subscription_menu_keyboard(),
+        disable_web_page_preview=True,
+    )
+
+@dp.callback_query(F.data.startswith("subscription_course:"))
+async def cb_subscription_course(callback: CallbackQuery):
+    course = callback.data.split(":", 1)[1]
+    if course not in _COURSE_TITLES:
+        await callback.answer("Курс не найден", show_alert=True)
+        return
+    await callback.answer()
+    await safe_edit_text(
+        callback.message,
+        get_subscription_course_tiers_text(callback.from_user.id, course),
+        parse_mode="HTML",
+        reply_markup=get_subscription_course_tiers_keyboard(course),
         disable_web_page_preview=True,
     )
 
@@ -3667,7 +3768,71 @@ def get_ai_usage_today(user_id: int) -> int:
         return 0
     return entry.get("count", 0)
 
+def has_unlimited_ai(user_id: int) -> bool:
+    return is_admin(user_id)
+
+# ---- Платный AI-план подписки (независим от бесплатного дневного лимита выше) ----
+# Новые тарифы (subscription_version 2) несут собственные ai_limit_type/ai_limit — "period"
+# (общий пул запросов на весь срок действия тарифа, без сброса) либо "monthly" (сбрасывается
+# каждый календарный месяц). Старые платные подписки (subscription_version отсутствует, т.е.
+# читается как 1 — см. .get("subscription_version", 1)) получают фиксированный ежемесячный
+# бонус LEGACY_PAID_AI_MONTHLY_BONUS, не завязанный ни на одно сохранённое в их записи поле —
+# трогать саму запись подписки нельзя (см. CLAUDE.md/спецификацию новой тарифной линейки).
+# Контентные права (anatomy/histology/scope/...) этот слой не читает и не меняет.
+
+def _sub_ai_plan(user_id: int) -> tuple[str | None, int | None]:
+    """(limit_type, limit) платного AI-плана подписки, либо (None, None) — тогда действует
+    только обычный бесплатный дневной лимит (AI_FREE_DAILY_LIMIT)."""
+    sub = get_subscription(user_id)
+    if not sub or not has_active_subscription(user_id):
+        return None, None
+    if sub.get("subscription_version", 1) >= 2:
+        cfg = SUBSCRIPTION_TIERS.get(sub.get("tier"), {})
+        limit_type, limit = cfg.get("ai_limit_type"), cfg.get("ai_limit")
+        if limit_type and limit:
+            return limit_type, limit
+        return None, None
+    return "monthly", LEGACY_PAID_AI_MONTHLY_BONUS
+
+def _current_ai_month_key() -> str:
+    return date.today().strftime("%Y-%m")
+
+def _get_sub_ai_used(sub: dict, limit_type: str) -> int:
+    if limit_type == "monthly":
+        entry = sub.get("ai_used_monthly")
+        if not entry or entry.get("month") != _current_ai_month_key():
+            return 0
+        return entry.get("count", 0)
+    return sub.get("ai_used_period", 0)
+
+def _increment_sub_ai_usage(user_id: int, limit_type: str) -> None:
+    sub = get_subscription(user_id)
+    if sub is None:
+        return
+    if limit_type == "monthly":
+        month = _current_ai_month_key()
+        entry = sub.get("ai_used_monthly")
+        if not entry or entry.get("month") != month:
+            entry = {"month": month, "count": 0}
+        entry["count"] += 1
+        sub["ai_used_monthly"] = entry
+    else:
+        sub["ai_used_period"] = sub.get("ai_used_period", 0) + 1
+    save_stats()
+
+def sub_ai_requests_left(user_id: int) -> int | None:
+    """None — нет отдельного платного AI-плана (см. _sub_ai_plan)."""
+    limit_type, limit = _sub_ai_plan(user_id)
+    if limit_type is None:
+        return None
+    sub = get_subscription(user_id)
+    return max(0, limit - _get_sub_ai_used(sub, limit_type))
+
 def increment_ai_usage(user_id: int) -> None:
+    limit_type, _ = _sub_ai_plan(user_id)
+    if limit_type is not None:
+        _increment_sub_ai_usage(user_id, limit_type)
+        return
     today = date.today().isoformat()
     entry = stats["ai_usage"].get(str(user_id))
     if not entry or entry.get("date") != today:
@@ -3676,17 +3841,23 @@ def increment_ai_usage(user_id: int) -> None:
     stats["ai_usage"][str(user_id)] = entry
     save_stats()
 
-def has_unlimited_ai(user_id: int) -> bool:
-    return is_admin(user_id)
-
 def ai_requests_left(user_id: int) -> int:
+    sub_left = sub_ai_requests_left(user_id)
+    if sub_left is not None:
+        return sub_left
     return max(0, AI_FREE_DAILY_LIMIT - get_ai_usage_today(user_id))
 
 def ai_quota_ok(user_id: int) -> bool:
     return has_unlimited_ai(user_id) or ai_requests_left(user_id) > 0
 
 def get_ai_quota_label(user_id: int) -> str:
-    return "♾ безлимит (админ)" if has_unlimited_ai(user_id) else f"{ai_requests_left(user_id)}/{AI_FREE_DAILY_LIMIT}"
+    if has_unlimited_ai(user_id):
+        return "♾ безлимит (админ)"
+    limit_type, limit = _sub_ai_plan(user_id)
+    if limit_type is not None:
+        period_word = "в месяц" if limit_type == "monthly" else "на срок подписки"
+        return f"{ai_requests_left(user_id)}/{limit} ({period_word})"
+    return f"{ai_requests_left(user_id)}/{AI_FREE_DAILY_LIMIT}"
 
 _AI_PROVIDER_PRICES = {
     "openai": (ai_openai.PRICE_INPUT_PER_1M, ai_openai.PRICE_OUTPUT_PER_1M),

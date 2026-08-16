@@ -61,7 +61,7 @@ async def main():
     check_html(text)
     assert "Биология, Физика и Химия" in text
     assert str(tb.REFERRAL_FULL_ACCESS_THRESHOLD) in text
-    assert f"{tb.SUBSCRIPTION_TIERS[1]['price_rub']}₽" in text
+    assert f"{tb.cheapest_gated3_tier()['price_rub']}₽" in text
     kb = tb.get_referral_reminder_broadcast_keyboard()
     texts = kb_texts(kb)
     assert "👥 Пригласить друзей" in texts and "💎 Подписка" in texts
