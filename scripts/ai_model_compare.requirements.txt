@@ -1,0 +1,5 @@
+# Only for scripts/ai_model_compare.py -- NOT installed as part of the bot (requirements.txt),
+# deliberately kept separate: google-genai pulls in pydantic>=2.12.5, which conflicts with
+# aiogram==3.7.0's pinned pydantic<2.8. Install this in its own venv/environment.
+openai==2.53.0
+google-genai==2.18.1
