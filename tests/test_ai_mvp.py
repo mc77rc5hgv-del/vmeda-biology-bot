@@ -2,6 +2,7 @@
 import asyncio
 from _bootstrap import tb
 from aiogram.dispatcher.event.bases import SkipHandler
+from ai import vision as ai_vision
 
 NON_ADMIN = 55501122
 ADMIN_ID = next(iter(tb.ADMIN_IDS))
@@ -160,7 +161,7 @@ async def main():
     cb_explain = FakeCB("ai_show_explanation", uid=uid)
     await tb.cb_ai_show_explanation(cb_explain)
     assert calls[-1][3] is False, "the explanation call must be quick=False (full step-by-step)"
-    assert calls[-1][1] == tb.AI_EXPLAIN_FOLLOWUP_TEXT
+    assert calls[-1][1] == tb.ai_prompts.EXPLAIN_FOLLOWUP_TEXT
     assert calls[-1][2] == [
         fake_user_turn(text="Реши задачу по химии"),
         {"role": "assistant", "content": "Ответ: Б"},
@@ -286,7 +287,7 @@ async def main():
     # ---- 14. record_ai_cost math is correct and cost block renders ----
     tb.stats["ai_cost_totals"] = {"requests": 0, "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0}
     tb.record_ai_cost({"input_tokens": 1_000_000, "output_tokens": 1_000_000})
-    expected_cost = tb.AI_PRICE_INPUT_PER_1M + tb.AI_PRICE_OUTPUT_PER_1M
+    expected_cost = tb.ai_openai.PRICE_INPUT_PER_1M + tb.ai_openai.PRICE_OUTPUT_PER_1M
     assert abs(tb.stats["ai_cost_totals"]["cost_usd"] - expected_cost) < 1e-9
     block = tb.get_ai_cost_stats_block()
     assert "VMedA AI" in block and "1" in block
@@ -319,7 +320,7 @@ async def main():
         r" \( m = \frac{n}{m_{\text{растворителя, кг}}} \approx 0,246 \, \text{моль/кг} \)."
         r" Сульфат калия SO4^{2-} и K^{+}, \Delta T_b \approx 0,37 \, \text{°C}."
     )
-    cleaned = tb._clean_ai_answer(raw)
+    cleaned = tb.ai_service.clean_answer(raw)
     for bad in ("\\(", "\\)", "\\cdot", "\\frac", "\\text", "\\Delta", "\\,", "$"):
         assert bad not in cleaned, f"{bad!r} leaked into cleaned output: {cleaned!r}"
     assert "×" in cleaned  # \cdot -> ×
@@ -346,7 +347,7 @@ async def main():
                 self.stack.pop()
 
     md = "1. **Молекулярная масса:**\n- K: 39,1 г/моль\n- S: 32,1 г/моль\n\nИтог: **174,3 г/моль**."
-    formatted = tb._format_ai_answer_html(md)
+    formatted = tb.ai_service.format_answer_html(md)
     assert "<b>Молекулярная масса:</b>" in formatted
     assert "<b>174,3 г/моль</b>" in formatted
     assert "• K: 39,1 г/моль" in formatted and "• S: 32,1 г/моль" in formatted
@@ -357,7 +358,7 @@ async def main():
 
     # a stray "<"/"&" from the model must be escaped, never treated as a real tag
     unsafe = "Если n < 5, реакция не идёт (K & Na реагируют иначе)."
-    formatted_unsafe = tb._format_ai_answer_html(unsafe)
+    formatted_unsafe = tb.ai_service.format_answer_html(unsafe)
     assert "&lt;" in formatted_unsafe and "&amp;" in formatted_unsafe
     checker2 = _BalanceChecker()
     checker2.feed(formatted_unsafe)
@@ -366,7 +367,7 @@ async def main():
     # regression: "### Заголовок" (Gemini uses these despite the system prompt saying not to)
     # must not leak as raw "###" into the Telegram message
     md_headers = "### 1. Брюшина\n• Определение: передняя стенка брюшной полости."
-    formatted_headers = tb._format_ai_answer_html(md_headers)
+    formatted_headers = tb.ai_service.format_answer_html(md_headers)
     assert "#" not in formatted_headers, "raw markdown headers must not leak into the message"
     assert "<b>1. Брюшина</b>" in formatted_headers
     checker3 = _BalanceChecker()
@@ -395,16 +396,16 @@ async def main():
     class FakeOpenAIClient:
         chat = FakeChat()
 
-    orig_get_client = tb.get_openai_client
-    orig_get_grok_client = tb.get_grok_client
-    tb.get_openai_client = lambda: FakeOpenAIClient()
-    tb.get_grok_client = lambda: None  # Grok не настроен в этом под-тесте — чистая проверка сжатия истории
-    long_answer = "Подробный ход решения. " * 30  # заведомо длиннее AI_HISTORY_SUMMARY_CHARS
+    orig_get_client = tb.ai_openai.get_client
+    orig_get_grok_client = tb.ai_xai.get_client
+    tb.ai_openai.get_client = lambda: FakeOpenAIClient()
+    tb.ai_xai.get_client = lambda: None  # Grok не настроен в этом под-тесте — чистая проверка сжатия истории
+    long_answer = "Подробный ход решения. " * 30  # заведомо длиннее HISTORY_SUMMARY_CHARS
     long_history = []
     for i in range(20):
         if i % 2 == 0:
             content = [{"type": "text", "text": f"вопрос {i}"}]
-            if i == 16:  # внутри окна AI_HISTORY_MAX_MESSAGES — проверяем, что фото тут вырезается
+            if i == 16:  # внутри окна HISTORY_MAX_MESSAGES — проверяем, что фото тут вырезается
                 content.append({"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,AAAA"}})
             long_history.append({"role": "user", "content": content})
         else:
@@ -413,7 +414,7 @@ async def main():
     answer_r, user_turn_r, usage_r = await orig_solve(text="новый вопрос", history=long_history)
     sent = captured["messages"]
     assert sent[0]["role"] == "system"
-    assert len(sent) == 1 + tb.AI_HISTORY_MAX_MESSAGES + 1, "must be system + compacted history + current turn"
+    assert len(sent) == 1 + tb.ai_service.HISTORY_MAX_MESSAGES + 1, "must be system + compacted history + current turn"
     compacted = sent[1:-1]
     assert sent[-1] == user_turn_r
 
@@ -439,12 +440,12 @@ async def main():
             assert "image_url" not in msg["content"] and "base64" not in msg["content"]
 
     # самый последний ответ ассистента в окне остаётся полным (может понадобиться модели целиком),
-    # более ранние в этом же окне — обрезаны до AI_HISTORY_SUMMARY_CHARS
+    # более ранние в этом же окне — обрезаны до HISTORY_SUMMARY_CHARS
     assistant_msgs = [m["content"] for m in compacted if m["role"] == "assistant"]
     assert len(assistant_msgs) >= 2
     assert assistant_msgs[-1] == long_answer + " #19"
     for shortened in assistant_msgs[:-1]:
-        assert len(shortened) <= tb.AI_HISTORY_SUMMARY_CHARS + 1
+        assert len(shortened) <= tb.ai_service.HISTORY_SUMMARY_CHARS + 1
         assert shortened.endswith("…")
 
     assert usage_r == {"input_tokens": 42, "output_tokens": 7, "provider": "openai"}
@@ -466,7 +467,7 @@ async def main():
         ]},
         {"role": "assistant", "content": "Краткий ответ на свежее фото"},
     ]
-    compacted_recent = tb._compact_history(history_with_recent_photo)
+    compacted_recent = tb.ai_service._compact_history(history_with_recent_photo)
     user_msgs_recent = [m for m in compacted_recent if m["role"] == "user"]
     assert isinstance(user_msgs_recent[-1]["content"], list), "the most recent user turn's photo must stay intact"
     assert any(p.get("type") == "image_url" for p in user_msgs_recent[-1]["content"])
@@ -492,18 +493,19 @@ async def main():
     class GrokMustNotBeCalledClient:
         chat = GrokMustNotBeCalledChat()
 
-    tb.get_openai_client = lambda: FakeOpenAIClient19()
-    tb.get_grok_client = lambda: GrokMustNotBeCalledClient()
+    tb.ai_openai.get_client = lambda: FakeOpenAIClient19()
+    tb.ai_xai.get_client = lambda: GrokMustNotBeCalledClient()
     answer19, _, usage19 = await orig_solve(text="краткий вопрос", quick=True)
-    assert captured19["model"] == tb.AI_MODEL_VISION
+    assert captured19["model"] == tb.ai_openai.MODEL
     assert usage19["provider"] == "openai"
     print("19. quick=True always stays on OpenAI, even with Grok configured: OK")
 
     # ---- 19a. task_type=None (unclassified) stays on OpenAI even with Grok configured and
-    # AI_USE_GROK_FOR_DETAILED on — Grok only engages for task_type=="theory_complex" specifically,
-    # never as a catch-all, so a mixed quick/detailed pair on a calculation can't reintroduce the
-    # rounding-mismatch bug (e.g. 100,5°C vs 100,4°C on the same problem) that got Grok disabled ----
-    assert tb.AI_USE_GROK_FOR_DETAILED is True, "Grok is enabled, scoped to theory_complex only"
+    # ai_router.USE_GROK_FOR_DETAILED on — Grok only engages for task_type=="theory_complex"
+    # specifically, never as a catch-all, so a mixed quick/detailed pair on a calculation can't
+    # reintroduce the rounding-mismatch bug (e.g. 100,5°C vs 100,4°C on the same problem) that got
+    # Grok disabled ----
+    assert tb.ai_router.USE_GROK_FOR_DETAILED is True, "Grok is enabled, scoped to theory_complex only"
     captured19a = {}
     class FakeCompletions19a:
         async def create(self, **kwargs):
@@ -515,20 +517,20 @@ async def main():
         chat = FakeChat19a()
     class GrokMustNotBeCalledCompletions19a:
         async def create(self, **kwargs):
-            raise AssertionError("Grok must not be called while AI_USE_GROK_FOR_DETAILED is off")
+            raise AssertionError("Grok must not be called while ai_router.USE_GROK_FOR_DETAILED is off")
     class GrokMustNotBeCalledChat19a:
         completions = GrokMustNotBeCalledCompletions19a()
     class GrokMustNotBeCalledClient19a:
         chat = GrokMustNotBeCalledChat19a()
-    tb.get_openai_client = lambda: FakeOpenAIClient19a()
-    tb.get_grok_client = lambda: GrokMustNotBeCalledClient19a()
+    tb.ai_openai.get_client = lambda: FakeOpenAIClient19a()
+    tb.ai_xai.get_client = lambda: GrokMustNotBeCalledClient19a()
     _, _, usage19a = await orig_solve(text="подробный вопрос", quick=False)
-    assert captured19a["model"] == tb.AI_MODEL_VISION
+    assert captured19a["model"] == tb.ai_openai.MODEL
     assert usage19a["provider"] == "openai"
     print("19a. task_type=None stays on OpenAI even with Grok enabled (scoped to theory_complex): OK")
 
-    # ---- 19b. task_type="theory_complex" + AI_USE_GROK_FOR_DETAILED on -> routes to Grok ----
-    tb.AI_USE_GROK_FOR_DETAILED = True
+    # ---- 19b. task_type="theory_complex" + ai_router.USE_GROK_FOR_DETAILED on -> routes to Grok ----
+    tb.ai_router.USE_GROK_FOR_DETAILED = True
     captured_grok = {}
     class FakeGrokUsage:
         prompt_tokens = 300
@@ -556,18 +558,18 @@ async def main():
     class OpenAIMustNotBeCalledClient:
         chat = OpenAIMustNotBeCalledChat()
 
-    tb.get_grok_client = lambda: FakeGrokClient()
-    tb.get_openai_client = lambda: OpenAIMustNotBeCalledClient()
+    tb.ai_xai.get_client = lambda: FakeGrokClient()
+    tb.ai_openai.get_client = lambda: OpenAIMustNotBeCalledClient()
     tb.stats["ai_cost_totals"] = {"requests": 0, "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0}
     answer_g, user_turn_g, usage_g = await orig_solve(
         text="подробный вопрос", quick=False, task_type="theory_complex"
     )
-    assert captured_grok["model"] == tb.AI_MODEL_GROK
+    assert captured_grok["model"] == tb.ai_xai.MODEL
     assert usage_g == {"input_tokens": 300, "output_tokens": 120, "provider": "grok"}
     tb.record_ai_cost(usage_g)
     grok_totals = tb.stats["ai_cost_totals"]["by_provider"]["grok"]
     expected_cost = (
-        300 * tb.AI_GROK_PRICE_INPUT_PER_1M / 1_000_000 + 120 * tb.AI_GROK_PRICE_OUTPUT_PER_1M / 1_000_000
+        300 * tb.ai_xai.PRICE_INPUT_PER_1M / 1_000_000 + 120 * tb.ai_xai.PRICE_OUTPUT_PER_1M / 1_000_000
     )
     assert grok_totals["requests"] == 1
     assert abs(grok_totals["cost_usd"] - expected_cost) < 1e-9, "Grok usage must be priced at Grok's own rates"
@@ -594,19 +596,19 @@ async def main():
     class FallbackOpenAIClient:
         chat = FallbackChat()
 
-    tb.get_grok_client = lambda: FailingGrokClient()
-    tb.get_openai_client = lambda: FallbackOpenAIClient()
+    tb.ai_xai.get_client = lambda: FailingGrokClient()
+    tb.ai_openai.get_client = lambda: FallbackOpenAIClient()
     answer_f, user_turn_f, usage_f = await orig_solve(
         text="подробный вопрос 2", quick=False, task_type="theory_complex"
     )
     assert len(grok_call_count) == 1, "must attempt Grok exactly once — not loop or retry it"
-    assert fallback_models == [tb.AI_MODEL_VISION], "must fall back to OpenAI exactly once after the Grok failure"
+    assert fallback_models == [tb.ai_openai.MODEL], "must fall back to OpenAI exactly once after the Grok failure"
     assert usage_f["provider"] == "openai", "usage must be attributed to whichever provider actually answered"
     print("19c. Grok failure falls back to OpenAI exactly once, no retry loop: OK")
 
-    tb.get_openai_client = orig_get_client
-    tb.get_grok_client = orig_get_grok_client
-    tb.AI_USE_GROK_FOR_DETAILED = False
+    tb.ai_openai.get_client = orig_get_client
+    tb.ai_xai.get_client = orig_get_grok_client
+    tb.ai_router.USE_GROK_FOR_DETAILED = False
 
     # ---- 20. photos are sent at "detail": "low" — gpt-4o-mini bills high/auto detail at up to
     # 36 835 tokens per photo (2833 base + 5667 per 512px tile) vs a flat 2833 at low, by far the
@@ -620,28 +622,28 @@ async def main():
         completions = FakeCompletions20()
     class FakeOpenAIClient20:
         chat = FakeChat20()
-    tb.get_openai_client = lambda: FakeOpenAIClient20()
-    tb.get_grok_client = lambda: None
+    tb.ai_openai.get_client = lambda: FakeOpenAIClient20()
+    tb.ai_xai.get_client = lambda: None
     await orig_solve(image_bytes=b"fake-jpeg-bytes", quick=True)
     sent_user_turn = captured20["messages"][-1]
     image_block = next(p for p in sent_user_turn["content"] if p["type"] == "image_url")
-    assert image_block["image_url"]["detail"] == tb.AI_IMAGE_DETAIL == "low"
+    assert image_block["image_url"]["detail"] == ai_vision.DETAIL == "low"
     print("20. photos are sent at detail=low to cut the dominant image-token cost: OK")
 
-    tb.get_openai_client = orig_get_client
-    tb.get_grok_client = orig_get_grok_client
+    tb.ai_openai.get_client = orig_get_client
+    tb.ai_xai.get_client = orig_get_grok_client
 
-    # ---- 21. _classify_quick_answer: three-way heuristic — problem (OpenAI) / theory_simple
-    # (Gemini) / theory_complex (Grok) ----
-    assert tb._classify_quick_answer("Ответ: Б") == "theory_simple"
-    assert tb._classify_quick_answer("3) Верно") == "theory_simple"
-    assert tb._classify_quick_answer("Ответ: В") == "theory_simple"
-    assert tb._classify_quick_answer("Температура кипения раствора составляет 100,5°C.") == "problem"
-    assert tb._classify_quick_answer("Масса вещества ≈ 42 г") == "problem"
-    assert tb._classify_quick_answer("pH раствора равен 3,2") == "problem"
+    # ---- 21. ai_router.classify_quick_answer: three-way heuristic — problem (OpenAI) /
+    # theory_simple (Gemini) / theory_complex (Grok) ----
+    assert tb.ai_router.classify_quick_answer("Ответ: Б") == "theory_simple"
+    assert tb.ai_router.classify_quick_answer("3) Верно") == "theory_simple"
+    assert tb.ai_router.classify_quick_answer("Ответ: В") == "theory_simple"
+    assert tb.ai_router.classify_quick_answer("Температура кипения раствора составляет 100,5°C.") == "problem"
+    assert tb.ai_router.classify_quick_answer("Масса вещества ≈ 42 г") == "problem"
+    assert tb.ai_router.classify_quick_answer("pH раствора равен 3,2") == "problem"
     # развёрнутая теоретическая формулировка (не голая буква/номер) — сложнее, чем бы надёжно
     # выдал Gemini, уходит в Grok
-    assert tb._classify_quick_answer(
+    assert tb.ai_router.classify_quick_answer(
         "Диффузия — самопроизвольное перемешивание частиц вещества из зоны высокой концентрации в зону низкой."
     ) == "theory_complex"
     # многопунктный список (3+ пунктов) остаётся на OpenAI целиком НЕЗАВИСИМО от содержимого —
@@ -654,7 +656,7 @@ async def main():
         "12. Промежность — область между анусом и половыми органами.\n"
         "13. Семенной каналикул — трубочки в яичках, где происходит сперматогенез."
     )
-    assert tb._classify_quick_answer(numbered_list_answer) == "problem", (
+    assert tb.ai_router.classify_quick_answer(numbered_list_answer) == "problem", (
         "a multi-item (3+) list must stay on OpenAI regardless of content — Gemini was observed "
         "to be less accurate/terser on this kind of answer"
     )
@@ -662,16 +664,16 @@ async def main():
     # классификатор даже в КОРОТКОМ списке (< 3 пунктов, не задета правилом выше) — но развёрнутая
     # формулировка внутри этого одного пункта всё равно делает его theory_complex, не simple
     short_list_no_numbers = "9. Грудная полость — пространство, в котором находятся лёгкие и сердце."
-    assert tb._classify_quick_answer(short_list_no_numbers) == "theory_complex", (
+    assert tb.ai_router.classify_quick_answer(short_list_no_numbers) == "theory_complex", (
         "list-item numbering (\"9.\") alone must not be mistaken for a calculated result, but the "
         "definition itself is long enough to still count as theory_complex, not a bare MCQ answer"
     )
     # но реальное число-результат СРЕДИ пунктов короткого списка всё ещё должно быть "problem"
     short_list_with_number = "1. Первый пункт\n2. Масса раствора составляет 15,7 г"
-    assert tb._classify_quick_answer(short_list_with_number) == "problem"
-    print("21. _classify_quick_answer tells problem/theory_simple/theory_complex apart: OK")
+    assert tb.ai_router.classify_quick_answer(short_list_with_number) == "problem"
+    print("21. ai_router.classify_quick_answer tells problem/theory_simple/theory_complex apart: OK")
 
-    # ---- 22. _openai_messages_to_gemini_contents: system extracted, roles mapped, images converted ----
+    # ---- 22. ai_gemini._messages_to_contents: system extracted, roles mapped, images converted ----
     openai_style_messages = [
         {"role": "system", "content": "СИСТЕМНЫЙ ПРОМПТ"},
         {"role": "user", "content": "старый текстовый вопрос"},
@@ -681,7 +683,7 @@ async def main():
             {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,QUJD", "detail": "low"}},
         ]},
     ]
-    system_text, contents = tb._openai_messages_to_gemini_contents(openai_style_messages)
+    system_text, contents = tb.ai_gemini._messages_to_contents(openai_style_messages)
     assert system_text == "СИСТЕМНЫЙ ПРОМПТ"
     assert [c["role"] for c in contents] == ["user", "model", "user"], "assistant maps to model, system is separate"
     assert contents[0]["parts"] == [{"text": "старый текстовый вопрос"}]
@@ -690,7 +692,7 @@ async def main():
     assert {"text": "новый вопрос"} in last_parts
     image_part = next(p for p in last_parts if "inline_data" in p)
     assert image_part["inline_data"] == {"mime_type": "image/jpeg", "data": "QUJD"}
-    print("22. _openai_messages_to_gemini_contents converts roles/system/images correctly: OK")
+    print("22. ai_gemini._messages_to_contents converts roles/system/images correctly: OK")
 
     # ---- 23. task_type is classified from the quick answer's shape and passed through to the
     # detailed explanation call — this is what lets solve_ai_request route theory/test questions
@@ -708,16 +710,16 @@ async def main():
     print("23. task_type is classified from the quick answer and passed to the detailed call: OK")
     tb.stats["ai_usage"].pop(str(uid), None)
 
-    # ---- 24. the REAL solve_ai_request: quick=False + task_type="theory_simple" + GEMINI_API_KEY set
-    # routes to Gemini, priced at Gemini's own (cheaper) rates ----
-    orig_gemini_key = tb.GEMINI_API_KEY
-    tb.GEMINI_API_KEY = "fake-gemini-key-for-tests"
+    # ---- 24. the REAL solve_ai_request: quick=False + task_type="theory_simple" +
+    # ai_gemini.GEMINI_API_KEY set routes to Gemini, priced at Gemini's own (cheaper) rates ----
+    orig_gemini_key = tb.ai_gemini.GEMINI_API_KEY
+    tb.ai_gemini.GEMINI_API_KEY = "fake-gemini-key-for-tests"
     gemini_calls = []
     async def fake_call_gemini_success(messages, max_tokens):
         gemini_calls.append((messages, max_tokens))
         return "Правильный вариант: В (эволюционная теория)", {"input_tokens": 150, "output_tokens": 40}
-    orig_call_gemini = tb._call_gemini
-    tb._call_gemini = fake_call_gemini_success
+    orig_call_gemini = tb.ai_gemini.call
+    tb.ai_gemini.call = fake_call_gemini_success
     class OpenAIMustNotBeCalledCompletions24:
         async def create(self, **kwargs):
             raise AssertionError("OpenAI must not be called when Gemini handles a theory question")
@@ -725,7 +727,7 @@ async def main():
         completions = OpenAIMustNotBeCalledCompletions24()
     class OpenAIMustNotBeCalledClient24:
         chat = OpenAIMustNotBeCalledChat24()
-    tb.get_openai_client = lambda: OpenAIMustNotBeCalledClient24()
+    tb.ai_openai.get_client = lambda: OpenAIMustNotBeCalledClient24()
     tb.stats["ai_cost_totals"] = {"requests": 0, "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0}
     answer_th, _, usage_th = await orig_solve(text="теоретический вопрос", quick=False, task_type="theory_simple")
     assert usage_th == {"input_tokens": 150, "output_tokens": 40, "provider": "gemini"}
@@ -733,14 +735,14 @@ async def main():
     tb.record_ai_cost(usage_th)
     gemini_totals = tb.stats["ai_cost_totals"]["by_provider"]["gemini"]
     expected_cost_gemini = (
-        150 * tb.AI_GEMINI_PRICE_INPUT_PER_1M / 1_000_000 + 40 * tb.AI_GEMINI_PRICE_OUTPUT_PER_1M / 1_000_000
+        150 * tb.ai_gemini.PRICE_INPUT_PER_1M / 1_000_000 + 40 * tb.ai_gemini.PRICE_OUTPUT_PER_1M / 1_000_000
     )
     assert abs(gemini_totals["cost_usd"] - expected_cost_gemini) < 1e-9, "Gemini usage must be priced at Gemini rates"
     assert "из них Gemini" in tb.get_ai_cost_stats_block(), "admin stats must break out Gemini spend separately"
     print("24. quick=False + task_type=theory_simple + GEMINI_API_KEY routes to Gemini, priced correctly: OK")
 
     # ---- 24b. task_type="theory_simple" but NO GEMINI_API_KEY still stays on OpenAI ----
-    tb.GEMINI_API_KEY = None
+    tb.ai_gemini.GEMINI_API_KEY = None
     captured24b = {}
     class FakeCompletions24b:
         async def create(self, **kwargs):
@@ -750,14 +752,14 @@ async def main():
         completions = FakeCompletions24b()
     class FakeOpenAIClient24b:
         chat = FakeChat24b()
-    tb.get_openai_client = lambda: FakeOpenAIClient24b()
+    tb.ai_openai.get_client = lambda: FakeOpenAIClient24b()
     gemini_calls.clear()
     _, _, usage_24b = await orig_solve(text="теоретический вопрос", quick=False, task_type="theory_simple")
     assert len(gemini_calls) == 0, "must not call Gemini when GEMINI_API_KEY is unset"
     assert usage_24b["provider"] == "openai"
-    assert captured24b["model"] == tb.AI_MODEL_VISION
+    assert captured24b["model"] == tb.ai_openai.MODEL
     print("24b. task_type=theory_simple without GEMINI_API_KEY still stays on OpenAI: OK")
-    tb.GEMINI_API_KEY = "fake-gemini-key-for-tests"
+    tb.ai_gemini.GEMINI_API_KEY = "fake-gemini-key-for-tests"
 
     # ---- 24c. task_type="problem" stays on OpenAI even when Gemini IS configured — this is the
     # self-consistency guarantee for calculations ----
@@ -770,7 +772,7 @@ async def main():
         completions = FakeCompletions24c()
     class FakeOpenAIClient24c:
         chat = FakeChat24c()
-    tb.get_openai_client = lambda: FakeOpenAIClient24c()
+    tb.ai_openai.get_client = lambda: FakeOpenAIClient24c()
     gemini_calls.clear()
     _, _, usage_24c = await orig_solve(text="расчётная задача", quick=False, task_type="problem")
     assert len(gemini_calls) == 0, "calculation problems must never be routed to Gemini"
@@ -781,7 +783,7 @@ async def main():
     async def fake_call_gemini_failing(messages, max_tokens):
         gemini_calls.append((messages, max_tokens))
         raise RuntimeError("simulated Gemini outage")
-    tb._call_gemini = fake_call_gemini_failing
+    tb.ai_gemini.call = fake_call_gemini_failing
     fallback_models_24d = []
     class FallbackCompletions24d:
         async def create(self, **kwargs):
@@ -791,58 +793,54 @@ async def main():
         completions = FallbackCompletions24d()
     class FallbackOpenAIClient24d:
         chat = FallbackChat24d()
-    tb.get_openai_client = lambda: FallbackOpenAIClient24d()
+    tb.ai_openai.get_client = lambda: FallbackOpenAIClient24d()
     gemini_calls.clear()
     _, _, usage_24d = await orig_solve(text="теоретический вопрос 2", quick=False, task_type="theory_simple")
     assert len(gemini_calls) == 1, "must attempt Gemini exactly once — not loop or retry it"
-    assert fallback_models_24d == [tb.AI_MODEL_VISION], "must fall back to OpenAI exactly once after Gemini fails"
+    assert fallback_models_24d == [tb.ai_openai.MODEL], "must fall back to OpenAI exactly once after Gemini fails"
     assert usage_24d["provider"] == "openai"
     print("24d. Gemini failure falls back to OpenAI exactly once, no retry loop: OK")
 
-    tb._call_gemini = orig_call_gemini
-    tb.get_openai_client = orig_get_client
-    tb.GEMINI_API_KEY = orig_gemini_key
+    tb.ai_gemini.call = orig_call_gemini
+    tb.ai_openai.get_client = orig_get_client
+    tb.ai_gemini.GEMINI_API_KEY = orig_gemini_key
 
     # ---- 25. AI RAG: builds a searchable index from the bot's own Q&A banks (Biology/Physics/
     # Chemistry only — matches the AI feature's stated scope) and retrieves relevant snippets by
     # keyword overlap, all zero-token pure Python (no model call for retrieval itself) ----
-    orig_questions, orig_physics_q = tb.QUESTIONS, tb.PHYSICS_QUESTIONS
-    orig_chem_theory = tb.CHEMISTRY_THEORY
-    orig_chem_theory_tickets, orig_chem_practice_tickets = tb.CHEMISTRY_THEORY_TICKETS, tb.CHEMISTRY_PRACTICE_TICKETS
-    tb.QUESTIONS = {"1": {
+    fake_questions = {"1": {
         "title": "Митохондрии и клеточное дыхание",
         "answer": "Митохондрии — органоиды клеточного дыхания, синтезируют АТФ путём окисления органических веществ.",
     }}
-    tb.PHYSICS_QUESTIONS = {"1": {
+    fake_physics_q = {"1": {
         "title": "Закон Ома для участка цепи",
         "answer": "Сила тока прямо пропорциональна напряжению и обратно пропорциональна сопротивлению участка цепи.",
     }}
-    tb.CHEMISTRY_THEORY = {"1": {
+    fake_chem_theory = {"1": {
         "title": "Окислительно-восстановительные реакции",
         "content": "ОВР — реакции с переносом электронов между окислителем и восстановителем.",
     }}
-    tb.CHEMISTRY_THEORY_TICKETS = {}
-    tb.CHEMISTRY_PRACTICE_TICKETS = {}
-    index = tb._build_ai_rag_index()
+    index = tb.ai_rag.build_index(
+        questions=fake_questions, physics_questions=fake_physics_q, chemistry_theory=fake_chem_theory,
+        chemistry_theory_tickets={}, chemistry_practice_tickets={}, anatomy=tb.ANATOMY,
+    )
     assert any(e["subject"] == "биология" and "Митохондрии" in e["title"] for e in index)
     assert any(e["subject"] == "физика" and "Ома" in e["title"] for e in index)
     assert any(e["subject"] == "химия" and "восстановительные" in e["title"] for e in index)
 
-    orig_get_index = tb.get_ai_rag_index
-    tb.get_ai_rag_index = lambda: index
-    snippets = tb._search_ai_rag_snippets("расскажи про митохондрии и клеточное дыхание в клетке")
+    orig_rag_index, orig_rag_idf = tb.ai_rag._index, tb.ai_rag._idf
+    tb.ai_rag._index = index
+    tb.ai_rag._idf = tb.ai_rag.build_stem_idf(index)
+    snippets = tb.ai_rag.search_snippets("расскажи про митохондрии и клеточное дыхание в клетке")
     assert snippets and snippets[0]["title"] == "Митохондрии и клеточное дыхание"
-    no_match = tb._search_ai_rag_snippets("совершенно не связанный запрос про космос и звёзды")
-    assert no_match == [], "must not return noisy single-word-overlap matches (AI_RAG_MIN_SCORE gate)"
-    context = tb._format_ai_rag_context(snippets)
+    no_match = tb.ai_rag.search_snippets("совершенно не связанный запрос про космос и звёзды")
+    assert no_match == [], "must not return noisy single-word-overlap matches (MIN_SCORE gate)"
+    context = tb.ai_rag.format_context(snippets)
     assert "Митохондрии и клеточное дыхание" in context and "биология" in context
-    assert tb._format_ai_rag_context([]) == "", "no snippets -> empty context, no wasted tokens"
+    assert tb.ai_rag.format_context([]) == "", "no snippets -> empty context, no wasted tokens"
     print("25. AI RAG index build + keyword retrieval + formatting: OK")
 
-    tb.get_ai_rag_index = orig_get_index
-    tb.QUESTIONS, tb.PHYSICS_QUESTIONS = orig_questions, orig_physics_q
-    tb.CHEMISTRY_THEORY = orig_chem_theory
-    tb.CHEMISTRY_THEORY_TICKETS, tb.CHEMISTRY_PRACTICE_TICKETS = orig_chem_theory_tickets, orig_chem_practice_tickets
+    tb.ai_rag._index, tb.ai_rag._idf = orig_rag_index, orig_rag_idf
 
     # ---- 26. the REAL solve_ai_request: rag_context reaches the model on quick=False, but is
     # NEVER baked into the returned/stored user_turn — otherwise it would resend itself (and its
@@ -857,8 +855,8 @@ async def main():
         completions = FakeCompletions26()
     class FakeOpenAIClient26:
         chat = FakeChat26()
-    tb.get_openai_client = lambda: FakeOpenAIClient26()
-    tb.get_grok_client = lambda: None
+    tb.ai_openai.get_client = lambda: FakeOpenAIClient26()
+    tb.ai_xai.get_client = lambda: None
     fake_rag_context = "Материалы ВМедА по теме: «Пример» (биология): много текста сюда для проверки."
 
     _, user_turn_26, _ = await orig_solve(text="объясни подробнее", quick=False, rag_context=fake_rag_context)
@@ -874,16 +872,16 @@ async def main():
     assert fake_rag_context not in sent_text_quick, "rag_context must be ignored on quick=True calls"
     print("26b. rag_context is ignored on quick=True (short answers stay lean): OK")
 
-    tb.get_openai_client = orig_get_client
-    tb.get_grok_client = orig_get_grok_client
+    tb.ai_openai.get_client = orig_get_client
+    tb.ai_xai.get_client = orig_get_grok_client
 
-    # ---- 27. _looks_like_ai_refusal: detects real refusal phrasing, not "не может"-style facts ----
-    assert tb._looks_like_ai_refusal("Извините, но я не могу помочь с этой просьбой.")
-    assert tb._looks_like_ai_refusal("I'm sorry, but I can't help with that request.")
-    assert not tb._looks_like_ai_refusal("Молекула не может изменить свою конформацию без затрат энергии.")
-    assert not tb._looks_like_ai_refusal("Ответ: Б")
-    assert not tb._looks_like_ai_refusal("Температура кипения раствора составляет 100,378°C.")
-    print("27. _looks_like_ai_refusal flags real refusals, not 3rd-person facts: OK")
+    # ---- 27. ai_router.looks_like_refusal: detects real refusal phrasing, not "не может"-style facts ----
+    assert tb.ai_router.looks_like_refusal("Извините, но я не могу помочь с этой просьбой.")
+    assert tb.ai_router.looks_like_refusal("I'm sorry, but I can't help with that request.")
+    assert not tb.ai_router.looks_like_refusal("Молекула не может изменить свою конформацию без затрат энергии.")
+    assert not tb.ai_router.looks_like_refusal("Ответ: Б")
+    assert not tb.ai_router.looks_like_refusal("Температура кипения раствора составляет 100,378°C.")
+    print("27. ai_router.looks_like_refusal flags real refusals, not 3rd-person facts: OK")
 
     # ---- 28. the REAL solve_ai_request: a refusal from the primary (already-openai) provider
     # raises AIRefusalError instead of being silently shown as a normal answer ----
@@ -904,8 +902,8 @@ async def main():
         completions = RefusingOpenAICompletions()
     class RefusingOpenAIClient:
         chat = RefusingOpenAIChat()
-    tb.get_openai_client = lambda: RefusingOpenAIClient()
-    tb.get_grok_client = lambda: None
+    tb.ai_openai.get_client = lambda: RefusingOpenAIClient()
+    tb.ai_xai.get_client = lambda: None
     try:
         await orig_solve(text="анатомический вопрос", quick=False)
         raised = False
@@ -916,7 +914,7 @@ async def main():
 
     # ---- 28b. a refusal from Grok falls back to OpenAI once; if OpenAI then answers normally,
     # the caller gets a normal answer, not an error ----
-    tb.AI_USE_GROK_FOR_DETAILED = True
+    tb.ai_router.USE_GROK_FOR_DETAILED = True
     class GrokRefusalCompletions:
         async def create(self, **kwargs):
             return RefusalResponse()
@@ -933,8 +931,8 @@ async def main():
         completions = GoodFallbackCompletions28b()
     class GoodFallbackClient28b:
         chat = GoodFallbackChat28b()
-    tb.get_grok_client = lambda: GrokRefusalClient()
-    tb.get_openai_client = lambda: GoodFallbackClient28b()
+    tb.ai_xai.get_client = lambda: GrokRefusalClient()
+    tb.ai_openai.get_client = lambda: GoodFallbackClient28b()
     _, _, usage_28b = await orig_solve(text="анатомический вопрос", quick=False, task_type="theory_complex")
     assert len(fallback_calls_28b) == 1, "must fall back to OpenAI exactly once after Grok refuses"
     assert usage_28b["provider"] == "openai"
@@ -949,8 +947,8 @@ async def main():
         completions = BadFallbackCompletions28c()
     class BadFallbackClient28c:
         chat = BadFallbackChat28c()
-    tb.get_grok_client = lambda: GrokRefusalClient()
-    tb.get_openai_client = lambda: BadFallbackClient28c()
+    tb.ai_xai.get_client = lambda: GrokRefusalClient()
+    tb.ai_openai.get_client = lambda: BadFallbackClient28c()
     try:
         await orig_solve(text="анатомический вопрос", quick=False, task_type="theory_complex")
         raised28c = False
@@ -958,16 +956,16 @@ async def main():
         raised28c = True
     assert raised28c, "must still raise AIRefusalError if even the OpenAI fallback refuses"
     print("28c. both primary and fallback refusing still raises AIRefusalError, no loop: OK")
-    tb.AI_USE_GROK_FOR_DETAILED = True
-    tb.get_openai_client = orig_get_client
-    tb.get_grok_client = orig_get_grok_client
+    tb.ai_router.USE_GROK_FOR_DETAILED = True
+    tb.ai_openai.get_client = orig_get_client
+    tb.ai_xai.get_client = orig_get_grok_client
 
     # ---- 28d. OpenAI refusing on an already-openai primary attempt (e.g. task_type="problem", a
     # multi-item list — where Gemini normally isn't used) now tries Gemini as a genuine LAST
     # RESORT if configured, instead of giving up immediately — a refusal is worse for the user
     # than a slightly less polished but real answer ----
-    orig_gemini_key_28d = tb.GEMINI_API_KEY
-    tb.GEMINI_API_KEY = "fake-gemini-key-for-tests"
+    orig_gemini_key_28d = tb.ai_gemini.GEMINI_API_KEY
+    tb.ai_gemini.GEMINI_API_KEY = "fake-gemini-key-for-tests"
     class RefusingOpenAICompletions28d:
         async def create(self, **kwargs):
             return RefusalResponse()
@@ -975,13 +973,13 @@ async def main():
         completions = RefusingOpenAICompletions28d()
     class RefusingOpenAIClient28d:
         chat = RefusingOpenAIChat28d()
-    tb.get_openai_client = lambda: RefusingOpenAIClient28d()
+    tb.ai_openai.get_client = lambda: RefusingOpenAIClient28d()
     gemini_calls_28d = []
     async def fake_call_gemini_success_28d(messages, max_tokens):
         gemini_calls_28d.append(1)
         return "Реальный ответ от Gemini, не отказ.", {"input_tokens": 80, "output_tokens": 30}
-    orig_call_gemini_28d = tb._call_gemini
-    tb._call_gemini = fake_call_gemini_success_28d
+    orig_call_gemini_28d = tb.ai_gemini.call
+    tb.ai_gemini.call = fake_call_gemini_success_28d
     answer_28d, _, usage_28d = await orig_solve(text="анатомический вопрос", quick=False)
     assert len(gemini_calls_28d) == 1, "must try Gemini exactly once after OpenAI refuses"
     assert usage_28d["provider"] == "gemini"
@@ -993,7 +991,7 @@ async def main():
     async def fake_call_gemini_refuses_28e(messages, max_tokens):
         gemini_calls_28d.append(1)
         return "Извините, но я не могу помочь с этой просьбой.", {"input_tokens": 40, "output_tokens": 10}
-    tb._call_gemini = fake_call_gemini_refuses_28e
+    tb.ai_gemini.call = fake_call_gemini_refuses_28e
     gemini_calls_28d.clear()
     try:
         await orig_solve(text="анатомический вопрос", quick=False)
@@ -1004,9 +1002,9 @@ async def main():
     assert len(gemini_calls_28d) == 1, "must try Gemini exactly once, not loop"
     print("28e. Gemini also refusing after OpenAI still raises AIRefusalError, no loop: OK")
 
-    tb._call_gemini = orig_call_gemini_28d
-    tb.get_openai_client = orig_get_client
-    tb.GEMINI_API_KEY = orig_gemini_key_28d
+    tb.ai_gemini.call = orig_call_gemini_28d
+    tb.ai_openai.get_client = orig_get_client
+    tb.ai_gemini.GEMINI_API_KEY = orig_gemini_key_28d
 
     # ---- 29. handler level: AIRefusalError shows a clear message, does NOT charge the daily
     # quota, and leaves the session alive so the user can rephrase and retry ----
@@ -1041,7 +1039,7 @@ async def main():
         "находятся органы мочеполовой системы. Промежность — область между анусом и половыми "
         "органами. Семенной каналикул — трубочки в яичках, где происходит сперматогенез."
     )
-    anatomy_matches = tb._search_ai_rag_snippets(anatomy_regression_query)
+    anatomy_matches = tb.ai_rag.search_snippets(anatomy_regression_query)
     matched_titles = {s["title"] for s in anatomy_matches}
     assert "Эволюция органов дыхания у беспозвоночных (Типы Annelides, Mollusca, Arthropoda)" not in matched_titles
     assert "Гисто- и органогенез. Производные зародышевых листков" not in matched_titles
@@ -1050,18 +1048,18 @@ async def main():
     print("30. RAG drops the old noisy biology matches and grounds anatomy questions on ANATOMY: OK")
 
     # ---- 30b. RAG index now also covers Anatomy (real material + flashcards from ANATOMY) ----
-    idx = tb.get_ai_rag_index()
+    idx = tb.ai_rag._index
     assert any(e["subject"] == "анатомия" for e in idx), "ANATOMY must be part of the RAG index"
-    pleura_snippets = tb._search_ai_rag_snippets("Что такое плевра, средостение и полость плевры?")
+    pleura_snippets = tb.ai_rag.search_snippets("Что такое плевра, средостение и полость плевры?")
     assert any("плевр" in s["title"].lower() or "плевр" in s["text"].lower() for s in pleura_snippets), (
         "a focused anatomy question must ground on real anatomy content with the correct term spelling"
     )
     print("30b. RAG index includes real Anatomy material/flashcards and grounds focused questions: OK")
 
-    # ---- 30c. RAG regression: _search_ai_rag_snippets_multi finds matches for a REAL-shaped
-    # numbered list (one item per line, the actual quick-answer format the bot generates) where a
-    # single-blob search over the whole 13-item list finds NOTHING — this was the live bug: the
-    # model still wrote "Плева" instead of "Плевра" because no grounding material ever got hit ----
+    # ---- 30c. RAG regression: search_snippets_multi finds matches for a REAL-shaped numbered list
+    # (one item per line, the actual quick-answer format the bot generates) where a single-blob
+    # search over the whole 13-item list finds NOTHING — this was the live bug: the model still
+    # wrote "Плева" instead of "Плевра" because no grounding material ever got hit ----
     numbered_anatomy_list = (
         "1. Брюшина — складка брюшины, соединяющая органы с задней стенкой живота.\n"
         "2. Полость брюшины — пространство между стенками брюшной полости и органами.\n"
@@ -1077,16 +1075,16 @@ async def main():
         "12. Промежность — область между анусом и половыми органами.\n"
         "13. Семенной каналикул — трубочки в яичках, где происходит образование сперматозоидов."
     )
-    assert tb._search_ai_rag_snippets(numbered_anatomy_list) == [], (
+    assert tb.ai_rag.search_snippets(numbered_anatomy_list) == [], (
         "sanity check: the whole 13-item blob as ONE query is too diffuse to match anything — "
         "this is exactly the live bug, confirming the per-item fix below is actually needed"
     )
-    multi_matches = tb._search_ai_rag_snippets_multi(numbered_anatomy_list)
+    multi_matches = tb.ai_rag.search_snippets_multi(numbered_anatomy_list)
     assert multi_matches, "searching each list item separately must find real anatomy grounding"
     assert all(s["subject"] == "анатомия" for s in multi_matches)
     matched_blob = " ".join(s["title"] + " " + s["text"] for s in multi_matches).lower()
     assert "плевр" in matched_blob, "must ground the pleura term specifically (the one the model got wrong live)"
-    print("30c. _search_ai_rag_snippets_multi finds per-item matches a single blob query misses: OK")
+    print("30c. search_snippets_multi finds per-item matches a single blob query misses: OK")
 
     # cleanup
     tb.solve_ai_request = orig_solve

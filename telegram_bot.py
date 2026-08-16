@@ -1,12 +1,9 @@
 import asyncio
-import base64
 import copy
 import html
 import io
 import json
 import logging
-import aiohttp
-import math
 import random
 import re
 import os
@@ -28,6 +25,17 @@ from aiogram.dispatcher.event.bases import SkipHandler
 from docx import Document as DocxDocument
 from docx.shared import Pt
 
+from ai import prompts as ai_prompts
+from ai import rag as ai_rag
+from ai import router as ai_router
+from ai import service as ai_service
+from ai.providers import gemini as ai_gemini
+from ai.providers import openai as ai_openai
+from ai.providers import xai as ai_xai
+from ai.router import AIRefusalError
+from ai.service import solve as solve_ai_request
+from ai.vision import resize_image as resize_image_for_ai
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -41,11 +49,10 @@ CHANNEL_ID = "@Vmeda_examen"
 ADMIN_IDS = {1326779223, 8601892147}
 STATS_DIR = os.getenv("STATS_DIR", ".")
 STATS_FILE = os.path.join(STATS_DIR, "stats.json")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")  # без него AI-раздел показывает "временно недоступен"
-XAI_API_KEY = os.getenv("XAI_API_KEY")  # опционально — Grok (xAI) для подробного разбора, см. solve_ai_request;
-# без него подробный разбор просто продолжает идти через OpenAI, как и раньше
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")  # опционально — Gemini для теоретических/тестовых
-# вопросов (см. solve_ai_request/_classify_quick_answer); без него такие вопросы тоже остаются на OpenAI
+# Ключи провайдеров AI живут в ai/providers/*.py (каждый модуль сам читает свою переменную
+# окружения) — эти два имени просто ре-экспортированы, потому что UI-уровень бота (кнопка
+# "Отправить фото", текст меню AI) должен знать, доступен ли AI, не заглядывая внутрь пакета ai.
+OPENAI_API_KEY = ai_openai.OPENAI_API_KEY  # без него AI-раздел показывает "временно недоступен"
 
 DIVIDER = "━━━━━━━━━━━━━━"
 IMAGES_DIR = "images"
@@ -110,6 +117,12 @@ with open("anatomy_exam_practice.json", "r", encoding="utf-8") as f:
 
 with open("histology.json", "r", encoding="utf-8") as f:
     HISTOLOGY = json.load(f)
+
+ai_rag.configure(
+    questions=QUESTIONS, physics_questions=PHYSICS_QUESTIONS, chemistry_theory=CHEMISTRY_THEORY,
+    chemistry_theory_tickets=CHEMISTRY_THEORY_TICKETS, chemistry_practice_tickets=CHEMISTRY_PRACTICE_TICKETS,
+    anatomy=ANATOMY,
+)
 
 # ==================== СТАТИСТИКА (СОХРАНЯЕТСЯ НА ДИСК) ====================
 def load_stats() -> dict:
@@ -1922,149 +1935,9 @@ def search_questions_by_keyword(query: str, limit: int = SEARCH_RESULTS_LIMIT):
                 break
     return matches
 
-# ==================== AI: ПОДМЕС МАТЕРИАЛОВ ВМедА (RAG-LITE) ====================
-# Идея: перед ПОДРОБНЫМ разбором (quick=False) ищем в собственной базе бота (вопросы/билеты,
-# уже загруженные в память для других разделов) несколько релевантных фрагментов и подмешиваем
-# их в запрос к модели, чтобы формулировки и метод совпадали с тем, что реально требуют на
-# кафедре, а не с общими знаниями модели. Поиск — тот же стеммированный keyword-matching, что и
-# выше (0 токенов, чистый Python); токены тратятся только на сам подмешанный текст, и только
-# тогда, когда что-то релевантное реально нашлось.
-AI_RAG_TOP_K = 3          # сколько фрагментов подмешиваем максимум за один подробный запрос —
-# на многопунктных списках (_search_ai_rag_snippets_multi) термины могут разбегаться по разным
-# темам (лёгкие/плевра, сердце/перикард, таз/промежность), 2 не хватало на покрытие
-AI_RAG_SNIPPET_MAX_CHARS = 600  # потолок длины ОДНОГО фрагмента — ограничивает добавленные токены
-AI_RAG_MIN_COMMON_STEMS = 2  # минимум РАЗНЫХ общих слов с запросом — иначе одно случайное слово
-                              # уже может дать высокий взвешенный балл
-# Порог по НОРМАЛИЗОВАННОМУ баллу (сумма IDF общих слов / число стеммов в запросе), не по сырой
-# сумме: длинный многопунктный ответ (например, список из 9+ анатомических терминов) набирает
-# сырую сумму выше короткого точного вопроса просто за счёт объёма слов, даже когда реально
-# релевантной темы в индексе вообще нет — на реальном вопросе так подмешался явно посторонний
-# материал (эволюция органов дыхания у беспозвоночных вместо анатомии полостей тела). На тех же
-# реальных вопросах у настоящих совпадений (митохондрии, коллигативные свойства, закон Ома)
-# нормализованный балл 1.3-3.5, у случайных многословных совпадений — 0.8-0.9: порог 1.2 чисто
-# разделяет эти два случая.
-AI_RAG_MIN_SCORE = 1.2
-
-def _entry_stems(title: str, text: str) -> set:
-    words = _extract_words(title) + _extract_words(text)
-    return {_word_stem(w) for w in words if len(w) >= 4}
-
-def _build_ai_rag_index() -> list:
-    """Собирает единый список {subject, title, text, stems} из уже загруженных в память банков
-    вопросов/ответов бота (биология/физика/химия — основная заявленная область AI-помощника — и
-    анатомия, потому что вопросы по ней реально задают через этот же AI-режим, и без точных
-    терминов из ANATOMY модель на них иногда путает термины по памяти). Строится один раз лениво
-    (см. get_ai_rag_index) — исходные словари не меняются во время работы бота."""
-    raw_entries = []
-    for q in QUESTIONS.values():
-        raw_entries.append(("биология", q.get("title", ""), q.get("answer", "")))
-    for q in PHYSICS_QUESTIONS.values():
-        raw_entries.append(("физика", q.get("title", ""), q.get("answer", "")))
-    for topic in CHEMISTRY_THEORY.values():
-        raw_entries.append(("химия", topic.get("title", ""), topic.get("content", "")))
-    for ticket in list(CHEMISTRY_THEORY_TICKETS.values()) + list(CHEMISTRY_PRACTICE_TICKETS.values()):
-        for q in ticket.get("questions", []):
-            raw_entries.append(("химия", q.get("title", ""), q.get("answer", "")))
-    for section in ANATOMY.values():
-        for topic in section.get("topics", {}).values():
-            for item in topic.get("material") or []:
-                raw_entries.append(("анатомия", item.get("title", ""), item.get("content", "")))
-            for card in topic.get("flashcards") or []:
-                raw_entries.append(("анатомия", card.get("front", ""), card.get("back", "")))
-    return [
-        {"subject": subject, "title": title, "text": text, "stems": _entry_stems(title, text)}
-        for subject, title, text in raw_entries
-        if title and text
-    ]
-
-_AI_RAG_INDEX = None
-
-def get_ai_rag_index() -> list:
-    global _AI_RAG_INDEX
-    if _AI_RAG_INDEX is None:
-        _AI_RAG_INDEX = _build_ai_rag_index()
-    return _AI_RAG_INDEX
-
-def _build_ai_rag_stem_idf(index: list) -> dict:
-    """Обычные IDF-веса: слова, встречающиеся почти в каждой записи («который», «между»,
-    «строение», «функции» — типичные связки для формулировок в стиле «Х, его строение и
-    функции») получают низкий вес и почти не влияют на совпадение; редкие тематические слова
-    («перикард», «диссоциация», «коллигативные») — высокий. Без этого длинный ответ совпадал по
-    общим словам с случайными, вообще не связанными темами (наблюдалось на реальном вопросе)."""
-    doc_freq = {}
-    for entry in index:
-        for stem in entry["stems"]:
-            doc_freq[stem] = doc_freq.get(stem, 0) + 1
-    n_docs = max(len(index), 1)
-    return {stem: math.log((n_docs + 1) / (df + 1)) + 1 for stem, df in doc_freq.items()}
-
-_AI_RAG_STEM_IDF = None
-
-def get_ai_rag_stem_idf() -> dict:
-    global _AI_RAG_STEM_IDF
-    if _AI_RAG_STEM_IDF is None:
-        _AI_RAG_STEM_IDF = _build_ai_rag_stem_idf(get_ai_rag_index())
-    return _AI_RAG_STEM_IDF
-
-def _score_ai_rag_entries(query_text: str) -> list:
-    """Возвращает [(score, entry), ...], не отсортировано и без обрезки по limit — общая часть
-    для _search_ai_rag_snippets (один запрос целиком) и _search_ai_rag_snippets_multi (по
-    отдельным пунктам списка). score — НОРМАЛИЗОВАННЫЙ IDF-балл (сумма весов общих слов / число
-    стеммов в запросе, см. AI_RAG_MIN_SCORE) — без обращения к модели, чистое сравнение множеств."""
-    query_stems = {_word_stem(w) for w in _extract_words(query_text) if len(w) >= 4}
-    if not query_stems:
-        return []
-    idf = get_ai_rag_stem_idf()
-    scored = []
-    for entry in get_ai_rag_index():
-        common = query_stems & entry["stems"]
-        if len(common) < AI_RAG_MIN_COMMON_STEMS:
-            continue
-        score = sum(idf.get(stem, 0.0) for stem in common) / len(query_stems)
-        if score >= AI_RAG_MIN_SCORE:
-            scored.append((score, entry))
-    return scored
-
-def _search_ai_rag_snippets(query_text: str, limit: int = AI_RAG_TOP_K) -> list:
-    """Возвращает до `limit` наиболее релевантных записей индекса для ОДНОГО запроса целиком."""
-    scored = _score_ai_rag_entries(query_text)
-    scored.sort(key=lambda x: -x[0])
-    return [entry for _, entry in scored[:limit]]
-
-def _search_ai_rag_snippets_multi(answer_text: str, limit: int = AI_RAG_TOP_K) -> list:
-    """Как _search_ai_rag_snippets, но для многопунктных ответов (список из нескольких терминов)
-    сначала бьёт текст на отдельные пункты и ищет по КАЖДОМУ пункту отдельно, а не по всему ответу
-    разом. Иначе короткое упоминание одного термина (например, «Плевра») тонет в общем запросе из
-    8-13 разных структур из разных систем органов и не проходит порог релевантности ни для одной
-    темы — реально наблюдалось: поиск по всему списку целиком находил 0 совпадений, хотя половина
-    терминов по отдельности легко находится в базе. Дедуп по (subject, title) с сохранением
-    лучшего балла, до `limit` записей суммарно по всем пунктам."""
-    items = [p.strip() for p in _AI_LIST_MARKER_RE.split(answer_text) if p.strip()]
-    if len(items) < 2:
-        return _search_ai_rag_snippets(answer_text, limit=limit)
-    best_by_key = {}
-    for item in items:
-        for score, entry in _score_ai_rag_entries(item):
-            key = (entry["subject"], entry["title"])
-            if key not in best_by_key or score > best_by_key[key][0]:
-                best_by_key[key] = (score, entry)
-    scored = list(best_by_key.values())
-    scored.sort(key=lambda x: -x[0])
-    return [entry for _, entry in scored[:limit]]
-
-def _format_ai_rag_context(snippets: list) -> str:
-    if not snippets:
-        return ""
-    blocks = []
-    for s in snippets:
-        text = html.unescape(strip_html_tags(s["text"]))
-        if len(text) > AI_RAG_SNIPPET_MAX_CHARS:
-            text = text[:AI_RAG_SNIPPET_MAX_CHARS] + "…"
-        blocks.append(f"«{s['title']}» ({s['subject']}): {text}")
-    return (
-        "Материалы ВМедА по теме (используй эти формулировки и метод, если задание о том же "
-        "самом; если задание про другое — просто игнорируй этот блок):\n" + "\n\n".join(blocks)
-    )
+# AI RAG-lite (индекс/поиск/подмес материалов ВМедА) перенесён в ai/rag.py — см. ai_rag.configure()
+# (вызывается один раз при старте, см. конец файла) и ai_rag.search_snippets_multi()/format_context()
+# (используются в обработчиках AI-режима).
 
 async def is_subscribed(user_id: int) -> bool:
     try:
@@ -6005,205 +5878,18 @@ async def handle_question_number(message: Message):
 
 # ==================== VMEDA AI (MVP) ====================
 # Phase 1 (MVP): пользователь присылает фото/текст задания -> модель отвечает напрямую,
-# без Knowledge Base/RAG/верификации (это следующие фазы, см. согласованный roadmap).
+# без Knowledge Base/верификации (это следующие фазы, см. согласованный roadmap).
 # Работает поверх существующих паттернов бота: свой gate (не через has_free_access),
 # свои ключи в stats.json (ai_usage, через .setdefault — обычная миграция), не трогает
 # ни один существующий раздел/контент/тариф.
-AI_MODEL_VISION = "gpt-4o-mini"
-AI_PRICE_INPUT_PER_1M = 0.15   # $/1M input tokens, gpt-4o-mini — держать в синхроне с реальным прайсом OpenAI
-AI_PRICE_OUTPUT_PER_1M = 0.60  # $/1M output tokens
-
-# Grok (xAI) — задействован ТОЛЬКО на "theory_complex" (см. _classify_quick_answer): развёрнутые
-# теоретические/тестовые вопросы, где быстрый ответ уже не голая буква, а формулировка, требующая
-# реального рассуждения — и где, по наблюдениям, Gemini иногда справляется слабее. НЕ трогает
-# "problem" (расчёты и многопунктные списки) — именно микс "быстрый на одной модели, подробный на
-# другой" по расчётам раньше давал расхождение в округлении (напр. 100,5°C vs 100,4°C на одной и
-# той же задаче) в рамках одной сессии, что и было причиной временно выключить Grok целиком; теперь
-# он используется только там, где такого риска нет. Ставь False, чтобы снова полностью выключить.
-AI_USE_GROK_FOR_DETAILED = True
-AI_MODEL_GROK = "grok-4.3"
-AI_GROK_PRICE_INPUT_PER_1M = 1.25   # $/1M input tokens, grok-4.3 — держать в синхроне с прайсом xAI
-AI_GROK_PRICE_OUTPUT_PER_1M = 2.50  # $/1M output tokens
-
-# Gemini 2.5 Flash-Lite — реально ДЕШЕВЛЕ gpt-4o-mini ($0.10/$0.40 vs $0.15/$0.60 за 1М токенов,
-# в отличие от Grok выше), поэтому берёт на себя подробный разбор ТОЛЬКО теоретических/тестовых
-# вопросов (см. _classify_quick_answer/solve_ai_request) — расчётные задачи по-прежнему целиком
-# остаются на OpenAI (и быстрый, и подробный ответ), чтобы не повторить баг с расхождением чисел
-# между моделями на многошаговой арифметике. Gemini не OpenAI-совместим (свой формат запроса/
-# ответа) — обращаемся к нему напрямую через aiohttp (см. _call_gemini), в обход google-genai SDK,
-# который конфликтует с версией pydantic, зафиксированной aiogram.
-AI_MODEL_GEMINI = "gemini-2.5-flash-lite"
-AI_GEMINI_PRICE_INPUT_PER_1M = 0.10   # $/1M input tokens — держать в синхроне с прайсом Google AI
-AI_GEMINI_PRICE_OUTPUT_PER_1M = 0.40  # $/1M output tokens
+#
+# Провайдеры/роутинг/RAG/промпты/подготовка фото вынесены в пакет ai/ (см. ai/service.py,
+# ai/router.py, ai/rag.py, ai/prompts.py, ai/vision.py, ai/providers/*) — здесь остаётся
+# только то, что завязано на stats/save_stats/is_admin/DIVIDER и сами @dp-хендлеры (перенос
+# хендлеров в отдельный router — следующая фаза рефакторинга, см. CLAUDE.md).
 AI_FREE_DAILY_LIMIT = 3
-AI_ANSWER_TELEGRAM_LIMIT = 3500  # с запасом от лимита Telegram в 4096 символов на сообщение
 AI_SESSION_TIMEOUT_SECONDS = 20 * 60  # диалог считается закрытым после 20 минут без сообщений
 AI_SESSIONS: dict = {}  # user_id -> {"messages": [...], "last_active": ts, "processing": bool} — открытый диалог с памятью
-AI_QUICK_MAX_TOKENS = 550   # короткий первый ответ — только итог, без хода решения; 150 обрезал
-# на середине слова вопросы с несколькими пунктами/терминами для перечисления (не тест, не
-# расчёт), 400 не оставлял запаса на точные термины без чрезмерного сжатия (см. AI_QUICK_SUFFIX) —
-# потолок реально расходуется только когда контент того требует: не добавляет токенов к обычному
-# односложному ответу, только даёт места на многопунктных не жертвовать точностью ради краткости
-AI_DETAILED_MAX_TOKENS = 1500
-AI_HISTORY_MAX_MESSAGES = 6  # сколько последних сообщений истории берём как основу перед сжатием
-# (см. _compact_history) — без этого потолка стоимость каждого следующего сообщения в долгой
-# сессии растёт почти квадратично: на каждый ход модели заново пересылается исходное фото и вся
-# переписка целиком
-
-AI_QUICK_SUFFIX = (
-    "\n\n(Важно: в этом ответе дай ТОЛЬКО краткий итоговый ответ, без хода решения и пояснений — "
-    "если тест с вариантами, укажи букву/номер варианта; если расчёт, только финальный результат "
-    "с единицами измерения — одна-две строки. Если в задании несколько терминов/пунктов для "
-    "перечисления — дай по одной строке на каждый термин с ТОЧНЫМ названием (не сокращай и не "
-    "искажай сам термин ради краткости — лучше формулировка чуть длиннее, но правильная; если "
-    "не уверен в точном названии термина — так и скажи, а не угадывай похожее слово) и кратким "
-    "пояснением; обязательно закончи перечень до конца, не обрывай на середине.)"
-)
-AI_EXPLAIN_FOLLOWUP_TEXT = "Дай теперь подробное решение по шагам для этого задания."
-
-AI_SYSTEM_PROMPT = (
-    "Ты — AI-помощник для студентов ВМедА (Военно-медицинская академия им. С.М. Кирова), "
-    "помогаешь готовиться к вступительным и текущим экзаменам по биологии, физике и химии. "
-    "Пользователь прислал фото или текст задания, теста, билета или контрольной. Определи, что "
-    "это за задание, и дай решение: сначала кратко укажи итоговый ответ, затем поясни ход решения "
-    "по шагам. Если это тест с вариантами ответа — явно укажи букву/номер правильного варианта. "
-    "Если не уверен в ответе — прямо скажи об этом, не выдавай догадку за точный факт. Итоговое "
-    "число, названное в самом конце, должно ТОЧНО совпадать с последним вычисленным значением в "
-    "ходе решения — никогда не меняй и не «корректируй» результат в конце без нового полного "
-    "расчёта, показанного пользователю; если сомневаешься в методе — выбери один стандартный "
-    "школьный/вузовский способ решения и доведи его до конца, не смешивая с другими подходами. "
-    "В расчётных задачах округляй итоговый числовой результат до тысячных (три знака после "
-    "запятой), если в условии не задана другая точность — не обрывай на сотых/десятых там, где "
-    "можно вычислить точнее; промежуточные шаги можно округлять свободнее для читаемости. "
-    "Отвечай на русском языке. НЕ используй LaTeX-разметку: никаких \\( \\), \\[ \\], \\frac{}{}, "
-    "\\cdot, \\text{}, $ и подобных конструкций с обратным слэшем. Дроби пиши через «/» (например, "
-    "0,086/0,350), умножение — знаком «×», приближённое равенство — «≈», степени и индексы — "
-    "обычными символами без ^ и _ (например, SO4^2- пиши как SO4(2-) или «сульфат-ион»), единицы "
-    "измерения просто текстом («г/моль», «°C»), греческие буквы словами или юникод-символом (Δ, α), "
-    "не командой. Для читаемости используй лёгкую разметку: **двумя звёздочками** выделяй ключевые "
-    "термины, важные числа и итоговый ответ; списки — через «- » в начале строки; где уместно — "
-    "умеренно добавляй по одному эмодзи на заголовок шага (например 📌, 🔢, ✅). Не используй "
-    "заголовки через #, таблицы или вложенные списки — только жирный текст, простые списки через "
-    "«-» и изредка эмодзи."
-)
-
-_openai_client = None
-
-def get_openai_client():
-    """Ленивая инициализация клиента — импортируем openai только когда он реально нужен,
-    и только если ключ вообще задан (иначе AI-раздел просто показывает "недоступен")."""
-    global _openai_client
-    if _openai_client is None and OPENAI_API_KEY:
-        from openai import AsyncOpenAI
-        _openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
-    return _openai_client
-
-_grok_client = None
-
-def get_grok_client():
-    """Grok API (xAI) OpenAI-совместим — тот же пакет openai, просто другой base_url и ключ,
-    отдельный пакет в requirements.txt не нужен. None, если XAI_API_KEY не задан — тогда
-    solve_ai_request просто продолжает работать через OpenAI."""
-    global _grok_client
-    if _grok_client is None and XAI_API_KEY:
-        from openai import AsyncOpenAI
-        _grok_client = AsyncOpenAI(api_key=XAI_API_KEY, base_url="https://api.x.ai/v1")
-    return _grok_client
-
-GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-
-def _openai_messages_to_gemini_contents(messages: list) -> tuple:
-    """Gemini не понимает наш OpenAI-формат messages (roles user/assistant/system, content —
-    строка или список text/image_url блоков) — у него свой contents[]/systemInstruction формат
-    с ролями user/model. Возвращает (system_text, contents) — на вход всегда идёт то же самое
-    messages, что строится в solve_ai_request что для OpenAI, что для Grok (оба OpenAI-совместимы),
-    так что конвертация нужна только на этой одной границе."""
-    system_text = ""
-    contents = []
-    for msg in messages:
-        role = msg.get("role")
-        content = msg.get("content")
-        if role == "system":
-            system_text = content if isinstance(content, str) else ""
-            continue
-        gemini_role = "model" if role == "assistant" else "user"
-        if isinstance(content, str):
-            parts = [{"text": content}]
-        else:
-            parts = []
-            for block in content:
-                if block.get("type") == "text" and block.get("text"):
-                    parts.append({"text": block["text"]})
-                elif block.get("type") == "image_url":
-                    url = block.get("image_url", {}).get("url", "")
-                    if url.startswith("data:"):
-                        header, _, b64_data = url.partition(",")
-                        mime_type = header[len("data:"):].split(";")[0] or "image/jpeg"
-                        parts.append({"inline_data": {"mime_type": mime_type, "data": b64_data}})
-            if not parts:
-                parts = [{"text": ""}]
-        contents.append({"role": gemini_role, "parts": parts})
-    return system_text, contents
-
-async def _call_gemini(messages: list, max_tokens: int) -> tuple:
-    """Прямой HTTP-вызов Gemini API (в обход google-genai SDK — он требует pydantic>=2.12.5,
-    несовместимую с версией, зафиксированной aiogram). trust_env=True обязателен, иначе aiohttp
-    игнорирует HTTPS_PROXY окружения. Возвращает (текст_ответа, usage) — usage в том же формате
-    {"input_tokens", "output_tokens"}, что и у OpenAI-совместимых провайдеров."""
-    system_text, contents = _openai_messages_to_gemini_contents(messages)
-    payload = {"contents": contents, "generationConfig": {"temperature": 0, "maxOutputTokens": max_tokens}}
-    if system_text:
-        payload["systemInstruction"] = {"parts": [{"text": system_text}]}
-    url = GEMINI_API_URL.format(model=AI_MODEL_GEMINI)
-    timeout = aiohttp.ClientTimeout(total=30)
-    async with aiohttp.ClientSession(trust_env=True, timeout=timeout) as session:
-        async with session.post(url, params={"key": GEMINI_API_KEY}, json=payload) as resp:
-            resp.raise_for_status()
-            data = await resp.json()
-    text = data["candidates"][0]["content"]["parts"][0]["text"]
-    usage_meta = data.get("usageMetadata", {})
-    usage = {
-        "input_tokens": usage_meta.get("promptTokenCount", 0),
-        "output_tokens": usage_meta.get("candidatesTokenCount", 0),
-    }
-    return text, usage
-
-_AI_PROBLEM_NUMBER_RE = re.compile(r"\d[.,]\d|\d{2,}")
-_AI_LIST_MARKER_RE = re.compile(r"(?m)^\s*\d+[.)]\s+")  # "9. ", "10. " — нумерация пунктов, не число-результат
-_AI_ANSWER_PREFIX_RE = re.compile(r"^(ответ|answer)\s*[:\-—]?\s*", re.IGNORECASE)
-AI_LIST_ANSWER_MIN_ITEMS_FOR_OPENAI = 3  # многопунктный список терминов — держим на OpenAI целиком
-AI_THEORY_SIMPLE_MAX_WORDS = 5  # "Ответ: Б", "3) Верно" — короче этого практически гарантированно
-# голый выбор варианта, а не развёрнутый факт, требующий реального рассуждения
-
-def _classify_quick_answer(answer: str) -> str:
-    """Дешёвая эвристика по уже сгенерированному быстрому ответу — без единого лишнего токена.
-    AI_QUICK_SUFFIX просит модель на первом ходу дать ЛИБО букву/номер варианта (тест/теория),
-    ЛИБО финальный числовой результат с единицами (расчётная задача), ЛИБО (для вопросов с
-    несколькими терминами) короткий пронумерованный список. Возвращает один из трёх типов:
-
-    - "problem" — расчёт ИЛИ список из AI_LIST_ANSWER_MIN_ITEMS_FOR_OPENAI+ пунктов; остаётся на
-      OpenAI целиком. Список — не потому, что это расчёт, а по реальным наблюдениям: Gemini на
-      многопунктных перечнях терминов даёт более короткие и местами неточные формулировки
-      (например, спутал «Плевра» с «Плева»), чем OpenAI на том же вопросе. Расчёт определяется по
-      дробному числу или числу из 2+ цифр (после вырезания самой нумерации пунктов, чтобы «10.»
-      не путалось с результатом вычисления). Безопасный вариант по умолчанию: при сомнении не
-      отправляем ответ в модель, которая на нём не проверялась.
-    - "theory_simple" — голый выбор варианта («Ответ: Б», «3) Верно», не длиннее
-      AI_THEORY_SIMPLE_MAX_WORDS слов после отсечения "Ответ:"-префикса) — уходит в Gemini,
-      дешевле OpenAI и не требует глубокого рассуждения, чтобы не ошибиться.
-    - "theory_complex" — теоретический вопрос, где быстрый ответ уже развёрнутая формулировка
-      (определение, объяснение), не просто буква — уходит в Grok, если он подключён
-      (AI_USE_GROK_FOR_DETAILED): такие вопросы требуют более сильного рассуждения, чем Gemini
-      надёжно выдаёт, а платить за это здесь оправданно, в отличие от простых MCQ-ответов."""
-    if len(_AI_LIST_MARKER_RE.findall(answer)) >= AI_LIST_ANSWER_MIN_ITEMS_FOR_OPENAI:
-        return "problem"
-    stripped = _AI_LIST_MARKER_RE.sub("", answer)
-    if _AI_PROBLEM_NUMBER_RE.search(stripped):
-        return "problem"
-    core = _AI_ANSWER_PREFIX_RE.sub("", stripped).strip()
-    if len(core.split()) <= AI_THEORY_SIMPLE_MAX_WORDS:
-        return "theory_simple"
-    return "theory_complex"
 
 def get_ai_usage_today(user_id: int) -> int:
     entry = stats["ai_usage"].get(str(user_id))
@@ -6233,9 +5919,9 @@ def get_ai_quota_label(user_id: int) -> str:
     return "♾ безлимит (админ)" if has_unlimited_ai(user_id) else f"{ai_requests_left(user_id)}/{AI_FREE_DAILY_LIMIT}"
 
 _AI_PROVIDER_PRICES = {
-    "openai": (AI_PRICE_INPUT_PER_1M, AI_PRICE_OUTPUT_PER_1M),
-    "grok": (AI_GROK_PRICE_INPUT_PER_1M, AI_GROK_PRICE_OUTPUT_PER_1M),
-    "gemini": (AI_GEMINI_PRICE_INPUT_PER_1M, AI_GEMINI_PRICE_OUTPUT_PER_1M),
+    "openai": (ai_openai.PRICE_INPUT_PER_1M, ai_openai.PRICE_OUTPUT_PER_1M),
+    "grok": (ai_xai.PRICE_INPUT_PER_1M, ai_xai.PRICE_OUTPUT_PER_1M),
+    "gemini": (ai_gemini.PRICE_INPUT_PER_1M, ai_gemini.PRICE_OUTPUT_PER_1M),
 }
 
 def record_ai_cost(usage: dict) -> None:
@@ -6314,269 +6000,6 @@ def get_ai_waiting_keyboard():
     builder.adjust(1)
     return builder.as_markup()
 
-AI_IMAGE_MAX_DIM = 1280  # достаточно для чтения печатного/рукописного текста, дальше — лишние input-токены
-
-# "detail": "low" у gpt-4o-mini — это ФИКСИРОВАННЫЕ 2833 токена на фото, а не 2833 + 5667×тайлы
-# (до 36 835 токенов при auto/high на наш же ресайз в 1280px) — самая дорогая часть всего
-# AI-запроса на порядок дороже, чем экономия от сжатия истории диалога. Риск — модель видит
-# уменьшенную версию фото и может хуже прочитать мелкий текст/подстрочные индексы в формулах.
-AI_IMAGE_DETAIL = "low"
-
-def _resize_image_for_ai(image_bytes: bytes) -> bytes:
-    """Фото с телефона часто в разы больше, чем нужно vision-модели для распознавания текста —
-    у OpenAI цена фото считается по числу тайлов, то есть растёт с разрешением. Сжимаем перед
-    отправкой; при любой ошибке разбора шлём оригинал как есть, не роняя запрос."""
-    try:
-        from PIL import Image, ImageOps
-        im = Image.open(io.BytesIO(image_bytes))
-        im = ImageOps.exif_transpose(im)
-        im = im.convert("RGB")
-        w, h = im.size
-        if max(w, h) > AI_IMAGE_MAX_DIM:
-            scale = AI_IMAGE_MAX_DIM / max(w, h)
-            im = im.resize((round(w * scale), round(h * scale)), Image.LANCZOS)
-        out = io.BytesIO()
-        im.save(out, "JPEG", quality=82, optimize=True)
-        return out.getvalue()
-    except Exception:
-        logger.exception("Не удалось сжать фото перед AI-запросом, отправляю оригинал")
-        return image_bytes
-
-# Страховка поверх системного промпта — модель иногда всё равно проскальзывает в LaTeX
-# (особенно на формулах/расчётах). Чисто текстовая пост-обработка, без обращения к API,
-# то есть не расходует ни единого токена.
-_LATEX_CLEANUP_PATTERNS = [
-    (r"\\text\{([^{}]*)\}", r"\1"),
-    (r"_\{([^{}]*)\}", r"\1"),      # подстрочный индекс: K_{b} -> Kb
-    (r"\^\{([^{}]*)\}", r"(\1)"),   # надстрочный индекс: SO4^{2-} -> SO4(2-)
-    (r"\\frac\{([^{}]*)\}\{([^{}]*)\}", r"\1/\2"),
-    (r"\\sqrt\{([^{}]*)\}", r"√(\1)"),
-    (r"\\cdot", "×"),
-    (r"\\times", "×"),
-    (r"\\approx", "≈"),
-    (r"\\neq", "≠"),
-    (r"\\geq|\\ge\b", "≥"),
-    (r"\\leq|\\le\b", "≤"),
-    (r"\\pm", "±"),
-    (r"\\Delta", "Δ"),
-    (r"\\delta", "δ"),
-    (r"\\alpha", "α"),
-    (r"\\beta", "β"),
-    (r"\\gamma", "γ"),
-    (r"\\,", " "),
-    (r"\\left|\\right", ""),
-    (r"\\[()\[\]]", ""),   # \( \) \[ \]
-    (r"\${1,2}", ""),      # стрей $ / $$ — математические разделители
-    (r"\\[a-zA-Z]+", ""),  # любая оставшаяся неопознанная LaTeX-команда
-]
-
-def _clean_ai_answer(answer: str) -> str:
-    for pattern, repl in _LATEX_CLEANUP_PATTERNS:
-        answer = re.sub(pattern, repl, answer)
-    return re.sub(r" {2,}", " ", answer)
-
-AI_HISTORY_SUMMARY_CHARS = 220  # до скольки символов ужимаем СТАРЫЕ ответы ассистента в истории —
-# самый свежий ответ всегда остаётся полным (модели он ещё может понадобиться целиком для
-# уточняющего вопроса), а более ранние в диалоге почти всегда нужны только как факт "это уже
-# решено и таким был ответ", не дословно
-
-def _compact_history(history: list) -> list:
-    """Ужимает историю перед пересылкой модели, поверх среза по AI_HISTORY_MAX_MESSAGES:
-    у пользовательских ходов убираем фото (самое дорогое по входным токенам — метка text
-    заменяет реальную картинку), у всех ответов ассистента, кроме самого последнего, обрезаем
-    текст до AI_HISTORY_SUMMARY_CHARS. Модели для продолжения диалога почти всегда достаточно
-    краткой памяти "что уже спросили и что уже ответили", а не полного текста каждого раунда
-    заново — это и есть основной резерв экономии токенов в многоходовых сессиях.
-
-    Исключение — САМЫЙ ПОСЛЕДНИЙ ход пользователя: его фото НЕ трогаем. Кнопка «Показать
-    решение» и обычные текстовые уточнения сами не пересылают фото повторно — они рассчитывают
-    на то, что оно ещё есть в history последнего раунда. Если срезать его и там, модель отвечает
-    "не вижу фото задания" вместо разбора — именно этот баг тут и чинится."""
-    trimmed = (history or [])[-AI_HISTORY_MAX_MESSAGES:]
-    last_assistant_idx = max(
-        (i for i, m in enumerate(trimmed) if m.get("role") == "assistant"), default=-1
-    )
-    last_user_idx = max(
-        (i for i, m in enumerate(trimmed) if m.get("role") == "user"), default=-1
-    )
-    compact = []
-    for i, msg in enumerate(trimmed):
-        role = msg.get("role")
-        content = msg.get("content")
-        if role == "user" and isinstance(content, list) and i != last_user_idx:
-            text_parts = [p.get("text", "") for p in content if p.get("type") == "text"]
-            had_image = any(p.get("type") == "image_url" for p in content)
-            text = " ".join(t for t in text_parts if t).strip()
-            if had_image:
-                text = (text + " [ранее приложено фото задания]").strip()
-            compact.append({"role": "user", "content": text or "[фото задания]"})
-        elif role == "assistant" and isinstance(content, str) and i != last_assistant_idx:
-            short = content if len(content) <= AI_HISTORY_SUMMARY_CHARS else content[:AI_HISTORY_SUMMARY_CHARS] + "…"
-            compact.append({"role": "assistant", "content": short})
-        else:
-            compact.append(msg)
-    return compact
-
-class AIRefusalError(RuntimeError):
-    """Провайдер ответил без ошибки, но это отказ от контент-фильтра ("Извините, но я не могу
-    помочь с этой просьбой"), а не реальный разбор задания — отдельный тип, чтобы вызывающий код
-    не показывал этот текст как обычный ответ и не списывал за него дневную квоту пользователя."""
-
-_AI_REFUSAL_RE = re.compile(
-    r"не могу (помочь|предоставить|ответить|обсуждать|выполнить эт)|"
-    r"i (?:can'?t|cannot|am unable to|won'?t) (?:help|assist|provide|answer)",
-    re.IGNORECASE,
-)
-
-def _looks_like_ai_refusal(answer: str) -> bool:
-    """«Не могу» (1-е лицо, сама модель о себе) — надёжный маркер отказа; «не может»/«не могут»
-    (3-е лицо, про молекулы/организмы в самом объяснении) под него не попадает. Смотрим только на
-    начало ответа — отказы провайдеры дают сразу, не посреди корректного объяснения, поэтому не
-    рискуем ложным срабатыванием на длинных настоящих ответах."""
-    return bool(_AI_REFUSAL_RE.search(answer[:150]))
-
-async def _call_provider(provider: str, model: str, client, messages: list, max_tokens: int) -> tuple:
-    """Единая точка вызова модели независимо от провайдера — OpenAI-совместимые (openai/grok,
-    через клиент AsyncOpenAI) и Gemini (свой формат запроса/ответа, прямой HTTP — см.
-    _call_gemini). Всегда возвращает (текст_ответа, usage) в одном формате, чтобы
-    solve_ai_request не дублировал разбор ответа для каждого случая отдельно."""
-    if provider == "gemini":
-        return await _call_gemini(messages, max_tokens)
-    response = await client.chat.completions.create(
-        model=model, messages=messages, max_tokens=max_tokens, temperature=0,
-    )
-    answer = response.choices[0].message.content or "Не удалось получить ответ от AI."
-    usage = {
-        "input_tokens": getattr(response.usage, "prompt_tokens", 0) if response.usage else 0,
-        "output_tokens": getattr(response.usage, "completion_tokens", 0) if response.usage else 0,
-    }
-    return answer, usage
-
-async def _try_ai_providers(attempts: list, messages: list, max_tokens: int) -> tuple:
-    """attempts — [(provider, model, client), ...] в порядке приоритета. Пробует по очереди, пока
-    один не ответит успешно (без исключения и без признаков отказа контент-фильтра) — не ретрай в
-    цикле, максимум len(attempts) попыток, каждая на другом провайдере/ключе. Возвращает (provider,
-    answer_raw, usage) первой удавшейся попытки; если ВСЕ попытки исчерпаны — поднимает исключение
-    последней (обычно AIRefusalError, если дело было в контент-фильтре, а не в сбое сети)."""
-    last_exc = None
-    for provider, model, client in attempts:
-        try:
-            answer_raw, usage = await _call_provider(provider, model, client, messages, max_tokens)
-            # temperature=0 (внутри _call_provider/_call_gemini) — для расчётных задач нужен
-            # стабильный, воспроизводимый ход решения: без этого один и тот же вопрос давал
-            # разный метод и разный ответ при каждом новом запросе
-            if _looks_like_ai_refusal(answer_raw):
-                raise AIRefusalError(f"{provider} отказался отвечать (похоже на срабатывание контент-фильтра)")
-            return provider, answer_raw, usage
-        except Exception as exc:
-            logger.exception("%s недоступен или отказал, пробую следующий вариант, если есть", provider)
-            last_exc = exc
-    raise last_exc
-
-async def solve_ai_request(
-    *, image_bytes: bytes = None, text: str = None, history: list = None, quick: bool = False,
-    task_type: str = None, rag_context: str = None,
-) -> tuple:
-    """history — предыдущие ходы этого диалога (без системного промпта, он добавляется здесь же),
-    в формате messages OpenAI. quick=True — просит только краткий итоговый ответ на маленьком
-    max_tokens (используется для самого первого сообщения новой сессии — экономит output-токены,
-    которые у OpenAI дороже входных; полное решение по шагам генерируется отдельным запросом,
-    только если пользователь явно нажмёт «Показать решение»). task_type —
-    "theory_simple"/"theory_complex"/"problem"/None, классификация быстрого ответа этой же сессии
-    (см. _classify_quick_answer) — решает, куда уходит подробный разбор (quick=False):
-    "theory_simple" в Gemini, "theory_complex" в Grok (если AI_USE_GROK_FOR_DETAILED), иначе
-    OpenAI; на quick=True не влияет, короткий ответ всегда на OpenAI, он же и определяет task_type.
-    rag_context — готовый
-    текст материалов ВМедА (см. _format_ai_rag_context), подмешивается ТОЛЬКО в отправляемый
-    запрос при quick=False и НИКОГДА не попадает в возвращаемый user_turn — иначе он бы каждый раз
-    заново пересылался из истории на следующих ходах сессии, как раньше раздувало фото/длинные
-    ответы (см. _compact_history). Возвращает (ответ, user_turn, usage) — user_turn нужен
-    вызывающему коду, чтобы дописать этот ход в историю сессии вместе с ответом ассистента;
-    usage — {"input_tokens", "output_tokens", "provider"} для учёта стоимости (record_ai_cost —
-    provider выбирает, по какому прайсу считать $)."""
-    text_part = text or ""
-    if quick:
-        text_part = (text_part + AI_QUICK_SUFFIX) if text_part else AI_QUICK_SUFFIX.strip()
-    content = []
-    if text_part:
-        content.append({"type": "text", "text": text_part})
-    if image_bytes:
-        b64 = base64.b64encode(image_bytes).decode("ascii")
-        content.append({
-            "type": "image_url",
-            "image_url": {"url": f"data:image/jpeg;base64,{b64}", "detail": AI_IMAGE_DETAIL},
-        })
-    if not content:
-        raise ValueError("Нет ни текста, ни фото для решения")
-
-    user_turn = {"role": "user", "content": content}  # то, что вернётся вызывающему и уйдёт в историю
-
-    send_content = content
-    if not quick and rag_context:
-        rag_text = f"{rag_context}\n\n{text_part}" if text_part else rag_context
-        send_content = [{"type": "text", "text": rag_text}] + [b for b in content if b.get("type") != "text"]
-
-    trimmed_history = _compact_history(history)
-    messages = [{"role": "system", "content": AI_SYSTEM_PROMPT}, *trimmed_history, {"role": "user", "content": send_content}]
-    max_tokens = AI_QUICK_MAX_TOKENS if quick else AI_DETAILED_MAX_TOKENS
-
-    # Короткий первый ответ (quick=True) всегда идёт через дешёвый gpt-4o-mini — по форме этого
-    # самого ответа потом и определяется task_type (см. _classify_quick_answer). Подробный разбор
-    # (quick=False): простой MCQ/тест ("theory_simple") — в Gemini, дешевле OpenAI и не требует
-    # глубокого рассуждения; развёрнутый теоретический/тестовый вопрос ("theory_complex") — в
-    # Grok, если подключён (AI_USE_GROK_FOR_DETAILED), там, где Gemini надёжно слабее; расчётные
-    # задачи и многопунктные списки (task_type="problem"/None) остаются на OpenAI целиком —
-    # именно там важна самосогласованность быстрого и подробного ответа одной моделью.
-    provider, model, active_client = "openai", AI_MODEL_VISION, get_openai_client()
-    if not quick:
-        if task_type == "theory_simple" and GEMINI_API_KEY:
-            provider, model, active_client = "gemini", AI_MODEL_GEMINI, None
-        elif task_type == "theory_complex" and AI_USE_GROK_FOR_DETAILED:
-            grok_client = get_grok_client()
-            if grok_client is not None:
-                provider, model, active_client = "grok", AI_MODEL_GROK, grok_client
-
-    if provider != "gemini" and active_client is None:
-        raise RuntimeError("AI недоступен: не задан OPENAI_API_KEY")
-
-    attempts = [(provider, model, active_client)]
-    if provider != "openai":
-        # Grok/Gemini недоступны или отказали (невалидный ключ, сбой у провайдера, контент-фильтр
-        # и т.п.) — запасной вариант через OpenAI, чтобы ответ не переставал приходить пользователю.
-        fallback_client = get_openai_client()
-        if fallback_client is not None:
-            attempts.append(("openai", AI_MODEL_VISION, fallback_client))
-    elif GEMINI_API_KEY:
-        # OpenAI отказал (контент-фильтр) — Gemini как последний резерв, даже для расчётных/
-        # многопунктных ответов, где обычно не используется из соображений качества/
-        # самосогласованности: отказ пользователю хуже, чем чуть менее аккуратный, но реальный
-        # ответ. Не влияет на случай, когда OpenAI просто недоступен по ключу — это отдельная
-        # ветка выше по функции (RuntimeError до этого места).
-        attempts.append(("gemini", AI_MODEL_GEMINI, None))
-    # Не ретрай в цикле — максимум len(attempts) попыток (обычно 1-2), каждая на другом провайдере.
-
-    provider, answer_raw, usage = await _try_ai_providers(attempts, messages, max_tokens)
-
-    answer = _clean_ai_answer(answer_raw)
-    if len(answer) > AI_ANSWER_TELEGRAM_LIMIT:
-        answer = answer[:AI_ANSWER_TELEGRAM_LIMIT] + "…\n\n(ответ обрезан)"
-    usage["provider"] = provider
-    return answer, user_turn, usage
-
-def _format_ai_answer_html(answer: str) -> str:
-    """Лёгкий markdown от модели (**жирный**, "- " списки) -> реальные HTML-теги Telegram.
-    Сначала экранируем ВЕСЬ текст (защита от случайного/сломанного HTML в ответе модели —
-    иначе модель могла бы случайно прислать что-то вроде "<3 ммоль" и сломать разметку
-    сообщения), и только потом расставляем свои теги поверх уже экранированного текста —
-    значит, наши теги не попадают под повторное экранирование."""
-    escaped = html.escape(answer)
-    escaped = re.sub(r"(?m)^#{1,6}\s*(.+)$", r"<b>\1</b>", escaped)  # заголовки ("### X") — модели
-    # (особенно Gemini) иногда используют их вопреки системному промпту, где явно просят не надо
-    escaped = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", escaped, flags=re.S)
-    escaped = re.sub(r"(?<!_)_(?!_)(.+?)(?<!_)_(?!_)", r"<i>\1</i>", escaped, flags=re.S)
-    escaped = re.sub(r"^[-*]\s+", "• ", escaped, flags=re.M)
-    return escaped
-
 def get_ai_result_text(answer: str, user_id: int, session_active: bool, offer_explanation: bool = False) -> str:
     if offer_explanation:
         continuation = "\n\n🧠 Это краткий ответ — нажми кнопку ниже, если нужно решение по шагам."
@@ -6585,7 +6008,7 @@ def get_ai_result_text(answer: str, user_id: int, session_active: bool, offer_ex
     else:
         continuation = ""
     return (
-        f"🤖 <b>Ответ AI</b>\n{DIVIDER}\n\n{_format_ai_answer_html(answer)}\n\n"
+        f"🤖 <b>Ответ AI</b>\n{DIVIDER}\n\n{ai_service.format_answer_html(answer)}\n\n"
         f"💡 Сверяй важные ответы с материалами курса.\n"
         f"Осталось бесплатных запросов сегодня: {get_ai_quota_label(user_id)}"
         f"{continuation}"
@@ -6676,7 +6099,7 @@ async def cb_ai_show_explanation(callback: CallbackQuery):
     thinking = await callback.message.answer("🤖 Готовлю решение по шагам...")
     try:
         answer, user_turn, usage = await solve_ai_request(
-            text=AI_EXPLAIN_FOLLOWUP_TEXT, history=session["messages"], quick=False,
+            text=ai_prompts.EXPLAIN_FOLLOWUP_TEXT, history=session["messages"], quick=False,
             task_type=session.get("task_type"), rag_context=session.get("rag_context"),
         )
         increment_ai_usage(user_id)
@@ -6730,14 +6153,14 @@ async def handle_ai_photo_input(message: Message):
         tg_file = await bot.get_file(photo.file_id)
         buf = await bot.download_file(tg_file.file_path)
         answer, user_turn, usage = await solve_ai_request(
-            image_bytes=_resize_image_for_ai(buf.read()), history=session["messages"], quick=quick,
+            image_bytes=resize_image_for_ai(buf.read()), history=session["messages"], quick=quick,
             task_type=session.get("task_type"), rag_context=session.get("rag_context"),
         )
         increment_ai_usage(user_id)
         record_ai_cost(usage)
         if quick:
-            session["task_type"] = _classify_quick_answer(answer)
-            session["rag_context"] = _format_ai_rag_context(_search_ai_rag_snippets_multi(answer))
+            session["task_type"] = ai_router.classify_quick_answer(answer)
+            session["rag_context"] = ai_rag.format_context(ai_rag.search_snippets_multi(answer))
         session["messages"].append(user_turn)
         session["messages"].append({"role": "assistant", "content": answer})
         session["last_active"] = time.time()
@@ -6790,9 +6213,9 @@ async def handle_ai_text_input(message: Message):
         increment_ai_usage(user_id)
         record_ai_cost(usage)
         if quick:
-            session["task_type"] = _classify_quick_answer(answer)
-            session["rag_context"] = _format_ai_rag_context(
-                _search_ai_rag_snippets_multi(f"{message.text} {answer}")
+            session["task_type"] = ai_router.classify_quick_answer(answer)
+            session["rag_context"] = ai_rag.format_context(
+                ai_rag.search_snippets_multi(f"{message.text} {answer}")
             )
         session["messages"].append(user_turn)
         session["messages"].append({"role": "assistant", "content": answer})
