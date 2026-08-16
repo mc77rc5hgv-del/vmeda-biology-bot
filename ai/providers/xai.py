@@ -1,6 +1,6 @@
 """Grok (xAI) provider — OpenAI-compatible API (same openai package, different base_url/key,
-no extra dependency). Used only for task_type=="theory_complex" (see ai.router) — deliberately
-scoped away from calculation problems: a mixed quick(OpenAI)/detailed(Grok) pair on a
+no extra dependency). Used only for bucket=="theory_complex" (see ai.router.route_bucket) —
+deliberately scoped away from calculation problems: a mixed quick(OpenAI)/detailed(Grok) pair on a
 multi-step calculation could round differently between the two models within one session
 (observed live, e.g. 100,5°C vs 100,4°C on the same problem), which is why Grok is never used
 for "problem"-classified content regardless of this module being configured."""

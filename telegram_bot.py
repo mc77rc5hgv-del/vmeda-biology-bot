@@ -32,6 +32,7 @@ from ai import service as ai_service
 from ai.providers import gemini as ai_gemini
 from ai.providers import openai as ai_openai
 from ai.providers import xai as ai_xai
+from ai import vision_parser as ai_vision_parser
 from ai.router import AIRefusalError
 from ai.service import solve as solve_ai_request
 from ai.vision import resize_image as resize_image_for_ai
@@ -3810,7 +3811,15 @@ async def handle_question_number(message: Message):
 # хендлеров в отдельный router — следующая фаза рефакторинга, см. CLAUDE.md).
 AI_FREE_DAILY_LIMIT = 3
 AI_SESSION_TIMEOUT_SECONDS = 20 * 60  # диалог считается закрытым после 20 минут без сообщений
-AI_SESSIONS: dict = {}  # user_id -> {"messages": [...], "last_active": ts, "processing": bool} — открытый диалог с памятью
+AI_SESSIONS: dict = {}
+# user_id -> {"task": TaskRepresentation|None, "messages": [...], "rag_context": str|None,
+#             "bucket": str|None, "quick_answer": str|None, "last_active": ts, "processing": bool}
+# "task" заполняется РОВНО один раз — при разборе самого первого сообщения сессии (фото или
+# текста) через ai.vision_parser.parse_task (см. handle_ai_photo_input/handle_ai_text_input) —
+# вместе с ним же в этот момент считаются rag_context (ai.rag.search_for_task) и bucket
+# (ai.router.route_bucket); последующие ходы того же диалога (уточняющие вопросы, кнопка
+# "Показать решение по шагам") переиспользуют то же rag_context/bucket и просто дописывают
+# текст в "messages", не трогая vision/RAG повторно.
 
 def get_ai_usage_today(user_id: int) -> int:
     entry = stats["ai_usage"].get(str(user_id))
@@ -3962,10 +3971,26 @@ def is_ai_session_active(user_id: int) -> bool:
     return bool(session) and time.time() - session["last_active"] < AI_SESSION_TIMEOUT_SECONDS
 
 def start_ai_session(user_id: int) -> None:
-    AI_SESSIONS[user_id] = {"messages": [], "last_active": time.time(), "processing": False}
+    AI_SESSIONS[user_id] = {
+        "task": None, "messages": [], "rag_context": None, "bucket": None,
+        "quick_answer": None, "last_active": time.time(), "processing": False,
+    }
 
 def end_ai_session(user_id: int) -> None:
     AI_SESSIONS.pop(user_id, None)
+
+def record_ai_attempts_cost(attempts_log: list) -> None:
+    """Учитывает стоимость КАЖДОЙ попытки провайдера из attempts_log (см. ai.router.try_providers)
+    — не только финально успешной. "refused" (контент-фильтр) реально тратит токены и должен
+    попадать в себестоимость; "failed" (сетевая/API-ошибка) всегда несёт нулевой usage, так что
+    его учёт — безопасный no-op. Вызывать вместо record_ai_cost(usage) на одну финальную попытку —
+    иначе стоимость отказавших/сорвавшихся попыток при переключении на резервного провайдера
+    нигде не фиксировалась (см. CLAUDE.md/архитектурный разбор AI-режима, пункт 9)."""
+    for attempt in attempts_log:
+        if attempt["status"] in ("success", "refused"):
+            usage = dict(attempt["usage"])
+            usage["provider"] = attempt["provider"]
+            record_ai_cost(usage)
 
 def get_ai_menu_text(user_id: int) -> str:
     availability = "" if OPENAI_API_KEY else "\n\n🔧 Идут финальные настройки — совсем скоро запустим."
@@ -4088,13 +4113,14 @@ async def cb_ai_show_explanation(callback: CallbackQuery):
     await callback.answer()
     session["processing"] = True
     thinking = await callback.message.answer("🤖 Готовлю решение по шагам...")
+    followup_text = ai_prompts.explain_followup_text(session.get("quick_answer") or "")
     try:
-        answer, user_turn, usage = await solve_ai_request(
-            text=ai_prompts.EXPLAIN_FOLLOWUP_TEXT, history=session["messages"], quick=False,
-            task_type=session.get("task_type"), rag_context=session.get("rag_context"),
+        answer, user_turn, usage, attempts_log = await solve_ai_request(
+            text=followup_text, history=session["messages"], quick=False,
+            bucket=session.get("bucket"), rag_context=session.get("rag_context"),
         )
         increment_ai_usage(user_id)
-        record_ai_cost(usage)
+        record_ai_attempts_cost(attempts_log)
         session["messages"].append(user_turn)
         session["messages"].append({"role": "assistant", "content": answer})
         session["last_active"] = time.time()
@@ -4107,16 +4133,18 @@ async def cb_ai_show_explanation(callback: CallbackQuery):
             parse_mode="HTML",
             reply_markup=get_ai_result_keyboard(session_active)
         )
-    except AIRefusalError:
+    except AIRefusalError as exc:
         logger.warning("AI отказался дать подробный разбор пользователю %s", user_id)
+        record_ai_attempts_cost(getattr(exc, "ai_attempts_log", []))
         await safe_edit_text(
             thinking,
             "⚠️ AI отказался отвечать на этот конкретный вопрос — похоже, сработал фильтр "
             "содержимого провайдера (так бывает на некоторых медицинских формулировках). "
             "Эта попытка не списана с дневного лимита — попробуй переформулировать вопрос."
         )
-    except Exception:
+    except Exception as exc:
         logger.exception("Ошибка при получении подробного решения для пользователя %s", user_id)
+        record_ai_attempts_cost(getattr(exc, "ai_attempts_log", []))
         await safe_edit_text(thinking, "⚠️ Не удалось получить решение. Попробуй ещё раз позже.")
     finally:
         if user_id in AI_SESSIONS:
@@ -4136,22 +4164,31 @@ async def handle_ai_photo_input(message: Message):
         end_ai_session(user_id)
         await message.answer("На сегодня бесплатные AI-запросы закончились, попробуй завтра.")
         return
-    quick = not session["messages"]  # самое первое сообщение сессии — сперва только краткий ответ
+    is_first = session["task"] is None  # самое первое сообщение сессии — сперва только краткий ответ
     session["processing"] = True
     thinking = await message.answer("🤖 Разбираю задание, подожди немного...")
     try:
         photo = message.photo[-1]
         tg_file = await bot.get_file(photo.file_id)
         buf = await bot.download_file(tg_file.file_path)
-        answer, user_turn, usage = await solve_ai_request(
-            image_bytes=resize_image_for_ai(buf.read()), history=session["messages"], quick=quick,
-            task_type=session.get("task_type"), rag_context=session.get("rag_context"),
+        task_repr, parse_usage = await ai_vision_parser.parse_task(image_bytes=resize_image_for_ai(buf.read()))
+        if parse_usage.get("input_tokens") or parse_usage.get("output_tokens"):
+            record_ai_cost(parse_usage)
+        if is_first:
+            session["task"] = task_repr
+            session["bucket"] = ai_router.route_bucket(task_repr)
+            session["rag_context"] = ai_rag.format_context(await ai_rag.search_for_task(task_repr))
+            solve_kwargs = {"task": task_repr, "quick": True}
+        else:
+            solve_kwargs = {"text": task_repr.to_prompt_text(), "quick": False}
+        answer, user_turn, usage, attempts_log = await solve_ai_request(
+            history=session["messages"], bucket=session.get("bucket"),
+            rag_context=session.get("rag_context"), **solve_kwargs,
         )
         increment_ai_usage(user_id)
-        record_ai_cost(usage)
-        if quick:
-            session["task_type"] = ai_router.classify_quick_answer(answer)
-            session["rag_context"] = ai_rag.format_context(ai_rag.search_snippets_multi(answer))
+        record_ai_attempts_cost(attempts_log)
+        if is_first:
+            session["quick_answer"] = answer
         session["messages"].append(user_turn)
         session["messages"].append({"role": "assistant", "content": answer})
         session["last_active"] = time.time()
@@ -4160,20 +4197,22 @@ async def handle_ai_photo_input(message: Message):
             end_ai_session(user_id)
         await safe_edit_text(
             thinking,
-            get_ai_result_text(answer, user_id, session_active, offer_explanation=quick),
+            get_ai_result_text(answer, user_id, session_active, offer_explanation=is_first),
             parse_mode="HTML",
-            reply_markup=get_ai_result_keyboard(session_active, offer_explanation=quick)
+            reply_markup=get_ai_result_keyboard(session_active, offer_explanation=is_first)
         )
-    except AIRefusalError:
+    except AIRefusalError as exc:
         logger.warning("AI отказался разобрать фото от пользователя %s", user_id)
+        record_ai_attempts_cost(getattr(exc, "ai_attempts_log", []))
         await safe_edit_text(
             thinking,
             "⚠️ AI отказался отвечать на это фото — похоже, сработал фильтр содержимого "
             "провайдера (так бывает на некоторых медицинских формулировках). Эта попытка не "
             "списана с дневного лимита — попробуй прислать вопрос текстом или переформулировать."
         )
-    except Exception:
+    except Exception as exc:
         logger.exception("Ошибка при обработке AI-фото от пользователя %s", user_id)
+        record_ai_attempts_cost(getattr(exc, "ai_attempts_log", []))
         await safe_edit_text(thinking, "⚠️ Не удалось обработать фото. Попробуй ещё раз или пришли текстом.")
     finally:
         if user_id in AI_SESSIONS:
@@ -4193,21 +4232,28 @@ async def handle_ai_text_input(message: Message):
         end_ai_session(user_id)
         await message.answer("На сегодня бесплатные AI-запросы закончились, попробуй завтра.")
         return
-    quick = not session["messages"]  # самое первое сообщение сессии — сперва только краткий ответ
+    is_first = session["task"] is None  # самое первое сообщение сессии — сперва только краткий ответ
     session["processing"] = True
     thinking = await message.answer("🤖 Разбираю задание, подожди немного...")
     try:
-        answer, user_turn, usage = await solve_ai_request(
-            text=message.text, history=session["messages"], quick=quick,
-            task_type=session.get("task_type"), rag_context=session.get("rag_context"),
+        if is_first:
+            task_repr, parse_usage = await ai_vision_parser.parse_task(text=message.text)
+            if parse_usage.get("input_tokens") or parse_usage.get("output_tokens"):
+                record_ai_cost(parse_usage)
+            session["task"] = task_repr
+            session["bucket"] = ai_router.route_bucket(task_repr)
+            session["rag_context"] = ai_rag.format_context(await ai_rag.search_for_task(task_repr))
+            solve_kwargs = {"task": task_repr, "quick": True}
+        else:
+            solve_kwargs = {"text": message.text, "quick": False}
+        answer, user_turn, usage, attempts_log = await solve_ai_request(
+            history=session["messages"], bucket=session.get("bucket"),
+            rag_context=session.get("rag_context"), **solve_kwargs,
         )
         increment_ai_usage(user_id)
-        record_ai_cost(usage)
-        if quick:
-            session["task_type"] = ai_router.classify_quick_answer(answer)
-            session["rag_context"] = ai_rag.format_context(
-                ai_rag.search_snippets_multi(f"{message.text} {answer}")
-            )
+        record_ai_attempts_cost(attempts_log)
+        if is_first:
+            session["quick_answer"] = answer
         session["messages"].append(user_turn)
         session["messages"].append({"role": "assistant", "content": answer})
         session["last_active"] = time.time()
@@ -4216,20 +4262,22 @@ async def handle_ai_text_input(message: Message):
             end_ai_session(user_id)
         await safe_edit_text(
             thinking,
-            get_ai_result_text(answer, user_id, session_active, offer_explanation=quick),
+            get_ai_result_text(answer, user_id, session_active, offer_explanation=is_first),
             parse_mode="HTML",
-            reply_markup=get_ai_result_keyboard(session_active, offer_explanation=quick)
+            reply_markup=get_ai_result_keyboard(session_active, offer_explanation=is_first)
         )
-    except AIRefusalError:
+    except AIRefusalError as exc:
         logger.warning("AI отказался ответить на текст от пользователя %s", user_id)
+        record_ai_attempts_cost(getattr(exc, "ai_attempts_log", []))
         await safe_edit_text(
             thinking,
             "⚠️ AI отказался отвечать на этот конкретный вопрос — похоже, сработал фильтр "
             "содержимого провайдера (так бывает на некоторых медицинских формулировках). "
             "Эта попытка не списана с дневного лимита — попробуй переформулировать вопрос."
         )
-    except Exception:
+    except Exception as exc:
         logger.exception("Ошибка при обработке AI-текста от пользователя %s", user_id)
+        record_ai_attempts_cost(getattr(exc, "ai_attempts_log", []))
         await safe_edit_text(thinking, "⚠️ Не удалось получить ответ от AI. Попробуй ещё раз позже.")
     finally:
         if user_id in AI_SESSIONS:
@@ -4570,6 +4618,10 @@ async def main():
     logger.info("Загружена статистика: %d пользователей", len(stats["total_users"]))
     await setup_bot_commands()
     resume_battle_timer_if_needed()
+    # Фоновой задачей, не блокируя polling — на первом прогоне подсчёт эмбеддингов всей базы
+    # может занять заметное время (см. ai_rag.build_embeddings); инкрементальный кэш на диске
+    # делает все последующие запуски бота почти мгновенными.
+    asyncio.create_task(ai_rag.build_embeddings(os.path.join(STATS_DIR, "ai_rag_embeddings_cache.json")))
     try:
         await dp.start_polling(bot)
     finally:

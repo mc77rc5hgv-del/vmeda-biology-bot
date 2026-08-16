@@ -1,7 +1,7 @@
 """Gemini provider — прямой HTTP-вызов Gemini API, в обход google-genai SDK: он требует
 pydantic>=2.12.5, несовместимую с версией, зафиксированной aiogram. Используется для
-task_type=="theory_simple" (см. ai.router) — дешевле OpenAI и надёжен для простых MCQ-ответов —
-а также как последний резерв, если OpenAI сам отказался отвечать (контент-фильтр)."""
+bucket=="theory_simple" (см. ai.router.route_bucket) — дешевле OpenAI и надёжен для простых
+MCQ-ответов — а также как последний резерв, если OpenAI сам отказался отвечать (контент-фильтр)."""
 import os
 import aiohttp
 

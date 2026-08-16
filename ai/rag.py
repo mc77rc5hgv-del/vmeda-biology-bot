@@ -1,15 +1,32 @@
-"""RAG-lite: перед ПОДРОБНЫМ разбором (quick=False) ищем в собственной базе бота (вопросы/
-билеты, уже загруженные в память для других разделов) несколько релевантных фрагментов и
-подмешиваем их в запрос к модели, чтобы формулировки и метод совпадали с тем, что реально
-требуют на кафедре, а не с общими знаниями модели. Поиск — стеммированный keyword-matching с
-IDF-весами (0 токенов, чистый Python); токены тратятся только на сам подмешанный текст, и
-только тогда, когда что-то релевантное реально нашлось.
+"""RAG: перед ЛЮБЫМ ответом модели (и коротким, и подробным — см. CLAUDE.md/обсуждение
+архитектурных недостатков AI-режима, пункт 2: раньше база ВМедА подмешивалась только в подробный
+разбор, первый быстрый ответ уходил "в общие знания модели") ищем в собственной базе бота
+(вопросы/билеты, уже загруженные в память для других разделов) несколько релевантных фрагментов и
+подмешиваем их в запрос к модели, чтобы формулировки и метод совпадали с тем, что реально требуют
+на кафедре.
+
+Гибридный поиск (пункт 5 того же обсуждения): базовый слой — стеммированный keyword-matching с
+IDF-весами (0 токенов, чистый Python, работает всегда, даже без ключа OpenAI). Поверх него, если
+доступен OPENAI_API_KEY — семантический слой на эмбеддингах (text-embedding-3-small): находит
+смысловые совпадения, которые keyword-поиск пропускает (синонимы, разная формулировка вопроса и
+материала). Эмбеддинги базы считаются один раз и кэшируются на диск (see build_embeddings) —
+одна и та же база не переоплачивается на каждый перезапуск бота; эмбеддинг запроса считается на
+каждый вызов search_for_task (недорого, один короткий текст). Деградирует грациозно на каждом
+уровне: нет ключа/сети/кэша -> просто keyword-скор, как раньше.
 
 Модуль не импортирует telegram_bot (циклический импорт) — контент передаётся в configure()
-один раз при старте бота, после загрузки JSON-файлов."""
+один раз при старте бота, после загрузки JSON-файлов; путь до файла кэша эмбеддингов (внутри
+STATS_DIR) тоже передаётся снаружи, а не берётся из окружения напрямую."""
+import hashlib
 import html
+import json
+import logging
 import math
 import re
+
+from ai.providers import openai as openai_provider
+
+logger = logging.getLogger(__name__)
 
 TOP_K = 3          # сколько фрагментов подмешиваем максимум за один подробный запрос — на
 # многопунктных списках (search_snippets_multi) термины могут разбегаться по разным темам
@@ -26,10 +43,6 @@ MIN_COMMON_STEMS = 2  # минимум РАЗНЫХ общих слов с за�
 # нормализованный балл 1.3-3.5, у случайных многословных совпадений — 0.8-0.9: порог 1.2 чисто
 # разделяет эти два случая.
 MIN_SCORE = 1.2
-
-LIST_MARKER_RE = re.compile(r"(?m)^\s*\d+[.)]\s+")  # "9. ", "10. " — нумерация пунктов списка;
-# используется и здесь (бить ответ на отдельные пункты для поиска), и в ai.router (не путать
-# номер пункта с числом-результатом расчёта)
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>")  # локальная лёгкая версия strip_html_tags — не импортируем
 # telegram_bot (циклический импорт), а полноценный докс-раннер тут и не нужен, только снять теги
@@ -57,11 +70,19 @@ def _entry_stems(title: str, text: str) -> set:
     return {_word_stem(w) for w in words if len(w) >= 4}
 
 
+def _entry_key(subject: str, title: str, text: str) -> str:
+    """Стабильный идентификатор записи индекса — используется ключом в кэше эмбеддингов
+    (см. build_embeddings): пересобирается из содержимого, а не порядкового номера, поэтому
+    переживает изменение порядка/добавление записей в исходных JSON без потери уже посчитанных
+    эмбеддингов для НЕизменившихся записей."""
+    return hashlib.sha256(f"{subject}\n{title}\n{text}".encode("utf-8")).hexdigest()[:24]
+
+
 def build_index(
     *, questions: dict, physics_questions: dict, chemistry_theory: dict,
     chemistry_theory_tickets: dict, chemistry_practice_tickets: dict, anatomy: dict,
 ) -> list:
-    """Собирает единый список {subject, title, text, stems} из банков вопросов/ответов бота:
+    """Собирает единый список {subject, title, text, stems, key} из банков вопросов/ответов бота:
     биология/физика/химия (основная заявленная область AI-помощника) и анатомия (вопросы по
     ней реально задают через этот же AI-режим, и без точных терминов из ANATOMY модель на них
     иногда путает термины по памяти)."""
@@ -82,7 +103,10 @@ def build_index(
             for card in topic.get("flashcards") or []:
                 raw_entries.append(("анатомия", card.get("front", ""), card.get("back", "")))
     return [
-        {"subject": subject, "title": title, "text": text, "stems": _entry_stems(title, text)}
+        {
+            "subject": subject, "title": title, "text": text, "stems": _entry_stems(title, text),
+            "key": _entry_key(subject, title, text),
+        }
         for subject, title, text in raw_entries
         if title and text
     ]
@@ -141,34 +165,148 @@ def _score_entries(query_text: str, index: list, idf: dict) -> list:
     return scored
 
 
-def search_snippets(query_text: str, limit: int = TOP_K) -> list:
-    """Возвращает до `limit` наиболее релевантных записей индекса для ОДНОГО запроса целиком.
-    Требует предварительного configure() — до этого индекс пуст, вернёт []."""
-    scored = _score_entries(query_text, _index or [], _idf or {})
-    scored.sort(key=lambda x: -x[0])
-    return [entry for _, entry in scored[:limit]]
+# ==================== ГИБРИДНЫЙ СЛОЙ: ЭМБЕДДИНГИ (семантический поиск) ====================
+EMBEDDING_MODEL = "text-embedding-3-small"
+EMBEDDING_BATCH_SIZE = 100  # сколько текстов эмбеддим за один вызов API
+MIN_COSINE = 0.5  # порог семантического совпадения — эмбеддинги дают смысловую близость даже
+# при полном отсутствии общих слов, поэтому порог держим консервативным: по наблюдениям для
+# text-embedding-3-small >=0.5 обычно означает "та же тема", ниже — уже случайные совпадения
+# общей лексики предметной области, а не реальная релевантность
+SEMANTIC_SCORE_SCALE = 3.0  # приводит косинусное сходство (0..1) к той же шкале, что и
+# нормализованный keyword-балл (типичные сильные совпадения 1.3-3.5, см. MIN_SCORE), чтобы два
+# сигнала были сравнимы при объединении в hybrid-скор
+
+_embeddings: dict = {}  # entry["key"] -> vector (list[float])
 
 
-def search_snippets_multi(answer_text: str, limit: int = TOP_K) -> list:
-    """Как search_snippets, но для многопунктных ответов (список из нескольких терминов)
-    сначала бьёт текст на отдельные пункты и ищет по КАЖДОМУ пункту отдельно, а не по всему ответу
-    разом. Иначе короткое упоминание одного термина (например, «Плевра») тонет в общем запросе из
-    8-13 разных структур из разных систем органов и не проходит порог релевантности ни для одной
-    темы — реально наблюдалось: поиск по всему списку целиком находил 0 совпадений, хотя половина
-    терминов по отдельности легко находится в базе. Дедуп по (subject, title) с сохранением
-    лучшего балла, до `limit` записей суммарно по всем пунктам."""
-    items = [p.strip() for p in LIST_MARKER_RE.split(answer_text) if p.strip()]
-    if len(items) < 2:
-        return search_snippets(answer_text, limit=limit)
+def _load_embeddings_cache(path: str) -> dict:
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+
+
+def _save_embeddings_cache(path: str, embeddings: dict) -> None:
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(embeddings, f)
+    except OSError:
+        logger.exception("Не удалось сохранить кэш эмбеддингов RAG на диск")
+
+
+async def build_embeddings(cache_path: str = None) -> None:
+    """Считает эмбеддинги для всех записей ТЕКУЩЕГО индекса (после configure()), которых ещё нет
+    в кэше — вызывать один раз при старте бота, желательно фоновой задачей (не блокируя запуск
+    polling), т.к. на первом прогоне это может занять заметное время. Инкрементально: запись
+    индексируется по содержимому (см. _entry_key), поэтому неизменившиеся записи между
+    перезапусками бота не переоплачиваются и не пересчитываются — платится только за реально
+    новый/изменившийся контент.
+
+    Полностью необязательный шаг — RAG прекрасно работает и без него (просто без семантического
+    слоя, только keyword/IDF, как раньше), поэтому любая ошибка (нет ключа, сеть, лимиты API)
+    только логируется, не роняет бота и не блокирует обычные keyword-совпадения."""
+    global _embeddings
+    if cache_path:
+        _embeddings = _load_embeddings_cache(cache_path)
+    client = openai_provider.get_client()
+    if client is None or not _index:
+        return
+    missing = [e for e in _index if e["key"] not in _embeddings]
+    if not missing:
+        return
+    try:
+        for i in range(0, len(missing), EMBEDDING_BATCH_SIZE):
+            batch = missing[i:i + EMBEDDING_BATCH_SIZE]
+            texts = [f"{e['title']}: {e['text'][:2000]}" for e in batch]
+            response = await client.embeddings.create(model=EMBEDDING_MODEL, input=texts)
+            for entry, item in zip(batch, response.data):
+                _embeddings[entry["key"]] = item.embedding
+            if cache_path:
+                _save_embeddings_cache(cache_path, _embeddings)  # сохраняем инкрементально, батч
+                # за батчем — обрыв на середине (сеть/рестарт бота) не теряет уже посчитанное
+        logger.info(
+            "RAG: посчитаны эмбеддинги для %d новых записей базы (всего в кэше %d)",
+            len(missing), len(_embeddings),
+        )
+    except Exception:
+        logger.exception(
+            "Не удалось посчитать эмбеддинги базы RAG — семантический поиск будет недоступен, "
+            "keyword-поиск продолжит работать как обычно"
+        )
+
+
+async def _embed_query(text: str):
+    """None при любой проблеме (нет ключа, сеть, лимиты) — вызывающий код просто не получает
+    семантический сигнал и работает на чистом keyword-поиске, как раньше."""
+    client = openai_provider.get_client()
+    if client is None or not text.strip():
+        return None
+    try:
+        response = await client.embeddings.create(model=EMBEDDING_MODEL, input=[text[:4000]])
+        return response.data[0].embedding
+    except Exception:
+        logger.exception("Не удалось получить эмбеддинг запроса для RAG — используется только keyword-поиск")
+        return None
+
+
+def _cosine(a: list, b: list) -> float:
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = math.sqrt(sum(x * x for x in a))
+    norm_b = math.sqrt(sum(y * y for y in b))
+    if norm_a == 0 or norm_b == 0:
+        return 0.0
+    return dot / (norm_a * norm_b)
+
+
+def _hybrid_score_entries(query_text: str, query_embedding, index: list, idf: dict) -> list:
+    """Объединяет keyword/IDF-скор (_score_entries) и семантический скор (косинус с эмбеддингом
+    запроса, если он передан) — запись проходит, если пройден ХОТЯ БЫ ОДИН порог (keyword
+    MIN_SCORE или семантический MIN_COSINE), итоговый скор — сумма обеих компонент (0, если
+    соответствующий сигнал не сработал/недоступен)."""
+    combined: dict[str, list] = {}
+    for score, entry in _score_entries(query_text, index, idf):
+        combined[entry["key"]] = [score, entry]
+    if query_embedding:
+        for entry in index:
+            vector = _embeddings.get(entry["key"])
+            if not vector:
+                continue
+            cosine = _cosine(query_embedding, vector)
+            existing = combined.get(entry["key"])
+            if cosine < MIN_COSINE and existing is None:
+                continue
+            semantic_component = cosine * SEMANTIC_SCORE_SCALE
+            if existing is None:
+                combined[entry["key"]] = [semantic_component, entry]
+            else:
+                existing[0] += semantic_component
+    return [(score, entry) for score, entry in combined.values()]
+
+
+async def search_for_task(task, limit: int = TOP_K) -> list:
+    """Гибридный поиск (keyword+эмбеддинги, см. модульный docstring) по УЖЕ РАЗОБРАННОМУ заданию
+    (ai.task.TaskRepresentation) — точка входа для нового конвейера: вызывается ДО первого ответа
+    модели, и на quick, и на detailed (в отличие от старого search_snippets/search_snippets_multi,
+    который участвовал только в подробном разборе). Для заданий с несколькими пунктами
+    (task.type == "list" и заполнен subquestions) ищет по КАЖДОМУ пункту отдельно и объединяет
+    результаты (та же идея, что и старый search_snippets_multi, но источник пунктов —
+    структурированное поле парсера, а не построчный разбор уже готового ответа модели, см. пункт 3
+    архитектурного разбора AI-режима — классификация должна идти по заданию, не по ответу)."""
     index, idf = _index or [], _idf or {}
+    queries = task.subquestions if (task.type == "list" and task.subquestions) else [task.question_text()]
     best_by_key = {}
-    for item in items:
-        for score, entry in _score_entries(item, index, idf):
+    for query in queries:
+        if not query.strip():
+            continue
+        query_embedding = await _embed_query(query)
+        for score, entry in _hybrid_score_entries(query, query_embedding, index, idf):
             key = (entry["subject"], entry["title"])
             if key not in best_by_key or score > best_by_key[key][0]:
                 best_by_key[key] = (score, entry)
-    scored = list(best_by_key.values())
-    scored.sort(key=lambda x: -x[0])
+    scored = sorted(best_by_key.values(), key=lambda x: -x[0])
     return [entry for _, entry in scored[:limit]]
 
 
