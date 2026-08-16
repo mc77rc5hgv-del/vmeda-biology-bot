@@ -129,9 +129,11 @@ async def main():
     tb.start_ai_session(uid)
     calls = []
     task_type_calls = []
-    async def fake_solve(*, image_bytes=None, text=None, history=None, quick=False, task_type=None):
+    rag_context_calls = []
+    async def fake_solve(*, image_bytes=None, text=None, history=None, quick=False, task_type=None, rag_context=None):
         calls.append((image_bytes, text, list(history or []), quick))
         task_type_calls.append(task_type)
+        rag_context_calls.append(rag_context)
         answer = "Ответ: Б" if quick else "Ответ: Б. Подробное решение по шагам: ..."
         return answer, fake_user_turn(text=text, image_bytes=image_bytes), dict(FAKE_USAGE)
     orig_solve = tb.solve_ai_request
@@ -755,6 +757,80 @@ async def main():
     tb._call_gemini = orig_call_gemini
     tb.get_openai_client = orig_get_client
     tb.GEMINI_API_KEY = orig_gemini_key
+
+    # ---- 25. AI RAG: builds a searchable index from the bot's own Q&A banks (Biology/Physics/
+    # Chemistry only — matches the AI feature's stated scope) and retrieves relevant snippets by
+    # keyword overlap, all zero-token pure Python (no model call for retrieval itself) ----
+    orig_questions, orig_physics_q = tb.QUESTIONS, tb.PHYSICS_QUESTIONS
+    orig_chem_theory = tb.CHEMISTRY_THEORY
+    orig_chem_theory_tickets, orig_chem_practice_tickets = tb.CHEMISTRY_THEORY_TICKETS, tb.CHEMISTRY_PRACTICE_TICKETS
+    tb.QUESTIONS = {"1": {
+        "title": "Митохондрии и клеточное дыхание",
+        "answer": "Митохондрии — органоиды клеточного дыхания, синтезируют АТФ путём окисления органических веществ.",
+    }}
+    tb.PHYSICS_QUESTIONS = {"1": {
+        "title": "Закон Ома для участка цепи",
+        "answer": "Сила тока прямо пропорциональна напряжению и обратно пропорциональна сопротивлению участка цепи.",
+    }}
+    tb.CHEMISTRY_THEORY = {"1": {
+        "title": "Окислительно-восстановительные реакции",
+        "content": "ОВР — реакции с переносом электронов между окислителем и восстановителем.",
+    }}
+    tb.CHEMISTRY_THEORY_TICKETS = {}
+    tb.CHEMISTRY_PRACTICE_TICKETS = {}
+    index = tb._build_ai_rag_index()
+    assert any(e["subject"] == "биология" and "Митохондрии" in e["title"] for e in index)
+    assert any(e["subject"] == "физика" and "Ома" in e["title"] for e in index)
+    assert any(e["subject"] == "химия" and "восстановительные" in e["title"] for e in index)
+
+    orig_get_index = tb.get_ai_rag_index
+    tb.get_ai_rag_index = lambda: index
+    snippets = tb._search_ai_rag_snippets("расскажи про митохондрии и клеточное дыхание в клетке")
+    assert snippets and snippets[0]["title"] == "Митохондрии и клеточное дыхание"
+    no_match = tb._search_ai_rag_snippets("совершенно не связанный запрос про космос и звёзды")
+    assert no_match == [], "must not return noisy single-word-overlap matches (AI_RAG_MIN_SCORE gate)"
+    context = tb._format_ai_rag_context(snippets)
+    assert "Митохондрии и клеточное дыхание" in context and "биология" in context
+    assert tb._format_ai_rag_context([]) == "", "no snippets -> empty context, no wasted tokens"
+    print("25. AI RAG index build + keyword retrieval + formatting: OK")
+
+    tb.get_ai_rag_index = orig_get_index
+    tb.QUESTIONS, tb.PHYSICS_QUESTIONS = orig_questions, orig_physics_q
+    tb.CHEMISTRY_THEORY = orig_chem_theory
+    tb.CHEMISTRY_THEORY_TICKETS, tb.CHEMISTRY_PRACTICE_TICKETS = orig_chem_theory_tickets, orig_chem_practice_tickets
+
+    # ---- 26. the REAL solve_ai_request: rag_context reaches the model on quick=False, but is
+    # NEVER baked into the returned/stored user_turn — otherwise it would resend itself (and its
+    # own token cost) on every future turn of the session, same class of bug as the photo/history
+    # cost-runaway fixed earlier ----
+    captured26 = {}
+    class FakeCompletions26:
+        async def create(self, **kwargs):
+            captured26["messages"] = kwargs["messages"]
+            return FakeOpenAIResponse()
+    class FakeChat26:
+        completions = FakeCompletions26()
+    class FakeOpenAIClient26:
+        chat = FakeChat26()
+    tb.get_openai_client = lambda: FakeOpenAIClient26()
+    tb.get_grok_client = lambda: None
+    fake_rag_context = "Материалы ВМедА по теме: «Пример» (биология): много текста сюда для проверки."
+
+    _, user_turn_26, _ = await orig_solve(text="объясни подробнее", quick=False, rag_context=fake_rag_context)
+    sent_text = captured26["messages"][-1]["content"][0]["text"]
+    assert fake_rag_context in sent_text, "rag_context must reach the model"
+    stored_text = user_turn_26["content"][0]["text"]
+    assert fake_rag_context not in stored_text, "rag_context must NOT be baked into the stored user_turn"
+    assert stored_text == "объясни подробнее"
+    print("26. rag_context reaches the model but never gets baked into stored history: OK")
+
+    _, user_turn_26b, _ = await orig_solve(text="краткий вопрос", quick=True, rag_context=fake_rag_context)
+    sent_text_quick = captured26["messages"][-1]["content"][0]["text"]
+    assert fake_rag_context not in sent_text_quick, "rag_context must be ignored on quick=True calls"
+    print("26b. rag_context is ignored on quick=True (short answers stay lean): OK")
+
+    tb.get_openai_client = orig_get_client
+    tb.get_grok_client = orig_get_grok_client
 
     # cleanup
     tb.solve_ai_request = orig_solve

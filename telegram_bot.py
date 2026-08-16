@@ -1921,6 +1921,78 @@ def search_questions_by_keyword(query: str, limit: int = SEARCH_RESULTS_LIMIT):
                 break
     return matches
 
+# ==================== AI: ПОДМЕС МАТЕРИАЛОВ ВМедА (RAG-LITE) ====================
+# Идея: перед ПОДРОБНЫМ разбором (quick=False) ищем в собственной базе бота (вопросы/билеты,
+# уже загруженные в память для других разделов) несколько релевантных фрагментов и подмешиваем
+# их в запрос к модели, чтобы формулировки и метод совпадали с тем, что реально требуют на
+# кафедре, а не с общими знаниями модели. Поиск — тот же стеммированный keyword-matching, что и
+# выше (0 токенов, чистый Python); токены тратятся только на сам подмешанный текст, и только
+# тогда, когда что-то релевантное реально нашлось.
+AI_RAG_TOP_K = 2          # сколько фрагментов подмешиваем максимум за один подробный запрос
+AI_RAG_SNIPPET_MAX_CHARS = 600  # потолок длины ОДНОГО фрагмента — ограничивает добавленные токены
+AI_RAG_MIN_SCORE = 2      # минимум общих стеммов с запросом, иначе слишком шумно/случайно
+
+def _entry_stems(title: str, text: str) -> set:
+    words = _extract_words(title) + _extract_words(text)
+    return {_word_stem(w) for w in words if len(w) >= 4}
+
+def _build_ai_rag_index() -> list:
+    """Собирает единый список {subject, title, text, stems} из уже загруженных в память банков
+    вопросов/ответов по трём предметам AI-раздела (биология/физика/химия — Анатомия и Гистология
+    сюда не входят, у AI-помощника нет такой заявленной области). Строится один раз лениво (см.
+    get_ai_rag_index) — исходные словари не меняются во время работы бота."""
+    raw_entries = []
+    for q in QUESTIONS.values():
+        raw_entries.append(("биология", q.get("title", ""), q.get("answer", "")))
+    for q in PHYSICS_QUESTIONS.values():
+        raw_entries.append(("физика", q.get("title", ""), q.get("answer", "")))
+    for topic in CHEMISTRY_THEORY.values():
+        raw_entries.append(("химия", topic.get("title", ""), topic.get("content", "")))
+    for ticket in list(CHEMISTRY_THEORY_TICKETS.values()) + list(CHEMISTRY_PRACTICE_TICKETS.values()):
+        for q in ticket.get("questions", []):
+            raw_entries.append(("химия", q.get("title", ""), q.get("answer", "")))
+    return [
+        {"subject": subject, "title": title, "text": text, "stems": _entry_stems(title, text)}
+        for subject, title, text in raw_entries
+        if title and text
+    ]
+
+_AI_RAG_INDEX = None
+
+def get_ai_rag_index() -> list:
+    global _AI_RAG_INDEX
+    if _AI_RAG_INDEX is None:
+        _AI_RAG_INDEX = _build_ai_rag_index()
+    return _AI_RAG_INDEX
+
+def _search_ai_rag_snippets(query_text: str, limit: int = AI_RAG_TOP_K) -> list:
+    """Возвращает до `limit` наиболее релевантных записей индекса по числу общих стеммов с
+    query_text — без обращения к модели, чистое сравнение множеств."""
+    query_stems = {_word_stem(w) for w in _extract_words(query_text) if len(w) >= 4}
+    if not query_stems:
+        return []
+    scored = [
+        (len(query_stems & entry["stems"]), entry)
+        for entry in get_ai_rag_index()
+    ]
+    scored = [(score, entry) for score, entry in scored if score >= AI_RAG_MIN_SCORE]
+    scored.sort(key=lambda x: -x[0])
+    return [entry for _, entry in scored[:limit]]
+
+def _format_ai_rag_context(snippets: list) -> str:
+    if not snippets:
+        return ""
+    blocks = []
+    for s in snippets:
+        text = html.unescape(strip_html_tags(s["text"]))
+        if len(text) > AI_RAG_SNIPPET_MAX_CHARS:
+            text = text[:AI_RAG_SNIPPET_MAX_CHARS] + "…"
+        blocks.append(f"«{s['title']}» ({s['subject']}): {text}")
+    return (
+        "Материалы ВМедА по теме (используй эти формулировки и метод, если задание о том же "
+        "самом; если задание про другое — просто игнорируй этот блок):\n" + "\n\n".join(blocks)
+    )
+
 async def is_subscribed(user_id: int) -> bool:
     try:
         member = await bot.get_chat_member(CHANNEL_ID, user_id)
@@ -6263,7 +6335,7 @@ async def _call_provider(provider: str, model: str, client, messages: list, max_
 
 async def solve_ai_request(
     *, image_bytes: bytes = None, text: str = None, history: list = None, quick: bool = False,
-    task_type: str = None,
+    task_type: str = None, rag_context: str = None,
 ) -> tuple:
     """history — предыдущие ходы этого диалога (без системного промпта, он добавляется здесь же),
     в формате messages OpenAI. quick=True — просит только краткий итоговый ответ на маленьком
@@ -6272,10 +6344,14 @@ async def solve_ai_request(
     только если пользователь явно нажмёт «Показать решение»). task_type — "theory"/"problem"/None,
     классификация быстрого ответа этой же сессии (см. _classify_quick_answer) — решает, можно ли
     подробный разбор (quick=False) безопасно отдать Gemini (только "theory"); на quick=True не
-    влияет, короткий ответ всегда на OpenAI, он же и определяет task_type. Возвращает (ответ,
-    user_turn, usage) — user_turn нужен вызывающему коду, чтобы дописать этот ход в историю сессии
-    вместе с ответом ассистента; usage — {"input_tokens", "output_tokens", "provider"} для учёта
-    стоимости (record_ai_cost — provider выбирает, по какому прайсу считать $)."""
+    влияет, короткий ответ всегда на OpenAI, он же и определяет task_type. rag_context — готовый
+    текст материалов ВМедА (см. _format_ai_rag_context), подмешивается ТОЛЬКО в отправляемый
+    запрос при quick=False и НИКОГДА не попадает в возвращаемый user_turn — иначе он бы каждый раз
+    заново пересылался из истории на следующих ходах сессии, как раньше раздувало фото/длинные
+    ответы (см. _compact_history). Возвращает (ответ, user_turn, usage) — user_turn нужен
+    вызывающему коду, чтобы дописать этот ход в историю сессии вместе с ответом ассистента;
+    usage — {"input_tokens", "output_tokens", "provider"} для учёта стоимости (record_ai_cost —
+    provider выбирает, по какому прайсу считать $)."""
     text_part = text or ""
     if quick:
         text_part = (text_part + AI_QUICK_SUFFIX) if text_part else AI_QUICK_SUFFIX.strip()
@@ -6291,9 +6367,15 @@ async def solve_ai_request(
     if not content:
         raise ValueError("Нет ни текста, ни фото для решения")
 
-    user_turn = {"role": "user", "content": content}
+    user_turn = {"role": "user", "content": content}  # то, что вернётся вызывающему и уйдёт в историю
+
+    send_content = content
+    if not quick and rag_context:
+        rag_text = f"{rag_context}\n\n{text_part}" if text_part else rag_context
+        send_content = [{"type": "text", "text": rag_text}] + [b for b in content if b.get("type") != "text"]
+
     trimmed_history = _compact_history(history)
-    messages = [{"role": "system", "content": AI_SYSTEM_PROMPT}, *trimmed_history, user_turn]
+    messages = [{"role": "system", "content": AI_SYSTEM_PROMPT}, *trimmed_history, {"role": "user", "content": send_content}]
     max_tokens = AI_QUICK_MAX_TOKENS if quick else AI_DETAILED_MAX_TOKENS
 
     # Короткий первый ответ (quick=True) всегда идёт через дешёвый gpt-4o-mini — по форме этого
@@ -6450,7 +6532,7 @@ async def cb_ai_show_explanation(callback: CallbackQuery):
     try:
         answer, user_turn, usage = await solve_ai_request(
             text=AI_EXPLAIN_FOLLOWUP_TEXT, history=session["messages"], quick=False,
-            task_type=session.get("task_type"),
+            task_type=session.get("task_type"), rag_context=session.get("rag_context"),
         )
         increment_ai_usage(user_id)
         record_ai_cost(usage)
@@ -6496,12 +6578,13 @@ async def handle_ai_photo_input(message: Message):
         buf = await bot.download_file(tg_file.file_path)
         answer, user_turn, usage = await solve_ai_request(
             image_bytes=_resize_image_for_ai(buf.read()), history=session["messages"], quick=quick,
-            task_type=session.get("task_type"),
+            task_type=session.get("task_type"), rag_context=session.get("rag_context"),
         )
         increment_ai_usage(user_id)
         record_ai_cost(usage)
         if quick:
             session["task_type"] = _classify_quick_answer(answer)
+            session["rag_context"] = _format_ai_rag_context(_search_ai_rag_snippets(answer))
         session["messages"].append(user_turn)
         session["messages"].append({"role": "assistant", "content": answer})
         session["last_active"] = time.time()
@@ -6541,12 +6624,15 @@ async def handle_ai_text_input(message: Message):
     try:
         answer, user_turn, usage = await solve_ai_request(
             text=message.text, history=session["messages"], quick=quick,
-            task_type=session.get("task_type"),
+            task_type=session.get("task_type"), rag_context=session.get("rag_context"),
         )
         increment_ai_usage(user_id)
         record_ai_cost(usage)
         if quick:
             session["task_type"] = _classify_quick_answer(answer)
+            session["rag_context"] = _format_ai_rag_context(
+                _search_ai_rag_snippets(f"{message.text} {answer}")
+            )
         session["messages"].append(user_turn)
         session["messages"].append({"role": "assistant", "content": answer})
         session["last_active"] = time.time()
