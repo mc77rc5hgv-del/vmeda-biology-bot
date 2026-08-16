@@ -470,10 +470,62 @@ async def main():
     assert cb3._answers and cb3._answers[0][1] is True and not cb3.message.edits
     print("cb_sub_tier rejects unknown tier: OK")
 
-    cb3b = FakeCB("sub_tier:9", uid=non_admin)  # retired tier — still resolvable (historical), just not sold
+    cb3b = FakeCB("sub_tier:9", uid=non_admin)  # retired tier — still reachable (historical deep link), but not sold
     await tb.cb_sub_tier(cb3b)
     assert cb3b.message.edits, "retired tier screens still render if reached directly (no crash)"
-    print("cb_sub_tier does not crash on a retired tier id: OK")
+    retired_text, retired_kb = cb3b.message.edits[0]
+    check_html(retired_text)
+    assert "больше не продаётся" in retired_text
+    assert tb.SUBSCRIPTION_TIERS[9]["title"] in retired_text
+    assert not any(d.startswith("buy_sub_") for d in kb_data(retired_kb)), "no live payment buttons on a retired tier screen"
+    assert kb_data(retired_kb) == ["subscription_menu"]
+    print("cb_sub_tier shows a 'no longer sold' screen (no payment buttons) for a retired tier id: OK")
+
+    # 15c. Regression: none of the purchase-creating handlers may act on a retired tier — this is
+    # the exact gap a production smoke-check caught (buy_sub_stars:9 was creating a real XTR
+    # invoice for a tier that's supposed to be unsellable) before this guard existed.
+    orig_send_invoice_retired = tb.bot.send_invoice
+    retired_invoice_calls = []
+    async def fake_send_invoice_retired(**kwargs):
+        retired_invoice_calls.append(kwargs)
+    tb.bot.send_invoice = fake_send_invoice_retired
+    retired_admin_sent = []
+    async def fake_send_message_retired(chat_id, text, **kwargs):
+        retired_admin_sent.append((chat_id, text))
+    orig_send_message_retired = tb.bot.send_message
+    tb.bot.send_message = fake_send_message_retired
+
+    retired_uid = random.randint(10_000_000, 99_999_999)
+    tb.stats["subscriptions"].pop(str(retired_uid), None)
+
+    cb_retired_stars = FakeCB("buy_sub_stars:9", uid=retired_uid)
+    await tb.cb_buy_sub_stars(cb_retired_stars)
+    assert not retired_invoice_calls, "must not create an invoice for a retired tier"
+    assert cb_retired_stars._answers and cb_retired_stars._answers[0][1] is True
+    assert cb_retired_stars._answers[0][0] == "Этот тариф больше не продаётся"
+
+    cb_retired_rub = FakeCB("buy_sub_rubles:9", uid=retired_uid)
+    await tb.cb_buy_sub_rubles(cb_retired_rub)
+    assert not retired_admin_sent, "must not notify admins of a payment request for a retired tier"
+    assert not cb_retired_rub.message.edits, "must not show payment instructions for a retired tier"
+    assert cb_retired_rub._answers and cb_retired_rub._answers[0][1] is True
+
+    cb_retired_stars_disc = FakeCB("buy_sub_stars_discount:9", uid=retired_uid)
+    await tb.cb_buy_sub_stars_discount(cb_retired_stars_disc)
+    assert not retired_invoice_calls, "discount path must not create an invoice for a retired tier either"
+
+    cb_retired_rub_disc = FakeCB("buy_sub_rubles_discount:9", uid=retired_uid)
+    await tb.cb_buy_sub_rubles_discount(cb_retired_rub_disc)
+    assert not retired_admin_sent
+
+    cb_retired_disc_screen = FakeCB("sub_discount:9", uid=retired_uid)
+    await tb.cb_sub_discount(cb_retired_disc_screen)
+    assert not cb_retired_disc_screen.message.edits, "discount offer screen must reject a retired tier too"
+
+    assert not tb.has_active_subscription(retired_uid), "no path above may have granted anything"
+    tb.bot.send_invoice = orig_send_invoice_retired
+    tb.bot.send_message = orig_send_message_retired
+    print("every purchase-creating handler (stars/rubles, incl. discount) rejects a retired tier id: OK")
 
     cb4 = FakeCB("buy_sub_rubles:22", uid=non_admin)
     await tb.cb_buy_sub_rubles(cb4)

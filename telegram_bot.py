@@ -3380,6 +3380,19 @@ async def cb_subscription_course(callback: CallbackQuery):
         disable_web_page_preview=True,
     )
 
+def get_tier_retired_text(tier_id: int) -> str:
+    cfg = SUBSCRIPTION_TIERS[tier_id]
+    return (
+        f"{cfg['emoji']} <b>{cfg['title']}</b>\n{DIVIDER}\n\n"
+        "🚫 Этот тариф больше не продаётся — линейка подписок обновилась.\n\n"
+        "Посмотри актуальные варианты ниже 👇"
+    )
+
+def get_tier_retired_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="💎 Посмотреть актуальные тарифы", callback_data="subscription_menu"))
+    return builder.as_markup()
+
 @dp.callback_query(F.data.startswith("sub_tier:"))
 async def cb_sub_tier(callback: CallbackQuery):
     tier_id = int(callback.data.split(":")[1])
@@ -3387,6 +3400,14 @@ async def cb_sub_tier(callback: CallbackQuery):
         await callback.answer("Тариф не найден", show_alert=True)
         return
     await callback.answer()
+    if tier_id not in ACTIVE_SUBSCRIPTION_TIERS:
+        await safe_edit_text(
+            callback.message,
+            get_tier_retired_text(tier_id),
+            parse_mode="HTML",
+            reply_markup=get_tier_retired_keyboard()
+        )
+        return
     await safe_edit_text(
         callback.message,
         get_sub_tier_text(tier_id),
@@ -3402,6 +3423,14 @@ async def cb_sub_subject(callback: CallbackQuery):
         await callback.answer("Тариф не найден", show_alert=True)
         return
     await callback.answer()
+    if tier_id not in ACTIVE_SUBSCRIPTION_TIERS:
+        await safe_edit_text(
+            callback.message,
+            get_tier_retired_text(tier_id),
+            parse_mode="HTML",
+            reply_markup=get_tier_retired_keyboard()
+        )
+        return
     cfg = SUBSCRIPTION_TIERS[tier_id]
     text = (
         f"{cfg['emoji']} <b>{cfg['title']}</b> — {SUBJECT_TITLES[subject]}\n{DIVIDER}\n\n"
@@ -3417,6 +3446,9 @@ async def cb_buy_sub_stars(callback: CallbackQuery):
     if tier_id not in SUBSCRIPTION_TIERS:
         await callback.answer("Тариф не найден", show_alert=True)
         return
+    if tier_id not in ACTIVE_SUBSCRIPTION_TIERS:
+        await callback.answer("Этот тариф больше не продаётся", show_alert=True)
+        return
     await callback.answer()
     await send_subscription_stars_invoice(callback.from_user.id, tier_id)
 
@@ -3427,6 +3459,9 @@ async def cb_buy_sub_stars_subj(callback: CallbackQuery):
     if tier_id not in SUBSCRIPTION_TIERS or subject not in SUBJECT_TITLES:
         await callback.answer("Тариф не найден", show_alert=True)
         return
+    if tier_id not in ACTIVE_SUBSCRIPTION_TIERS:
+        await callback.answer("Этот тариф больше не продаётся", show_alert=True)
+        return
     await callback.answer()
     await send_subscription_stars_invoice(callback.from_user.id, tier_id, subject)
 
@@ -3435,6 +3470,9 @@ async def cb_buy_sub_rubles(callback: CallbackQuery):
     tier_id = int(callback.data.split(":")[1])
     if tier_id not in SUBSCRIPTION_TIERS:
         await callback.answer("Тариф не найден", show_alert=True)
+        return
+    if tier_id not in ACTIVE_SUBSCRIPTION_TIERS:
+        await callback.answer("Этот тариф больше не продаётся", show_alert=True)
         return
     await callback.answer()
     await safe_edit_text(
@@ -3453,6 +3491,9 @@ async def cb_buy_sub_rubles_subj(callback: CallbackQuery):
     if tier_id not in SUBSCRIPTION_TIERS or subject not in SUBJECT_TITLES:
         await callback.answer("Тариф не найден", show_alert=True)
         return
+    if tier_id not in ACTIVE_SUBSCRIPTION_TIERS:
+        await callback.answer("Этот тариф больше не продаётся", show_alert=True)
+        return
     await callback.answer()
     await safe_edit_text(
         callback.message,
@@ -3470,6 +3511,9 @@ async def cb_sub_discount(callback: CallbackQuery):
     if not cfg or cfg.get("subject_choice_required"):
         await callback.answer("Тариф не найден", show_alert=True)
         return
+    if tier_id not in ACTIVE_SUBSCRIPTION_TIERS:
+        await callback.answer("Этот тариф больше не продаётся", show_alert=True)
+        return
     await callback.answer()
     await safe_edit_text(
         callback.message,
@@ -3484,6 +3528,9 @@ async def cb_buy_sub_stars_discount(callback: CallbackQuery):
     if tier_id not in SUBSCRIPTION_TIERS:
         await callback.answer("Тариф не найден", show_alert=True)
         return
+    if tier_id not in ACTIVE_SUBSCRIPTION_TIERS:
+        await callback.answer("Этот тариф больше не продаётся", show_alert=True)
+        return
     await callback.answer()
     await send_subscription_stars_invoice(callback.from_user.id, tier_id, discount=True)
 
@@ -3492,6 +3539,9 @@ async def cb_buy_sub_rubles_discount(callback: CallbackQuery):
     tier_id = int(callback.data.split(":")[1])
     if tier_id not in SUBSCRIPTION_TIERS:
         await callback.answer("Тариф не найден", show_alert=True)
+        return
+    if tier_id not in ACTIVE_SUBSCRIPTION_TIERS:
+        await callback.answer("Этот тариф больше не продаётся", show_alert=True)
         return
     await callback.answer()
     price = discount_price(SUBSCRIPTION_TIERS[tier_id]["price_rub"])
