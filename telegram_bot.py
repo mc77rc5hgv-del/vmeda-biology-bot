@@ -5716,119 +5716,24 @@ async def cb_lab_calculations(callback: CallbackQuery):
     builder.button(text="🔙 Назад", callback_data=f"lab:{lab_num}")
     await safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=builder.as_markup())
 
-# ==================== БИОЛОГИЯ — БИЛЕТЫ ====================
-@dp.callback_query(F.data == "random_ticket")
-async def cb_random_ticket(callback: CallbackQuery):
-    if not await is_subscribed(callback.from_user.id):
-        await callback.answer("Сначала подпишись на канал!", show_alert=True)
-        return
-    if not VISIBLE_TICKETS:
-        await callback.answer("Билеты пока не загружены", show_alert=True)
-        return
-    await callback.answer()
-    stats["random_ticket_used"] += 1
-    save_stats()
-    ticket = random.choice(VISIBLE_TICKETS)
-    await show_ticket(callback.message, ticket)
+# ==================== БИОЛОГИЯ — БИЛЕТЫ / ВОПРОСЫ ====================
+# Билеты и вопросы (уникальные callback_data-фильтры, безопасно для порядка dp) вынесены в
+# handlers/biology.py (свой Router) — здесь только регистрация роутера и реэкспорт имён. Режим
+# опроса (quiz_*) и handle_question_number (F.text.isdigit(), сразу под этим блоком) сознательно
+# НЕ перенесены — см. docstring handlers/biology.py.
+from handlers import biology as biology_handlers  # noqa: E402 — mid-file by design, see above
 
-@dp.callback_query(F.data.startswith("ticket:"))
-async def cb_ticket(callback: CallbackQuery):
-    await callback.answer()
-    ticket_num = callback.data.split(":")[1]
-    if ticket_num in TICKETS_DICT and is_ticket_visible(ticket_num):
-        await show_ticket(callback.message, TICKETS_DICT[ticket_num])
-    else:
-        await callback.answer("Билет не найден", show_alert=True)
+dp.include_router(biology_handlers.router)
 
-async def show_ticket(message, ticket: dict):
-    ticket_num = ticket.get("num", "?")
-    questions = ticket.get("questions", [])
-    lines = [f"📘 <b>Билет {ticket_num}</b>", DIVIDER, ""]
-    for q in questions:
-        lines.append(f"<b>{q.get('num')}.</b> {q.get('title', '')}")
-        lines.append("")
-    lines.append("👇 Нажми на номер вопроса, чтобы увидеть ответ:")
-    text = "\n".join(lines)
-    await safe_edit_text(message, text, parse_mode="HTML", reply_markup=get_ticket_questions_keyboard(str(ticket_num)))
-
-@dp.callback_query(F.data.startswith("ticket_q:"))
-async def cb_ticket_question(callback: CallbackQuery):
-    await callback.answer()
-    _, ticket_num, q_num = callback.data.split(":")
-    ticket = TICKETS_DICT.get(ticket_num, {})
-    questions = ticket.get("questions", [])
-    question = next((q for q in questions if str(q.get("num")) == q_num), None)
-    if question:
-        header = f"❓ <b>Вопрос {q_num}</b> · Билет {ticket_num}"
-        body = f"{header}\n{DIVIDER}\n\n<b>{question['title']}</b>\n\n{question['answer']}"
-        short_caption = f"{header}\n{DIVIDER}\n\n<b>{question['title']}</b>"
-        keyboard = get_ticket_questions_keyboard(ticket_num)
-        await send_answer(callback.message, body, short_caption, question, keyboard, edit=True)
-    else:
-        await callback.answer("Вопрос не найден", show_alert=True)
-
-# ==================== БИОЛОГИЯ — ВОПРОСЫ ====================
-@dp.callback_query(F.data.startswith("qpage:"))
-async def cb_question_page(callback: CallbackQuery):
-    page = int(callback.data.split(":")[1])
-    await callback.answer()
-    await safe_edit_text(
-        callback.message,
-        f"📄 <b>Вопросы — Страница {page}</b>\n{DIVIDER}",
-        parse_mode="HTML",
-        reply_markup=get_question_page_keyboard(page)
-    )
-
-@dp.callback_query(F.data.startswith("q:"))
-async def cb_show_question(callback: CallbackQuery):
-    await callback.answer()
-    q_num = callback.data.split(":")[1]
-    if q_num in QUESTIONS:
-        stats["question_opened"][q_num] = stats["question_opened"].get(q_num, 0) + 1
-        save_stats()
-        q = QUESTIONS[q_num]
-        header = f"❓ <b>Вопрос {q_num}</b>"
-        body = f"{header}\n{DIVIDER}\n\n<b>{q['title']}</b>\n\n{q['answer']}"
-        short_caption = f"{header}\n{DIVIDER}\n\n<b>{q['title']}</b>"
-        await send_answer(callback.message, body, short_caption, q, get_question_answer_keyboard(q_num), edit=True)
-    else:
-        await callback.answer("Вопрос не найден", show_alert=True)
-
-@dp.callback_query(F.data == "question_random")
-async def cb_question_random(callback: CallbackQuery):
-    if not QUESTIONS:
-        await callback.answer("Вопросы ещё не загружены", show_alert=True)
-        return
-    await callback.answer()
-    stats["random_question_used"] += 1
-    q_num = random.choice(list(QUESTIONS.keys()))
-    stats["question_opened"][q_num] = stats["question_opened"].get(q_num, 0) + 1
-    save_stats()
-    q = QUESTIONS[q_num]
-    header = f"❓ <b>Вопрос {q_num}</b>"
-    body = f"{header}\n{DIVIDER}\n\n<b>{q['title']}</b>\n\n{q['answer']}"
-    short_caption = f"{header}\n{DIVIDER}\n\n<b>{q['title']}</b>"
-    await send_answer(callback.message, body, short_caption, q, get_question_answer_keyboard(q_num), edit=True)
-
-@dp.callback_query(F.data == "question_by_number")
-async def cb_question_by_number(callback: CallbackQuery):
-    await callback.answer()
-    await safe_edit_text(
-        callback.message,
-        f"🔢 <b>Поиск вопроса по номеру</b>\n{DIVIDER}\n\nВведи номер вопроса (от 1 до 185):",
-        parse_mode="HTML"
-    )
-
-@dp.callback_query(F.data == "question_search")
-async def cb_question_search(callback: CallbackQuery):
-    await callback.answer()
-    await safe_edit_text(
-        callback.message,
-        f"🔍 <b>Поиск по ключевым словам</b>\n{DIVIDER}\n\n"
-        "Напиши слово или часть слова (например: <i>плазмодий</i>) — "
-        "покажу все вопросы, где оно встречается, вместе с падежами и склонениями.",
-        parse_mode="HTML"
-    )
+cb_random_ticket = biology_handlers.cb_random_ticket
+show_ticket = biology_handlers.show_ticket
+cb_ticket = biology_handlers.cb_ticket
+cb_ticket_question = biology_handlers.cb_ticket_question
+cb_question_page = biology_handlers.cb_question_page
+cb_show_question = biology_handlers.cb_show_question
+cb_question_random = biology_handlers.cb_question_random
+cb_question_by_number = biology_handlers.cb_question_by_number
+cb_question_search = biology_handlers.cb_question_search
 
 @dp.message(F.text.isdigit())
 async def handle_question_number(message: Message):
