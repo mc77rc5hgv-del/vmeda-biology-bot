@@ -196,18 +196,33 @@ async def main():
     assert tb.get_gated_subject("anatomy_menu") is None
     print("get_gated_subject classifies gated callbacks by subject: OK")
 
-    # 4. Legacy tier 1 (89₽, month) -> all 3 subjects, time-boxed Histology preview, no Anatomy
+    # 4. Legacy tier 1 (89₽, month) -> all 3 subjects, time-boxed Histology preview, no Anatomy.
+    # JULY_END_2026 (1 Aug 2026) is a frozen historical cutoff for a tier no longer sold — it must
+    # NEVER be advanced just because real calendar time has passed it (that would retroactively
+    # reshape what tier-1 buyers were actually promised, see CLAUDE.md). So rather than asserting
+    # histology_access_ok(non_admin) directly (true only while the real clock is before that date,
+    # which stops holding after 1 Aug 2026), test the on/off mechanism itself with explicit
+    # before/after timestamps, and separately assert whichever branch actually holds right now —
+    # this stays correct and passing on both sides of the cutoff, indefinitely.
     tb.grant_subscription(non_admin, 1, "stars", 89)
     for subject in ("biology", "physics", "chemistry"):
         assert tb.has_subject_access(non_admin, subject)
     assert not tb.anatomy_access_ok(non_admin)
-    assert tb.histology_access_ok(non_admin)
     sub = tb.get_subscription(non_admin)
     assert sub["restricted_subject"] is None
     assert sub["histology_until"] == tb.JULY_END_2026
-    assert "Гистологии" in tb.get_subscription_scope_label(sub)
     assert "Анатомии" not in tb.get_subscription_scope_label(sub)
-    print("legacy tier 1 grants all 3 gated subjects + time-boxed Histology preview, no Anatomy: OK")
+    assert tb._sub_has_histology({"histology_access": True, "histology_until": time.time() + 86400}), \
+        "still within the preview window -> Histology must be granted"
+    assert not tb._sub_has_histology({"histology_access": True, "histology_until": time.time() - 86400}), \
+        "past the preview window -> Histology must be denied"
+    if time.time() < tb.JULY_END_2026:
+        assert tb.histology_access_ok(non_admin), "preview window still open as of the real clock"
+        assert "Гистологии" in tb.get_subscription_scope_label(sub)
+    else:
+        assert not tb.histology_access_ok(non_admin), "preview window (1 Aug 2026) has closed"
+        assert "Гистологии" not in tb.get_subscription_scope_label(sub)
+    print("legacy tier 1 grants all 3 gated subjects + time-boxed Histology preview mechanism verified: OK")
 
     # 5. Legacy tier 6 (239₽, until Oct 2026) -> fixed calendar expiry, not a relative duration
     tb.grant_subscription(non_admin, 6, "rubles", 239)
@@ -242,6 +257,37 @@ async def main():
     assert "ко всем разделам бота" in tb.get_subscription_scope_label(sub)
     tb.stats["subscriptions"].pop(str(non_admin), None)
     print("legacy tier 10 (6 years, everything) grants full scope with a relative 6-year expiry: OK")
+
+    # 8b. Regression: a hand-written "gift" legacy tier 10 record (the shape a manually-granted/
+    # comped subscription actually has in stats["subscriptions"] — not produced via
+    # grant_subscription(), unlike section 8 above) keeps working exactly as promised after the
+    # new 20-28 lineup was introduced, and the new tier 28 ("Вся академия", the closest modern
+    # equivalent) has zero effect on it whatsoever.
+    gift_uid = random.randint(10_000_000, 99_999_999)
+    tb.stats["subscriptions"][str(gift_uid)] = {
+        "tier": 10,
+        "expires": time.time() + 6 * 365 * 86400,
+        "anatomy": True,
+        "histology_access": True,
+        "histology_until": None,
+        "biology_download": True,
+        "cheat_sheets": True,
+        "purchased_at": time.time(),
+        "method": "rubles_manual",
+        "price": 0,
+    }
+    assert tb.has_active_subscription(gift_uid)
+    assert tb.anatomy_access_ok(gift_uid)
+    assert tb.histology_access_ok(gift_uid)
+    assert tb.biology_tickets_download_ok(gift_uid)
+    gift_sub_before = dict(tb.get_subscription(gift_uid))
+    # tier 28 existing at all (config lookups, ACTIVE_SUBSCRIPTION_TIERS membership, etc.) must not
+    # retroactively touch this gift record in any way
+    assert 28 in tb.SUBSCRIPTION_TIERS and 28 in tb.ACTIVE_SUBSCRIPTION_TIERS
+    assert tb.get_subscription(gift_uid) == gift_sub_before, "tier 28's existence must not alter the gift record"
+    assert tb.get_subscription(gift_uid)["tier"] == 10, "still resolves against the frozen legacy tier 10 entry"
+    tb.stats["subscriptions"].pop(str(gift_uid), None)
+    print("hand-written gift legacy tier 10 subscription keeps working, unaffected by new tier 28: OK")
 
     # 9. Expired subscription -> no access
     tb.stats["subscriptions"][str(non_admin)] = {
@@ -763,26 +809,36 @@ async def main():
     print("get_subscription_teaser_keyboard: OK")
 
     # 22. Main menu: subscription button always visible; anatomy/histology labels reflect
-    # has_subscription_anatomy_access/has_subscription_histology_access, not scope=="all"
-    menu_no_sub = tb.get_main_menu(user_id=non_admin)
-    assert "💎 Подписка без рефералов" in kb_texts(menu_no_sub)
-    assert "🔥🦴 Анатомия" in kb_texts(menu_no_sub)
-    assert "🔬 Гистология (рефералы/подписка)" in kb_texts(menu_no_sub)
+    # has_subscription_anatomy_access/has_subscription_histology_access, not scope=="all".
+    # Anatomy's label has a third state (ANATOMY_MAINTENANCE_MODE, unrelated to subscriptions —
+    # see test_anatomy_maintenance.py) that would otherwise shadow the 💎/plain distinction this
+    # section actually tests; pin it to False for this section only, same save/restore pattern
+    # test_anatomy_maintenance.py itself uses, so this test's outcome doesn't depend on whatever
+    # unrelated state that flag happens to be in.
+    orig_maintenance_mode = tb.anatomy_handlers.ANATOMY_MAINTENANCE_MODE
+    tb.anatomy_handlers.ANATOMY_MAINTENANCE_MODE = False
+    try:
+        menu_no_sub = tb.get_main_menu(user_id=non_admin)
+        assert "💎 Подписка без рефералов" in kb_texts(menu_no_sub)
+        assert "🔥🦴 Анатомия" in kb_texts(menu_no_sub)
+        assert "🔬 Гистология (рефералы/подписка)" in kb_texts(menu_no_sub)
 
-    tb.grant_subscription(non_admin, 21, "stars", 129)  # no histology, no anatomy
-    menu_tier21 = tb.get_main_menu(user_id=non_admin)
-    tier21_texts = kb_texts(menu_tier21)
-    assert "💎 Моя подписка" in tier21_texts
-    assert "🔬 Гистология (рефералы/подписка)" in tier21_texts, "tier 21 has no histology"
-    assert "🔥🦴 Анатомия" in tier21_texts, "tier 21 has no anatomy — button stays plain (not the 💎 variant)"
-    tb.stats["subscriptions"].pop(str(non_admin), None)
+        tb.grant_subscription(non_admin, 21, "stars", 129)  # no histology, no anatomy
+        menu_tier21 = tb.get_main_menu(user_id=non_admin)
+        tier21_texts = kb_texts(menu_tier21)
+        assert "💎 Моя подписка" in tier21_texts
+        assert "🔬 Гистология (рефералы/подписка)" in tier21_texts, "tier 21 has no histology"
+        assert "🔥🦴 Анатомия" in tier21_texts, "tier 21 has no anatomy — button stays plain (not the 💎 variant)"
+        tb.stats["subscriptions"].pop(str(non_admin), None)
 
-    tb.grant_subscription(non_admin, 24, "stars", 599)  # anatomy + histology yes (Зимняя сессия)
-    menu_tier24 = tb.get_main_menu(user_id=non_admin)
-    tier24_texts = kb_texts(menu_tier24)
-    assert "🔥🦴 Анатомия 💎" in tier24_texts
-    assert "🔬 Гистология 💎" in tier24_texts
-    tb.stats["subscriptions"].pop(str(non_admin), None)
+        tb.grant_subscription(non_admin, 24, "stars", 599)  # anatomy + histology yes (Зимняя сессия)
+        menu_tier24 = tb.get_main_menu(user_id=non_admin)
+        tier24_texts = kb_texts(menu_tier24)
+        assert "🔥🦴 Анатомия 💎" in tier24_texts
+        assert "🔬 Гистология 💎" in tier24_texts
+        tb.stats["subscriptions"].pop(str(non_admin), None)
+    finally:
+        tb.anatomy_handlers.ANATOMY_MAINTENANCE_MODE = orig_maintenance_mode
     print("main menu subscription button always visible, anatomy/histology labels match per-tier flags: OK")
 
     # 22b. Regression: free referral access (no subscription) must still show the subscription entry
