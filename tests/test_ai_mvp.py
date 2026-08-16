@@ -362,6 +362,16 @@ async def main():
     checker2 = _BalanceChecker()
     checker2.feed(formatted_unsafe)
     assert checker2.ok and not checker2.stack
+
+    # regression: "### Заголовок" (Gemini uses these despite the system prompt saying not to)
+    # must not leak as raw "###" into the Telegram message
+    md_headers = "### 1. Брюшина\n• Определение: передняя стенка брюшной полости."
+    formatted_headers = tb._format_ai_answer_html(md_headers)
+    assert "#" not in formatted_headers, "raw markdown headers must not leak into the message"
+    assert "<b>1. Брюшина</b>" in formatted_headers
+    checker3 = _BalanceChecker()
+    checker3.feed(formatted_headers)
+    assert checker3.ok and not checker3.stack
     print("17. markdown-to-HTML formatting is real, balanced, and escape-safe: OK")
 
     # ---- 18. the REAL solve_ai_request compacts history before resending (cost-runaway guard) ----
@@ -624,8 +634,9 @@ async def main():
     assert tb._classify_quick_answer("Температура кипения раствора составляет 100,5°C.") == "problem"
     assert tb._classify_quick_answer("Масса вещества ≈ 42 г") == "problem"
     assert tb._classify_quick_answer("pH раствора равен 3,2") == "problem"
-    # регрессия: пронумерованный список из 10+ пунктов (список терминов, не расчёт) — номера
-    # пунктов ≥10 сами по себе двузначные и раньше ложно классифицировались как "problem"
+    # многопунктный список (3+ пунктов) остаётся на OpenAI целиком НЕЗАВИСИМО от содержимого —
+    # по реальным наблюдениям Gemini на таком контенте путает термины ("Плева" вместо "Плевра")
+    # и даёт более куцые формулировки, чем OpenAI на том же вопросе
     numbered_list_answer = (
         "9. Грудная полость — пространство, в котором находятся лёгкие и сердце.\n"
         "10. Забрюшинное пространство — область за брюшиной, содержащая жировую ткань и сосуды.\n"
@@ -633,12 +644,19 @@ async def main():
         "12. Промежность — область между анусом и половыми органами.\n"
         "13. Семенной каналикул — трубочки в яичках, где происходит сперматогенез."
     )
-    assert tb._classify_quick_answer(numbered_list_answer) == "theory", (
-        "list-item numbering (9., 10., 11. ...) must not be mistaken for a calculated result"
+    assert tb._classify_quick_answer(numbered_list_answer) == "problem", (
+        "a multi-item (3+) list must stay on OpenAI regardless of content — Gemini was observed "
+        "to be less accurate/terser on this kind of answer"
     )
-    # но реальное число-результат СРЕДИ пунктов списка всё ещё должно определяться как problem
-    numbered_list_with_number = "1. Первый пункт\n2. Масса раствора составляет 15,7 г\n3. Третий пункт"
-    assert tb._classify_quick_answer(numbered_list_with_number) == "problem"
+    # регрессия отдельно: номер пункта САМ ПО СЕБЕ (не число-результат) не должен путать
+    # классификатор даже в КОРОТКОМ списке (< 3 пунктов, не задета правилом выше)
+    short_list_no_numbers = "9. Грудная полость — пространство, в котором находятся лёгкие и сердце."
+    assert tb._classify_quick_answer(short_list_no_numbers) == "theory", (
+        "list-item numbering (\"9.\") alone must not be mistaken for a calculated result"
+    )
+    # но реальное число-результат СРЕДИ пунктов короткого списка всё ещё должно быть "problem"
+    short_list_with_number = "1. Первый пункт\n2. Масса раствора составляет 15,7 г"
+    assert tb._classify_quick_answer(short_list_with_number) == "problem"
     print("21. _classify_quick_answer tells theory/test answers from calculated ones: OK")
 
     # ---- 22. _openai_messages_to_gemini_contents: system extracted, roles mapped, images converted ----
