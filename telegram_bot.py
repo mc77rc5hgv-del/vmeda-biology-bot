@@ -6108,16 +6108,24 @@ def _compact_history(history: list) -> list:
     заменяет реальную картинку), у всех ответов ассистента, кроме самого последнего, обрезаем
     текст до AI_HISTORY_SUMMARY_CHARS. Модели для продолжения диалога почти всегда достаточно
     краткой памяти "что уже спросили и что уже ответили", а не полного текста каждого раунда
-    заново — это и есть основной резерв экономии токенов в многоходовых сессиях."""
+    заново — это и есть основной резерв экономии токенов в многоходовых сессиях.
+
+    Исключение — САМЫЙ ПОСЛЕДНИЙ ход пользователя: его фото НЕ трогаем. Кнопка «Показать
+    решение» и обычные текстовые уточнения сами не пересылают фото повторно — они рассчитывают
+    на то, что оно ещё есть в history последнего раунда. Если срезать его и там, модель отвечает
+    "не вижу фото задания" вместо разбора — именно этот баг тут и чинится."""
     trimmed = (history or [])[-AI_HISTORY_MAX_MESSAGES:]
     last_assistant_idx = max(
         (i for i, m in enumerate(trimmed) if m.get("role") == "assistant"), default=-1
+    )
+    last_user_idx = max(
+        (i for i, m in enumerate(trimmed) if m.get("role") == "user"), default=-1
     )
     compact = []
     for i, msg in enumerate(trimmed):
         role = msg.get("role")
         content = msg.get("content")
-        if role == "user" and isinstance(content, list):
+        if role == "user" and isinstance(content, list) and i != last_user_idx:
             text_parts = [p.get("text", "") for p in content if p.get("type") == "text"]
             had_image = any(p.get("type") == "image_url" for p in content)
             text = " ".join(t for t in text_parts if t).strip()

@@ -403,17 +403,26 @@ async def main():
     compacted = sent[1:-1]
     assert sent[-1] == user_turn_r
 
-    # ни один сохранённый ход истории не тащит картинку — самое дорогое по входным токенам
-    for msg in compacted:
+    # ни один сохранённый ход истории, КРОМЕ самого последнего пользовательского, не тащит
+    # картинку — самое дорогое по входным токенам. Последний пользовательский ход (вопрос 18,
+    # без фото в этом тесте) намеренно проходит без изменений — см. тест 18b для случая, когда у
+    # него ЕСТЬ фото.
+    user_msgs_all = [m for m in compacted if m["role"] == "user"]
+    older_user_msgs = user_msgs_all[:-1]
+    for msg in older_user_msgs:
         content = msg["content"]
-        assert isinstance(content, str), "history entries must be compacted to plain text"
+        assert isinstance(content, str), "older history entries must be compacted to plain text"
         assert "image_url" not in content and "base64" not in content
 
-    user_msgs = {m["content"]: m for m in compacted if m["role"] == "user"}
-    assert any("вопрос 16" in c and "[ранее приложено фото задания]" in c for c in user_msgs), (
-        "user turn that had an image must keep a short text marker instead"
+    older_texts = [m["content"] for m in older_user_msgs]
+    assert any("вопрос 16" in c and "[ранее приложено фото задания]" in c for c in older_texts), (
+        "an OLDER user turn that had an image must keep a short text marker instead"
     )
-    assert any(c == "вопрос 14" for c in user_msgs), "user turns without an image are passed through as-is"
+    assert any(c == "вопрос 14" for c in older_texts), "user turns without an image are passed through as-is"
+
+    for msg in compacted:
+        if msg["role"] == "assistant":
+            assert "image_url" not in msg["content"] and "base64" not in msg["content"]
 
     # самый последний ответ ассистента в окне остаётся полным (может понадобиться модели целиком),
     # более ранние в этом же окне — обрезаны до AI_HISTORY_SUMMARY_CHARS
@@ -426,6 +435,30 @@ async def main():
 
     assert usage_r == {"input_tokens": 42, "output_tokens": 7, "provider": "openai"}
     print("18. long history is compacted (images stripped, old answers shortened) before resending: OK")
+
+    # ---- 18b. the MOST RECENT user turn's photo must survive compaction (regression guard) ----
+    # "Показать решение" and typed follow-ups never resend the photo themselves — they rely on
+    # it still being in history for the round being explained. Stripping it there made the model
+    # answer "не вижу фото задания" instead of solving.
+    history_with_recent_photo = [
+        {"role": "user", "content": [
+            {"type": "text", "text": "старый вопрос"},
+            {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,OLD"}},
+        ]},
+        {"role": "assistant", "content": "старый ответ " * 20},
+        {"role": "user", "content": [
+            {"type": "text", "text": ""},
+            {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,RECENT"}},
+        ]},
+        {"role": "assistant", "content": "Краткий ответ на свежее фото"},
+    ]
+    compacted_recent = tb._compact_history(history_with_recent_photo)
+    user_msgs_recent = [m for m in compacted_recent if m["role"] == "user"]
+    assert isinstance(user_msgs_recent[-1]["content"], list), "the most recent user turn's photo must stay intact"
+    assert any(p.get("type") == "image_url" for p in user_msgs_recent[-1]["content"])
+    assert isinstance(user_msgs_recent[0]["content"], str), "an OLDER user turn's photo must still be stripped"
+    assert "RECENT" not in str(user_msgs_recent[0]) and "image_url" not in str(user_msgs_recent[0])
+    print("18b. most recent user turn keeps its photo intact, older ones still stripped: OK")
 
     # ---- 19. quick=True (short first answer) always stays on cheap OpenAI, even if Grok is configured ----
     captured19 = {}
