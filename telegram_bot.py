@@ -3935,6 +3935,10 @@ _AI_PROVIDER_PRICES = {
     "openai": (ai_openai.PRICE_INPUT_PER_1M, ai_openai.PRICE_OUTPUT_PER_1M),
     "grok": (ai_xai.PRICE_INPUT_PER_1M, ai_xai.PRICE_OUTPUT_PER_1M),
     "gemini": (ai_gemini.PRICE_INPUT_PER_1M, ai_gemini.PRICE_OUTPUT_PER_1M),
+    # Эмбеддинги биллятся только по входным токенам — выходная цена 0, но запись всё равно идёт
+    # через record_ai_cost с provider="openai-embeddings", чтобы расход RAG был виден отдельной
+    # строкой в статистике, а не терялся молча (см. CLAUDE.md/архитектурный разбор, пункт 5).
+    "openai-embeddings": (ai_rag.EMBEDDING_PRICE_PER_1M, 0.0),
 }
 
 def record_ai_cost(usage: dict) -> None:
@@ -3973,7 +3977,7 @@ def get_ai_cost_stats_block() -> str:
         f"Расход: <b>${totals['cost_usd']:.4f}</b>, в среднем ${avg:.5f}/запрос"
     )
     by_provider = totals.get("by_provider", {})
-    for provider, label in (("grok", "Grok"), ("gemini", "Gemini")):
+    for provider, label in (("grok", "Grok"), ("gemini", "Gemini"), ("openai-embeddings", "RAG-эмбеддинги")):
         p = by_provider.get(provider)
         if p and p["requests"]:
             block += f"\n  из них {label}: {p['requests']} запр., ${p['cost_usd']:.4f}"
@@ -4083,24 +4087,46 @@ AI_LOW_CONFIDENCE_NOTE = (
     "обязательно сверь его с материалами курса, прежде чем полагаться на него."
 )
 
+async def ensure_rag_context(session: dict) -> str:
+    """Лениво считает session["rag_context"], если он ещё не считался (None — сентинел "не
+    считали", в отличие от "" — "считали, снипетов не нашлось"). Первый ход сессии, попавший в
+    кэш точных совпадений (см. get_first_message_ai_answer), НЕ платит за RAG вообще — но если
+    пользователь потом жмёт "Показать решение по шагам", этому второму, уже небесплатному
+    запросу контекст всё-таки нужен, иначе подробный разбор проиграет в качестве без видимой
+    причины. Безопасно вызывать повторно — второй вызов на той же сессии не платит снова."""
+    if session.get("rag_context") is not None:
+        return session["rag_context"]
+    if session.get("task") is None:
+        return ""
+    snippets, rag_usage = await ai_rag.search_for_task(session["task"])
+    if rag_usage.get("input_tokens"):
+        record_ai_cost({**rag_usage, "provider": "openai-embeddings"})
+    session["rag_context"] = ai_rag.format_context(snippets)
+    return session["rag_context"]
+
 async def get_first_message_ai_answer(user_id: int, session: dict, task) -> tuple:
     """Первый ход AI-сессии: сначала проверяем кэш точных совпадений (только ОДОБРЕННЫЕ записи) —
-    при попадании ответ отдаётся бесплатно, без обращения к модели и без списания квоты/учёта
-    стоимости. При промахе — обычный запрос к solve_ai_request (списывает квоту, учитывает
-    стоимость всех попыток), затем ответ прогоняется через детерминированный валидатор (см.
-    ai/validator.py), для calculation-заданий — ещё и через независимый математический verifier
-    (ai/math_verifier.py, пересчитывает результат по распознанной формуле и сверяет с ответом), для
-    mcq-заданий — через сверку с эталонной базой (ai/mcq_verifier.py, ai/reference_bank.py:
-    1040 вопросов теста кафедры анатомии с объективно известным правильным вариантом), и
-    через confidence-роутер (ai/confidence.py) — при низкой уверенности пользователю честно
-    показывается предупреждение (AI_LOW_CONFIDENCE_NOTE), а запись в очереди модерации получает
-    более высокий приоритет на проверку. session["quick_answer"] всегда хранит ИСХОДНЫЙ
-    ответ БЕЗ предупреждения — это canonical-якорь для "Показать решение по шагам"
-    (ai.prompts.explain_followup_text), предупреждение не должно путать модель на следующем ходу.
+    при попадании ответ отдаётся бесплатно, без обращения к модели, без RAG/эмбеддингов и без
+    списания квоты/учёта стоимости (см. пункт 4 архитектурного разбора: раньше RAG считался ДО
+    проверки кэша, и даже кэш-хит платил за эмбеддинги). При промахе — сначала считаем RAG-контекст
+    (ensure_rag_context, тут уже реально нужен модели), затем обычный запрос к solve_ai_request
+    (списывает квоту, учитывает стоимость всех попыток), затем ответ прогоняется через
+    детерминированный валидатор (см. ai/validator.py), для calculation-заданий — ещё и через
+    независимый математический verifier (ai/math_verifier.py, пересчитывает результат по
+    распознанной формуле и сверяет с ответом), для mcq-заданий — через сверку с эталонной базой
+    (ai/mcq_verifier.py, ai/reference_bank.py: 1040 вопросов теста кафедры анатомии с объективно
+    известным правильным вариантом), и через confidence-роутер (ai/confidence.py) — при низкой
+    уверенности пользователю честно показывается предупреждение (AI_LOW_CONFIDENCE_NOTE), а запись
+    в очереди модерации получает более высокий приоритет на проверку. session["quick_answer"]
+    всегда хранит ИСХОДНЫЙ ответ БЕЗ предупреждения — это canonical-якорь для "Показать решение по
+    шагам" (ai.prompts.explain_followup_text), предупреждение не должно путать модель на следующем
+    ходу.
 
     Возвращает (answer, user_turn) — user_turn в обоих случаях в том же формате, что и обычный
     ход solve(), включая суффикс краткого ответа (ai_prompts.QUICK_SUFFIX), чтобы история сессии
     не отличалась по форме от того, что получилось бы при реальном обращении к модели."""
+    session.setdefault("task", task)  # ensure_rag_context reads session["task"] — обычные хендлеры
+    # уже выставляют его сами до вызова этой функции, но полагаться на внешнюю дисциплину незачем
     cached_answer = get_cached_ai_answer(task.fingerprint())
     if cached_answer is not None:
         session["quick_answer"] = cached_answer
@@ -4108,9 +4134,10 @@ async def get_first_message_ai_answer(user_id: int, session: dict, task) -> tupl
         text_part = (text_part + ai_prompts.QUICK_SUFFIX) if text_part else ai_prompts.QUICK_SUFFIX.strip()
         return cached_answer, {"role": "user", "content": text_part}
 
+    rag_context = await ensure_rag_context(session)
     answer, user_turn, usage, attempts_log = await solve_ai_request(
         task=task, history=session["messages"], quick=True,
-        bucket=session["bucket"], rag_context=session["rag_context"],
+        bucket=session["bucket"], rag_context=rag_context,
     )
     increment_ai_usage(user_id)
     record_ai_attempts_cost(attempts_log)
@@ -4279,9 +4306,10 @@ async def cb_ai_show_explanation(callback: CallbackQuery):
     thinking = await callback.message.answer("🤖 Готовлю решение по шагам...")
     followup_text = ai_prompts.explain_followup_text(session.get("quick_answer") or "")
     try:
+        rag_context = await ensure_rag_context(session)
         answer, user_turn, usage, attempts_log = await solve_ai_request(
             text=followup_text, history=session["messages"], quick=False,
-            bucket=session.get("bucket"), rag_context=session.get("rag_context"),
+            bucket=session.get("bucket"), rag_context=rag_context,
         )
         increment_ai_usage(user_id)
         record_ai_attempts_cost(attempts_log)
@@ -4336,12 +4364,12 @@ async def handle_ai_photo_input(message: Message):
         if is_first:
             session["task"] = task_repr
             session["bucket"] = ai_router.route_bucket(task_repr)
-            session["rag_context"] = ai_rag.format_context(await ai_rag.search_for_task(task_repr))
             answer, user_turn = await get_first_message_ai_answer(user_id, session, task_repr)
         else:
+            rag_context = await ensure_rag_context(session)
             answer, user_turn, usage, attempts_log = await solve_ai_request(
                 text=task_repr.to_prompt_text(), history=session["messages"], quick=False,
-                bucket=session.get("bucket"), rag_context=session.get("rag_context"),
+                bucket=session.get("bucket"), rag_context=rag_context,
             )
             increment_ai_usage(user_id)
             record_ai_attempts_cost(attempts_log)
@@ -4393,12 +4421,12 @@ async def handle_ai_text_input(message: Message):
                 record_ai_cost(parse_usage)
             session["task"] = task_repr
             session["bucket"] = ai_router.route_bucket(task_repr)
-            session["rag_context"] = ai_rag.format_context(await ai_rag.search_for_task(task_repr))
             answer, user_turn = await get_first_message_ai_answer(user_id, session, task_repr)
         else:
+            rag_context = await ensure_rag_context(session)
             answer, user_turn, usage, attempts_log = await solve_ai_request(
                 text=message.text, history=session["messages"], quick=False,
-                bucket=session.get("bucket"), rag_context=session.get("rag_context"),
+                bucket=session.get("bucket"), rag_context=rag_context,
             )
             increment_ai_usage(user_id)
             record_ai_attempts_cost(attempts_log)

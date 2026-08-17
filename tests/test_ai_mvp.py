@@ -178,7 +178,7 @@ async def main():
     FAKE_RAG_SNIPPETS = []
     async def fake_search_for_task(task, limit=3):
         rag_search_calls.append(task)
-        return list(FAKE_RAG_SNIPPETS)
+        return list(FAKE_RAG_SNIPPETS), {"input_tokens": 0, "output_tokens": 0}
 
     tb.solve_ai_request = fake_solve
     tb.ai_vision_parser.parse_task = fake_parse_task
@@ -1019,7 +1019,7 @@ async def main():
         "органами. Семенной каналикул — трубочки в яичках, где происходит сперматогенез."
     )
     task_regr = TaskRepresentation(type="theory", question=anatomy_regression_query, raw_text=anatomy_regression_query)
-    anatomy_matches = await tb.ai_rag.search_for_task(task_regr)
+    anatomy_matches, _ = await tb.ai_rag.search_for_task(task_regr)
     matched_titles = {s["title"] for s in anatomy_matches}
     assert "Эволюция органов дыхания у беспозвоночных (Типы Annelides, Mollusca, Arthropoda)" not in matched_titles
     assert "Гисто- и органогенез. Производные зародышевых листков" not in matched_titles
@@ -1034,7 +1034,7 @@ async def main():
         type="theory", question="Что такое плевра, средостение и полость плевры?",
         raw_text="Что такое плевра, средостение и полость плевры?",
     )
-    pleura_snippets = await tb.ai_rag.search_for_task(task_pleura)
+    pleura_snippets, _ = await tb.ai_rag.search_for_task(task_pleura)
     assert any("плевр" in s["title"].lower() or "плевр" in s["text"].lower() for s in pleura_snippets), (
         "a focused anatomy question must ground on real anatomy content with the correct term spelling"
     )
@@ -1061,12 +1061,13 @@ async def main():
         "Семенной каналикул — трубочки в яичках, где происходит образование сперматозоидов.",
     ]
     blob_task = TaskRepresentation(type="theory", question=" ".join(numbered_anatomy_items))
-    assert await tb.ai_rag.search_for_task(blob_task) == [], (
+    blob_matches, _ = await tb.ai_rag.search_for_task(blob_task)
+    assert blob_matches == [], (
         "sanity check: the whole 13-item blob as ONE query is too diffuse to match anything — "
         "confirms the per-item fix below is actually needed"
     )
     list_task = TaskRepresentation(type="list", subquestions=numbered_anatomy_items)
-    multi_matches = await tb.ai_rag.search_for_task(list_task, limit=10)
+    multi_matches, _ = await tb.ai_rag.search_for_task(list_task, limit=10)
     assert multi_matches, "searching each list item separately must find real anatomy grounding"
     assert all(s["subject"] == "анатомия" for s in multi_matches)
     matched_blob = " ".join(s["title"] + " " + s["text"] for s in multi_matches).lower()
@@ -1105,10 +1106,10 @@ async def main():
     assert tb.ai_openai.get_client() is None, "sanity: no OpenAI key configured, semantic layer must be inert here"
 
     task_mito = TaskRepresentation(question="расскажи про митохондрии и клеточное дыхание в клетке")
-    mito_matches = await tb.ai_rag.search_for_task(task_mito)
+    mito_matches, _ = await tb.ai_rag.search_for_task(task_mito)
     assert mito_matches and mito_matches[0]["title"] == "Митохондрии и клеточное дыхание"
     task_unrelated = TaskRepresentation(question="совершенно не связанный запрос про космос и звёзды")
-    no_match = await tb.ai_rag.search_for_task(task_unrelated)
+    no_match, _ = await tb.ai_rag.search_for_task(task_unrelated)
     assert no_match == [], "must not return noisy single-word-overlap matches (MIN_SCORE gate)"
     context = tb.ai_rag.format_context(mito_matches)
     assert "Митохондрии и клеточное дыхание" in context and "биология" in context
@@ -2182,6 +2183,155 @@ async def main():
     tb.stats["ai_answer_cache"].clear()
     tb.stats["ai_usage"].pop(str(uid), None)
     tb.solve_ai_request = orig_solve
+
+    # ==================== ЧАСТЬ E: cost/safety hardening (см. CLAUDE.md/архитектурный разбор,
+    # пункты 1-4 приоритетного списка) ====================
+
+    # ---- 63. search_for_task: MAX_RAG_QUERIES caps the number of distinct queries per task, and
+    # they ALL go out as ONE batched embeddings API call, not one call per subquestion — a
+    # vision-parsed task with many subquestions must not fire N separate embedding requests ----
+    class FakeEmbeddingItem63:
+        def __init__(self, embedding):
+            self.embedding = embedding
+    class FakeUsage63:
+        def __init__(self, total_tokens):
+            self.total_tokens = total_tokens
+    class FakeEmbeddingResponse63:
+        def __init__(self, n):
+            self.data = [FakeEmbeddingItem63([1.0, 0.0]) for _ in range(n)]
+            self.usage = FakeUsage63(n * 5)
+    class FakeEmbeddingsAPI63:
+        def __init__(self):
+            self.calls = []
+        async def create(self, model, input):
+            self.calls.append(list(input))
+            return FakeEmbeddingResponse63(len(input))
+    class FakeEmbedClient63:
+        def __init__(self):
+            self.embeddings = FakeEmbeddingsAPI63()
+
+    fake_embed_client = FakeEmbedClient63()
+    tb.ai_openai.get_client = lambda: fake_embed_client
+    many_subquestions = [f"Пункт номер {i} условия задачи про анатомию" for i in range(20)]
+    many_task = TaskRepresentation(type="list", subquestions=many_subquestions)
+    snippets_63, usage_63 = await tb.ai_rag.search_for_task(many_task)
+    assert len(fake_embed_client.embeddings.calls) == 1, "all queries must go out as ONE batched API call"
+    assert len(fake_embed_client.embeddings.calls[0]) == tb.ai_rag.MAX_RAG_QUERIES, (
+        "the number of distinct queries actually embedded must be capped at MAX_RAG_QUERIES, "
+        "not all 20 subquestions"
+    )
+    assert usage_63["input_tokens"] == tb.ai_rag.MAX_RAG_QUERIES * 5
+    tb.ai_openai.get_client = orig_get_client
+    print("63. search_for_task caps queries at MAX_RAG_QUERIES and batches them into one embeddings call: OK")
+
+    # ---- 64. get_first_message_ai_answer: cache-before-RAG ordering — a cache HIT must not touch
+    # RAG/embeddings at all (not even to compute cost), a cache MISS computes RAG exactly once and
+    # records its embedding cost separately under provider "openai-embeddings" ----
+    tb.stats["ai_answer_cache"].clear()
+    tb.stats["ai_usage"].pop(str(uid), None)
+    tb.stats["ai_cost_totals"] = {"requests": 0, "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0}
+    rag_calls_64 = []
+    async def fake_search_for_task_64(task, limit=3):
+        rag_calls_64.append(task)
+        return [], {"input_tokens": 42, "output_tokens": 0}
+    tb.ai_rag.search_for_task = fake_search_for_task_64
+
+    async def fake_solve_64(*, task=None, text=None, history=None, quick=False, bucket=None, rag_context=None):
+        text_part = task.to_prompt_text() + tb.ai_prompts.QUICK_SUFFIX
+        return (
+            "ответ 64", {"role": "user", "content": text_part}, dict(FAKE_USAGE, provider="openai"),
+            [{"provider": "openai", "status": "success", "usage": dict(FAKE_USAGE)}],
+        )
+    tb.solve_ai_request = fake_solve_64
+
+    task64 = TaskRepresentation(
+        question="Уникальный вопрос для проверки RAG-порядка", raw_text="Уникальный вопрос для проверки RAG-порядка",
+    )
+    session64 = {"messages": [], "bucket": "theory_simple", "rag_context": None, "quick_answer": None, "task": task64}
+    answer64, _ = await tb.get_first_message_ai_answer(uid, session64, task64)
+    assert answer64 == "ответ 64"
+    assert len(rag_calls_64) == 1, "a cache miss must compute RAG exactly once"
+    assert tb.stats["ai_cost_totals"]["by_provider"]["openai-embeddings"]["requests"] == 1
+    assert tb.stats["ai_cost_totals"]["by_provider"]["openai-embeddings"]["input_tokens"] == 42
+
+    tb.moderate_ai_cache_entry(task64.fingerprint(), approve=True)
+    session64b = {"messages": [], "bucket": "theory_simple", "rag_context": None, "quick_answer": None, "task": task64}
+    embeddings_requests_before = tb.stats["ai_cost_totals"]["by_provider"]["openai-embeddings"]["requests"]
+    answer64b, _ = await tb.get_first_message_ai_answer(uid, session64b, task64)
+    assert answer64b == "ответ 64"
+    assert len(rag_calls_64) == 1, "a cache HIT must not touch RAG/embeddings at all"
+    assert tb.stats["ai_cost_totals"]["by_provider"]["openai-embeddings"]["requests"] == embeddings_requests_before
+    tb.stats["ai_answer_cache"].clear()
+    print("64. get_first_message_ai_answer checks the cache BEFORE computing RAG — a hit costs nothing: OK")
+
+    # ---- 65. ensure_rag_context: a pure cache-hit first message leaves session["rag_context"] at
+    # its "not computed yet" sentinel (None) — computing it lazily on demand (e.g. for "show
+    # explanation") happens exactly once, a second call reuses the cached value instead of paying
+    # for RAG/embeddings again ----
+    tb.stats["ai_usage"].pop(str(uid), None)
+    tb.stats["ai_cost_totals"] = {"requests": 0, "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0}
+    rag_calls_65 = []
+    async def fake_search_for_task_65(task, limit=3):
+        rag_calls_65.append(task)
+        return [{"subject": "биология", "title": "T", "text": "материал"}], {"input_tokens": 7, "output_tokens": 0}
+    tb.ai_rag.search_for_task = fake_search_for_task_65
+
+    task65 = TaskRepresentation(
+        question="Кэшированный вопрос для проверки ленивого RAG",
+        raw_text="Кэшированный вопрос для проверки ленивого RAG",
+    )
+    tb.submit_ai_answer_for_moderation(task65, "кэш-ответ")
+    tb.moderate_ai_cache_entry(task65.fingerprint(), approve=True)
+
+    tb.start_ai_session(uid)
+    session65 = tb.AI_SESSIONS[uid]
+    session65["task"] = task65
+    session65["bucket"] = "theory_simple"
+    answer65, _ = await tb.get_first_message_ai_answer(uid, session65, task65)
+    assert answer65 == "кэш-ответ"
+    assert not rag_calls_65, "a cache hit must not touch RAG at all"
+    assert session65["rag_context"] is None, "rag_context stays at the uncomputed sentinel after a pure cache hit"
+
+    rag_ctx_1 = await tb.ensure_rag_context(session65)
+    assert len(rag_calls_65) == 1
+    assert rag_ctx_1, "the fake snippet must produce a non-empty formatted context"
+    assert tb.stats["ai_cost_totals"]["by_provider"]["openai-embeddings"]["requests"] == 1
+    assert tb.stats["ai_cost_totals"]["by_provider"]["openai-embeddings"]["input_tokens"] == 7
+    rag_ctx_2 = await tb.ensure_rag_context(session65)
+    assert len(rag_calls_65) == 1, "a second call must reuse the cached rag_context, not recompute it"
+    assert rag_ctx_2 == rag_ctx_1
+    assert tb.stats["ai_cost_totals"]["by_provider"]["openai-embeddings"]["requests"] == 1
+    tb.end_ai_session(uid)
+    print("65. ensure_rag_context computes RAG lazily after a cache hit, exactly once: OK")
+
+    # ---- 65b. real handler wiring: cb_ai_show_explanation, following a cache-hit first message,
+    # must compute the RAG context on demand (not silently pass rag_context=None/empty to the
+    # detailed request) ----
+    rag_calls_65.clear()
+    tb.stats["ai_usage"].pop(str(uid), None)
+    async def fake_solve_65b(*, task=None, text=None, history=None, quick=False, bucket=None, rag_context=None):
+        assert rag_context, "the detailed explanation must receive a non-empty RAG context computed on demand"
+        return (
+            "подробный ответ", {"role": "user", "content": text}, dict(FAKE_USAGE, provider="openai"),
+            [{"provider": "openai", "status": "success", "usage": dict(FAKE_USAGE)}],
+        )
+    tb.solve_ai_request = fake_solve_65b
+    tb.start_ai_session(uid)
+    session65b = tb.AI_SESSIONS[uid]
+    session65b["task"] = task65
+    session65b["bucket"] = "theory_simple"
+    session65b["quick_answer"] = "кэш-ответ"
+    session65b["messages"] = [
+        {"role": "user", "content": task65.to_prompt_text()}, {"role": "assistant", "content": "кэш-ответ"},
+    ]
+    cb_explain_65 = FakeCB("ai_show_explanation", uid=uid)
+    await tb.cb_ai_show_explanation(cb_explain_65)
+    assert len(rag_calls_65) == 1, "cb_ai_show_explanation must compute RAG lazily exactly once"
+    tb.end_ai_session(uid)
+    tb.stats["ai_answer_cache"].clear()
+    tb.stats["ai_usage"].pop(str(uid), None)
+    tb.solve_ai_request = orig_solve
+    print("65b. cb_ai_show_explanation computes RAG lazily when the session never had it: OK")
 
     # ==================== cleanup ====================
     tb.solve_ai_request = orig_solve

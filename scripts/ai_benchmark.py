@@ -108,7 +108,7 @@ async def run_one(part_id: int, part_title: str, q: dict) -> dict:
     try:
         task, parse_usage = await ai_vision_parser.parse_task(text=question_text)
         bucket = ai_router.route_bucket(task)
-        snippets = await ai_rag.search_for_task(task)
+        snippets, rag_usage = await ai_rag.search_for_task(task)
         rag_context = ai_rag.format_context(snippets)
         answer, _, usage, _attempts_log = await ai_service.solve(
             task=task, quick=True, bucket=bucket, rag_context=rag_context,
@@ -130,7 +130,8 @@ async def run_one(part_id: int, part_title: str, q: dict) -> dict:
             "confidence_score": decision.score,
             "mcq_verification_checked": mcq_verification.checked,
             "mcq_verification_matched": mcq_verification.matched,
-            "input_tokens": parse_usage.get("input_tokens", 0) + usage.get("input_tokens", 0),
+            "input_tokens": parse_usage.get("input_tokens", 0) + rag_usage.get("input_tokens", 0)
+            + usage.get("input_tokens", 0),
             "output_tokens": parse_usage.get("output_tokens", 0) + usage.get("output_tokens", 0),
             "elapsed_sec": round(time.monotonic() - started, 2),
             "error": None,

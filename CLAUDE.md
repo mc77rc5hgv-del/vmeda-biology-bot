@@ -476,30 +476,50 @@ Pipeline, in call order, for the **first** message of a session (photo or text):
    itself, not from a later answer — this is what lets `ai.router.route_bucket(task)` pick a
    provider before any answer exists (replaced the old `classify_quick_answer()`, which inferred
    provider from the shape of an already-generated reply).
-2. **`ai/rag.py`** (`search_for_task(task, limit=TOP_K)`) — runs before BOTH the quick and the
-   detailed answer (not just the detailed one, unlike the original MVP). Hybrid: a keyword/IDF
-   layer (`_score_entries`, zero tokens, always available) plus an optional OpenAI-embeddings
-   semantic layer (`text-embedding-3-small`, cosine similarity, `MIN_COSINE`/`SEMANTIC_SCORE_SCALE`)
-   that only engages when `OPENAI_API_KEY` is set — `_embed_query`/`build_embeddings` degrade to
-   `None`/no-op otherwise, so the feature is fully functional (keyword-only) with no key at all.
-   Embeddings are cached to disk keyed by `_entry_key()` (a content hash, not a list index), so
-   re-running `build_embeddings()` on every bot restart only pays for genuinely new/changed content.
-   `task.type == "list"` with `task.subquestions` filled queries each subquestion separately and
-   unions the results (a single blob query over a 13-item list was observed to match nothing, even
-   when half the items individually ground fine) — the old `search_snippets_multi()` did the same
-   thing by regex-splitting the model's own numbered-list ANSWER text; the new version splits on the
-   parser's structured field instead, which is the whole point of having `TaskRepresentation`.
-3. **Exact-match answer cache** (`telegram_bot.get_cached_ai_answer`/`get_first_message_ai_answer`,
-   keyed by `TaskRepresentation.fingerprint()` — normalizes word order and folds in `values` so two
-   different phrasings of the same question with the same numbers collide, but two different numbers
-   never do) — checked BEFORE calling the model at all. A hit is free: no model call, no quota spent,
-   no cost recorded. **A freshly generated answer is never auto-trusted into the cache** —
+2. **Exact-match answer cache** (`telegram_bot.get_cached_ai_answer`, called from inside
+   `get_first_message_ai_answer` BEFORE anything else — including RAG, see next item) — keyed by
+   `TaskRepresentation.fingerprint()` — normalizes word order and folds in `values` so two different
+   phrasings of the same question with the same numbers collide, but two different numbers never do.
+   A hit is free: no model call, no RAG/embedding call, no quota spent, no cost recorded at all —
+   this ordering (cache check strictly before RAG) is deliberate: RAG used to run for every first
+   message regardless, so even a cache HIT was paying for an embedding call before the cache was ever
+   consulted. **A freshly generated answer is never auto-trusted into the cache** —
    `submit_ai_answer_for_moderation()` queues it as `"pending"` in `stats["ai_answer_cache"]`; only an
    admin approving it via the moderation queue (admin panel → "🤖 Модерация AI-кэша",
    `handlers/admin.py`: `cb_admin_ai_cache_queue`/`_approve`/`_reject`) makes it servable to other
    users. Rejecting doesn't block the question forever — the next occurrence generates (and re-queues)
    a fresh candidate. `submit_ai_answer_for_moderation()` never overwrites an already-`"approved"`
    entry with a new candidate; only `moderate_ai_cache_entry()` can change an approved entry's fate.
+3. **`ai/rag.py`** (`search_for_task(task, limit=TOP_K) -> (snippets, usage)`) — runs on a cache
+   MISS, before BOTH the quick and the detailed answer (not just the detailed one, unlike the
+   original MVP). Hybrid: a keyword/IDF layer (`_score_entries`, zero tokens, always available) plus
+   an optional OpenAI-embeddings semantic layer (`text-embedding-3-small`, cosine similarity,
+   `MIN_COSINE`/`SEMANTIC_SCORE_SCALE`) that only engages when `OPENAI_API_KEY` is set —
+   `_embed_query`/`_embed_queries`/`build_embeddings` degrade to `None`/no-op otherwise, so the
+   feature is fully functional (keyword-only) with no key at all. Embeddings are cached to disk keyed
+   by `_entry_key()` (a content hash, not a list index), so re-running `build_embeddings()` on every
+   bot restart only pays for genuinely new/changed content. `task.type == "list"` with
+   `task.subquestions` filled queries each subquestion separately and unions the results (a single
+   blob query over a 13-item list was observed to match nothing, even when half the items
+   individually ground fine) — the old `search_snippets_multi()` did the same thing by regex-splitting
+   the model's own numbered-list ANSWER text; the new version splits on the parser's structured field
+   instead, which is the whole point of having `TaskRepresentation`. The number of distinct queries
+   fired per task is capped at `MAX_RAG_QUERIES` (8) — a vision-parsed task with an unusually long
+   `subquestions` list (e.g. 25 items) must not fire one embedding call per item; the capped queries
+   then ALL go out as a SINGLE batched call (`_embed_queries()`, `client.embeddings.create(input=[...])`
+   accepts a list natively) instead of one API call per query — `_embed_query` (singular) still exists
+   unchanged for the few call sites that only ever need one embedding at a time. `search_for_task()`
+   returns `(snippets, usage)`, not just `snippets` — the caller (`telegram_bot.ensure_rag_context()`)
+   folds `usage` into `record_ai_cost({**usage, "provider": "openai-embeddings"})` whenever
+   `input_tokens` is nonzero, so embedding spend shows up as its own line in `get_ai_cost_stats_block()`
+   instead of silently under-reporting total AI cost. `ensure_rag_context(session)` is the single
+   entry point that computes-once/caches `session["rag_context"]` — `None` is the "not computed yet"
+   sentinel (distinct from `""`, "computed, no snippets found"); `get_first_message_ai_answer()` calls
+   it only on a cache miss, and `cb_ai_show_explanation`/the "later message in the same session"
+   branches of `handle_ai_photo_input`/`handle_ai_text_input` call it too, so a session whose FIRST
+   message was served from cache (and therefore never computed RAG) still gets a real, on-demand RAG
+   context the moment it's actually needed (e.g. "Показать решение по шагам") instead of silently
+   running ungrounded for the rest of that session.
 4. **`ai/service.py`** (`solve(*, task=None, text=None, history=None, quick=False, bucket=None,
    rag_context=None)`) — only called on a cache MISS. `task` is passed only on the first turn of a
    session (its `to_prompt_text()` becomes the request content); every later turn passes `text`

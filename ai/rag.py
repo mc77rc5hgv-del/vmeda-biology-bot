@@ -167,6 +167,8 @@ def _score_entries(query_text: str, index: list, idf: dict) -> list:
 
 # ==================== ГИБРИДНЫЙ СЛОЙ: ЭМБЕДДИНГИ (семантический поиск) ====================
 EMBEDDING_MODEL = "text-embedding-3-small"
+EMBEDDING_PRICE_PER_1M = 0.02  # $/1M токенов — держать в синхроне с прайсом OpenAI; эмбеддинги
+# биллятся только по входным токенам, отдельной "output"-цены у них нет
 EMBEDDING_BATCH_SIZE = 100  # сколько текстов эмбеддим за один вызов API
 MIN_COSINE = 0.5  # порог семантического совпадения — эмбеддинги дают смысловую близость даже
 # при полном отсутствии общих слов, поэтому порог держим консервативным: по наблюдениям для
@@ -175,6 +177,11 @@ MIN_COSINE = 0.5  # порог семантического совпадения
 SEMANTIC_SCORE_SCALE = 3.0  # приводит косинусное сходство (0..1) к той же шкале, что и
 # нормализованный keyword-балл (типичные сильные совпадения 1.3-3.5, см. MIN_SCORE), чтобы два
 # сигнала были сравнимы при объединении в hybrid-скор
+MAX_RAG_QUERIES = 8  # верхний предел числа отдельных "запросов" на одно задание — без него
+# task.type=="list" с большим числом task.subquestions (vision-парсер в принципе может выделить
+# и 20-30 пунктов из сложного многосоставного задания) отправлял бы по отдельному embedding-
+# запросу на КАЖДЫЙ пункт; теперь не только ограничено сверху, но и все запросы уходят ОДНИМ
+# батч-вызовом API (см. _embed_queries), а не по одному на пункт
 
 _embeddings: dict = {}  # entry["key"] -> vector (list[float])
 
@@ -238,7 +245,8 @@ async def build_embeddings(cache_path: str = None) -> None:
 
 async def _embed_query(text: str):
     """None при любой проблеме (нет ключа, сеть, лимиты) — вызывающий код просто не получает
-    семантический сигнал и работает на чистом keyword-поиске, как раньше."""
+    семантический сигнал и работает на чистом keyword-поиске, как раньше. Одиночный запрос —
+    для батча НЕСКОЛЬКИХ запросов одним вызовом API см. _embed_queries."""
     client = openai_provider.get_client()
     if client is None or not text.strip():
         return None
@@ -248,6 +256,40 @@ async def _embed_query(text: str):
     except Exception:
         logger.exception("Не удалось получить эмбеддинг запроса для RAG — используется только keyword-поиск")
         return None
+
+
+async def _embed_queries(texts: list) -> tuple:
+    """Батчевый эмбеддинг НЕСКОЛЬКИХ запросов ОДНИМ вызовом API вместо одного вызова на каждый
+    текст — OpenAI embeddings endpoint нативно принимает список input. Возвращает
+    (embeddings, usage): embeddings — список того же порядка и длины, что texts (None на месте
+    пустого текста); usage — {"input_tokens", "output_tokens": 0} суммарно по батчу, чтобы
+    вызывающий код мог учесть реальную стоимость (см. telegram_bot.record_ai_cost) — раньше
+    стоимость эмбеддингов запроса нигде не фиксировалась. Деградирует в (все None, нулевой usage)
+    при любой проблеме (нет ключа, сеть, лимиты), как и _embed_query."""
+    zero_usage = {"input_tokens": 0, "output_tokens": 0}
+    if not texts:
+        return [], dict(zero_usage)
+    client = openai_provider.get_client()
+    if client is None:
+        return [None] * len(texts), dict(zero_usage)
+    non_empty = [(i, t) for i, t in enumerate(texts) if t.strip()]
+    if not non_empty:
+        return [None] * len(texts), dict(zero_usage)
+    try:
+        response = await client.embeddings.create(
+            model=EMBEDDING_MODEL, input=[t[:4000] for _, t in non_empty],
+        )
+        results = [None] * len(texts)
+        for (idx, _), item in zip(non_empty, response.data):
+            results[idx] = item.embedding
+        usage = {
+            "input_tokens": getattr(response.usage, "total_tokens", 0) if response.usage else 0,
+            "output_tokens": 0,
+        }
+        return results, usage
+    except Exception:
+        logger.exception("Не удалось получить батч эмбеддингов запросов для RAG — используется только keyword-поиск")
+        return [None] * len(texts), dict(zero_usage)
 
 
 def _cosine(a: list, b: list) -> float:
@@ -286,7 +328,7 @@ def _hybrid_score_entries(query_text: str, query_embedding, index: list, idf: di
     return [(score, entry) for score, entry in combined.values()]
 
 
-async def search_for_task(task, limit: int = TOP_K) -> list:
+async def search_for_task(task, limit: int = TOP_K) -> tuple:
     """Гибридный поиск (keyword+эмбеддинги, см. модульный docstring) по УЖЕ РАЗОБРАННОМУ заданию
     (ai.task.TaskRepresentation) — точка входа для нового конвейера: вызывается ДО первого ответа
     модели, и на quick, и на detailed (в отличие от старого search_snippets/search_snippets_multi,
@@ -294,20 +336,33 @@ async def search_for_task(task, limit: int = TOP_K) -> list:
     (task.type == "list" и заполнен subquestions) ищет по КАЖДОМУ пункту отдельно и объединяет
     результаты (та же идея, что и старый search_snippets_multi, но источник пунктов —
     структурированное поле парсера, а не построчный разбор уже готового ответа модели, см. пункт 3
-    архитектурного разбора AI-режима — классификация должна идти по заданию, не по ответу)."""
+    архитектурного разбора AI-режима — классификация должна идти по заданию, не по ответу).
+
+    Число отдельных запросов урезано до MAX_RAG_QUERIES (см. константу) — без этого предела
+    многопунктное задание с большим числом subquestions могло бы породить непропорционально много
+    embedding-запросов на один-единственный AI-запрос пользователя; все они при этом уходят ОДНИМ
+    батч-вызовом API (_embed_queries), а не по одному на пункт.
+
+    Возвращает (snippets, usage) — usage {"input_tokens", "output_tokens": 0} суммарно по всем
+    embedding-запросам этого вызова (нулевой, если семантический слой не участвовал вообще — нет
+    ключа, все запросы деградировали, или запросов не было), чтобы вызывающий код мог учесть
+    реальную стоимость (см. telegram_bot.record_ai_cost)."""
     index, idf = _index or [], _idf or {}
     queries = task.subquestions if (task.type == "list" and task.subquestions) else [task.question_text()]
+    queries = [q for q in queries if q and q.strip()][:MAX_RAG_QUERIES]
+    if not queries:
+        return [], {"input_tokens": 0, "output_tokens": 0}
+
+    query_embeddings, usage = await _embed_queries(queries)
+
     best_by_key = {}
-    for query in queries:
-        if not query.strip():
-            continue
-        query_embedding = await _embed_query(query)
+    for query, query_embedding in zip(queries, query_embeddings):
         for score, entry in _hybrid_score_entries(query, query_embedding, index, idf):
             key = (entry["subject"], entry["title"])
             if key not in best_by_key or score > best_by_key[key][0]:
                 best_by_key[key] = (score, entry)
     scored = sorted(best_by_key.values(), key=lambda x: -x[0])
-    return [entry for _, entry in scored[:limit]]
+    return [entry for _, entry in scored[:limit]], usage
 
 
 def format_context(snippets: list) -> str:
