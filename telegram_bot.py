@@ -33,6 +33,7 @@ from ai.providers import gemini as ai_gemini
 from ai.providers import openai as ai_openai
 from ai.providers import xai as ai_xai
 from ai import confidence as ai_confidence
+from ai import math_verifier as ai_math_verifier
 from ai import validator as ai_validator
 from ai import vision_parser as ai_vision_parser
 from ai.router import AIRefusalError
@@ -4084,9 +4085,11 @@ async def get_first_message_ai_answer(user_id: int, session: dict, task) -> tupl
     при попадании ответ отдаётся бесплатно, без обращения к модели и без списания квоты/учёта
     стоимости. При промахе — обычный запрос к solve_ai_request (списывает квоту, учитывает
     стоимость всех попыток), затем ответ прогоняется через детерминированный валидатор (см.
-    ai/validator.py) и confidence-роутер (ai/confidence.py) — при низкой уверенности пользователю
-    честно показывается предупреждение (AI_LOW_CONFIDENCE_NOTE), а запись в очереди модерации
-    получает более высокий приоритет на проверку. session["quick_answer"] всегда хранит ИСХОДНЫЙ
+    ai/validator.py), для calculation-заданий — ещё и через независимый математический verifier
+    (ai/math_verifier.py, пересчитывает результат по распознанной формуле и сверяет с ответом), и
+    через confidence-роутер (ai/confidence.py) — при низкой уверенности пользователю честно
+    показывается предупреждение (AI_LOW_CONFIDENCE_NOTE), а запись в очереди модерации получает
+    более высокий приоритет на проверку. session["quick_answer"] всегда хранит ИСХОДНЫЙ
     ответ БЕЗ предупреждения — это canonical-якорь для "Показать решение по шагам"
     (ai.prompts.explain_followup_text), предупреждение не должно путать модель на следующем ходу.
 
@@ -4108,7 +4111,10 @@ async def get_first_message_ai_answer(user_id: int, session: dict, task) -> tupl
     record_ai_attempts_cost(attempts_log)
 
     validation = ai_validator.validate_answer(task, answer)
-    decision = ai_confidence.decide(task, validation, rag_grounded=bool(session.get("rag_context")))
+    math_verification = ai_math_verifier.verify_calculation(task, answer)
+    decision = ai_confidence.decide(
+        task, validation, rag_grounded=bool(session.get("rag_context")), math_verification=math_verification,
+    )
     submit_ai_answer_for_moderation(task, answer, decision.action, decision.reasons)
     session["quick_answer"] = answer
 

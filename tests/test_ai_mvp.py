@@ -1850,6 +1850,127 @@ async def main():
     tb.stats["ai_usage"].pop(str(uid), None)
     tb.solve_ai_request = orig_solve
 
+    # ==================== ЧАСТЬ I: ai.math_verifier (независимый пересчёт для calculation) ====================
+
+    # ---- 54. verify_calculation: Ohm's law — all three solve-for directions, match/mismatch/
+    # order-of-magnitude cases. This is the concrete fix for "pH = 3.2 instead of 3.7" class of
+    # error: ai.validator only checks a calculation answer HAS a digit, never whether it's right ----
+    ohm_task_u = TaskRepresentation(
+        type="calculation", question="Найти напряжение по закону Ома",
+        values={"I": "2", "R": "5"}, units={"I": "А", "R": "Ом"},
+    )
+    r54 = tb.ai_math_verifier.verify_calculation(ohm_task_u, "Напряжение равно 10 В")
+    assert r54.checked and r54.matched and r54.formula_name.startswith("закон Ома")
+    assert abs(r54.expected_value - 10.0) < 1e-9
+
+    r54_wrong = tb.ai_math_verifier.verify_calculation(ohm_task_u, "Напряжение равно 12 В")
+    assert r54_wrong.checked and not r54_wrong.matched
+    assert abs(r54_wrong.found_value - 12.0) < 1e-9
+
+    r54_magnitude = tb.ai_math_verifier.verify_calculation(ohm_task_u, "Напряжение равно 100 В")
+    assert r54_magnitude.checked and not r54_magnitude.matched
+    assert "порядок величины" in r54_magnitude.note
+
+    ohm_task_i = TaskRepresentation(
+        type="calculation", question="Закон Ома: найти силу тока",
+        values={"U": "10", "R": "5"}, units={"U": "В", "R": "Ом"},
+    )
+    r54_i = tb.ai_math_verifier.verify_calculation(ohm_task_i, "Сила тока равна 2 А")
+    assert r54_i.checked and r54_i.matched
+
+    ohm_task_r = TaskRepresentation(
+        type="calculation", question="Закон Ома: найти сопротивление",
+        values={"U": "10", "I": "2"}, units={"U": "В", "I": "А"},
+    )
+    r54_r = tb.ai_math_verifier.verify_calculation(ohm_task_r, "Сопротивление равно 5 Ом")
+    assert r54_r.checked and r54_r.matched
+    print("54. verify_calculation: Ohm's law solves for U/I/R, catches wrong and order-of-magnitude answers: OK")
+
+    # ---- 55. verify_calculation: pH from concentration — the exact "3.2 instead of 3.7"-shaped
+    # regression this feature targets; tolerance is generous enough for rounding, not for a wrong digit ----
+    ph_task = TaskRepresentation(
+        type="calculation", question="Найти pH раствора", values={"c": "0.001"}, units={"c": "моль/л"},
+    )
+    r55_correct = tb.ai_math_verifier.verify_calculation(ph_task, "pH раствора равен 3")
+    assert r55_correct.checked and r55_correct.matched
+    r55_close_enough = tb.ai_math_verifier.verify_calculation(ph_task, "pH раствора равен 3,04")
+    assert r55_close_enough.checked and r55_close_enough.matched, "small rounding must stay within tolerance"
+    r55_wrong = tb.ai_math_verifier.verify_calculation(ph_task, "pH раствора равен 3,7")
+    assert r55_wrong.checked and not r55_wrong.matched, "a genuinely wrong digit must fail, not just be waved through"
+    print("55. verify_calculation: pH from [H+], generous rounding tolerance but catches real errors: OK")
+
+    # ---- 56. verify_calculation: honest scope — unrecognized formulas and non-calculation tasks
+    # are checked=False (no opinion), never a false "matched" verdict; malformed/non-numeric
+    # condition values degrade to checked=False instead of crashing ----
+    unrecognized_task = TaskRepresentation(type="calculation", question="Найти массу вещества X по неизвестной методике")
+    r56 = tb.ai_math_verifier.verify_calculation(unrecognized_task, "m = 42 г")
+    assert not r56.checked
+    r56_noncalc = tb.ai_math_verifier.verify_calculation(TaskRepresentation(type="mcq", question="x"), "A")
+    assert not r56_noncalc.checked
+    ohm_bad_values = TaskRepresentation(
+        type="calculation", question="Закон Ома", values={"I": "много", "R": "5"}, units={"I": "А", "R": "Ом"},
+    )
+    r56_bad = tb.ai_math_verifier.verify_calculation(ohm_bad_values, "Напряжение 10 В")
+    assert not r56_bad.checked, "non-numeric condition values must degrade to 'no opinion', not crash"
+    print("56. verify_calculation: unrecognized formulas and bad input degrade to checked=False, never crash: OK")
+
+    # ---- 57. ai.confidence.decide: a math mismatch forces ESCALATE directly, stronger than any
+    # validator-only signal; a confirmed match is a real positive signal; checked=False (formula
+    # not recognized) has NO effect on the decision at all ----
+    clean_validation57 = tb.ai_validator.validate_answer(ohm_task_u, "Напряжение равно 10 В")
+    decision_match = tb.ai_confidence.decide(ohm_task_u, clean_validation57, math_verification=r54)
+    assert decision_match.action == tb.ai_confidence.SERVE
+    assert any("подтверждён" in r for r in decision_match.reasons)
+
+    clean_validation_wrong = tb.ai_validator.validate_answer(ohm_task_u, "Напряжение равно 12 В")
+    decision_mismatch = tb.ai_confidence.decide(ohm_task_u, clean_validation_wrong, math_verification=r54_wrong)
+    assert decision_mismatch.action == tb.ai_confidence.ESCALATE, (
+        "a failed independent recompute must force ESCALATE even though the validator alone saw "
+        "nothing wrong (the answer has a digit, that's all validate_answer checks for calculations)"
+    )
+
+    decision_no_opinion = tb.ai_confidence.decide(unrecognized_task, clean_validation57, math_verification=r56)
+    decision_baseline = tb.ai_confidence.decide(unrecognized_task, clean_validation57, math_verification=None)
+    assert decision_no_opinion.action == decision_baseline.action == tb.ai_confidence.SERVE
+    assert decision_no_opinion.score == decision_baseline.score, "checked=False must be a complete no-op on the score"
+    print("57. ai.confidence.decide: math mismatch forces ESCALATE, match is a real bonus, unrecognized is a no-op: OK")
+
+    # ---- 58. end-to-end: get_first_message_ai_answer runs the math verifier for calculation
+    # tasks — a wrong recomputed answer gets the low-confidence warning AND jumps the moderation
+    # queue ahead of a plain SERVE entry, exactly like a VERIFY/ESCALATE from the validator would ----
+    tb.stats["ai_answer_cache"].clear()
+    tb.stats["ai_usage"].pop(str(uid), None)
+    async def fake_solve_58(*, task=None, text=None, history=None, quick=False, bucket=None, rag_context=None):
+        return (
+            "pH раствора равен 3,7",  # wrong — the recognized formula gives 3
+            {"role": "user", "content": task.to_prompt_text() + tb.ai_prompts.QUICK_SUFFIX},
+            dict(FAKE_USAGE, provider="openai"),
+            [{"provider": "openai", "status": "success", "usage": dict(FAKE_USAGE)}],
+        )
+    tb.solve_ai_request = fake_solve_58
+    ph_task_58 = TaskRepresentation(
+        type="calculation", question="Найти pH раствора", values={"c": "0.001"}, units={"c": "моль/л"},
+        raw_text="Найти pH раствора",
+    )
+    session58 = {"messages": [], "bucket": "problem", "rag_context": None, "quick_answer": None}
+    display58, _ = await tb.get_first_message_ai_answer(uid, session58, ph_task_58)
+    assert tb.AI_LOW_CONFIDENCE_NOTE in display58
+    assert session58["quick_answer"] == "pH раствора равен 3,7", "canonical anchor stays the original answer"
+    fp58 = ph_task_58.fingerprint()
+    assert tb.stats["ai_answer_cache"][fp58]["confidence_action"] == tb.ai_confidence.ESCALATE
+    assert any("пересчёт" in r for r in tb.stats["ai_answer_cache"][fp58]["confidence_reasons"])
+
+    # a plain SERVE entry queued right after must still come AFTER the math-mismatch one
+    plain_task_58 = TaskRepresentation(question="Обычный вопрос без калькуляции")
+    tb.submit_ai_answer_for_moderation(plain_task_58, "ok", confidence_action=tb.ai_confidence.SERVE)
+    fp_next58, _ = tb.get_next_pending_ai_cache_entry()
+    assert fp_next58 == fp58, "the math-verifier-flagged ESCALATE entry must be reviewed before a plain SERVE one"
+    print("58. get_first_message_ai_answer: math verifier mismatch triggers the warning and queue priority: OK")
+
+    tb.stats["ai_answer_cache"].clear()
+    tb.stats["ai_usage"].pop(str(uid), None)
+    tb.solve_ai_request = orig_solve
+
     # ==================== cleanup ====================
     tb.solve_ai_request = orig_solve
     tb.ai_vision_parser.parse_task = orig_parse_task

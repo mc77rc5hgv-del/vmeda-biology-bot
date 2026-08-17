@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 """Confidence-роутинг: объединяет сигналы уверенности с разных этапов конвейера (уверенность
 vision-парсера в разборе самого задания, была ли найдена релевантная база РАГ, прошёл ли ответ
-детерминированный валидатор — см. ai/validator.py) в одно решение, что делать с готовым ответом:
+детерминированный валидатор — см. ai/validator.py, и, для calculation-заданий, сошёлся ли
+независимый пересчёт по формуле — см. ai/math_verifier.py) в одно решение, что делать с готовым
+ответом:
 
 - SERVE — отдать как есть.
 - VERIFY — отдать, но честно предупредить пользователя, что ответ не прошёл автоматическую
@@ -41,13 +43,26 @@ class ConfidenceDecision:
     reasons: list = field(default_factory=list)
 
 
+MATH_MISMATCH_PENALTY = 0.8  # штраф при несовпадении пересчёта — заведомо сильнее любого штрафа
+# ai.validator (максимум 0.4-1.0 там за структурные нестыковки): независимый пересчёт по формуле,
+# который НЕ совпал с ответом, — куда более веское доказательство ошибки, чем "в ответе есть цифра"
+MATH_MATCH_BONUS = 0.2  # подтверждённый пересчёт — сильный положительный сигнал, сильнее RAG
+
+
 def decide(
     task: TaskRepresentation, validation: ValidationResult, *,
-    rag_grounded: bool = False, from_cache: bool = False,
+    rag_grounded: bool = False, from_cache: bool = False, math_verification=None,
 ) -> ConfidenceDecision:
     """from_cache=True — ответ уже одобрен админом через кэш точных совпадений (см.
     telegram_bot.get_cached_ai_answer): доверие установлено модерацией заранее, пересчитывать
-    нечего — всегда SERVE немедленно, без обращения к validation/task вообще."""
+    нечего — всегда SERVE немедленно, без обращения к validation/task/math_verification вообще.
+
+    math_verification — ai.math_verifier.MathVerification, если задание было типа "calculation" и
+    формула распозналась (checked=True); при checked=False (формула не распознана — verifier не
+    имеет мнения об этом задании) не влияет на решение вообще. matched=False — единственный сигнал
+    в этой функции, который форсирует ESCALATE НАПРЯМУЮ, независимо от validation/score: несовпадение
+    независимого пересчёта — куда более веское доказательство ошибки, чем любая структурная
+    эвристика validator'а."""
     if from_cache:
         return ConfidenceDecision(SERVE, 1.0, ["ответ из промодерированного кэша"])
 
@@ -65,7 +80,17 @@ def decide(
     score += validation.confidence_adjustment
     reasons.extend(validation.warnings)
 
-    if not validation.passed and validation.confidence_adjustment <= ESCALATE_THRESHOLD:
+    math_mismatch = False
+    if math_verification is not None and math_verification.checked:
+        if math_verification.matched:
+            score += MATH_MATCH_BONUS
+            reasons.append(f"независимый пересчёт подтверждён: {math_verification.note}")
+        else:
+            math_mismatch = True
+            score -= MATH_MISMATCH_PENALTY
+            reasons.append(f"независимый пересчёт разошёлся с ответом: {math_verification.note}")
+
+    if math_mismatch or (not validation.passed and validation.confidence_adjustment <= ESCALATE_THRESHOLD):
         return ConfidenceDecision(ESCALATE, score, reasons)
     if not validation.passed or score < VERIFY_SCORE_THRESHOLD:
         return ConfidenceDecision(VERIFY, score, reasons)

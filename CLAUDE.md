@@ -514,10 +514,28 @@ Pipeline, in call order, for the **first** message of a session (photo or text):
    `task.options`, a `"list"` answer with far fewer lines than `task.subquestions`, an empty answer,
    or `ai.router.looks_like_refusal()` firing. Does NOT check factual correctness — only "does this
    look like a plausible answer to this specific question shape".
-6. **`ai/confidence.py`** (`decide(task, validation, *, rag_grounded=False, from_cache=False)`) —
-   combines parse confidence + RAG grounding + the validator's verdict into `SERVE`/`VERIFY`/
-   `ESCALATE`. `from_cache=True` always short-circuits to `SERVE` (trust was already established by
-   admin moderation). `ESCALATE` does **not** trigger a hidden retry with a stronger model — `quick=True`
+   **`ai/math_verifier.py`** (`verify_calculation(task, answer)`) goes one level further, but ONLY
+   for `task.type == "calculation"`: an actual independent recompute-and-compare, not just a shape
+   check — this is what catches a wrong-but-plausible-looking number (e.g. `pH = 3.2` when the
+   correct value is `3.7`), which `validate_answer` structurally cannot, since it only checks that
+   *some* digit is present. Deliberately does NOT attempt to infer an arbitrary formula from free
+   text (that would need either another model call, defeating "zero tokens", or a full CAS) —
+   instead it holds a small, explicit registry of formulas it can recognize with confidence (today:
+   Ohm's law, pH from `[H+]`), matched via `task.values`/`task.units` (the parser's own structured
+   fields — units there are unambiguous, unlike scanning raw prose where a bare "в" is usually just
+   the preposition "in", not Volts). A question whose formula isn't in the registry comes back
+   `checked=False` — the verifier stays silent rather than guessing. When it does have an opinion,
+   it extracts the closest number in the model's answer, compares within `RELATIVE_TOLERANCE` (5%,
+   generous enough for rounding, not for a wrong digit), and flags a ≥10× gap specifically as a
+   likely unit/order-of-magnitude mix-up.
+6. **`ai/confidence.py`** (`decide(task, validation, *, rag_grounded=False, from_cache=False,
+   math_verification=None)`) — combines parse confidence + RAG grounding + the validator's verdict
+   + (for calculations) the math verifier's verdict into `SERVE`/`VERIFY`/`ESCALATE`. A math-verifier
+   MISMATCH forces `ESCALATE` directly, overriding everything else — an independent recompute
+   disagreeing is stronger evidence than any structural heuristic; a `checked=False` verdict (formula
+   not recognized) is a complete no-op on the score, never nudges the decision either way.
+   `from_cache=True` always short-circuits to `SERVE` (trust was already established by admin
+   moderation). `ESCALATE` does **not** trigger a hidden retry with a stronger model — `quick=True`
    requests are deliberately pinned to OpenAI only (self-consistency with the detailed step that
    follows), so there is no stronger provider to actually fall back to at this stage. Its real effect
    is queue priority: `get_next_pending_ai_cache_entry()` sorts pending moderation entries
