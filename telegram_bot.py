@@ -10,7 +10,7 @@ import sys
 import time
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date
+from datetime import date, datetime
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import (
     Message, CallbackQuery, InlineKeyboardButton, FSInputFile, BufferedInputFile, Update,
@@ -153,6 +153,10 @@ def load_stats() -> dict:
             data.setdefault("ai_usage", {})
             data.setdefault("ai_cost_totals", {"requests": 0, "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0})
             data.setdefault("ai_answer_cache", {})
+            data.setdefault("ai_cost_windows", {
+                "hour_key": None, "hour_cost_usd": 0.0, "day_key": None, "day_cost_usd": 0.0,
+                "breaker_tripped": False, "breaker_alerted": False,
+            })
             return data
         except (json.JSONDecodeError, OSError):
             logger.exception("Не удалось прочитать %s, статистика будет создана заново", STATS_FILE)
@@ -192,6 +196,10 @@ def load_stats() -> dict:
         "ai_usage": {},
         "ai_cost_totals": {"requests": 0, "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0},
         "ai_answer_cache": {},
+        "ai_cost_windows": {
+            "hour_key": None, "hour_cost_usd": 0.0, "day_key": None, "day_cost_usd": 0.0,
+            "breaker_tripped": False, "breaker_alerted": False,
+        },
     }
 
 # Один воркер сериализует записи на диск и не даёт им блокировать event loop бота.
@@ -2422,6 +2430,8 @@ cb_admin_referral_reminder_go = admin_handlers.cb_admin_referral_reminder_go
 cb_admin_discount_promo_confirm = admin_handlers.cb_admin_discount_promo_confirm
 cb_admin_discount_promo_go = admin_handlers.cb_admin_discount_promo_go
 cb_admin_stats = admin_handlers.cb_admin_stats
+get_admin_stats_keyboard = admin_handlers.get_admin_stats_keyboard
+cb_admin_ai_breaker_reset = admin_handlers.cb_admin_ai_breaker_reset
 get_ai_cache_queue_text = admin_handlers.get_ai_cache_queue_text
 get_ai_cache_queue_keyboard = admin_handlers.get_ai_cache_queue_keyboard
 cb_admin_ai_cache_queue = admin_handlers.cb_admin_ai_cache_queue
@@ -3852,6 +3862,18 @@ def _get_ai_user_lock(user_id: int) -> asyncio.Lock:
         AI_USER_LOCKS[user_id] = lock
     return lock
 
+# ---- Бот-широкий предохранитель по одновременным запросам (независим от AI_USER_LOCKS выше,
+# который ограничивает только ОДНОГО пользователя одним запросом за раз) — всплеск трафика (много
+# разных пользователей, у каждого своя дневная квота) мог бы всё равно запустить неограниченное
+# число дорогих запросов ОДНОВРЕМЕННО, раз лимит был только по-пользовательский ----
+MAX_AI_CONCURRENT_REQUESTS = int(os.environ.get("AI_MAX_CONCURRENT_REQUESTS", "10"))
+_AI_CONCURRENCY = {"count": 0}  # мутируем через словарь, а не через global int — единственный
+# await между "count < MAX" и "count += 1" нигде не встаёт, так что гонки внутри одного event loop
+# здесь нет: и код, что проверяет условие, и код, что увеличивает счётчик, выполняются синхронно.
+
+def ai_concurrency_slot_available() -> bool:
+    return _AI_CONCURRENCY["count"] < MAX_AI_CONCURRENT_REQUESTS
+
 def get_ai_usage_today(user_id: int) -> int:
     entry = stats["ai_usage"].get(str(user_id))
     if not entry or entry.get("date") != date.today().isoformat():
@@ -3983,7 +4005,13 @@ def record_ai_cost(usage: dict) -> None:
     p["input_tokens"] += input_tokens
     p["output_tokens"] += output_tokens
     p["cost_usd"] += cost
+    _update_ai_cost_windows(cost)
     save_stats()
+    if ai_circuit_breaker_tripped() and not stats["ai_cost_windows"].get("breaker_alerted"):
+        try:
+            asyncio.get_running_loop().create_task(_maybe_alert_admins_of_breaker_trip())
+        except RuntimeError:
+            pass  # вызвано вне event loop (например, из синхронного теста) — алерт просто не уйдёт
 
 def get_ai_cost_stats_block() -> str:
     totals = stats["ai_cost_totals"]
@@ -4000,6 +4028,72 @@ def get_ai_cost_stats_block() -> str:
         if p and p["requests"]:
             block += f"\n  из них {label}: {p['requests']} запр., ${p['cost_usd']:.4f}"
     return block.replace(",", " ")
+
+# ---- Ценовой автовыключатель (circuit breaker) — на случай, если из-за какого-то бага (не
+# concurrency-гонки выше, а, например, зацикленного клиента или скомпрометированного ключа) реально
+# улетают деньги: MAX_AI_CONCURRENT_REQUESTS ограничивает только ОДНОВРЕМЕННЫЕ запросы, но не
+# суммарный расход за час/сутки. Окна те же, что и у ai_used_monthly (см. CLAUDE.md) — ключ-строка
+# периода + бегущая сумма, сравниваемая с порогом при каждой записи стоимости. ----
+AI_COST_HOUR_LIMIT_USD = float(os.environ.get("AI_COST_HOUR_LIMIT_USD", "5.0"))
+AI_COST_DAY_LIMIT_USD = float(os.environ.get("AI_COST_DAY_LIMIT_USD", "30.0"))
+
+def _current_hour_key() -> str:
+    return datetime.now().strftime("%Y-%m-%d-%H")
+
+def _current_day_key() -> str:
+    return date.today().isoformat()
+
+def _update_ai_cost_windows(cost: float) -> None:
+    """Вызывается из record_ai_cost() на КАЖДУЮ записанную стоимость (включая эмбеддинги) —
+    копит расход в скользящих часовом/суточном окнах и взводит breaker_tripped, если порог
+    превышен. Не сбрасывает breaker_tripped автоматически при смене окна — снятие блокировки нарочно
+    осталось ручным (админ должен увидеть алерт и осознанно решить, что дело не в баге, а не
+    полагаться на то, что через час всё само откроется и никто не заметит, что лимит вообще
+    срабатывал)."""
+    windows = stats["ai_cost_windows"]
+    hour_key = _current_hour_key()
+    if windows.get("hour_key") != hour_key:
+        windows["hour_key"] = hour_key
+        windows["hour_cost_usd"] = 0.0
+    windows["hour_cost_usd"] += cost
+    day_key = _current_day_key()
+    if windows.get("day_key") != day_key:
+        windows["day_key"] = day_key
+        windows["day_cost_usd"] = 0.0
+    windows["day_cost_usd"] += cost
+    if windows["hour_cost_usd"] >= AI_COST_HOUR_LIMIT_USD or windows["day_cost_usd"] >= AI_COST_DAY_LIMIT_USD:
+        windows["breaker_tripped"] = True
+
+def ai_circuit_breaker_tripped() -> bool:
+    return stats["ai_cost_windows"].get("breaker_tripped", False)
+
+def reset_ai_circuit_breaker() -> None:
+    """Ручной сброс из админ-панели — единственный способ разблокировать AI после срабатывания."""
+    windows = stats["ai_cost_windows"]
+    windows["breaker_tripped"] = False
+    windows["breaker_alerted"] = False
+    save_stats()
+
+async def _maybe_alert_admins_of_breaker_trip() -> None:
+    """Шлёт админам алерт РОВНО один раз за срабатывание (breaker_alerted — не per-заблокированный
+    запрос, иначе при живом трафике админов завалило бы одинаковыми сообщениями)."""
+    windows = stats["ai_cost_windows"]
+    if windows.get("breaker_alerted"):
+        return
+    windows["breaker_alerted"] = True
+    save_stats()
+    text = (
+        "🚨 <b>AI-автовыключатель сработал</b>\n\n"
+        f"Расход за текущий час: ${windows['hour_cost_usd']:.2f} (лимит ${AI_COST_HOUR_LIMIT_USD:.2f})\n"
+        f"Расход за сутки: ${windows['day_cost_usd']:.2f} (лимит ${AI_COST_DAY_LIMIT_USD:.2f})\n\n"
+        "AI-режим временно отключён для всех пользователей. Проверь расход в статистике и сбрось "
+        "выключатель из админ-панели, если это ожидаемый трафик, а не баг."
+    )
+    for admin_id in ADMIN_IDS:
+        try:
+            await bot.send_message(admin_id, text, parse_mode="HTML")
+        except Exception:
+            logger.exception("Не удалось уведомить админа %s о срабатывании AI-автовыключателя", admin_id)
 
 def is_ai_session_active(user_id: int) -> bool:
     session = AI_SESSIONS.get(user_id)
@@ -4267,6 +4361,12 @@ async def cb_ai_solve_start(callback: CallbackQuery):
     if not OPENAI_API_KEY:
         await callback.answer("AI сейчас на техническом обслуживании, загляни позже.", show_alert=True)
         return
+    if ai_circuit_breaker_tripped():
+        await callback.answer(
+            "AI временно отключён из-за высокой нагрузки — администраторы уже знают, попробуй позже.",
+            show_alert=True,
+        )
+        return
     if not ai_quota_ok(user_id):
         await callback.answer("На сегодня бесплатные AI-запросы закончились, попробуй завтра.", show_alert=True)
         return
@@ -4321,6 +4421,15 @@ async def cb_ai_show_explanation(callback: CallbackQuery):
         # AI-сессии, session["processing"] выше такую гонку не ловит (см. AI_USER_LOCKS)
         await callback.answer()
         return
+    if ai_circuit_breaker_tripped():
+        await callback.answer(
+            "AI временно отключён из-за высокой нагрузки — администраторы уже знают, попробуй позже.",
+            show_alert=True,
+        )
+        return
+    if not ai_concurrency_slot_available():
+        await callback.answer("Сейчас слишком много запросов к AI одновременно — попробуй через минуту.", show_alert=True)
+        return
     if not ai_quota_ok(user_id):
         end_ai_session(user_id)
         await callback.answer("На сегодня бесплатные AI-запросы закончились, попробуй завтра.", show_alert=True)
@@ -4328,6 +4437,7 @@ async def cb_ai_show_explanation(callback: CallbackQuery):
     await callback.answer()
     async with lock:
         session["processing"] = True
+        _AI_CONCURRENCY["count"] += 1
         thinking = await callback.message.answer("🤖 Готовлю решение по шагам...")
         followup_text = ai_prompts.explain_followup_text(session.get("quick_answer") or "")
         try:
@@ -4359,6 +4469,7 @@ async def cb_ai_show_explanation(callback: CallbackQuery):
             record_ai_attempts_cost(getattr(exc, "ai_attempts_log", []))
             await safe_edit_text(thinking, "⚠️ Не удалось получить решение. Попробуй ещё раз позже.")
         finally:
+            _AI_CONCURRENCY["count"] -= 1
             if user_id in AI_SESSIONS:
                 AI_SESSIONS[user_id]["processing"] = False
 
@@ -4376,6 +4487,12 @@ async def handle_ai_photo_input(message: Message):
     if lock.locked():
         # запрос этого пользователя уже в работе (возможно, из другой, уже заменившей эту, сессии)
         return
+    if ai_circuit_breaker_tripped():
+        await message.answer("AI временно отключён из-за высокой нагрузки — администраторы уже знают, попробуй позже.")
+        return
+    if not ai_concurrency_slot_available():
+        await message.answer("Сейчас слишком много запросов к AI одновременно — попробуй через минуту.")
+        return
     if not ai_quota_ok(user_id):
         end_ai_session(user_id)
         await message.answer("На сегодня бесплатные AI-запросы закончились, попробуй завтра.")
@@ -4383,6 +4500,7 @@ async def handle_ai_photo_input(message: Message):
     is_first = session["task"] is None  # самое первое сообщение сессии — сперва только краткий ответ
     async with lock:
         session["processing"] = True
+        _AI_CONCURRENCY["count"] += 1
         thinking = await message.answer("🤖 Разбираю задание, подожди немного...")
         try:
             photo = message.photo[-1]
@@ -4424,6 +4542,7 @@ async def handle_ai_photo_input(message: Message):
             record_ai_attempts_cost(getattr(exc, "ai_attempts_log", []))
             await safe_edit_text(thinking, "⚠️ Не удалось обработать фото. Попробуй ещё раз или пришли текстом.")
         finally:
+            _AI_CONCURRENCY["count"] -= 1
             if user_id in AI_SESSIONS:
                 AI_SESSIONS[user_id]["processing"] = False
 
@@ -4441,6 +4560,12 @@ async def handle_ai_text_input(message: Message):
     if lock.locked():
         # запрос этого пользователя уже в работе (возможно, из другой, уже заменившей эту, сессии)
         raise SkipHandler
+    if ai_circuit_breaker_tripped():
+        await message.answer("AI временно отключён из-за высокой нагрузки — администраторы уже знают, попробуй позже.")
+        return
+    if not ai_concurrency_slot_available():
+        await message.answer("Сейчас слишком много запросов к AI одновременно — попробуй через минуту.")
+        return
     if not ai_quota_ok(user_id):
         end_ai_session(user_id)
         await message.answer("На сегодня бесплатные AI-запросы закончились, попробуй завтра.")
@@ -4448,6 +4573,7 @@ async def handle_ai_text_input(message: Message):
     is_first = session["task"] is None  # самое первое сообщение сессии — сперва только краткий ответ
     async with lock:
         session["processing"] = True
+        _AI_CONCURRENCY["count"] += 1
         thinking = await message.answer("🤖 Разбираю задание, подожди немного...")
         try:
             if is_first:
@@ -4486,6 +4612,7 @@ async def handle_ai_text_input(message: Message):
             record_ai_attempts_cost(getattr(exc, "ai_attempts_log", []))
             await safe_edit_text(thinking, "⚠️ Не удалось получить ответ от AI. Попробуй ещё раз позже.")
         finally:
+            _AI_CONCURRENCY["count"] -= 1
             if user_id in AI_SESSIONS:
                 AI_SESSIONS[user_id]["processing"] = False
 

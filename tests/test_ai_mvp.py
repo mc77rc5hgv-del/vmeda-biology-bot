@@ -2384,6 +2384,135 @@ async def main():
     tb.solve_ai_request = orig_solve
     print("66. AI_USER_LOCKS blocks a concurrent request even after the session dict is replaced: OK")
 
+    # ---- 67. AI cost circuit breaker: record_ai_cost trips it once an hourly threshold is
+    # crossed, and fires exactly ONE admin alert per trip (not per record afterwards) ----
+    tb.stats["ai_cost_windows"] = {
+        "hour_key": None, "hour_cost_usd": 0.0, "day_key": None, "day_cost_usd": 0.0,
+        "breaker_tripped": False, "breaker_alerted": False,
+    }
+    orig_hour_limit_67 = tb.AI_COST_HOUR_LIMIT_USD
+    tb.AI_COST_HOUR_LIMIT_USD = 0.001  # trivially small — one normal-sized record must cross it
+    orig_send_message_67 = tb.bot.send_message
+    alerts_67 = []
+    async def fake_send_message_67(chat_id, text, **kwargs):
+        alerts_67.append((chat_id, text))
+    tb.bot.send_message = fake_send_message_67
+
+    assert not tb.ai_circuit_breaker_tripped()
+    tb.record_ai_cost({"input_tokens": 1_000_000, "output_tokens": 0, "provider": "openai"})
+    await asyncio.sleep(0)  # let the admin-alert task record_ai_cost schedules actually run
+    assert tb.ai_circuit_breaker_tripped(), "cost above the hourly limit must trip the breaker"
+    assert len(alerts_67) == len(tb.ADMIN_IDS), "every admin must be alerted once"
+
+    tb.record_ai_cost({"input_tokens": 1_000_000, "output_tokens": 0, "provider": "openai"})
+    await asyncio.sleep(0)
+    assert len(alerts_67) == len(tb.ADMIN_IDS), "a second cost record after the trip must NOT re-alert"
+
+    tb.reset_ai_circuit_breaker()
+    assert not tb.ai_circuit_breaker_tripped()
+    tb.AI_COST_HOUR_LIMIT_USD = orig_hour_limit_67
+    tb.bot.send_message = orig_send_message_67
+    tb.stats["ai_cost_windows"] = {
+        "hour_key": None, "hour_cost_usd": 0.0, "day_key": None, "day_cost_usd": 0.0,
+        "breaker_tripped": False, "breaker_alerted": False,
+    }
+    print("67. record_ai_cost trips the circuit breaker and alerts admins exactly once: OK")
+
+    # ---- 68. ai_circuit_breaker_tripped() blocks every AI entry point — starting a session, both
+    # message handlers, and the explanation button — until reset_ai_circuit_breaker() runs ----
+    tb.stats["ai_answer_cache"].clear()
+    tb.stats["ai_usage"].pop(str(uid), None)
+    tb.end_ai_session(uid)
+    tb.stats["ai_cost_windows"]["breaker_tripped"] = True
+
+    cb_blocked_start = FakeCB("ai_solve_start", uid=uid)
+    await tb.cb_ai_solve_start(cb_blocked_start)
+    assert not tb.is_ai_session_active(uid), "a tripped breaker must block starting a new session"
+    assert cb_blocked_start._answers and cb_blocked_start._answers[-1][1] is True, "must show_alert"
+
+    tb.stats["ai_cost_windows"]["breaker_tripped"] = False
+    tb.start_ai_session(uid)  # simulate a session that was already open before the trip
+    tb.stats["ai_cost_windows"]["breaker_tripped"] = True
+
+    msg_blocked_text = FakeMsg(uid=uid, text="Вопрос во время срабатывания автовыключателя")
+    await tb.handle_ai_text_input(msg_blocked_text)
+    assert msg_blocked_text.children and "отключён" in msg_blocked_text.last_child.edits[-1][0], (
+        "handle_ai_text_input must reply with the block notice, not start an actual AI request"
+    )
+    assert tb.AI_SESSIONS[uid]["task"] is None, "no vision-parse must have happened while tripped"
+
+    photo_blocked = FakeMsg(uid=uid, photo=[FakePhotoSize("f1")])
+    await tb.handle_ai_photo_input(photo_blocked)
+    assert photo_blocked.children and "отключён" in photo_blocked.last_child.edits[-1][0], (
+        "handle_ai_photo_input must reply with the block notice, not start an actual AI request"
+    )
+    assert tb.AI_SESSIONS[uid]["task"] is None, "no vision-parse must have happened while tripped"
+
+    tb.AI_SESSIONS[uid]["quick_answer"] = "какой-то предыдущий ответ"
+    cb_blocked_explain = FakeCB("ai_show_explanation", uid=uid)
+    await tb.cb_ai_show_explanation(cb_blocked_explain)
+    assert cb_blocked_explain.message.last_child is None, "cb_ai_show_explanation must not start a request while tripped"
+
+    tb.reset_ai_circuit_breaker()
+    assert not tb.ai_circuit_breaker_tripped()
+    tb.end_ai_session(uid)
+    tb.stats["ai_usage"].pop(str(uid), None)
+    print("68. a tripped circuit breaker blocks every AI entry point until reset: OK")
+
+    # ---- 69. MAX_AI_CONCURRENT_REQUESTS/_AI_CONCURRENCY: caps how many AI requests can be in
+    # flight bot-wide at once, independent of any single user's own quota — a request rejected for
+    # lack of a global slot must not spend quota, and the slot frees up once the in-flight request
+    # actually finishes ----
+    tb.stats["ai_usage"].pop(str(uid), None)
+    orig_max_concurrent_69 = tb.MAX_AI_CONCURRENT_REQUESTS
+    tb.MAX_AI_CONCURRENT_REQUESTS = 1
+    tb._AI_CONCURRENCY["count"] = 0
+
+    release_event_69 = asyncio.Event()
+    entered_event_69 = asyncio.Event()
+    async def slow_parse_task_69(*, image_bytes=None, text=None):
+        entered_event_69.set()
+        await release_event_69.wait()
+        return TaskRepresentation(type="theory", question=text or "", raw_text=text or ""), dict(FAKE_PARSE_USAGE)
+    tb.ai_vision_parser.parse_task = slow_parse_task_69
+    tb.ai_rag.search_for_task = fake_search_for_task
+    async def fake_solve_69(*, task=None, text=None, history=None, quick=False, bucket=None, rag_context=None):
+        text_part = task.to_prompt_text() + tb.ai_prompts.QUICK_SUFFIX
+        return (
+            "ответ 69", {"role": "user", "content": text_part}, dict(FAKE_USAGE, provider="openai"),
+            [{"provider": "openai", "status": "success", "usage": dict(FAKE_USAGE)}],
+        )
+    tb.solve_ai_request = fake_solve_69
+
+    tb.start_ai_session(uid)
+    msg_first_69 = FakeMsg(uid=uid, text="Первый одновременный запрос")
+    first_task_69 = asyncio.ensure_future(tb.handle_ai_text_input(msg_first_69))
+    await entered_event_69.wait()  # the single global concurrency slot is now occupied
+
+    uid2_69 = NON_ADMIN + 1
+    tb.stats["ai_usage"].pop(str(uid2_69), None)
+    tb.start_ai_session(uid2_69)
+    before69 = tb.ai_requests_left(uid2_69)
+    msg_second_69 = FakeMsg(uid=uid2_69, text="Второй запрос другого пользователя")
+    await tb.handle_ai_text_input(msg_second_69)
+    assert msg_second_69.children and "одновременно" in msg_second_69.last_child.edits[-1][0], (
+        "no global slot available -> must reply with the block notice, not start an actual AI request"
+    )
+    assert tb.AI_SESSIONS[uid2_69]["task"] is None, "no vision-parse must have happened without a free slot"
+    assert tb.ai_requests_left(uid2_69) == before69, "a request rejected for lack of a slot must not spend quota"
+
+    release_event_69.set()
+    await first_task_69
+    assert tb._AI_CONCURRENCY["count"] == 0, "the slot must be released once the in-flight request finishes"
+
+    tb.end_ai_session(uid)
+    tb.end_ai_session(uid2_69)
+    tb.stats["ai_usage"].pop(str(uid), None)
+    tb.stats["ai_usage"].pop(str(uid2_69), None)
+    tb.MAX_AI_CONCURRENT_REQUESTS = orig_max_concurrent_69
+    tb.solve_ai_request = orig_solve
+    print("69. MAX_AI_CONCURRENT_REQUESTS caps in-flight AI requests bot-wide: OK")
+
     # ==================== cleanup ====================
     tb.solve_ai_request = orig_solve
     tb.ai_vision_parser.parse_task = orig_parse_task

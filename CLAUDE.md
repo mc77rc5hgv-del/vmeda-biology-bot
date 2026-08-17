@@ -637,6 +637,38 @@ for the request's full duration — the two checks aren't redundant, `session["p
 catches a same-session double-tap exactly as before, `lock.locked()` catches the cross-session case
 the flag was blind to.
 
+**Bot-wide AI safety net** (on top of the per-user quota/lock above — a traffic spike is many
+*different* users, each within their own daily quota, so a per-user limit alone can't cap total
+concurrent spend):
+- **`MAX_AI_CONCURRENT_REQUESTS`** (`AI_MAX_CONCURRENT_REQUESTS` env var, default 10) +
+  `_AI_CONCURRENCY` (a `{"count": int}` dict, not a bare module-level `int`, so it can be mutated from
+  inside handlers without a `global` statement) + `ai_concurrency_slot_available()` — all three
+  cost-incurring entry points check this (same place as the `AI_USER_LOCKS` check) and reply with a
+  short "too many requests right now" notice instead of queuing when no slot is free; the counter is
+  incremented right after `session["processing"] = True` and decremented in the same `finally` block
+  that resets it. Safe without an explicit lock around the check-then-increment: nothing `await`s
+  between reading `_AI_CONCURRENCY["count"]` and incrementing it, so there's no interleaving point for
+  another coroutine on the same event loop to race through.
+- **Cost circuit breaker** (`stats["ai_cost_windows"]`, `_update_ai_cost_windows()` called from inside
+  `record_ai_cost()` on every recorded cost — including RAG/embedding cost, so a runaway RAG loop
+  trips it too) — buckets spend into an hour window and a day window (same `*_key` + running-total
+  reset-on-new-period shape as `ai_used_monthly` elsewhere in the file) and compares each against
+  `AI_COST_HOUR_LIMIT_USD`/`AI_COST_DAY_LIMIT_USD` (env-overridable, default $5/hour, $30/day).
+  Crossing either sets `breaker_tripped`, checked by `ai_circuit_breaker_tripped()` at the same four
+  entry points as the concurrency/lock checks (plus `cb_ai_solve_start`, so a tripped breaker also
+  blocks *starting* a new session, not just continuing one already open) — AI is fully disabled for
+  everyone until an admin clears it. **Does NOT auto-clear on its own** when the next hour/day
+  starts — that's deliberate: silently reopening after an hour would let a real problem repeat
+  unnoticed. `reset_ai_circuit_breaker()` is the only way to clear it, wired to a
+  "🔓 Сбросить AI-автовыключатель" button that `get_admin_stats_keyboard()` (`handlers/admin.py`)
+  shows on the admin stats screen only while tripped — `cb_admin_stats` also prints the current
+  hour/day spend + limits inline when tripped, so the admin doesn't need to dig through
+  `get_ai_cost_stats_block()` to see why. `record_ai_cost()` fires a one-time Telegram alert to every
+  `ADMIN_IDS` entry the moment `breaker_tripped` flips (`breaker_alerted` guards against re-sending on
+  every subsequent blocked request) — scheduled via `asyncio.get_running_loop().create_task(...)`
+  since `record_ai_cost()` itself is synchronous (called from many non-async call sites) but the alert
+  needs to `await bot.send_message`.
+
 **`scripts/ai_benchmark.py`** measures real pipeline accuracy against `ai/reference_bank.py`'s 1040
 questions — same "not part of the bot/requirements.txt, run manually, costs real tokens" pattern as
 `scripts/ai_model_compare.py`. Runs the actual `ai.vision_parser -> ai.router.route_bucket ->

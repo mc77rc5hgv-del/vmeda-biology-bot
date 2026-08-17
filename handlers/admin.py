@@ -150,6 +150,15 @@ def get_admin_back_keyboard():
     builder.row(InlineKeyboardButton(text="🔙 В админ-панель", callback_data="admin_panel"))
     return builder.as_markup()
 
+def get_admin_stats_keyboard(breaker_tripped: bool):
+    """Как get_admin_back_keyboard(), плюс кнопка сброса AI-автовыключателя, когда он сработал —
+    единственный способ снова включить AI после срабатывания (см. tb.reset_ai_circuit_breaker)."""
+    builder = InlineKeyboardBuilder()
+    if breaker_tripped:
+        builder.row(InlineKeyboardButton(text="🔓 Сбросить AI-автовыключатель", callback_data="admin_ai_breaker_reset"))
+    builder.row(InlineKeyboardButton(text="🔙 В админ-панель", callback_data="admin_panel"))
+    return builder.as_markup()
+
 def resolve_user_by_username(raw: str):
     """Резолвит введённый админом идентификатор — username (с @ или без) или
     числовой Telegram ID — в (username_или_None, target_id_или_None). ID должен
@@ -717,7 +726,27 @@ async def cb_admin_stats(callback: CallbackQuery):
         f"🗄 AI-кэш: <b>{len(tb.stats['ai_answer_cache'])}</b> записей, "
         f"на модерации: <b>{tb.get_pending_ai_cache_count()}</b>"
     )
-    await tb.safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=get_admin_back_keyboard())
+    breaker_tripped = tb.ai_circuit_breaker_tripped()
+    if breaker_tripped:
+        windows = tb.stats["ai_cost_windows"]
+        text += (
+            f"\n\n🚨 <b>AI-автовыключатель сработал</b> — AI отключён для всех пользователей.\n"
+            f"За час: ${windows['hour_cost_usd']:.2f} (лимит ${tb.AI_COST_HOUR_LIMIT_USD:.2f}), "
+            f"за сутки: ${windows['day_cost_usd']:.2f} (лимит ${tb.AI_COST_DAY_LIMIT_USD:.2f})"
+        )
+    await tb.safe_edit_text(
+        callback.message, text, parse_mode="HTML",
+        reply_markup=get_admin_stats_keyboard(breaker_tripped),
+    )
+
+@router.callback_query(F.data == "admin_ai_breaker_reset")
+async def cb_admin_ai_breaker_reset(callback: CallbackQuery):
+    if not tb.is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    tb.reset_ai_circuit_breaker()
+    await callback.answer("AI-автовыключатель сброшен, AI снова доступен всем.", show_alert=True)
+    await cb_admin_stats(callback)
 
 _AI_CACHE_CONFIDENCE_LABEL = {"escalate": "🔴 высокий риск ошибки", "verify": "🟡 стоит проверить внимательнее", "serve": "🟢 без замечаний"}
 

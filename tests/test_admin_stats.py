@@ -197,6 +197,41 @@ async def main():
     assert not msg_non_admin.sent, "/stats must not leak metrics to non-admins"
     print("/stats non-admin blocked: OK")
 
+    # AI cost circuit breaker: the stats screen shows the tripped block + reset button only while
+    # tripped, and admin_ai_breaker_reset actually clears it (see CLAUDE.md/AI cost-safety section)
+    orig_windows = copy.deepcopy(tb.stats["ai_cost_windows"])
+    tb.stats["ai_cost_windows"] = {
+        "hour_key": "x", "hour_cost_usd": 7.5, "day_key": "y", "day_cost_usd": 40.0,
+        "breaker_tripped": True, "breaker_alerted": True,
+    }
+    cb_tripped = FakeCB("admin_stats")
+    await tb.cb_admin_stats(cb_tripped)
+    tripped_text = cb_tripped.message.edits[-1]
+    assert "AI-автовыключатель сработал" in tripped_text
+    tripped_kb = tb.get_admin_stats_keyboard(True)
+    tripped_kb_data = [b.callback_data for row in tripped_kb.inline_keyboard for b in row]
+    assert "admin_ai_breaker_reset" in tripped_kb_data
+    print("admin stats screen shows the tripped AI circuit breaker + reset button: OK")
+
+    cb_reset = FakeCB("admin_ai_breaker_reset")
+    await tb.cb_admin_ai_breaker_reset(cb_reset)
+    assert not tb.ai_circuit_breaker_tripped(), "cb_admin_ai_breaker_reset must clear the breaker"
+    reset_text = cb_reset.message.edits[-1]
+    assert "AI-автовыключатель сработал" not in reset_text, "the screen must re-render without the tripped block"
+    print("cb_admin_ai_breaker_reset clears the breaker and re-renders the stats screen: OK")
+
+    cb_reset_non_admin = FakeCB("admin_ai_breaker_reset", uid=123456789)
+    tb.stats["ai_cost_windows"]["breaker_tripped"] = True
+    await tb.cb_admin_ai_breaker_reset(cb_reset_non_admin)
+    assert tb.ai_circuit_breaker_tripped(), "a non-admin must not be able to reset the breaker"
+    print("cb_admin_ai_breaker_reset non-admin blocked: OK")
+
+    normal_kb = tb.get_admin_stats_keyboard(False)
+    normal_kb_data = [b.callback_data for row in normal_kb.inline_keyboard for b in row]
+    assert "admin_ai_breaker_reset" not in normal_kb_data, "the reset button must not appear when not tripped"
+    tb.stats["ai_cost_windows"] = orig_windows
+    print("get_admin_stats_keyboard omits the reset button when the breaker isn't tripped: OK")
+
     print("ALL ADMIN STATS TESTS PASSED")
 
 asyncio.run(main())
