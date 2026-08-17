@@ -96,6 +96,11 @@ def get_admin_menu():
     builder.button(text="🎉 Снять все ограничения всем на 12ч", callback_data="admin_global_promo_12h_confirm")
     builder.button(text="🔒 Вернуть ограничения", callback_data="admin_restore_restrictions_confirm")
     builder.button(text="📋 Анонс переклички групп", callback_data="admin_announce_rollcall_confirm")
+    pending_ai_cache = tb.get_pending_ai_cache_count()
+    builder.button(
+        text=f"🤖 Модерация AI-кэша ({pending_ai_cache})" if pending_ai_cache else "🤖 Модерация AI-кэша",
+        callback_data="admin_ai_cache_queue",
+    )
     builder.adjust(1)
     return builder.as_markup()
 
@@ -708,9 +713,76 @@ async def cb_admin_stats(callback: CallbackQuery):
         f"💵 Донаты рублями: <b>{donation_rubles_total}</b>₽ ({donation_rubles_count} чел.)\n"
         f"⭐ Подписки звёздами: <b>{sub_revenue_stars}</b>\n"
         f"💵 Подписки рублями: <b>{sub_revenue_rubles}</b>₽\n"
-        f"{tb.get_ai_cost_stats_block()}"
+        f"{tb.get_ai_cost_stats_block()}\n"
+        f"🗄 AI-кэш: <b>{len(tb.stats['ai_answer_cache'])}</b> записей, "
+        f"на модерации: <b>{tb.get_pending_ai_cache_count()}</b>"
     )
     await tb.safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=get_admin_back_keyboard())
+
+def get_ai_cache_queue_text(fingerprint: str, entry: dict) -> str:
+    subject = entry.get("subject") or "не определён"
+    return (
+        f"🤖 <b>Модерация AI-кэша</b>\n{tb.DIVIDER}\n\n"
+        f"На очереди: <b>{tb.get_pending_ai_cache_count()}</b>\n"
+        f"Предмет: <b>{subject}</b>\n\n"
+        f"❓ <b>Вопрос:</b>\n{entry['question_preview']}\n\n"
+        f"💬 <b>Сгенерированный ответ:</b>\n{entry['answer']}\n\n"
+        "Одобрить — этот ответ будет бесплатно и мгновенно отдаваться любому пользователю, "
+        "задавшему точно такой же вопрос (без обращения к модели). Отклонить — ответ не "
+        "сохранится в кэше, но при следующем таком же вопросе будет сгенерирован заново и "
+        "снова предложен на модерацию."
+    )
+
+def get_ai_cache_queue_keyboard(fingerprint: str):
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Одобрить", callback_data=f"admin_ai_cache_approve:{fingerprint}")
+    builder.button(text="❌ Отклонить", callback_data=f"admin_ai_cache_reject:{fingerprint}")
+    builder.button(text="🔙 В админ-панель", callback_data="admin_panel")
+    builder.adjust(1)
+    return builder.as_markup()
+
+@router.callback_query(F.data == "admin_ai_cache_queue")
+async def cb_admin_ai_cache_queue(callback: CallbackQuery):
+    if not tb.is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer()
+    fingerprint, entry = tb.get_next_pending_ai_cache_entry()
+    if fingerprint is None:
+        await tb.safe_edit_text(
+            callback.message,
+            f"🤖 <b>Модерация AI-кэша</b>\n{tb.DIVIDER}\n\nОчередь пуста — все сгенерированные "
+            "ответы уже промодерированы.",
+            parse_mode="HTML",
+            reply_markup=get_admin_back_keyboard(),
+        )
+        return
+    await tb.safe_edit_text(
+        callback.message,
+        get_ai_cache_queue_text(fingerprint, entry),
+        parse_mode="HTML",
+        reply_markup=get_ai_cache_queue_keyboard(fingerprint),
+    )
+
+@router.callback_query(F.data.startswith("admin_ai_cache_approve:"))
+async def cb_admin_ai_cache_approve(callback: CallbackQuery):
+    if not tb.is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    fingerprint = callback.data.split(":", 1)[1]
+    tb.moderate_ai_cache_entry(fingerprint, approve=True)
+    await callback.answer("Одобрено — теперь отдаётся из кэша")
+    await cb_admin_ai_cache_queue(callback)
+
+@router.callback_query(F.data.startswith("admin_ai_cache_reject:"))
+async def cb_admin_ai_cache_reject(callback: CallbackQuery):
+    if not tb.is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    fingerprint = callback.data.split(":", 1)[1]
+    tb.moderate_ai_cache_entry(fingerprint, approve=False)
+    await callback.answer("Отклонено")
+    await cb_admin_ai_cache_queue(callback)
 
 @router.callback_query(F.data == "admin_export_stats")
 async def cb_admin_export_stats(callback: CallbackQuery):

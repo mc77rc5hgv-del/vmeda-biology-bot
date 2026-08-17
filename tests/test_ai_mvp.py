@@ -1339,6 +1339,233 @@ async def main():
     assert not TaskRepresentation().is_usable(), "an empty task (no question, no raw_text) is not usable"
     print("39. TaskRepresentation: prompt rendering, round trip, fingerprint semantics: OK")
 
+    # ==================== ЧАСТЬ F: кэш точных совпадений с модерацией ====================
+
+    # ---- 40. get_cached_ai_answer: only an APPROVED entry is ever served; pending/rejected are
+    # not, since a wrong AI-generated answer must never propagate to other students unreviewed
+    # ("Модерация перед раздачей" — see CLAUDE.md) ----
+    tb.stats["ai_answer_cache"].clear()
+    task40 = TaskRepresentation(question="Тестовый вопрос для кэша 40", raw_text="Тестовый вопрос для кэша 40")
+    fp40 = task40.fingerprint()
+    assert tb.get_cached_ai_answer(fp40) is None, "missing fingerprint -> no cached answer"
+    tb.stats["ai_answer_cache"][fp40] = {
+        "question_preview": "x", "answer": "кэшированный ответ", "subject": "biology",
+        "status": "pending", "created_at": tb.time.time(), "hits": 0,
+    }
+    assert tb.get_cached_ai_answer(fp40) is None, "a pending entry must not be served"
+    tb.stats["ai_answer_cache"][fp40]["status"] = "rejected"
+    assert tb.get_cached_ai_answer(fp40) is None, "a rejected entry must not be served"
+    tb.stats["ai_answer_cache"][fp40]["status"] = "approved"
+    assert tb.get_cached_ai_answer(fp40) == "кэшированный ответ"
+    assert tb.stats["ai_answer_cache"][fp40]["hits"] == 1
+    assert tb.get_cached_ai_answer(fp40) == "кэшированный ответ"
+    assert tb.stats["ai_answer_cache"][fp40]["hits"] == 2
+    print("40. get_cached_ai_answer serves only approved entries, counts hits: OK")
+
+    # ---- 41. submit_ai_answer_for_moderation: queues a fresh candidate, refreshes a still-pending
+    # (or rejected) entry with the newest generation, but NEVER overwrites an already-approved
+    # answer — the approved version stays the source of truth until an admin explicitly changes it ----
+    tb.stats["ai_answer_cache"].clear()
+    task41 = TaskRepresentation(question="Второй тестовый вопрос", raw_text="Второй тестовый вопрос", subject="chemistry")
+    fp41 = task41.fingerprint()
+    tb.submit_ai_answer_for_moderation(task41, "первый сгенерированный ответ")
+    entry41 = tb.stats["ai_answer_cache"][fp41]
+    assert entry41["status"] == "pending"
+    assert entry41["answer"] == "первый сгенерированный ответ"
+    assert entry41["subject"] == "chemistry"
+    assert entry41["hits"] == 0
+
+    entry41["hits"] = 3  # simulate accumulated hits before the candidate gets refreshed
+    tb.submit_ai_answer_for_moderation(task41, "второй сгенерированный ответ")
+    assert tb.stats["ai_answer_cache"][fp41]["answer"] == "второй сгенерированный ответ"
+    assert tb.stats["ai_answer_cache"][fp41]["hits"] == 3, "hits must survive a pending entry being refreshed"
+
+    tb.moderate_ai_cache_entry(fp41, approve=True)
+    tb.submit_ai_answer_for_moderation(task41, "ответ, который не должен попасть в кэш")
+    assert tb.stats["ai_answer_cache"][fp41]["answer"] == "второй сгенерированный ответ"
+    assert tb.stats["ai_answer_cache"][fp41]["status"] == "approved"
+    print("41. submit_ai_answer_for_moderation queues candidates, never overwrites an approved answer: OK")
+
+    # ---- 42. moderate_ai_cache_entry: approve/reject transitions, False for an unknown fingerprint ----
+    assert tb.moderate_ai_cache_entry("несуществующий_фингерпринт", approve=True) is False
+    task42 = TaskRepresentation(question="Третий тестовый вопрос", raw_text="Третий тестовый вопрос")
+    tb.submit_ai_answer_for_moderation(task42, "ответ")
+    fp42 = task42.fingerprint()
+    assert tb.moderate_ai_cache_entry(fp42, approve=False) is True
+    assert tb.stats["ai_answer_cache"][fp42]["status"] == "rejected"
+    assert tb.moderate_ai_cache_entry(fp42, approve=True) is True
+    assert tb.stats["ai_answer_cache"][fp42]["status"] == "approved"
+    print("42. moderate_ai_cache_entry transitions state, False for an unknown fingerprint: OK")
+
+    # ---- 43. get_pending_ai_cache_count / get_next_pending_ai_cache_entry: oldest-first, only
+    # counts entries still awaiting moderation ----
+    tb.stats["ai_answer_cache"].clear()
+    t_old = TaskRepresentation(question="Старый вопрос", raw_text="Старый вопрос")
+    t_new = TaskRepresentation(question="Новый вопрос", raw_text="Новый вопрос")
+    tb.submit_ai_answer_for_moderation(t_old, "ответ старый")
+    tb.stats["ai_answer_cache"][t_old.fingerprint()]["created_at"] = tb.time.time() - 100
+    tb.submit_ai_answer_for_moderation(t_new, "ответ новый")
+    assert tb.get_pending_ai_cache_count() == 2
+    fp_first, entry_first = tb.get_next_pending_ai_cache_entry()
+    assert fp_first == t_old.fingerprint(), "the oldest pending entry must come first"
+    tb.moderate_ai_cache_entry(t_old.fingerprint(), approve=True)
+    assert tb.get_pending_ai_cache_count() == 1
+    fp_second, entry_second = tb.get_next_pending_ai_cache_entry()
+    assert fp_second == t_new.fingerprint()
+    tb.moderate_ai_cache_entry(t_new.fingerprint(), approve=True)
+    assert tb.get_pending_ai_cache_count() == 0
+    assert tb.get_next_pending_ai_cache_entry() == (None, None)
+    print("43. get_pending_ai_cache_count/get_next_pending_ai_cache_entry: oldest-first, correct filtering: OK")
+
+    # ---- 44. get_first_message_ai_answer: on a cache MISS, calls the model exactly like a normal
+    # first message, spends quota/cost, and queues the fresh answer for moderation ----
+    tb.stats["ai_answer_cache"].clear()
+    tb.stats["ai_usage"].pop(str(uid), None)
+    tb.stats["ai_cost_totals"] = {"requests": 0, "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0}
+    solve_calls_44 = []
+    async def fake_solve_44(*, task=None, text=None, history=None, quick=False, bucket=None, rag_context=None):
+        solve_calls_44.append({"task": task, "quick": quick, "bucket": bucket, "rag_context": rag_context})
+        text_part = task.to_prompt_text() + tb.ai_prompts.QUICK_SUFFIX
+        return (
+            "свежий ответ", {"role": "user", "content": text_part}, dict(FAKE_USAGE, provider="openai"),
+            [{"provider": "openai", "status": "success", "usage": dict(FAKE_USAGE)}],
+        )
+    tb.solve_ai_request = fake_solve_44
+
+    task44 = TaskRepresentation(
+        question="Уникальный вопрос для проверки кэш-промаха",
+        raw_text="Уникальный вопрос для проверки кэш-промаха",
+    )
+    session44 = {"messages": [], "bucket": "theory_complex", "rag_context": None, "quick_answer": None}
+    before44 = tb.ai_requests_left(uid)
+    cost_before44 = tb.stats["ai_cost_totals"]["requests"]
+    answer44, user_turn44 = await tb.get_first_message_ai_answer(uid, session44, task44)
+    assert len(solve_calls_44) == 1, "a cache miss must call the model"
+    assert answer44 == "свежий ответ"
+    assert session44["quick_answer"] == "свежий ответ"
+    assert tb.ai_requests_left(uid) == before44 - 1
+    assert tb.stats["ai_cost_totals"]["requests"] == cost_before44 + 1
+    fp44 = task44.fingerprint()
+    assert tb.stats["ai_answer_cache"][fp44]["status"] == "pending"
+    assert tb.stats["ai_answer_cache"][fp44]["answer"] == "свежий ответ"
+    print("44. get_first_message_ai_answer on a cache miss calls the model and queues moderation: OK")
+
+    # ---- 44b. once approved, the SAME task is served from cache: no model call, no quota/cost
+    # spent, and the stored user_turn matches what a real solve() call would have produced ----
+    tb.moderate_ai_cache_entry(fp44, approve=True)
+    session44b = {"messages": [], "bucket": "theory_complex", "rag_context": None, "quick_answer": None}
+    before44b = tb.ai_requests_left(uid)
+    cost_before44b = tb.stats["ai_cost_totals"]["requests"]
+    answer44b, user_turn44b = await tb.get_first_message_ai_answer(uid, session44b, task44)
+    assert len(solve_calls_44) == 1, "a cache hit must NOT call the model again"
+    assert answer44b == "свежий ответ"
+    assert session44b["quick_answer"] == "свежий ответ"
+    assert tb.ai_requests_left(uid) == before44b, "a cache hit must not spend quota"
+    assert tb.stats["ai_cost_totals"]["requests"] == cost_before44b, "a cache hit must not record any cost"
+    assert user_turn44b["content"] == task44.to_prompt_text() + tb.ai_prompts.QUICK_SUFFIX, (
+        "the stored user_turn on a cache hit must match what a real solve() call would have produced"
+    )
+    print("44b. get_first_message_ai_answer on a cache hit skips the model entirely, spends nothing: OK")
+
+    # ---- 45. end-to-end handler regression: a fresh question is answered by the model and queued;
+    # once an admin approves it, a COMPLETELY SEPARATE session asking the exact same question gets
+    # served from cache — no model call, no quota spent, session/history still populate normally ----
+    tb.stats["ai_answer_cache"].clear()
+    tb.stats["ai_usage"].pop(str(uid), None)
+    tb.end_ai_session(uid)
+    solve_calls_45 = []
+    async def fake_solve_45(*, task=None, text=None, history=None, quick=False, bucket=None, rag_context=None):
+        solve_calls_45.append(1)
+        text_part = task.to_prompt_text() if task is not None else (text or "")
+        answer = "Ответ: 46 хромосом" if quick else "Подробно: ..."
+        return answer, {"role": "user", "content": text_part}, dict(FAKE_USAGE, provider="openai"), [
+            {"provider": "openai", "status": "success", "usage": dict(FAKE_USAGE)},
+        ]
+    tb.solve_ai_request = fake_solve_45
+
+    tb.start_ai_session(uid)
+    before45 = tb.ai_requests_left(uid)
+    msg45 = FakeMsg(uid=uid, text="Сколько хромосом в соматической клетке человека?")
+    await tb.handle_ai_text_input(msg45)
+    assert len(solve_calls_45) == 1
+    assert tb.ai_requests_left(uid) == before45 - 1, "a fresh (uncached) question must spend quota"
+    fingerprint_45 = tb.AI_SESSIONS[uid]["task"].fingerprint()
+    assert tb.stats["ai_answer_cache"][fingerprint_45]["status"] == "pending"
+    tb.end_ai_session(uid)
+
+    assert tb.moderate_ai_cache_entry(fingerprint_45, approve=True)
+
+    tb.stats["ai_usage"].pop(str(uid), None)
+    tb.start_ai_session(uid)
+    before45b = tb.ai_requests_left(uid)
+    msg45b = FakeMsg(uid=uid, text="Сколько хромосом в соматической клетке человека?")
+    await tb.handle_ai_text_input(msg45b)
+    assert len(solve_calls_45) == 1, "must NOT call the model again — served from the approved cache"
+    assert tb.ai_requests_left(uid) == before45b, "a cache hit must not spend quota"
+    final_text_45b, final_kb_45b = msg45b.last_child.edits[-1]
+    assert "Ответ: 46 хромосом" in final_text_45b
+    assert "ai_show_explanation" in kb_data(final_kb_45b), "a cached quick answer still offers the explanation button"
+    assert tb.stats["ai_answer_cache"][fingerprint_45]["hits"] == 1
+    tb.end_ai_session(uid)
+    tb.stats["ai_usage"].pop(str(uid), None)
+    print("45. end-to-end: fresh question queued for moderation, approved answer served for free to a new session: OK")
+
+    tb.solve_ai_request = orig_solve
+
+    # ---- 46. admin moderation queue UI: pending count on the menu button, question/answer shown,
+    # approve/reject transition state and re-render, non-admin blocked from every action ----
+    tb.stats["ai_answer_cache"].clear()
+    menu_no_pending = tb.get_admin_menu()
+    assert "admin_ai_cache_queue" in kb_data(menu_no_pending)
+    assert any(t.startswith("🤖 Модерация AI-кэша") for t in kb_texts(menu_no_pending))
+
+    cb_queue_empty = FakeCB("admin_ai_cache_queue", uid=ADMIN_ID)
+    await tb.cb_admin_ai_cache_queue(cb_queue_empty)
+    empty_text = cb_queue_empty.message.edits[-1][0]
+    assert "пуста" in empty_text
+
+    task46 = TaskRepresentation(
+        question="Вопрос для проверки админ-очереди", raw_text="Вопрос для проверки админ-очереди",
+        subject="physics",
+    )
+    tb.submit_ai_answer_for_moderation(task46, "ответ на модерации")
+    fp46 = task46.fingerprint()
+
+    menu_with_pending = tb.get_admin_menu()
+    assert any("Модерация AI-кэша (1)" in t for t in kb_texts(menu_with_pending))
+
+    cb_queue = FakeCB("admin_ai_cache_queue", uid=ADMIN_ID)
+    await tb.cb_admin_ai_cache_queue(cb_queue)
+    queue_text, queue_kb = cb_queue.message.edits[-1]
+    assert "Вопрос для проверки админ-очереди" in queue_text
+    assert "ответ на модерации" in queue_text
+    assert f"admin_ai_cache_approve:{fp46}" in kb_data(queue_kb)
+    assert f"admin_ai_cache_reject:{fp46}" in kb_data(queue_kb)
+
+    cb_non_admin = FakeCB("admin_ai_cache_queue", uid=uid)
+    await tb.cb_admin_ai_cache_queue(cb_non_admin)
+    assert cb_non_admin.message.edits == [], "non-admin must not see the moderation queue"
+
+    cb_approve = FakeCB(f"admin_ai_cache_approve:{fp46}", uid=ADMIN_ID)
+    await tb.cb_admin_ai_cache_approve(cb_approve)
+    assert tb.stats["ai_answer_cache"][fp46]["status"] == "approved"
+    approve_text = cb_approve.message.edits[-1][0]
+    assert "пуста" in approve_text, "after approving the only pending entry, the queue must show empty"
+
+    task46b = TaskRepresentation(question="Второй вопрос для отклонения", raw_text="Второй вопрос для отклонения")
+    tb.submit_ai_answer_for_moderation(task46b, "плохой ответ")
+    fp46b = task46b.fingerprint()
+    cb_reject = FakeCB(f"admin_ai_cache_reject:{fp46b}", uid=ADMIN_ID)
+    await tb.cb_admin_ai_cache_reject(cb_reject)
+    assert tb.stats["ai_answer_cache"][fp46b]["status"] == "rejected"
+
+    cb_non_admin_approve = FakeCB(f"admin_ai_cache_approve:{fp46b}", uid=uid)
+    await tb.cb_admin_ai_cache_approve(cb_non_admin_approve)
+    assert tb.stats["ai_answer_cache"][fp46b]["status"] == "rejected", "non-admin must not be able to approve"
+    print("46. admin AI-cache moderation queue: pending count, approve/reject, non-admin blocked: OK")
+
+    tb.stats["ai_answer_cache"].clear()
+
     # ==================== cleanup ====================
     tb.solve_ai_request = orig_solve
     tb.ai_vision_parser.parse_task = orig_parse_task

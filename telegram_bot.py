@@ -146,6 +146,7 @@ def load_stats() -> dict:
             data.setdefault("anatomy_exam_flash_scores", {})
             data.setdefault("ai_usage", {})
             data.setdefault("ai_cost_totals", {"requests": 0, "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0})
+            data.setdefault("ai_answer_cache", {})
             return data
         except (json.JSONDecodeError, OSError):
             logger.exception("Не удалось прочитать %s, статистика будет создана заново", STATS_FILE)
@@ -184,6 +185,7 @@ def load_stats() -> dict:
         "anatomy_exam_flash_scores": {},
         "ai_usage": {},
         "ai_cost_totals": {"requests": 0, "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0},
+        "ai_answer_cache": {},
     }
 
 # Один воркер сериализует записи на диск и не даёт им блокировать event loop бота.
@@ -2414,6 +2416,11 @@ cb_admin_referral_reminder_go = admin_handlers.cb_admin_referral_reminder_go
 cb_admin_discount_promo_confirm = admin_handlers.cb_admin_discount_promo_confirm
 cb_admin_discount_promo_go = admin_handlers.cb_admin_discount_promo_go
 cb_admin_stats = admin_handlers.cb_admin_stats
+get_ai_cache_queue_text = admin_handlers.get_ai_cache_queue_text
+get_ai_cache_queue_keyboard = admin_handlers.get_ai_cache_queue_keyboard
+cb_admin_ai_cache_queue = admin_handlers.cb_admin_ai_cache_queue
+cb_admin_ai_cache_approve = admin_handlers.cb_admin_ai_cache_approve
+cb_admin_ai_cache_reject = admin_handlers.cb_admin_ai_cache_reject
 cb_admin_export_stats = admin_handlers.cb_admin_export_stats
 cb_admin_userlist = admin_handlers.cb_admin_userlist
 cb_admin_grant_prompt = admin_handlers.cb_admin_grant_prompt
@@ -3992,6 +3999,88 @@ def record_ai_attempts_cost(attempts_log: list) -> None:
             usage["provider"] = attempt["provider"]
             record_ai_cost(usage)
 
+# ---- Кэш точных совпадений с модерацией (см. CLAUDE.md/архитектурный разбор AI-режима, пункт 6)
+# ----
+# Ключ — TaskRepresentation.fingerprint() (см. ai/task.py): нормализованный текст вопроса + данные
+# условия, порядок слов не важен, разные исходные числа — разный fingerprint. Свежесгенерированный
+# ответ НИКОГДА не раздаётся другим пользователям автоматически ("Модерация перед раздачей" —
+# явный выбор архитектуры, а не auto-trust-with-first-answer: одна неверная генерация не должна
+# разойтись по всем студентам, задавшим тот же вопрос, прежде чем админ её увидит) — см.
+# get_cached_ai_answer/submit_ai_answer_for_moderation ниже и админ-очередь модерации в
+# handlers/admin.py.
+def get_cached_ai_answer(fingerprint: str) -> str | None:
+    entry = stats["ai_answer_cache"].get(fingerprint)
+    if not entry or entry.get("status") != "approved":
+        return None
+    entry["hits"] = entry.get("hits", 0) + 1
+    save_stats()
+    return entry["answer"]
+
+def submit_ai_answer_for_moderation(task, answer: str) -> None:
+    """Не перезаписывает уже ОДОБРЕННУЮ запись тем же fingerprint'ом — она остаётся источником
+    истины, пока админ не отклонит её отдельным действием. "pending"/"rejected" запись
+    обновляется новым кандидатом — отклонённый вопрос не блокируется навсегда, у него будет шанс
+    на новый (возможно, более удачный) сгенерированный ответ при следующем обращении."""
+    fingerprint = task.fingerprint()
+    existing = stats["ai_answer_cache"].get(fingerprint)
+    if existing and existing.get("status") == "approved":
+        return
+    stats["ai_answer_cache"][fingerprint] = {
+        "question_preview": task.question_text()[:300],
+        "answer": answer,
+        "subject": task.subject,
+        "status": "pending",
+        "created_at": time.time(),
+        "hits": existing.get("hits", 0) if existing else 0,
+    }
+    save_stats()
+
+def get_pending_ai_cache_count() -> int:
+    return sum(1 for e in stats["ai_answer_cache"].values() if e.get("status") == "pending")
+
+def get_next_pending_ai_cache_entry():
+    """(fingerprint, entry) старейшей ещё не промодерированной записи по created_at, либо
+    (None, None), если очередь пуста."""
+    pending = [(fp, e) for fp, e in stats["ai_answer_cache"].items() if e.get("status") == "pending"]
+    if not pending:
+        return None, None
+    pending.sort(key=lambda item: item[1].get("created_at", 0))
+    return pending[0]
+
+def moderate_ai_cache_entry(fingerprint: str, approve: bool) -> bool:
+    entry = stats["ai_answer_cache"].get(fingerprint)
+    if not entry:
+        return False
+    entry["status"] = "approved" if approve else "rejected"
+    save_stats()
+    return True
+
+async def get_first_message_ai_answer(user_id: int, session: dict, task) -> tuple:
+    """Первый ход AI-сессии: сначала проверяем кэш точных совпадений (только ОДОБРЕННЫЕ записи) —
+    при попадании ответ отдаётся бесплатно, без обращения к модели и без списания квоты/учёта
+    стоимости. При промахе — обычный запрос к solve_ai_request (списывает квоту, учитывает
+    стоимость всех попыток), и свежий ответ уходит на модерацию, чтобы при следующем точно таком
+    же вопросе (от любого пользователя) его можно было отдать из кэша, если админ его одобрит.
+    Возвращает (answer, user_turn) — user_turn в обоих случаях в том же формате, что и обычный
+    ход solve(), включая суффикс краткого ответа (ai_prompts.QUICK_SUFFIX), чтобы история сессии
+    не отличалась по форме от того, что получилось бы при реальном обращении к модели."""
+    cached_answer = get_cached_ai_answer(task.fingerprint())
+    if cached_answer is not None:
+        session["quick_answer"] = cached_answer
+        text_part = task.to_prompt_text()
+        text_part = (text_part + ai_prompts.QUICK_SUFFIX) if text_part else ai_prompts.QUICK_SUFFIX.strip()
+        return cached_answer, {"role": "user", "content": text_part}
+
+    answer, user_turn, usage, attempts_log = await solve_ai_request(
+        task=task, history=session["messages"], quick=True,
+        bucket=session["bucket"], rag_context=session["rag_context"],
+    )
+    increment_ai_usage(user_id)
+    record_ai_attempts_cost(attempts_log)
+    submit_ai_answer_for_moderation(task, answer)
+    session["quick_answer"] = answer
+    return answer, user_turn
+
 def get_ai_menu_text(user_id: int) -> str:
     availability = "" if OPENAI_API_KEY else "\n\n🔧 Идут финальные настройки — совсем скоро запустим."
     return (
@@ -4178,17 +4267,14 @@ async def handle_ai_photo_input(message: Message):
             session["task"] = task_repr
             session["bucket"] = ai_router.route_bucket(task_repr)
             session["rag_context"] = ai_rag.format_context(await ai_rag.search_for_task(task_repr))
-            solve_kwargs = {"task": task_repr, "quick": True}
+            answer, user_turn = await get_first_message_ai_answer(user_id, session, task_repr)
         else:
-            solve_kwargs = {"text": task_repr.to_prompt_text(), "quick": False}
-        answer, user_turn, usage, attempts_log = await solve_ai_request(
-            history=session["messages"], bucket=session.get("bucket"),
-            rag_context=session.get("rag_context"), **solve_kwargs,
-        )
-        increment_ai_usage(user_id)
-        record_ai_attempts_cost(attempts_log)
-        if is_first:
-            session["quick_answer"] = answer
+            answer, user_turn, usage, attempts_log = await solve_ai_request(
+                text=task_repr.to_prompt_text(), history=session["messages"], quick=False,
+                bucket=session.get("bucket"), rag_context=session.get("rag_context"),
+            )
+            increment_ai_usage(user_id)
+            record_ai_attempts_cost(attempts_log)
         session["messages"].append(user_turn)
         session["messages"].append({"role": "assistant", "content": answer})
         session["last_active"] = time.time()
@@ -4243,17 +4329,14 @@ async def handle_ai_text_input(message: Message):
             session["task"] = task_repr
             session["bucket"] = ai_router.route_bucket(task_repr)
             session["rag_context"] = ai_rag.format_context(await ai_rag.search_for_task(task_repr))
-            solve_kwargs = {"task": task_repr, "quick": True}
+            answer, user_turn = await get_first_message_ai_answer(user_id, session, task_repr)
         else:
-            solve_kwargs = {"text": message.text, "quick": False}
-        answer, user_turn, usage, attempts_log = await solve_ai_request(
-            history=session["messages"], bucket=session.get("bucket"),
-            rag_context=session.get("rag_context"), **solve_kwargs,
-        )
-        increment_ai_usage(user_id)
-        record_ai_attempts_cost(attempts_log)
-        if is_first:
-            session["quick_answer"] = answer
+            answer, user_turn, usage, attempts_log = await solve_ai_request(
+                text=message.text, history=session["messages"], quick=False,
+                bucket=session.get("bucket"), rag_context=session.get("rag_context"),
+            )
+            increment_ai_usage(user_id)
+            record_ai_attempts_cost(attempts_log)
         session["messages"].append(user_turn)
         session["messages"].append({"role": "assistant", "content": answer})
         session["last_active"] = time.time()
