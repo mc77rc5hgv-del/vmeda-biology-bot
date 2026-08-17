@@ -124,9 +124,12 @@ async def main():
     assert called_cmd == [1]
     print("command message always passes OK")
 
-    # 10. Full access (threshold referrals) -> biology passes too
+    # 10. Full access (threshold referrals THIS MONTH) -> biology passes too
     uid3 = fresh_uid()
     tb.stats["referrals"][str(uid3)] = [f"ref{i}" for i in range(tb.REFERRAL_FULL_ACCESS_THRESHOLD)]
+    tb.stats["referral_monthly"][str(uid3)] = {
+        "month": tb._current_referral_month_key(), "count": tb.REFERRAL_FULL_ACCESS_THRESHOLD,
+    }
     called, sent = await hard_block(uid3, "menu_biology")
     assert called == [1], "full-referral user must have full access even to gated sections"
     print("full-access user: menu_biology -> passed OK")

@@ -40,7 +40,14 @@ def is_section_promo_active(section: str) -> bool:
 
 # ==================== РЕФЕРАЛЬНАЯ СИСТЕМА ====================
 BOT_USERNAME = "VMEDA_examen_bot"
-REFERRAL_FULL_ACCESS_THRESHOLD = 4  # столько рефералов нужно, чтобы открыть доступ навсегда
+# Раньше: разовый порог, открывающий доступ НАВСЕГДА после первого достижения. Теперь — порог
+# ЕЖЕМЕСЯЧНО ОБНОВЛЯЕМЫХ рефералов: чтобы доступ оставался открытым, каждый календарный месяц
+# нужно приводить заново REFERRAL_FULL_ACCESS_THRESHOLD НОВЫХ друзей (см. get_referral_count_this_month
+# ниже) — рефералы прошлых месяцев в счёт текущего месяца не идут, "банковать" их нельзя.
+# get_referral_count() (лифтайм-счётчик, ниже) при этом никуда не делся — им по-прежнему считаются
+# лидерборд, битва рефералов и мгновенное уведомление "тебя пригласили N человек всего", просто ОН
+# больше не решает вопрос доступа к контенту — этим теперь занимается ТОЛЬКО помесячный счётчик.
+REFERRAL_FULL_ACCESS_THRESHOLD = 2  # столько НОВЫХ рефералов нужно каждый месяц, чтобы открыть доступ
 REFERRAL_WARNING_THRESHOLD = 3  # столько предупреждений даём, прежде чем закрыть доступ
 REFERRAL_WARNING_COOLDOWN_SECONDS = 4 * 60 * 60  # не чаще одного предупреждения раз в 4 часа
 TEMP_ACCESS_GRANT_SECONDS = 7 * 24 * 60 * 60  # длительность временного восстановления доступа
@@ -51,7 +58,30 @@ def get_referral_link(user_id: int) -> str:
     return f"https://t.me/{BOT_USERNAME}?start=ref_{user_id}"
 
 def get_referral_count(user_id: int) -> int:
+    """Рефералы за ВСЁ ВРЕМЯ — для лидерборда/битвы рефералов/мгновенного уведомления о новом
+    реферале. НЕ используется для гейта доступа к контенту — см. get_referral_count_this_month."""
     return len(tb.stats["referrals"].get(str(user_id), []))
+
+def _current_referral_month_key() -> str:
+    return date.today().strftime("%Y-%m")
+
+def get_referral_count_this_month(user_id: int) -> int:
+    """Рефералы, приведённые ИМЕННО в текущем календарном месяце — то, что реально сравнивается с
+    REFERRAL_FULL_ACCESS_THRESHOLD для доступа к контенту. Тот же паттерн месяц-ключ + бегущий
+    счётчик, сбрасываемый при смене периода, что и у ai_used_monthly (telegram_bot.py) — см.
+    _increment_referral_month_count ниже."""
+    entry = tb.stats["referral_monthly"].get(str(user_id))
+    if not entry or entry.get("month") != _current_referral_month_key():
+        return 0
+    return entry.get("count", 0)
+
+def _increment_referral_month_count(user_id: int) -> None:
+    month = _current_referral_month_key()
+    entry = tb.stats["referral_monthly"].get(str(user_id))
+    if not entry or entry.get("month") != month:
+        entry = {"month": month, "count": 0}
+    entry["count"] += 1
+    tb.stats["referral_monthly"][str(user_id)] = entry
 
 def get_temp_access_expiry(user_id: int) -> float:
     return tb.stats["temporary_access"].get(str(user_id), 0)
@@ -643,7 +673,7 @@ def has_subject_access(user_id: int, subject: str) -> bool:
     if (
         is_admin_or_assistant(user_id)
         or is_section_promo_active("global")
-        or get_referral_count(user_id) >= REFERRAL_FULL_ACCESS_THRESHOLD
+        or get_referral_count_this_month(user_id) >= REFERRAL_FULL_ACCESS_THRESHOLD
         or user_id in tb.stats["manual_access_granted"]
         or has_temp_access(user_id)
     ):
@@ -739,7 +769,7 @@ def has_free_access(user_id: int) -> bool:
     return (
         is_admin_or_assistant(user_id)
         or is_section_promo_active("global")
-        or get_referral_count(user_id) >= REFERRAL_FULL_ACCESS_THRESHOLD
+        or get_referral_count_this_month(user_id) >= REFERRAL_FULL_ACCESS_THRESHOLD
         or user_id in tb.stats["manual_access_granted"]
         or has_temp_access(user_id)
         or has_active_subscription(user_id)
@@ -754,7 +784,10 @@ def get_exhausted_users() -> list:
 
 def get_below_threshold_users() -> list:
     """ID пользователей, у которых прямо сейчас нет бесплатного доступа к предметным разделам —
-    меньше REFERRAL_FULL_ACCESS_THRESHOLD рефералов и нет подписки/ручного доступа/временного доступа."""
+    меньше REFERRAL_FULL_ACCESS_THRESHOLD рефералов В ЭТОМ МЕСЯЦЕ и нет подписки/ручного
+    доступа/временного доступа. Пересчитывается на лету от has_free_access(), поэтому автоматически
+    актуализируется при смене месяца (пользователь, набравший норму в прошлом месяце и не
+    приведший новых друзей, снова попадает в эту когорту)."""
     return [uid for uid in tb.stats["total_users"] if not has_free_access(uid)]
 
 
@@ -767,12 +800,20 @@ async def register_referral(referrer_id: int, referred_id: int) -> None:
     refs = tb.stats["referrals"].setdefault(str(referrer_id), [])
     if referred_id not in refs:
         refs.append(referred_id)
+        _increment_referral_month_count(referrer_id)
         tb.save_stats()
+        month_count = get_referral_count_this_month(referrer_id)
+        month_line = (
+            f"В этом месяце: <b>{month_count}</b> из {REFERRAL_FULL_ACCESS_THRESHOLD}, нужных для доступа.\n"
+            if month_count < REFERRAL_FULL_ACCESS_THRESHOLD else
+            "В этом месяце норма выполнена — доступ открыт до конца месяца! 🎉\n"
+        )
         try:
             await tb.bot.send_message(
                 referrer_id,
                 "🎉 <b>По твоей ссылке в бота зашёл новый пользователь!</b>\n\n"
-                f"Всего приглашено: <b>{len(refs)}</b>",
+                f"{month_line}"
+                f"Всего приглашено за всё время: <b>{len(refs)}</b>",
                 parse_mode="HTML"
             )
         except Exception:
@@ -850,7 +891,7 @@ def chemistry_tickets_access_ok(user_id: int) -> bool:
     открывала бы билеты по химии (пред-существовавший пробел, здесь же и закрытый)."""
     if is_admin_or_assistant(user_id):
         return True
-    if get_referral_count(user_id) >= REFERRAL_FULL_ACCESS_THRESHOLD:
+    if get_referral_count_this_month(user_id) >= REFERRAL_FULL_ACCESS_THRESHOLD:
         return True
     sub = get_subscription(user_id)
     if sub and has_active_subscription(user_id):

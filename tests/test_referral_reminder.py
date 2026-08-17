@@ -79,6 +79,9 @@ async def main():
     tb.stats["referrals"].pop(str(uid_none), None)
     tb.stats["referrals"][str(uid_one)] = ["a"]
     tb.stats["referrals"][str(uid_full)] = [f"ref{i}" for i in range(tb.REFERRAL_FULL_ACCESS_THRESHOLD)]
+    tb.stats["referral_monthly"][str(uid_full)] = {
+        "month": tb._current_referral_month_key(), "count": tb.REFERRAL_FULL_ACCESS_THRESHOLD,
+    }
     tb.grant_subscription(uid_sub, 1, "stars", 89)
     if uid_manual not in tb.stats["manual_access_granted"]:
         tb.stats["manual_access_granted"].append(uid_manual)

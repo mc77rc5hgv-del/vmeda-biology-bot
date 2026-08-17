@@ -31,12 +31,15 @@ def has_histology_temp_access(user_id: int) -> bool:
     return time.time() < get_histology_temp_expiry(user_id)
 
 def histology_permanently_unlocked(user_id: int) -> bool:
-    """Доступ, не зависящий от тающего пробного окна (в отличие от has_histology_temp_access)."""
+    """Доступ, не зависящий от тающего пробного окна (в отличие от has_histology_temp_access) —
+    имя осталось от старой (разовой навсегда) модели рефералов; сейчас реферальная ветка сама по
+    себе ЕЖЕМЕСЯЧНО обновляемая (см. tb.get_referral_count_this_month), просто в контрасте с
+    неделей пробного доступа она по-прежнему "не временная"."""
     return (
         HISTOLOGY_PUBLIC or tb.is_admin_or_assistant(user_id)
         or tb.is_section_promo_active("histology") or tb.is_section_promo_active("global")
         or tb.has_subscription_histology_access(user_id)
-        or tb.get_referral_count(user_id) >= tb.REFERRAL_FULL_ACCESS_THRESHOLD
+        or tb.get_referral_count_this_month(user_id) >= tb.REFERRAL_FULL_ACCESS_THRESHOLD
     )
 
 def histology_access_ok(user_id: int) -> bool:
@@ -89,8 +92,9 @@ async def histology_gate_ok(callback: CallbackQuery) -> bool:
             warn_text = (
                 "⚠️❗️ <b>Гистология скоро закроется!</b> ❗️⚠️\n\n"
                 f"Бесплатный пробный доступ действует ещё примерно <b>{days_left} дн.</b> Пригласи "
-                f"{tb.REFERRAL_FULL_ACCESS_THRESHOLD} друзей или оформи подписку от <b>{price_rub}₽ / {price_stars}⭐</b> — "
-                "и раздел останется открытым навсегда."
+                f"{tb.REFERRAL_FULL_ACCESS_THRESHOLD} друзей в этом месяце или оформи подписку от "
+                f"<b>{price_rub}₽ / {price_stars}⭐</b> — и раздел откроется (рефералами — доступ "
+                "нужно будет подтверждать новыми друзьями каждый месяц)."
             )
         else:
             warn_text = (
@@ -123,7 +127,7 @@ def get_histology_locked_text() -> str:
         "протоколы-описания взяты именно с препаратов академии, а содержание "
         "сверено с преподавателями.\n\n"
         f"Открывается бесплатно — как Биология, Физика и Химия — после "
-        f"<b>{tb.REFERRAL_FULL_ACCESS_THRESHOLD}</b> приглашённых друзей, либо сразу по подписке от "
+        f"<b>{tb.REFERRAL_FULL_ACCESS_THRESHOLD}</b> приглашённых друзей в этом месяце, либо сразу по подписке от "
         f"<b>{cheapest['price_rub']}₽ / {cheapest['price_stars']}⭐</b> "
         f"(тариф «{cheapest['title']}») и выше.\n\n"
         f"Новым пользователям раздел открыт бесплатно на пробный период (до недели)."
@@ -145,7 +149,7 @@ async def announce_histology_promo_start() -> None:
         f"{tb.DIVIDER}\n\n"
         "На <b>24 часа</b> раздел «Гистология» — все препараты, микрофотографии и разборы — "
         "доступен абсолютно бесплатно, без рефералов и подписки.\n\n"
-        f"После этого доступ, как обычно: {tb.REFERRAL_FULL_ACCESS_THRESHOLD} реферала или подписка.\n\n"
+        f"После этого доступ, как обычно: {tb.REFERRAL_FULL_ACCESS_THRESHOLD} реферала в этом месяце или подписка.\n\n"
         "Успей посмотреть, пока открыто! 🚀"
     )
     await tb._broadcast(text, builder.as_markup())

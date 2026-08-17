@@ -899,11 +899,16 @@ async def main():
 
     # 22b. Regression: free referral access (no subscription) must still show the subscription entry
     tb.stats["referrals"][str(non_admin)] = [f"ref{i}" for i in range(tb.REFERRAL_FULL_ACCESS_THRESHOLD)]
+    tb.stats["referral_monthly"][str(non_admin)] = {
+        "month": tb._current_referral_month_key(), "count": tb.REFERRAL_FULL_ACCESS_THRESHOLD,
+    }
     assert tb.get_referral_count(non_admin) >= tb.REFERRAL_FULL_ACCESS_THRESHOLD
+    assert tb.get_referral_count_this_month(non_admin) >= tb.REFERRAL_FULL_ACCESS_THRESHOLD
     assert tb.has_free_access(non_admin) and not tb.has_active_subscription(non_admin)
     menu_referral_access = tb.get_main_menu(user_id=non_admin)
     assert "💎 Подписка без рефералов" in kb_texts(menu_referral_access)
     tb.stats["referrals"].pop(str(non_admin), None)
+    tb.stats["referral_monthly"].pop(str(non_admin), None)
     print("subscription button stays visible for users with free referral access (not subscribed): OK")
 
     # 23. Locked Histology screen: dynamic cheapest-histology-tier price, not a stale literal

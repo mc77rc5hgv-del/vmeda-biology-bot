@@ -129,6 +129,7 @@ def load_stats() -> dict:
             data.setdefault("referrals", {})
             data.setdefault("referred_by", {})
             data.setdefault("referral_warnings", {})
+            data.setdefault("referral_monthly", {})
             data.setdefault("user_names", {})
             data.setdefault("user_username", {})
             data.setdefault("usernames", {})
@@ -173,6 +174,7 @@ def load_stats() -> dict:
         "referrals": {},
         "referred_by": {},
         "referral_warnings": {},
+        "referral_monthly": {},
         "user_names": {},
         "user_username": {},
         "usernames": {},
@@ -249,6 +251,8 @@ GLOBAL_PROMO_SECONDS = access.GLOBAL_PROMO_SECONDS
 GLOBAL_PROMO_12H_SECONDS = access.GLOBAL_PROMO_12H_SECONDS
 get_referral_link = access.get_referral_link
 get_referral_count = access.get_referral_count
+get_referral_count_this_month = access.get_referral_count_this_month
+_current_referral_month_key = access._current_referral_month_key
 get_temp_access_expiry = access.get_temp_access_expiry
 has_temp_access = access.has_temp_access
 TIER1_HISTOLOGY_DEADLINE = access.TIER1_HISTOLOGY_DEADLINE
@@ -383,7 +387,12 @@ def get_subscription_scope_label(sub: dict) -> str:
     return "к " + ", ".join(parts)
 
 def get_referral_status_text(user_id: int) -> str:
-    count = get_referral_count(user_id)
+    # count — рефералы ИМЕННО этого календарного месяца (то, что реально сравнивается с порогом,
+    # см. get_referral_count_this_month/services/access.py: доступ по рефералам с этой версии не
+    # разовый навсегда, а ЕЖЕМЕСЯЧНО обновляемый); total — рефералы за всё время, только для
+    # контекста ("сколько всего людей ты когда-либо привёл"), на сам гейт не влияет.
+    count = get_referral_count_this_month(user_id)
+    total = get_referral_count(user_id)
     link = get_referral_link(user_id)
     if has_active_subscription(user_id):
         sub = get_subscription(user_id)
@@ -397,14 +406,21 @@ def get_referral_status_text(user_id: int) -> str:
             "в <b>битве рефералов</b> за призы!\n\n"
             f"Твоя ссылка:\n{link}"
         )
-    if count >= REFERRAL_FULL_ACCESS_THRESHOLD or user_id in stats["manual_access_granted"]:
-        extra = f"Приглашено друзей: <b>{count}</b>\n" if count > 0 else ""
+    manual = user_id in stats["manual_access_granted"]
+    if count >= REFERRAL_FULL_ACCESS_THRESHOLD or manual:
+        extra = f"Приглашено в этом месяце: <b>{count}</b>\n" if count > 0 else ""
+        reset_note = "" if manual else (
+            f"\n⚠️ Условие обновляется каждый месяц: чтобы доступ не закрылся, в следующем "
+            f"месяце снова понадобится пригласить {REFERRAL_FULL_ACCESS_THRESHOLD} новых друзей.\n"
+        )
         return (
             f"👥 <b>Твои приглашения</b>\n{DIVIDER}\n\n"
             f"{extra}"
-            "Доступ ко всем разделам бота открыт. Спасибо! 🎉\n\n"
+            "Доступ ко всем разделам бота открыт. Спасибо! 🎉\n"
+            f"{reset_note}\n"
             "⚔️ А ещё сейчас можно побороться за призы в <b>битве рефералов</b> — "
             "приглашай друзей дальше и попади в топ-5!\n\n"
+            f"Всего приглашено за всё время: <b>{total}</b>\n\n"
             f"Твоя ссылка (можно приглашать ещё):\n{link}"
         )
     if has_temp_access(user_id):
@@ -413,7 +429,7 @@ def get_referral_status_text(user_id: int) -> str:
             f"👥 <b>Твои приглашения</b>\n{DIVIDER}\n\n"
             f"🎁 Тебе временно открыт полный доступ ко всем разделам бота — осталось "
             f"<b>{remaining}</b>.\n\n"
-            f"Приглашено друзей: <b>{count}</b> из {REFERRAL_FULL_ACCESS_THRESHOLD}\n\n"
+            f"Приглашено в этом месяце: <b>{count}</b> из {REFERRAL_FULL_ACCESS_THRESHOLD}\n\n"
             "Пригласи друзей уже сейчас, чтобы доступ остался открытым и после окончания "
             f"временного периода:\n{link}"
         )
@@ -435,7 +451,7 @@ def get_referral_status_text(user_id: int) -> str:
         f"👥 <b>Пригласи друзей</b>\n{DIVIDER}\n\n"
         f"{invite_line}\n\n"
         f"{link}\n\n"
-        f"Приглашено друзей: <b>{count}</b> из {REFERRAL_FULL_ACCESS_THRESHOLD}\n"
+        f"Приглашено в этом месяце: <b>{count}</b> из {REFERRAL_FULL_ACCESS_THRESHOLD}\n"
         f"Осталось бесплатных заходов без рефералов: <b>{remaining_free}</b>\n\n"
         f"💎 Не хочешь ждать друзей? Открой доступ сразу оплатой!\n\n"
         f"🔥 Самые выгодные варианты — «{SUBSCRIPTION_TIERS[21]['short']}» за "
@@ -749,18 +765,19 @@ def get_access_restored_broadcast_text() -> str:
         "взамен, пожалуйста, включи уведомления от бота (в Telegram: настройки чата с ботом → "
         "уведомления), чтобы не пропустить важные новости и новые материалы.\n\n"
         "⏳ Через 7 дней временный доступ закончится, и снова понадобится "
-        f"{REFERRAL_FULL_ACCESS_THRESHOLD} приглашённых друга, чтобы открыть доступ навсегда — "
-        "это правило не меняется и остаётся таким же для всех.\n\n"
-        "👥 Открыть доступ насовсем можно в любой момент — кнопка «Пригласить друзей» в главном меню."
+        f"{REFERRAL_FULL_ACCESS_THRESHOLD} приглашённых друга — это правило теперь обновляется "
+        "каждый месяц: чтобы доступ оставался открытым, каждый месяц нужны новые приглашённые "
+        "друзья, старые в счёт следующего месяца не идут.\n\n"
+        "👥 Открыть доступ можно в любой момент — кнопка «Пригласить друзей» в главном меню."
     )
 
 def get_referral_reminder_broadcast_text() -> str:
     cheapest = cheapest_gated3_tier()
     return (
         f"👋 <b>Напоминание</b>\n{DIVIDER}\n\n"
-        f"Чтобы бесплатно пользоваться разделами Биология, Физика и Химия, нужно пригласить "
-        f"{REFERRAL_FULL_ACCESS_THRESHOLD} друзей в бота — открой «👥 Пригласить друзей» в "
-        "главном меню, посмотри свой прогресс и отправь ссылку.\n\n"
+        f"Чтобы бесплатно пользоваться разделами Биология, Физика и Химия, нужно приглашать "
+        f"{REFERRAL_FULL_ACCESS_THRESHOLD} новых друзей КАЖДЫЙ МЕСЯЦ — открой «👥 Пригласить "
+        "друзей» в главном меню, посмотри свой прогресс за этот месяц и отправь ссылку.\n\n"
         f"💎 Не хочешь ждать друзей? Открой доступ сразу оплатой — подписки от "
         f"{cheapest['price_rub']}₽/{cheapest['price_stars']}⭐. Жми «💎 Подписка» в главном меню."
     )
@@ -1220,7 +1237,7 @@ def get_subscription_announcement_text() -> str:
     return (
         f"💎 <b>Новое в боте — платная подписка без рефералов!</b>\n{DIVIDER}\n\n"
         "Разработка и содержание бота требуют серьёзных затрат — поэтому в дополнение "
-        f"к бесплатному доступу за {REFERRAL_FULL_ACCESS_THRESHOLD} рефералов теперь можно "
+        f"к бесплатному доступу за {REFERRAL_FULL_ACCESS_THRESHOLD} рефералов в месяц теперь можно "
         "открыть доступ сразу оплатой:\n\n"
         f"{tier_lines}\n\n"
         "После оплаты правило с рефералами для тебя больше не действует — доступ "
@@ -1743,7 +1760,7 @@ def get_main_menu(user_id: int = None):
         histology_label = "🔬 Гистология (админ)"
     elif is_section_promo_active("histology"):
         histology_label = "🔬 Гистология 🎉"
-    elif user_id is not None and get_referral_count(user_id) >= REFERRAL_FULL_ACCESS_THRESHOLD:
+    elif user_id is not None and get_referral_count_this_month(user_id) >= REFERRAL_FULL_ACCESS_THRESHOLD:
         histology_label = "🔬 Гистология"
     elif sub_histology:
         histology_label = "🔬 Гистология 💎"
@@ -2122,7 +2139,7 @@ def get_chemistry_tickets_locked_text() -> str:
     return (
         f"🎫 <b>Билеты по химии</b>\n{DIVIDER}\n\n"
         f"Раздел закрыт дополнительным условием: нужно {REFERRAL_FULL_ACCESS_THRESHOLD} "
-        f"реферала или подписка от 89₽ (например, «{cheapest['emoji']} {cheapest['title']}» за "
+        f"реферала в этом месяце или подписка от 89₽ (например, «{cheapest['emoji']} {cheapest['title']}» за "
         f"{cheapest['price_rub']}₽ / {cheapest['price_stars']}⭐) — обычного доступа к Химии для "
         "билетов недостаточно.\n\n"
         "Пригласи друзей или оформи подписку, чтобы открыть раздел."

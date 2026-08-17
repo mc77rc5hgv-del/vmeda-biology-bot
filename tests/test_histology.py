@@ -164,18 +164,23 @@ async def main():
     tb.stats["histology_temp_access"].pop(str(non_admin), None)
     tb.stats["histology_warnings"].pop(str(non_admin), None)
 
-    # 4d. Referral threshold alone (no subscription, no trial) unlocks Histology permanently,
-    # bypassing the trial/warning system entirely
+    # 4d. Referral threshold alone (no subscription, no trial) unlocks Histology for the current
+    # month, bypassing the trial/warning system entirely (see get_referral_count_this_month —
+    # referral-based access is now a monthly-recurring requirement, not a one-time-forever unlock)
     referral_uid = random.randint(10_000_000, 99_999_999)
     assert not tb.histology_access_ok(referral_uid)
     tb.stats["referrals"][str(referral_uid)] = [str(i) for i in range(tb.REFERRAL_FULL_ACCESS_THRESHOLD)]
+    tb.stats["referral_monthly"][str(referral_uid)] = {
+        "month": tb._current_referral_month_key(), "count": tb.REFERRAL_FULL_ACCESS_THRESHOLD,
+    }
     assert tb.histology_access_ok(referral_uid)
     cb_ref = FakeCB("histology_menu", uid=referral_uid)
     await tb.cb_histology_menu(cb_ref)
     assert "Выбери диагностику" in cb_ref.message.edits[0][0]
     assert str(referral_uid) not in tb.stats["histology_temp_access"], "referral access shouldn't touch the trial"
     tb.stats["referrals"].pop(str(referral_uid), None)
-    print("referral threshold alone unlocks Histology, bypassing the trial: OK")
+    tb.stats["referral_monthly"].pop(str(referral_uid), None)
+    print("referral threshold alone unlocks Histology this month, bypassing the trial: OK")
 
     # 4e. Section promo: makes Histology free for everyone until it expires
     promo_uid = random.randint(10_000_000, 99_999_999)

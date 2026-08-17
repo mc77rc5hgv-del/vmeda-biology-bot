@@ -52,6 +52,7 @@ TEST_UID = 111222333
 async def main():
     uid_str = str(TEST_UID)
     tb.stats["referrals"][uid_str] = []
+    tb.stats["referral_monthly"].pop(uid_str, None)
     tb.stats["subscriptions"].pop(uid_str, None)
     tb.stats["manual_access_granted"] = [x for x in tb.stats["manual_access_granted"] if x != TEST_UID]
     tb.stats["temporary_access"].pop(uid_str, None)
@@ -105,6 +106,9 @@ async def main():
     # From here on, grant the test user full referral access so the rest of this file exercises
     # ticket content/navigation exactly as before the extra restriction was added.
     tb.stats["referrals"][uid_str] = [f"ref{i}" for i in range(tb.REFERRAL_FULL_ACCESS_THRESHOLD)]
+    tb.stats["referral_monthly"][uid_str] = {
+        "month": tb._current_referral_month_key(), "count": tb.REFERRAL_FULL_ACCESS_THRESHOLD,
+    }
     assert tb.chemistry_tickets_access_ok(TEST_UID)
 
     # 1. chemistry menu exposes the new "Билеты" entry point

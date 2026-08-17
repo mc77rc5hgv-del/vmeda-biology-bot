@@ -36,6 +36,7 @@ async def main():
     UID = 777333
     uid_str = str(UID)
     tb.stats["referrals"][uid_str] = []
+    tb.stats["referral_monthly"].pop(uid_str, None)
     tb.stats["manual_access_granted"] = [x for x in tb.stats["manual_access_granted"] if x != UID]
 
     # 0 referrals -> plain back keyboard, no battle button
@@ -46,8 +47,11 @@ async def main():
     assert "🔙 Назад в меню" in texts
     print("0-ref keyboard OK:", texts)
 
-    # full referral count -> battle button appears, subscription entry point stays reachable
+    # full referral count THIS MONTH -> battle button appears, subscription entry point stays reachable
     tb.stats["referrals"][uid_str] = [f"ref{i}" for i in range(tb.REFERRAL_FULL_ACCESS_THRESHOLD)]
+    tb.stats["referral_monthly"][uid_str] = {
+        "month": tb._current_referral_month_key(), "count": tb.REFERRAL_FULL_ACCESS_THRESHOLD,
+    }
     cb = FakeCB("referral_info", UID)
     await tb.cb_referral_info(cb)
     texts = keyboard_texts(cb.message.markups[0])

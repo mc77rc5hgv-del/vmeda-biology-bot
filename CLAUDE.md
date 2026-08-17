@@ -179,13 +179,35 @@ it's a safe no-op when `sent_message` has no `.photo` (e.g. test mocks), so test
    ONE chosen subject (`stats["subscriptions"][uid]["restricted_subject"]`); every other tier leaves
    `restricted_subject = None`, which `has_subject_access` treats as "all three". For plain message events (not
    tied to one subject) it falls back to the blanket `has_free_access()`. Free access requires
-   `REFERRAL_FULL_ACCESS_THRESHOLD` (2) referrals; below that, `REFERRAL_WARNING_THRESHOLD` (3) free attempts (one
-   warning per `REFERRAL_WARNING_COOLDOWN_SECONDS`, 4h) before a hard block.
+   `REFERRAL_FULL_ACCESS_THRESHOLD` (2) referrals **brought in the current calendar month** — below that,
+   `REFERRAL_WARNING_THRESHOLD` (3) free attempts (one warning per `REFERRAL_WARNING_COOLDOWN_SECONDS`, 4h)
+   before a hard block. **Referral-based access is recurring, not a one-time-forever unlock**: every gating
+   check (`has_free_access`, `has_subject_access`, `chemistry_tickets_access_ok`, the Histology bypass below)
+   compares against `get_referral_count_this_month(user_id)` (`services/access.py`), not the lifetime
+   `get_referral_count(user_id)` — a user who reached the threshold in March and brings zero new referrals
+   in April loses access again on April 1st; referrals don't carry over or "bank" across months.
+   `get_referral_count_this_month`/`_current_referral_month_key`/`_increment_referral_month_count` follow the
+   same month-key + running-total-reset-on-new-period shape as `ai_used_monthly` elsewhere in the file;
+   `stats["referral_monthly"][uid] = {"month": "YYYY-MM", "count": int}` holds the running counter, incremented
+   from inside `register_referral()` on every genuinely NEW referral (same anti-fraud dedup via
+   `stats["referred_by"]` as before — re-registering an already-credited referred user is still a no-op for
+   both the lifetime list and the monthly counter). `get_referral_count(user_id)` (the lifetime, never-reset
+   total) is unchanged and still drives the referral leaderboard, the referral battle, and the "invited N
+   people total" line in `register_referral()`'s instant Telegram notification and in
+   `get_referral_status_text()` — those are informational, not access-gating, so they deliberately stay
+   lifetime-cumulative even though the actual gate no longer is. The admin stats screen's "Меньше N
+   рефералов" cohort count (`cb_admin_stats`/`get_assistant_stats_text`) is ALSO deliberately left on the
+   lifetime count — a monthly version of that particular metric would read as "nearly everyone" at the start
+   of every month and stop being a useful trend line, so it intentionally answers a different question
+   ("how many users have historically referred fewer than N people ever") than the live access gate does.
 2. **Anatomy/Histology gates** (`anatomy_access_ok` / `histology_access_ok`): separate boolean functions, not part
    of the referral allowlist — public-flag-gated (`ANATOMY_PUBLIC` / `HISTOLOGY_PUBLIC`, both currently `False`)
    until admin flips them, bypassed by admin, by `has_subscription_anatomy_access()`/`has_subscription_histology_access()`
    (per-tier `anatomy`/`histology_until_rule` flags — see Subscriptions below), or (Histology only) by reaching
-   `REFERRAL_FULL_ACCESS_THRESHOLD` referrals — same permanent free-access rule as Biology/Physics/Chemistry.
+   `REFERRAL_FULL_ACCESS_THRESHOLD` referrals **this month** — same monthly-recurring free-access rule as
+   Biology/Physics/Chemistry (`handlers/histology.py`'s `histology_permanently_unlocked()` keeps its name from
+   the old one-time-forever model — it's still accurate in the sense that it's not tied to the trial/warning
+   countdown `has_histology_temp_access()` uses, just no longer "permanent" in the referral branch specifically).
    Anatomy currently has no referral bypass, only admin/a subscription tier with `anatomy: True`, or a manual
    per-user demo grant (`stats["manual_anatomy_demo_granted"]`, a plain list of IDs mirroring
    `manual_access_granted`'s shape but scoped to Anatomy only — granted/revoked from the admin panel by username/ID,
