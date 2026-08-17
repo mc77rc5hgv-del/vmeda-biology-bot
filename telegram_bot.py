@@ -32,6 +32,8 @@ from ai import service as ai_service
 from ai.providers import gemini as ai_gemini
 from ai.providers import openai as ai_openai
 from ai.providers import xai as ai_xai
+from ai import confidence as ai_confidence
+from ai import validator as ai_validator
 from ai import vision_parser as ai_vision_parser
 from ai.router import AIRefusalError
 from ai.service import solve as solve_ai_request
@@ -4016,11 +4018,17 @@ def get_cached_ai_answer(fingerprint: str) -> str | None:
     save_stats()
     return entry["answer"]
 
-def submit_ai_answer_for_moderation(task, answer: str) -> None:
+def submit_ai_answer_for_moderation(
+    task, answer: str, confidence_action: str = ai_confidence.SERVE, confidence_reasons: list = None,
+) -> None:
     """Не перезаписывает уже ОДОБРЕННУЮ запись тем же fingerprint'ом — она остаётся источником
     истины, пока админ не отклонит её отдельным действием. "pending"/"rejected" запись
     обновляется новым кандидатом — отклонённый вопрос не блокируется навсегда, у него будет шанс
-    на новый (возможно, более удачный) сгенерированный ответ при следующем обращении."""
+    на новый (возможно, более удачный) сгенерированный ответ при следующем обращении.
+
+    confidence_action/confidence_reasons — вывод ai.confidence.decide() (см. get_first_message_ai_answer
+    ниже): не влияет на то, попадёт ли запись в очередь, только на порядок (см.
+    get_next_pending_ai_cache_entry) и на то, что увидит админ на экране модерации."""
     fingerprint = task.fingerprint()
     existing = stats["ai_answer_cache"].get(fingerprint)
     if existing and existing.get("status") == "approved":
@@ -4032,19 +4040,30 @@ def submit_ai_answer_for_moderation(task, answer: str) -> None:
         "status": "pending",
         "created_at": time.time(),
         "hits": existing.get("hits", 0) if existing else 0,
+        "confidence_action": confidence_action,
+        "confidence_reasons": confidence_reasons or [],
     }
     save_stats()
 
 def get_pending_ai_cache_count() -> int:
     return sum(1 for e in stats["ai_answer_cache"].values() if e.get("status") == "pending")
 
+_AI_CACHE_PRIORITY = {ai_confidence.ESCALATE: 0, ai_confidence.VERIFY: 1, ai_confidence.SERVE: 2}
+
 def get_next_pending_ai_cache_entry():
-    """(fingerprint, entry) старейшей ещё не промодерированной записи по created_at, либо
-    (None, None), если очередь пуста."""
+    """(fingerprint, entry) следующей записи на модерацию, либо (None, None), если очередь пуста.
+    Не строго FIFO — сначала записи с более тревожным confidence_action (см. ai/confidence.py:
+    ESCALATE, затем VERIFY, затем SERVE — сегодня у quick-ответа нет более сильного провайдера,
+    на который можно было бы реально переключиться при низкой уверенности, поэтому "эскалация"
+    здесь означает приоритет в очереди модерации, а не скрытый повторный запрос к модели), внутри
+    одного уровня приоритета — старейшая первая."""
     pending = [(fp, e) for fp, e in stats["ai_answer_cache"].items() if e.get("status") == "pending"]
     if not pending:
         return None, None
-    pending.sort(key=lambda item: item[1].get("created_at", 0))
+    pending.sort(key=lambda item: (
+        _AI_CACHE_PRIORITY.get(item[1].get("confidence_action", ai_confidence.SERVE), 2),
+        item[1].get("created_at", 0),
+    ))
     return pending[0]
 
 def moderate_ai_cache_entry(fingerprint: str, approve: bool) -> bool:
@@ -4055,12 +4074,22 @@ def moderate_ai_cache_entry(fingerprint: str, approve: bool) -> bool:
     save_stats()
     return True
 
+AI_LOW_CONFIDENCE_NOTE = (
+    "\n\n⚠️ Этот ответ не прошёл автоматическую проверку на согласованность с заданием — "
+    "обязательно сверь его с материалами курса, прежде чем полагаться на него."
+)
+
 async def get_first_message_ai_answer(user_id: int, session: dict, task) -> tuple:
     """Первый ход AI-сессии: сначала проверяем кэш точных совпадений (только ОДОБРЕННЫЕ записи) —
     при попадании ответ отдаётся бесплатно, без обращения к модели и без списания квоты/учёта
     стоимости. При промахе — обычный запрос к solve_ai_request (списывает квоту, учитывает
-    стоимость всех попыток), и свежий ответ уходит на модерацию, чтобы при следующем точно таком
-    же вопросе (от любого пользователя) его можно было отдать из кэша, если админ его одобрит.
+    стоимость всех попыток), затем ответ прогоняется через детерминированный валидатор (см.
+    ai/validator.py) и confidence-роутер (ai/confidence.py) — при низкой уверенности пользователю
+    честно показывается предупреждение (AI_LOW_CONFIDENCE_NOTE), а запись в очереди модерации
+    получает более высокий приоритет на проверку. session["quick_answer"] всегда хранит ИСХОДНЫЙ
+    ответ БЕЗ предупреждения — это canonical-якорь для "Показать решение по шагам"
+    (ai.prompts.explain_followup_text), предупреждение не должно путать модель на следующем ходу.
+
     Возвращает (answer, user_turn) — user_turn в обоих случаях в том же формате, что и обычный
     ход solve(), включая суффикс краткого ответа (ai_prompts.QUICK_SUFFIX), чтобы история сессии
     не отличалась по форме от того, что получилось бы при реальном обращении к модели."""
@@ -4077,9 +4106,14 @@ async def get_first_message_ai_answer(user_id: int, session: dict, task) -> tupl
     )
     increment_ai_usage(user_id)
     record_ai_attempts_cost(attempts_log)
-    submit_ai_answer_for_moderation(task, answer)
+
+    validation = ai_validator.validate_answer(task, answer)
+    decision = ai_confidence.decide(task, validation, rag_grounded=bool(session.get("rag_context")))
+    submit_ai_answer_for_moderation(task, answer, decision.action, decision.reasons)
     session["quick_answer"] = answer
-    return answer, user_turn
+
+    display_answer = answer + AI_LOW_CONFIDENCE_NOTE if decision.action != ai_confidence.SERVE else answer
+    return display_answer, user_turn
 
 def get_ai_menu_text(user_id: int) -> str:
     availability = "" if OPENAI_API_KEY else "\n\n🔧 Идут финальные настройки — совсем скоро запустим."

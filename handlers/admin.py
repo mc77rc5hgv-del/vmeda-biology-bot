@@ -719,12 +719,19 @@ async def cb_admin_stats(callback: CallbackQuery):
     )
     await tb.safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=get_admin_back_keyboard())
 
+_AI_CACHE_CONFIDENCE_LABEL = {"escalate": "🔴 высокий риск ошибки", "verify": "🟡 стоит проверить внимательнее", "serve": "🟢 без замечаний"}
+
 def get_ai_cache_queue_text(fingerprint: str, entry: dict) -> str:
     subject = entry.get("subject") or "не определён"
+    confidence_action = entry.get("confidence_action", "serve")
+    confidence_line = _AI_CACHE_CONFIDENCE_LABEL.get(confidence_action, confidence_action)
+    reasons = entry.get("confidence_reasons") or []
+    reasons_block = ("\n" + "\n".join(f"  • {r}" for r in reasons)) if reasons else ""
     return (
         f"🤖 <b>Модерация AI-кэша</b>\n{tb.DIVIDER}\n\n"
         f"На очереди: <b>{tb.get_pending_ai_cache_count()}</b>\n"
-        f"Предмет: <b>{subject}</b>\n\n"
+        f"Предмет: <b>{subject}</b>\n"
+        f"Автопроверка: {confidence_line}{reasons_block}\n\n"
         f"❓ <b>Вопрос:</b>\n{entry['question_preview']}\n\n"
         f"💬 <b>Сгенерированный ответ:</b>\n{entry['answer']}\n\n"
         "Одобрить — этот ответ будет бесплатно и мгновенно отдаваться любому пользователю, "

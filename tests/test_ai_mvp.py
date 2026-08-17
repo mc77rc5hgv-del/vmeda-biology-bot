@@ -1566,6 +1566,116 @@ async def main():
 
     tb.stats["ai_answer_cache"].clear()
 
+    # ==================== ЧАСТЬ G: ai.validator + ai.confidence (детерминированная проверка) ====================
+
+    # ---- 47. validate_answer: structural checks per task type, none of them requiring a model call ----
+    calc_task = TaskRepresentation(type="calculation", question="Найти массу вещества")
+    no_digits = tb.ai_validator.validate_answer(calc_task, "Масса вещества равна примерно нескольким граммам")
+    assert not no_digits.passed and "цифры" in no_digits.warnings[0]
+    assert abs(no_digits.confidence_adjustment - (-0.4)) < 1e-9
+    with_digits = tb.ai_validator.validate_answer(calc_task, "Масса вещества составляет 4,5 г")
+    assert with_digits.passed and with_digits.warnings == []
+
+    mcq_task = TaskRepresentation(
+        type="mcq", question="Выберите правильный ответ",
+        options=["Митохондрия", "Рибосома", "Лизосома"],
+    )
+    mentions_option = tb.ai_validator.validate_answer(mcq_task, "Правильный ответ: Митохондрия, она производит энергию")
+    assert mentions_option.passed
+    unrelated = tb.ai_validator.validate_answer(mcq_task, "Совершенно не относящийся к вариантам ответ про космос")
+    assert not unrelated.passed and "не ссылается" in unrelated.warnings[0]
+
+    list_task = TaskRepresentation(type="list", subquestions=[f"пункт {i}" for i in range(6)])
+    too_short = tb.ai_validator.validate_answer(list_task, "Один единственный короткий ответ без деталей")
+    assert not too_short.passed and "пропущена" in too_short.warnings[0]
+    enough_lines = tb.ai_validator.validate_answer(
+        list_task, "\n".join(f"пункт {i} — ответ" for i in range(6))
+    )
+    assert enough_lines.passed
+
+    empty_result = tb.ai_validator.validate_answer(calc_task, "")
+    assert not empty_result.passed and abs(empty_result.confidence_adjustment - (-1.0)) < 1e-9
+    refusal_result = tb.ai_validator.validate_answer(calc_task, "Извините, но я не могу помочь с этой просьбой.")
+    assert not refusal_result.passed and abs(refusal_result.confidence_adjustment - (-1.0)) < 1e-9
+
+    theory_task = TaskRepresentation(type="theory", question="Объясни явление диффузии")
+    theory_result = tb.ai_validator.validate_answer(theory_task, "Диффузия — самопроизвольное перемешивание частиц.")
+    assert theory_result.passed, "theory/open-ended answers have no type-specific structural check"
+    print("47. validate_answer: structural checks per task type, zero model calls: OK")
+
+    # ---- 48. ai.confidence.decide: combines parse confidence + RAG grounding + validator into
+    # SERVE / VERIFY / ESCALATE — from_cache=True always short-circuits to SERVE ----
+    confident_task = TaskRepresentation(type="mcq", question="x", options=["A", "B"], confidence=0.9)
+    clean_validation = tb.ai_validator.validate_answer(confident_task, "Правильный вариант: A")
+    serve_decision = tb.ai_confidence.decide(confident_task, clean_validation, rag_grounded=True)
+    assert serve_decision.action == tb.ai_confidence.SERVE
+    assert serve_decision.score > 1.0, "RAG grounding must be a small positive signal, not just a penalty source"
+
+    verify_decision = tb.ai_confidence.decide(mcq_task, unrelated)
+    assert verify_decision.action == tb.ai_confidence.VERIFY
+
+    escalate_decision = tb.ai_confidence.decide(calc_task, empty_result)
+    assert escalate_decision.action == tb.ai_confidence.ESCALATE
+
+    cache_decision = tb.ai_confidence.decide(calc_task, empty_result, from_cache=True)
+    assert cache_decision.action == tb.ai_confidence.SERVE, (
+        "an answer already served from the moderated cache must always be SERVE, "
+        "regardless of what a fresh validation run would say"
+    )
+    assert cache_decision.score == 1.0
+    print("48. ai.confidence.decide: SERVE/VERIFY/ESCALATE from combined signals, cache always SERVE: OK")
+
+    # ---- 49. get_next_pending_ai_cache_entry prioritizes by confidence_action (escalate first,
+    # then verify, then serve), oldest-first within each tier — this is the real lever ESCALATE has
+    # today: no stronger provider to retry with, but a human moderator sees the riskiest answers
+    # first instead of in arrival order ----
+    tb.stats["ai_answer_cache"].clear()
+    t_serve = TaskRepresentation(question="Вопрос без замечаний")
+    t_verify = TaskRepresentation(question="Вопрос под вопросом")
+    t_escalate = TaskRepresentation(question="Самый рискованный вопрос")
+    tb.submit_ai_answer_for_moderation(t_serve, "ok", confidence_action=tb.ai_confidence.SERVE)
+    tb.submit_ai_answer_for_moderation(t_verify, "ok", confidence_action=tb.ai_confidence.VERIFY)
+    tb.submit_ai_answer_for_moderation(t_escalate, "ok", confidence_action=tb.ai_confidence.ESCALATE)
+    fp_next, entry_next = tb.get_next_pending_ai_cache_entry()
+    assert fp_next == t_escalate.fingerprint(), "ESCALATE-flagged entries must surface first, regardless of arrival order"
+    tb.moderate_ai_cache_entry(fp_next, approve=True)
+    fp_next2, _ = tb.get_next_pending_ai_cache_entry()
+    assert fp_next2 == t_verify.fingerprint(), "VERIFY comes next, ahead of the plain SERVE entry"
+    tb.moderate_ai_cache_entry(fp_next2, approve=True)
+    fp_next3, _ = tb.get_next_pending_ai_cache_entry()
+    assert fp_next3 == t_serve.fingerprint()
+    tb.moderate_ai_cache_entry(fp_next3, approve=True)
+    print("49. get_next_pending_ai_cache_entry prioritizes ESCALATE > VERIFY > SERVE: OK")
+    tb.stats["ai_answer_cache"].clear()
+
+    # ---- 50. end-to-end: get_first_message_ai_answer appends AI_LOW_CONFIDENCE_NOTE to what's
+    # DISPLAYED when the answer doesn't pass validation, but session["quick_answer"] (the
+    # canonical anchor for "Показать решение по шагам") stays the ORIGINAL answer, unmarked — the
+    # warning must not contaminate the model's own memory of what it previously answered ----
+    tb.stats["ai_usage"].pop(str(uid), None)
+    async def fake_solve_50(*, task=None, text=None, history=None, quick=False, bucket=None, rag_context=None):
+        return (
+            "Б", {"role": "user", "content": task.to_prompt_text() + tb.ai_prompts.QUICK_SUFFIX},
+            dict(FAKE_USAGE, provider="openai"),
+            [{"provider": "openai", "status": "success", "usage": dict(FAKE_USAGE)}],
+        )
+    tb.solve_ai_request = fake_solve_50
+    mcq_task_50 = TaskRepresentation(
+        type="mcq", question="Вопрос с вариантами, отвечен буквой без совпадения",
+        options=["Кислород", "Азот", "Углекислый газ"], confidence=0.9,
+    )
+    session50 = {"messages": [], "bucket": "theory_simple", "rag_context": None, "quick_answer": None}
+    display50, _ = await tb.get_first_message_ai_answer(uid, session50, mcq_task_50)
+    assert tb.AI_LOW_CONFIDENCE_NOTE in display50, "a validator-failing answer must carry the warning when displayed"
+    assert session50["quick_answer"] == "Б", "the canonical anchor must stay the original, unmarked answer"
+    fp50 = mcq_task_50.fingerprint()
+    assert tb.stats["ai_answer_cache"][fp50]["confidence_action"] in (tb.ai_confidence.VERIFY, tb.ai_confidence.ESCALATE)
+    assert tb.stats["ai_answer_cache"][fp50]["confidence_reasons"], "the moderation entry must carry the reasons for admin triage"
+    print("50. get_first_message_ai_answer: low-confidence answers are flagged for the user and prioritized for review: OK")
+    tb.stats["ai_answer_cache"].clear()
+    tb.stats["ai_usage"].pop(str(uid), None)
+    tb.solve_ai_request = orig_solve
+
     # ==================== cleanup ====================
     tb.solve_ai_request = orig_solve
     tb.ai_vision_parser.parse_task = orig_parse_task
