@@ -651,14 +651,24 @@ the flag was blind to.
 *different* users, each within their own daily quota, so a per-user limit alone can't cap total
 concurrent spend):
 - **`MAX_AI_CONCURRENT_REQUESTS`** (`AI_MAX_CONCURRENT_REQUESTS` env var, default 10) +
-  `_AI_CONCURRENCY` (a `{"count": int}` dict, not a bare module-level `int`, so it can be mutated from
-  inside handlers without a `global` statement) + `ai_concurrency_slot_available()` — all three
-  cost-incurring entry points check this (same place as the `AI_USER_LOCKS` check) and reply with a
-  short "too many requests right now" notice instead of queuing when no slot is free; the counter is
-  incremented right after `session["processing"] = True` and decremented in the same `finally` block
-  that resets it. Safe without an explicit lock around the check-then-increment: nothing `await`s
-  between reading `_AI_CONCURRENCY["count"]` and incrementing it, so there's no interleaving point for
-  another coroutine on the same event loop to race through.
+  `AI_CONCURRENCY_GATE` (an `_AIConcurrencyGate` instance) — all three cost-incurring entry points
+  call `AI_CONCURRENCY_GATE.try_acquire()` as the LAST check before committing to the request (after
+  the lock/breaker/quota checks, right before `async with lock:`) and reply with a short "too many
+  requests right now" notice instead of queuing when it returns `False`; `release()` runs in the same
+  `finally` block that resets `session["processing"]`. `try_acquire()` is a single **synchronous**
+  method with no `await` inside — the "is a slot free" check and the "take it" increment happen as
+  one unsplittable step, so no other coroutine on the event loop can ever observe a free slot between
+  those two operations and also take it (the exact bug an earlier version had: the check and the
+  increment lived in two separate statements with real `await` points — `callback.answer()`,
+  `async with lock:` — in between, so two coroutines could both pass the check while the counter was
+  at `MAX-1` and both increment, pushing the count above the intended ceiling). Checking
+  `try_acquire()` LAST (not first, like the old check) matters too — it must be the final gate before
+  the slot is actually consumed, or an early return further down (e.g. the quota check) would leak an
+  acquired slot that never gets `release()`d. Deliberately not a bare `asyncio.Semaphore`: `async with
+  semaphore` queues a caller until a slot frees rather than rejecting immediately, which is the wrong
+  UX here (silently waiting is the same load buildup this gate exists to prevent, just invisible to
+  the user) and `Semaphore` has no public non-blocking "try acquire" to build a reject-not-queue check
+  on top of.
 - **Cost circuit breaker** (`stats["ai_cost_windows"]`, `_update_ai_cost_windows()` called from inside
   `record_ai_cost()` on every recorded cost — including RAG/embedding cost, so a runaway RAG loop
   trips it too) — buckets spend into an hour window and a day window (same `*_key` + running-total

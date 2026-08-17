@@ -3867,12 +3867,34 @@ def _get_ai_user_lock(user_id: int) -> asyncio.Lock:
 # разных пользователей, у каждого своя дневная квота) мог бы всё равно запустить неограниченное
 # число дорогих запросов ОДНОВРЕМЕННО, раз лимит был только по-пользовательский ----
 MAX_AI_CONCURRENT_REQUESTS = int(os.environ.get("AI_MAX_CONCURRENT_REQUESTS", "10"))
-_AI_CONCURRENCY = {"count": 0}  # мутируем через словарь, а не через global int — единственный
-# await между "count < MAX" и "count += 1" нигде не встаёт, так что гонки внутри одного event loop
-# здесь нет: и код, что проверяет условие, и код, что увеличивает счётчик, выполняются синхронно.
 
-def ai_concurrency_slot_available() -> bool:
-    return _AI_CONCURRENCY["count"] < MAX_AI_CONCURRENT_REQUESTS
+class _AIConcurrencyGate:
+    """Небольшая неблокирующая замена asyncio.Semaphore под нашу семантику "нет слота — сразу
+    отказ", а не "подождать, пока освободится" (обычное поведение Semaphore.acquire()/async with):
+    очередь запросов молча ждущих своей очереди — то же самое накопление нагрузки, от которого
+    вообще затевался этот предохранитель, просто отложенное на потом и невидимое пользователю (он
+    просто долго не получает ответ вместо понятного "попробуй через минуту").
+
+    try_acquire() — синхронный метод БЕЗ await внутри, поэтому проверка условия и инкремент
+    счётчика происходят одним неразрывным шагом: между ними физически не может вклиниться другая
+    корутина на том же event loop (в отличие от прежней схемы "check ai_concurrency_slot_available()
+    ... await ... count += 1", где между проверкой и инкрементом успевали пройти чужие await-точки
+    — несколько запросов могли одновременно увидеть свободный слот и все пройти проверку до того,
+    как хоть один из них успевал застолбить его за собой, и потолок оказывался не жёстким)."""
+    def __init__(self, limit: int):
+        self._limit = limit
+        self._count = 0
+
+    def try_acquire(self) -> bool:
+        if self._count >= self._limit:
+            return False
+        self._count += 1
+        return True
+
+    def release(self) -> None:
+        self._count -= 1
+
+AI_CONCURRENCY_GATE = _AIConcurrencyGate(MAX_AI_CONCURRENT_REQUESTS)
 
 def get_ai_usage_today(user_id: int) -> int:
     entry = stats["ai_usage"].get(str(user_id))
@@ -4427,17 +4449,18 @@ async def cb_ai_show_explanation(callback: CallbackQuery):
             show_alert=True,
         )
         return
-    if not ai_concurrency_slot_available():
-        await callback.answer("Сейчас слишком много запросов к AI одновременно — попробуй через минуту.", show_alert=True)
-        return
     if not ai_quota_ok(user_id):
         end_ai_session(user_id)
         await callback.answer("На сегодня бесплатные AI-запросы закончились, попробуй завтра.", show_alert=True)
         return
+    if not AI_CONCURRENCY_GATE.try_acquire():
+        # проверяем последним, ПОСЛЕ всех остальных причин отказа — слот резервируется только
+        # если запрос реально пойдёт в работу, иначе release() в finally было бы не с чем парить
+        await callback.answer("Сейчас слишком много запросов к AI одновременно — попробуй через минуту.", show_alert=True)
+        return
     await callback.answer()
     async with lock:
         session["processing"] = True
-        _AI_CONCURRENCY["count"] += 1
         thinking = await callback.message.answer("🤖 Готовлю решение по шагам...")
         followup_text = ai_prompts.explain_followup_text(session.get("quick_answer") or "")
         try:
@@ -4469,7 +4492,7 @@ async def cb_ai_show_explanation(callback: CallbackQuery):
             record_ai_attempts_cost(getattr(exc, "ai_attempts_log", []))
             await safe_edit_text(thinking, "⚠️ Не удалось получить решение. Попробуй ещё раз позже.")
         finally:
-            _AI_CONCURRENCY["count"] -= 1
+            AI_CONCURRENCY_GATE.release()
             if user_id in AI_SESSIONS:
                 AI_SESSIONS[user_id]["processing"] = False
 
@@ -4490,17 +4513,18 @@ async def handle_ai_photo_input(message: Message):
     if ai_circuit_breaker_tripped():
         await message.answer("AI временно отключён из-за высокой нагрузки — администраторы уже знают, попробуй позже.")
         return
-    if not ai_concurrency_slot_available():
-        await message.answer("Сейчас слишком много запросов к AI одновременно — попробуй через минуту.")
-        return
     if not ai_quota_ok(user_id):
         end_ai_session(user_id)
         await message.answer("На сегодня бесплатные AI-запросы закончились, попробуй завтра.")
         return
+    if not AI_CONCURRENCY_GATE.try_acquire():
+        # проверяем последним, ПОСЛЕ всех остальных причин отказа — слот резервируется только
+        # если запрос реально пойдёт в работу, иначе release() в finally было бы не с чем парить
+        await message.answer("Сейчас слишком много запросов к AI одновременно — попробуй через минуту.")
+        return
     is_first = session["task"] is None  # самое первое сообщение сессии — сперва только краткий ответ
     async with lock:
         session["processing"] = True
-        _AI_CONCURRENCY["count"] += 1
         thinking = await message.answer("🤖 Разбираю задание, подожди немного...")
         try:
             photo = message.photo[-1]
@@ -4542,7 +4566,7 @@ async def handle_ai_photo_input(message: Message):
             record_ai_attempts_cost(getattr(exc, "ai_attempts_log", []))
             await safe_edit_text(thinking, "⚠️ Не удалось обработать фото. Попробуй ещё раз или пришли текстом.")
         finally:
-            _AI_CONCURRENCY["count"] -= 1
+            AI_CONCURRENCY_GATE.release()
             if user_id in AI_SESSIONS:
                 AI_SESSIONS[user_id]["processing"] = False
 
@@ -4563,17 +4587,18 @@ async def handle_ai_text_input(message: Message):
     if ai_circuit_breaker_tripped():
         await message.answer("AI временно отключён из-за высокой нагрузки — администраторы уже знают, попробуй позже.")
         return
-    if not ai_concurrency_slot_available():
-        await message.answer("Сейчас слишком много запросов к AI одновременно — попробуй через минуту.")
-        return
     if not ai_quota_ok(user_id):
         end_ai_session(user_id)
         await message.answer("На сегодня бесплатные AI-запросы закончились, попробуй завтра.")
         return
+    if not AI_CONCURRENCY_GATE.try_acquire():
+        # проверяем последним, ПОСЛЕ всех остальных причин отказа — слот резервируется только
+        # если запрос реально пойдёт в работу, иначе release() в finally было бы не с чем парить
+        await message.answer("Сейчас слишком много запросов к AI одновременно — попробуй через минуту.")
+        return
     is_first = session["task"] is None  # самое первое сообщение сессии — сперва только краткий ответ
     async with lock:
         session["processing"] = True
-        _AI_CONCURRENCY["count"] += 1
         thinking = await message.answer("🤖 Разбираю задание, подожди немного...")
         try:
             if is_first:
@@ -4612,7 +4637,7 @@ async def handle_ai_text_input(message: Message):
             record_ai_attempts_cost(getattr(exc, "ai_attempts_log", []))
             await safe_edit_text(thinking, "⚠️ Не удалось получить ответ от AI. Попробуй ещё раз позже.")
         finally:
-            _AI_CONCURRENCY["count"] -= 1
+            AI_CONCURRENCY_GATE.release()
             if user_id in AI_SESSIONS:
                 AI_SESSIONS[user_id]["processing"] = False
 

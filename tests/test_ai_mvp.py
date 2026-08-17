@@ -2488,14 +2488,13 @@ async def main():
     tb.stats["ai_usage"].pop(str(uid), None)
     print("68. a tripped circuit breaker blocks every AI entry point until reset: OK")
 
-    # ---- 69. MAX_AI_CONCURRENT_REQUESTS/_AI_CONCURRENCY: caps how many AI requests can be in
-    # flight bot-wide at once, independent of any single user's own quota — a request rejected for
-    # lack of a global slot must not spend quota, and the slot frees up once the in-flight request
-    # actually finishes ----
+    # ---- 69. AI_CONCURRENCY_GATE: caps how many AI requests can be in flight bot-wide at once,
+    # independent of any single user's own quota — a request rejected for lack of a global slot
+    # must not spend quota, and the slot frees up once the in-flight request actually finishes ----
     tb.stats["ai_usage"].pop(str(uid), None)
-    orig_max_concurrent_69 = tb.MAX_AI_CONCURRENT_REQUESTS
-    tb.MAX_AI_CONCURRENT_REQUESTS = 1
-    tb._AI_CONCURRENCY["count"] = 0
+    orig_limit_69 = tb.AI_CONCURRENCY_GATE._limit
+    tb.AI_CONCURRENCY_GATE._limit = 1
+    tb.AI_CONCURRENCY_GATE._count = 0
 
     release_event_69 = asyncio.Event()
     entered_event_69 = asyncio.Event()
@@ -2532,15 +2531,33 @@ async def main():
 
     release_event_69.set()
     await first_task_69
-    assert tb._AI_CONCURRENCY["count"] == 0, "the slot must be released once the in-flight request finishes"
+    assert tb.AI_CONCURRENCY_GATE._count == 0, "the slot must be released once the in-flight request finishes"
 
     tb.end_ai_session(uid)
     tb.end_ai_session(uid2_69)
     tb.stats["ai_usage"].pop(str(uid), None)
     tb.stats["ai_usage"].pop(str(uid2_69), None)
-    tb.MAX_AI_CONCURRENT_REQUESTS = orig_max_concurrent_69
+    tb.AI_CONCURRENCY_GATE._limit = orig_limit_69
+    tb.AI_CONCURRENCY_GATE._count = 0
     tb.solve_ai_request = orig_solve
-    print("69. MAX_AI_CONCURRENT_REQUESTS caps in-flight AI requests bot-wide: OK")
+    print("69. AI_CONCURRENCY_GATE caps in-flight AI requests bot-wide: OK")
+
+    # ---- 69b. _AIConcurrencyGate.try_acquire() is a single synchronous call with no internal
+    # await — check-and-reserve happen as one atomic step, so no interleaving point exists for
+    # another coroutine to slip through between "slot looked free" and "slot got taken" (the exact
+    # gap the old check-then-later-increment design left open). Exactly `limit` callers succeed out
+    # of many "simultaneous" ones, never more; release() frees exactly one slot back up. ----
+    gate_69b = tb._AIConcurrencyGate(3)
+    async def racer_69b():
+        return gate_69b.try_acquire()
+    results_69b = await asyncio.gather(*(racer_69b() for _ in range(50)))
+    assert sum(results_69b) == 3, "exactly `limit` callers must succeed, never more"
+    assert gate_69b._count == 3
+    assert gate_69b.try_acquire() is False, "no slots left -> further acquires must fail"
+    gate_69b.release()
+    assert gate_69b._count == 2
+    assert gate_69b.try_acquire() is True, "releasing a slot must make it acquirable again"
+    print("69b. _AIConcurrencyGate.try_acquire()/release() are atomic and enforce the exact cap: OK")
 
     # ==================== cleanup ====================
     tb.solve_ai_request = orig_solve
