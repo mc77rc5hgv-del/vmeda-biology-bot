@@ -1313,8 +1313,9 @@ async def main():
 
     # ==================== ЧАСТЬ E: ai.task.TaskRepresentation ====================
 
-    # ---- 39. TaskRepresentation: prompt rendering, round trip, order-independent fingerprint
-    # that still changes with different condition values ----
+    # ---- 39. TaskRepresentation: prompt rendering, round trip, and fingerprint semantics —
+    # canonical (case/punctuation-insensitive) but ORDER-preserving, so opposite-meaning questions
+    # sharing the same word set never collide (see CLAUDE.md: "A вызывает B?" vs "B вызывает A?") ----
     t = TaskRepresentation(
         subject="biology", type="calculation", question="Найти массу",
         values={"m": "10"}, units={"m": "г"}, options=[], subquestions=["пункт 1", "пункт 2"],
@@ -1330,14 +1331,37 @@ async def main():
     t2 = TaskRepresentation.from_dict(d)
     assert t2.to_dict() == d
 
-    fp1 = TaskRepresentation(question="Найти массу", values={"m": "10"}).fingerprint()
-    fp2 = TaskRepresentation(question="массу найти", values={"m": "10"}).fingerprint()
-    assert fp1 == fp2, "fingerprint must be order-independent (same words, different order)"
+    fp_base = TaskRepresentation(question="Найти массу", values={"m": "10"}).fingerprint()
+    fp_case = TaskRepresentation(question="НАЙТИ МАССУ", values={"m": "10"}).fingerprint()
+    fp_punct = TaskRepresentation(question="Найти,  массу!", values={"m": "10"}).fingerprint()
+    assert fp_base == fp_case == fp_punct, (
+        "case/punctuation/whitespace-only differences must still collide into the same fingerprint"
+    )
+
+    fp_reordered = TaskRepresentation(question="массу найти", values={"m": "10"}).fingerprint()
+    assert fp_base != fp_reordered, (
+        "word ORDER must now be preserved, not sorted away — a regression here would resurrect the "
+        "cross-collision bug between differently-ordered, differently-meaning questions"
+    )
+    fp_cause_ab = TaskRepresentation(question="Вещество A вызывает реакцию вещества B").fingerprint()
+    fp_cause_ba = TaskRepresentation(question="Вещество B вызывает реакцию вещества A").fingerprint()
+    assert fp_cause_ab != fp_cause_ba, (
+        "opposite-meaning questions built from the same word set must never share a fingerprint — "
+        "the exact-match cache would otherwise serve one question's approved answer to the other"
+    )
+
+    fp_values_reordered = TaskRepresentation(question="Найти массу", values={"V": "2", "m": "10"}).fingerprint()
+    fp_values_same_order = TaskRepresentation(question="Найти массу", values={"m": "10", "V": "2"}).fingerprint()
+    assert fp_values_reordered == fp_values_same_order, (
+        "values are independent key/value facts, not sequential text — their dict insertion order "
+        "must NOT affect the fingerprint, unlike word order in the question itself"
+    )
+
     fp3 = TaskRepresentation(question="Найти массу", values={"m": "20"}).fingerprint()
-    assert fp1 != fp3, "different condition values must change the fingerprint, even with the same wording"
+    assert fp_base != fp3, "different condition values must change the fingerprint, even with the same wording"
 
     assert not TaskRepresentation().is_usable(), "an empty task (no question, no raw_text) is not usable"
-    print("39. TaskRepresentation: prompt rendering, round trip, fingerprint semantics: OK")
+    print("39. TaskRepresentation: prompt rendering, round trip, order-preserving fingerprint: OK")
 
     # ==================== ЧАСТЬ F: кэш точных совпадений с модерацией ====================
 
