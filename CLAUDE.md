@@ -279,7 +279,7 @@ forever, unchanged, so historical buyers' grants (and any admin/gift subscriptio
 `stats["subscriptions"]`) keep resolving to the exact title/price/expiry/entitlements they were sold, but
 excluded from every purchase-facing surface (`ACTIVE_SUBSCRIPTION_TIERS = {t: cfg for t, cfg in
 SUBSCRIPTION_TIERS.items() if not cfg.get("retired")}`, iterated by all menus/keyboards/announcements instead of
-the raw dict). **Tiers 20-28 are the current lineup** (2026/27 academic year — a "pick your course" set,
+the raw dict). **Tiers 20-29 are the current lineup** (2026/27 academic year — a "pick your course" set,
 see below). **Never repurpose a retired (or any existing) tier's numeric key for a different product** —
 `stats["subscriptions"]` only stores the tier id, and some display paths re-derive text by looking the id back up
 in `SUBSCRIPTION_TIERS` live, so reusing an id would silently reinterpret what an existing payer already bought.
@@ -289,9 +289,12 @@ until `JAN_1_2027_CUTOFF`), 24 (599₽, "Зимняя сессия", adds Anatom
 (849₽, "Весь первый курс", until `FIRST_YEAR_END_2027`), 26 (1290₽, "До конца второго курса", full scope +
 downloads + cheat_sheets, until `SECOND_YEAR_END_2027` — **the same cutoff constant retired tier 9 uses**, since
 both promise "through the end of 2nd year"; do not change it without checking tier-9 holders too), 27 (1690₽,
-"VMedA MAX", `2*365` days, full scope), 28 (2990₽, "Вся академия", `6*365` days, full scope, deliberately **not**
-shown in the curated per-course screens or badged "HOT" — see the shop UI note below). Add a new tier with a
-fresh unused key above 28, never reuse 1-11 or a retired id.
+"VMedA MAX", `2*365` days, full scope), 29 (3299₽, "5 лет", `5*365` days, full scope), 28 (3899₽, "Вся академия",
+`6*365` days, full scope). 28 and 29 are deliberately **not** shown in the curated per-course screens or badged
+"HOT" — positioned as premium/long-horizon upsells, only reachable via "📦 Все тарифы" (see the shop UI note
+below); their `menu_number` (10 and 9 respectively) keeps 29 listed just ahead of the pricier 28 on that flat
+screen even though 29 was added to the dict after 28. Add a new tier with a fresh unused key above 29, never
+reuse 1-11 or a retired id.
 
 **Migrating pricing/lineups**: when retiring a whole generation of tiers in favor of a new one (as happened going
 from 1-11 to 20-28), never rewrite existing `stats["subscriptions"]` records to point at new tier ids, and never
@@ -348,7 +351,7 @@ Each tier is a dict of `title/short/price_rub/price_stars/emoji/benefits/...` pl
 
 The "💎 Подписка" entry point (`subscription_menu` callback, `cb_subscription_menu`) opens a **course picker**
 first (`get_subscription_course_picker_text/_keyboard` — "1️⃣ Первый курс" / "2️⃣ Второй курс" / "📦 Все тарифы"),
-not a flat tier list directly — with 9 active tiers a single undifferentiated screen was both unreadable and not
+not a flat tier list directly — with 10 active tiers a single undifferentiated screen was both unreadable and not
 targeted at what a given student actually needs. Nothing about the choice is persisted; it lives entirely in
 callback_data for that one screen transition. `subscription_course:{year1|year2}` renders a curated ≤4-tier list
 per `FIRST_YEAR_TIER_IDS`/`SECOND_YEAR_AUTUMN_TIER_IDS`/`SECOND_YEAR_WINTER_TIER_IDS` (`_course_tier_ids()`); the
@@ -357,9 +360,9 @@ per `FIRST_YEAR_TIER_IDS`/`SECOND_YEAR_AUTUMN_TIER_IDS`/`SECOND_YEAR_WINTER_TIER
 moment resit season is over. `subscription_all_tiers` (`cb_subscription_all_tiers`) is the *original* flat-list
 screen — `get_subscription_menu_text`/`_keyboard` themselves are unchanged in behavior, just no longer the direct
 target of the main entry point; every course screen and the picker itself link to it as a "not what I wanted"
-escape hatch. Tier 28 ("Вся академия") is deliberately **absent** from every curated course screen (only reachable
-via "📦 Все тарифы") and carries no badge — it's positioned as an upsell/premium option, not a default recommendation.
-Because 9 tiers' full benefit lists no longer fit Telegram's 4096-char cap on one screen, the flat "все тарифы"
+escape hatch. Tiers 28 ("Вся академия") and 29 ("5 лет") are deliberately **absent** from every curated course
+screen (only reachable via "📦 Все тарифы") and carry no badge — positioned as upsell/premium options, not a
+default recommendation. Because 10 tiers' full benefit lists no longer fit Telegram's 4096-char cap on one screen, the flat "все тарифы"
 view shows only each tier's *first* benefit line + price; the full list is one tap away on the tier's own detail
 screen (`get_sub_tier_text`, unchanged, still shows every benefit).
 

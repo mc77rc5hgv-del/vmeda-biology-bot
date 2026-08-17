@@ -65,7 +65,7 @@ class FakeSuccessfulPayment:
 # условия (цена/срок/права) не меняются задним числом, и записи, уже выданные по ним, продолжают
 # резолвиться ровно как раньше. Тарифы 20-28 — новая линейка (см. services/access.py).
 RETIRED_TIERS = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}
-ACTIVE_TIERS = {20, 21, 22, 23, 24, 25, 26, 27, 28}
+ACTIVE_TIERS = {20, 21, 22, 23, 24, 25, 26, 27, 28, 29}
 
 async def main():
     non_admin = random.randint(10_000_000, 99_999_999)
@@ -121,7 +121,7 @@ async def main():
         assert "ai_limit_type" not in tb.SUBSCRIPTION_TIERS[t]
     print("legacy tier (1-11) configs are byte-for-byte unchanged: OK")
 
-    # 1c. New tier (20-28) configs match the agreed price list exactly
+    # 1c. New tier (20-29) configs match the agreed price list exactly
     expected_new = {
         20: {"price_rub": 99, "price_stars": 99, "duration_days": 7, "expires_at": None,
              "subject_choice_required": True, "anatomy": False, "biology_download": False,
@@ -147,7 +147,10 @@ async def main():
         27: {"price_rub": 1690, "price_stars": 1690, "duration_days": 2 * 365, "expires_at": None,
              "subject_choice_required": False, "anatomy": True, "biology_download": True,
              "cheat_sheets": True, "ai_limit_type": "monthly", "ai_limit": 375},
-        28: {"price_rub": 2990, "price_stars": 2990, "duration_days": 6 * 365, "expires_at": None,
+        28: {"price_rub": 3899, "price_stars": 3899, "duration_days": 6 * 365, "expires_at": None,
+             "subject_choice_required": False, "anatomy": True, "biology_download": True,
+             "cheat_sheets": True, "ai_limit_type": "monthly", "ai_limit": 375},
+        29: {"price_rub": 3299, "price_stars": 3299, "duration_days": 5 * 365, "expires_at": None,
              "subject_choice_required": False, "anatomy": True, "biology_download": True,
              "cheat_sheets": True, "ai_limit_type": "monthly", "ai_limit": 375},
     }
@@ -159,9 +162,10 @@ async def main():
     # id 20 is the only new tier requiring a subject choice
     for t in ACTIVE_TIERS - {20}:
         assert not tb.SUBSCRIPTION_TIERS[t].get("subject_choice_required"), t
-    # 26/27/28 never used a HOT badge (per spec, tier 28 must not be marked HOT)
+    # 26/27/28/29 never used a HOT badge (per spec, tier 28/29 must not be marked HOT)
     assert "HOT" not in (tb.SUBSCRIPTION_TIERS[28].get("badge") or "")
-    print("new tier (20-28) configs match the agreed price list exactly: OK")
+    assert "HOT" not in (tb.SUBSCRIPTION_TIERS[29].get("badge") or "")
+    print("new tier (20-29) configs match the agreed price list exactly: OK")
 
     # 2. No subscription -> no access to any subject, no anatomy/histology
     assert not tb.has_active_subscription(non_admin)
@@ -383,7 +387,7 @@ async def main():
     assert tb.ai_requests_left(non_admin) == tb.AI_FREE_DAILY_LIMIT
     print("no active subscription -> ordinary free daily AI limit applies, unaffected: OK")
 
-    # 12. Subscription menu ("📦 Все тарифы") only lists the 9 active tiers, never the 11 retired ones
+    # 12. Subscription menu ("📦 Все тарифы") only lists the active tiers, never the 11 retired ones
     menu_text = tb.get_subscription_menu_text(non_admin)
     check_html(menu_text)
     for cfg in tb.ACTIVE_SUBSCRIPTION_TIERS.values():
@@ -399,7 +403,7 @@ async def main():
         cfg = tb.SUBSCRIPTION_TIERS[t]
         assert cfg["title"] not in menu_text
         assert not any(f"sub_tier:{t}" == d for d in kb_data(menu_kb))
-    print("'all tiers' screen lists only the 9 new active tiers, retired tiers excluded: OK")
+    print("'all tiers' screen lists only the active tiers, retired tiers excluded: OK")
 
     # 12b. Every active tier's detail screen renders valid HTML
     for tier_id in ACTIVE_TIERS:
@@ -733,7 +737,7 @@ async def main():
     sent4.clear()
     upsell_uid2 = random.randint(10_000_000, 99_999_999)
     msg_t28 = FakeMsg(from_user=FakeUser(upsell_uid2))
-    msg_t28.successful_payment = FakeSuccessfulPayment(2990, f"sub_stars_28_-_{upsell_uid2}_{int(time.time())}")
+    msg_t28.successful_payment = FakeSuccessfulPayment(3899, f"sub_stars_28_-_{upsell_uid2}_{int(time.time())}")
     await tb.handle_successful_payment(msg_t28)
     buyer_sent2 = [(c, t, k) for c, t, k in sent4 if c == upsell_uid2]
     assert buyer_sent2
@@ -1136,16 +1140,18 @@ async def main():
     assert "📣 Анонс теста по латыни" in kb_texts(tb.get_admin_menu())
     print("admin Latin-quiz announcement broadcast + admin panel button: OK")
 
-    # 27. Menu order: active tiers appear in ascending price order (menu_number), 20 first, 28 last.
-    # (Checked via the keyboard's button order, not text position — the teaser paragraph at the
-    # top of the message deliberately name-drops tiers 21/26 early as "top offers", so searching
-    # for a tier's title anywhere in the free text isn't a reliable position check.)
+    # 27. Menu order: active tiers appear in ascending price order (menu_number), 20 first, 28
+    # (the most expensive, "Вся академия") last — tier 29 ("5 лет", cheaper than 28) sits just
+    # before it. (Checked via the keyboard's button order, not text position — the teaser
+    # paragraph at the top of the message deliberately name-drops tiers 21/26 early as "top
+    # offers", so searching for a tier's title anywhere in the free text isn't a reliable
+    # position check.)
     menu_text2 = tb.get_subscription_menu_text(non_admin)
     check_html(menu_text2)
     menu_kb2 = tb.get_subscription_menu_keyboard()
     order = [d for d in kb_data(menu_kb2) if d.startswith("sub_tier:")]
-    assert order == [f"sub_tier:{t}" for t in range(20, 29)]
-    print("'all tiers' screen lists tiers 20..28 in ascending price order: OK")
+    assert order == [f"sub_tier:{t}" for t in (20, 21, 22, 23, 24, 25, 26, 27, 29, 28)]
+    print("'all tiers' screen lists active tiers in ascending price order, 29 before 28: OK")
 
     # 28. Discount purchase flow (10% off), reachable via sub_discount:{tier} — now tiers 21/26
     for t in (21, 26):
