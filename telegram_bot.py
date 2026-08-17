@@ -4139,19 +4139,35 @@ def get_ai_waiting_keyboard():
     builder.adjust(1)
     return builder.as_markup()
 
-def get_ai_result_text(answer: str, user_id: int, session_active: bool, offer_explanation: bool = False) -> str:
+def get_ai_result_chunks(answer: str, user_id: int, session_active: bool, offer_explanation: bool = False) -> list:
+    """Делит длинный ответ на несколько сообщений вместо физической обрезки (см.
+    ai.service.split_answer_into_chunks) — заголовок только в первом куске, футер (напоминание
+    сверяться с курсом + остаток квоты + подсказка про диалог) только в последнем. HTML-разметка
+    (ai.service.format_answer_html) применяется к КАЖДОМУ куску сырого текста уже ПОСЛЕ
+    разбиения — иначе резать уже готовый HTML рисковало бы разорвать тег пополам, а Telegram
+    целиком отклоняет сообщение с несбалансированной разметкой."""
     if offer_explanation:
         continuation = "\n\n🧠 Это краткий ответ — нажми кнопку ниже, если нужно решение по шагам."
     elif session_active:
         continuation = "\n\n💬 Можешь сразу уточнить вопрос по этой же теме — я помню контекст диалога."
     else:
         continuation = ""
-    return (
-        f"🤖 <b>Ответ AI</b>\n{DIVIDER}\n\n{ai_service.format_answer_html(answer)}\n\n"
-        f"💡 Сверяй важные ответы с материалами курса.\n"
+    footer = (
+        f"\n\n💡 Сверяй важные ответы с материалами курса.\n"
         f"Осталось бесплатных запросов сегодня: {get_ai_quota_label(user_id)}"
         f"{continuation}"
     )
+    raw_chunks = ai_service.split_answer_into_chunks(answer)
+    last = len(raw_chunks) - 1
+    texts = []
+    for i, raw_chunk in enumerate(raw_chunks):
+        text = ai_service.format_answer_html(raw_chunk)
+        if i == 0:
+            text = f"🤖 <b>Ответ AI</b>\n{DIVIDER}\n\n{text}"
+        if i == last:
+            text = f"{text}{footer}"
+        texts.append(text)
+    return texts
 
 def get_ai_result_keyboard(session_active: bool, offer_explanation: bool = False):
     builder = InlineKeyboardBuilder()
@@ -4163,6 +4179,18 @@ def get_ai_result_keyboard(session_active: bool, offer_explanation: bool = False
         builder.button(text="🔙 Назад в меню", callback_data="ai_menu")
     builder.adjust(1)
     return builder.as_markup()
+
+async def send_ai_result(thinking, answer: str, user_id: int, session_active: bool, offer_explanation: bool = False) -> None:
+    """Общая точка отправки ответа AI для всех трёх хендлеров (фото/текст/"показать решение") —
+    редактирует "thinking"-заглушку первым куском, остальные куски (если ответ длинный) уходят
+    отдельными сообщениями; клавиатура с действиями всегда только на последнем сообщении."""
+    chunks = get_ai_result_chunks(answer, user_id, session_active, offer_explanation)
+    keyboard = get_ai_result_keyboard(session_active, offer_explanation)
+    await safe_edit_text(thinking, chunks[0], parse_mode="HTML", reply_markup=keyboard if len(chunks) == 1 else None)
+    for chunk in chunks[1:-1]:
+        await thinking.answer(chunk, parse_mode="HTML")
+    if len(chunks) > 1:
+        await thinking.answer(chunks[-1], parse_mode="HTML", reply_markup=keyboard)
 
 @dp.callback_query(F.data == "ai_menu")
 async def cb_ai_menu(callback: CallbackQuery):
@@ -4250,12 +4278,7 @@ async def cb_ai_show_explanation(callback: CallbackQuery):
         session_active = ai_quota_ok(user_id)
         if not session_active:
             end_ai_session(user_id)
-        await safe_edit_text(
-            thinking,
-            get_ai_result_text(answer, user_id, session_active),
-            parse_mode="HTML",
-            reply_markup=get_ai_result_keyboard(session_active)
-        )
+        await send_ai_result(thinking, answer, user_id, session_active)
     except AIRefusalError as exc:
         logger.warning("AI отказался дать подробный разбор пользователю %s", user_id)
         record_ai_attempts_cost(getattr(exc, "ai_attempts_log", []))
@@ -4315,12 +4338,7 @@ async def handle_ai_photo_input(message: Message):
         session_active = ai_quota_ok(user_id)
         if not session_active:
             end_ai_session(user_id)
-        await safe_edit_text(
-            thinking,
-            get_ai_result_text(answer, user_id, session_active, offer_explanation=is_first),
-            parse_mode="HTML",
-            reply_markup=get_ai_result_keyboard(session_active, offer_explanation=is_first)
-        )
+        await send_ai_result(thinking, answer, user_id, session_active, offer_explanation=is_first)
     except AIRefusalError as exc:
         logger.warning("AI отказался разобрать фото от пользователя %s", user_id)
         record_ai_attempts_cost(getattr(exc, "ai_attempts_log", []))
@@ -4377,12 +4395,7 @@ async def handle_ai_text_input(message: Message):
         session_active = ai_quota_ok(user_id)
         if not session_active:
             end_ai_session(user_id)
-        await safe_edit_text(
-            thinking,
-            get_ai_result_text(answer, user_id, session_active, offer_explanation=is_first),
-            parse_mode="HTML",
-            reply_markup=get_ai_result_keyboard(session_active, offer_explanation=is_first)
-        )
+        await send_ai_result(thinking, answer, user_id, session_active, offer_explanation=is_first)
     except AIRefusalError as exc:
         logger.warning("AI отказался ответить на текст от пользователя %s", user_id)
         record_ai_attempts_cost(getattr(exc, "ai_attempts_log", []))

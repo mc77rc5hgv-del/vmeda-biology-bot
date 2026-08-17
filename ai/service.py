@@ -5,7 +5,10 @@ import re
 
 from ai import prompts, router
 
-ANSWER_TELEGRAM_LIMIT = 3500  # с запасом от лимита Telegram в 4096 символов на сообщение
+ANSWER_CHUNK_CHARS = 3500  # с запасом от лимита Telegram в 4096 символов на сообщение — размер
+# ОДНОГО куска при разбиении длинного ответа на несколько сообщений (см. split_answer_into_chunks
+# ниже и telegram_bot.get_ai_result_chunks), а не потолок физической обрезки — раньше ответ
+# длиннее этого резался с потерей конца решения, теперь просто уходит вторым/третьим сообщением
 QUICK_MAX_TOKENS = 550   # короткий первый ответ — только итог, без хода решения; 150 обрезал
 # на середине слова вопросы с несколькими пунктами/терминами для перечисления (не тест, не
 # расчёт), 400 не оставлял запаса на точные термины без чрезмерного сжатия (см. ai.prompts.
@@ -137,10 +140,71 @@ async def solve(
     provider, answer_raw, usage, attempts_log = await router.try_providers(attempts, messages, max_tokens)
 
     answer = clean_answer(answer_raw)
-    if len(answer) > ANSWER_TELEGRAM_LIMIT:
-        answer = answer[:ANSWER_TELEGRAM_LIMIT] + "…\n\n(ответ обрезан)"
     usage["provider"] = provider
     return answer, user_turn, usage, attempts_log
+
+
+def split_answer_into_chunks(answer: str, max_chars: int = ANSWER_CHUNK_CHARS) -> list:
+    """Делит длинный ответ на несколько кусков вместо физической обрезки — раньше ответ длиннее
+    ANSWER_CHUNK_CHARS резался с потерей конца решения (см. CLAUDE.md/архитектурный разбор
+    AI-режима, пункт "message splitting"). Режет ТОЛЬКО по границам абзацев ("\\n\\n"), затем
+    строк, затем слов — практически никогда не разрывает слово или короткий **жирный**/_курсивный_
+    маркдаун-спан посередине, потому что работает на СЫРОМ тексте ДО format_answer_html: если бы
+    резали уже готовый HTML, разбиение могло бы располовинить тег (`<b>...` без закрывающего
+    `</b>` в следующем куске) — Telegram целиком отклоняет сообщение с несбалансированной
+    разметкой. Каждый кусок форматируется в HTML ОТДЕЛЬНО, уже после разбиения (см.
+    telegram_bot.get_ai_result_chunks) — тогда результат каждого куска гарантированно
+    сбалансирован сам по себе."""
+    if not answer:
+        return [""]
+    if len(answer) <= max_chars:
+        return [answer]
+
+    chunks = []
+    current = ""
+
+    def flush():
+        nonlocal current
+        if current:
+            chunks.append(current)
+            current = ""
+
+    for paragraph in answer.split("\n\n"):
+        candidate = f"{current}\n\n{paragraph}" if current else paragraph
+        if len(candidate) <= max_chars:
+            current = candidate
+            continue
+        flush()
+        if len(paragraph) <= max_chars:
+            current = paragraph
+            continue
+        for line in paragraph.split("\n"):
+            candidate_line = f"{current}\n{line}" if current else line
+            if len(candidate_line) <= max_chars:
+                current = candidate_line
+                continue
+            flush()
+            if len(line) <= max_chars:
+                current = line
+                continue
+            for word in line.split(" "):
+                if not word:
+                    continue  # двойной/хвостовой пробел -> пустой токен, не тащим лишний пробел
+                candidate_word = f"{current} {word}" if current else word
+                if len(candidate_word) <= max_chars:
+                    current = candidate_word
+                    continue
+                flush()
+                # единственное место реальной физической обрезки — одно "слово" длиннее целого
+                # сообщения целиком (в естественном тексте не встречается, чистая защита от краша)
+                # — режем на куски по max_chars и добавляем ВСЕ, не теряя хвост
+                if len(word) <= max_chars:
+                    current = word
+                else:
+                    for i in range(0, len(word), max_chars):
+                        chunks.append(word[i:i + max_chars])
+    flush()
+    return chunks
 
 
 def format_answer_html(answer: str) -> str:

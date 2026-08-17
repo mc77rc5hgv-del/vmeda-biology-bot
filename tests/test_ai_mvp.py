@@ -34,6 +34,9 @@ class FakeMsg:
         self.edits = []
         self.deleted = False
         self.last_child = None
+        self.children = []  # every message ever sent via .answer(), in order — last_child only
+        # keeps the MOST RECENT one, which hides earlier chunks when a long AI answer is split
+        # across several messages (see send_ai_result/get_ai_result_chunks in telegram_bot.py)
     async def edit_text(self, text, **kwargs):
         self.edits.append((text, kwargs.get("reply_markup")))
         return self
@@ -43,6 +46,7 @@ class FakeMsg:
         m = FakeMsg(uid=self.from_user.id)
         m.edits.append((text, kwargs.get("reply_markup")))
         self.last_child = m
+        self.children.append(m)
         return m
 
 class FakeCB:
@@ -1696,6 +1700,87 @@ async def main():
     assert tb.stats["ai_answer_cache"][fp50]["confidence_action"] in (tb.ai_confidence.VERIFY, tb.ai_confidence.ESCALATE)
     assert tb.stats["ai_answer_cache"][fp50]["confidence_reasons"], "the moderation entry must carry the reasons for admin triage"
     print("50. get_first_message_ai_answer: low-confidence answers are flagged for the user and prioritized for review: OK")
+    tb.stats["ai_answer_cache"].clear()
+    tb.stats["ai_usage"].pop(str(uid), None)
+    tb.solve_ai_request = orig_solve
+
+    # ==================== ЧАСТЬ H: разбиение длинных ответов на несколько сообщений ====================
+
+    # ---- 51. split_answer_into_chunks: short answers pass through untouched, no truncation ----
+    short_answer = "Короткий ответ, меньше лимита."
+    assert tb.ai_service.split_answer_into_chunks(short_answer) == [short_answer]
+    assert tb.ai_service.split_answer_into_chunks("") == [""]
+
+    # paragraph-boundary splitting: two paragraphs individually well under the limit, but too
+    # long together -> two chunks, every word preserved (only whitespace at the exact cut point
+    # may differ, never actual content)
+    para_a = "Абзац один. " * 200
+    para_b = "Абзац два. " * 200
+    two_paragraphs = para_a + "\n\n" + para_b
+    chunks51 = tb.ai_service.split_answer_into_chunks(two_paragraphs, max_chars=3000)
+    assert len(chunks51) == 2
+    assert all(len(c) <= 3000 for c in chunks51)
+    assert " ".join(chunks51).split() == two_paragraphs.split(), "no word may be lost or duplicated"
+
+    # a single paragraph/line with no natural break points still splits on WORD boundaries, never
+    # mid-word
+    no_breaks = "слово " * 3000
+    chunks51b = tb.ai_service.split_answer_into_chunks(no_breaks, max_chars=3000)
+    assert len(chunks51b) >= 2
+    assert all(len(c) <= 3000 for c in chunks51b)
+    assert " ".join(chunks51b).split() == no_breaks.split()
+    for c in chunks51b:
+        assert not c.startswith(" ") and not c.endswith(" "), "must not cut in the middle of a word"
+
+    # pathological case: a single unbreakable "word" longer than the whole chunk limit — the
+    # ONLY place actual character-level cutting happens, and it must not silently drop the tail
+    unbreakable = "а" * 5000
+    chunks51c = tb.ai_service.split_answer_into_chunks(unbreakable, max_chars=3000)
+    assert "".join(chunks51c) == unbreakable, "an oversized unbreakable token must never lose characters"
+    assert all(len(c) <= 3000 for c in chunks51c)
+    print("51. split_answer_into_chunks: paragraph/line/word splitting, no data loss, no mid-word cuts: OK")
+
+    # ---- 52. get_ai_result_chunks: header only on the first chunk, footer+quota only on the
+    # last, each chunk independently valid HTML (never a torn tag) ----
+    long_markdown_answer = "\n\n".join(f"**Пункт {i}:** подробное объяснение пункта номер {i}. " * 20 for i in range(6))
+    chunks52 = tb.get_ai_result_chunks(long_markdown_answer, uid, session_active=True, offer_explanation=True)
+    assert len(chunks52) > 1, "sanity check: this answer must actually need splitting for the test to mean anything"
+    assert chunks52[0].startswith("🤖 <b>Ответ AI</b>")
+    assert not any(c.startswith("🤖 <b>Ответ AI</b>") for c in chunks52[1:]), "header must appear exactly once"
+    assert "Осталось бесплатных запросов сегодня" in chunks52[-1]
+    assert "показать решение по шагам" not in chunks52[-1].lower() or "🧠" in chunks52[-1]
+    assert not any("Осталось бесплатных запросов сегодня" in c for c in chunks52[:-1]), "footer must appear exactly once, on the last chunk"
+    for chunk in chunks52:
+        checker_ai = _BalanceChecker()
+        checker_ai.feed(chunk)
+        assert checker_ai.ok and not checker_ai.stack, f"chunk is not balanced HTML on its own: {chunk!r}"
+    print("52. get_ai_result_chunks: header on first chunk only, footer on last, every chunk independently balanced HTML: OK")
+
+    # ---- 53. send_ai_result: a long answer is delivered as several real Telegram messages —
+    # edits the "thinking" placeholder with the first chunk, sends the rest as new messages, and
+    # attaches the action keyboard ONLY to the very last one ----
+    thinking53 = FakeMsg(uid=uid)
+    await tb.send_ai_result(thinking53, long_markdown_answer, uid, session_active=True, offer_explanation=True)
+    assert len(thinking53.edits) == 1, "the thinking placeholder itself is edited exactly once (the first chunk)"
+    assert thinking53.edits[0][1] is None, "no keyboard on the first (non-final) chunk"
+    assert len(thinking53.children) == len(chunks52) - 1, "every chunk after the first must be a separate new message"
+    for child in thinking53.children[:-1]:
+        assert child.edits[-1][1] is None, "no keyboard on any non-final chunk"
+    assert thinking53.children[-1].edits[-1][1] is not None, "the keyboard must be attached to the very last message"
+    assert "ai_show_explanation" in kb_data(thinking53.children[-1].edits[-1][1])
+    all_sent_text = thinking53.edits[0][0] + "".join(c.edits[-1][0] for c in thinking53.children)
+    assert "решение по шагам" in all_sent_text.lower()
+    print("53. send_ai_result splits a long answer across several messages, keyboard on the last one only: OK")
+
+    # ---- 53b. send_ai_result: a SHORT answer is still delivered exactly like before this change
+    # — one edit, no extra messages, keyboard attached immediately (regression guard) ----
+    thinking53b = FakeMsg(uid=uid)
+    await tb.send_ai_result(thinking53b, "Короткий ответ", uid, session_active=True, offer_explanation=True)
+    assert len(thinking53b.edits) == 1
+    assert thinking53b.children == []
+    assert thinking53b.edits[0][1] is not None, "keyboard must still be attached immediately for a single-chunk answer"
+    print("53b. send_ai_result leaves short answers exactly as a single edited message: OK")
+
     tb.stats["ai_answer_cache"].clear()
     tb.stats["ai_usage"].pop(str(uid), None)
     tb.solve_ai_request = orig_solve
