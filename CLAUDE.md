@@ -528,12 +528,30 @@ Pipeline, in call order, for the **first** message of a session (photo or text):
    it extracts the closest number in the model's answer, compares within `RELATIVE_TOLERANCE` (5%,
    generous enough for rounding, not for a wrong digit), and flags a ≥10× gap specifically as a
    likely unit/order-of-magnitude mix-up.
+   **`ai/reference_bank.py`** + **`ai/mcq_verifier.py`** do the same job as the math verifier, but
+   for `task.type == "mcq"`, against an actually objective source: the 1040-question official test
+   bank of the ВМедА normal-anatomy department (`anatomy_exam_test.json`, the same content that
+   powers "🎓 Экзамен → ✅ ТЕСТ" — see `ANATOMY_EXAM_TEST_PARTS`), each question already carrying a
+   verified correct option. This is deliberately the ONLY subject/format the codebase treats this
+   way — Biology/Physics/Chemistry/Anatomy-theory content is all free-text (`title`+`answer`), with
+   no objectively-checkable "correct" field, so grading it would need another model call as judge
+   (defeating "zero tokens"). `reference_bank.configure(ANATOMY_EXAM_TEST_PARTS)` (called at startup
+   next to `ai_rag.configure()`) builds a keyword/stem index over the 1040 questions;
+   `find_reference_match(question_text)` returns the closest match only above `MIN_MATCH_SCORE`
+   (0.6 Jaccard-style overlap) — high on purpose, since a wrong match would silently hand back
+   *someone else's* correct answer. `mcq_verifier.verify_mcq(task, answer)` then extracts which
+   option letter the model's answer names (by explicit letter mention, or by the option's own text)
+   and compares it to the matched question's `correct` field.
 6. **`ai/confidence.py`** (`decide(task, validation, *, rag_grounded=False, from_cache=False,
-   math_verification=None)`) — combines parse confidence + RAG grounding + the validator's verdict
-   + (for calculations) the math verifier's verdict into `SERVE`/`VERIFY`/`ESCALATE`. A math-verifier
-   MISMATCH forces `ESCALATE` directly, overriding everything else — an independent recompute
-   disagreeing is stronger evidence than any structural heuristic; a `checked=False` verdict (formula
-   not recognized) is a complete no-op on the score, never nudges the decision either way.
+   math_verification=None, mcq_verification=None)`) — combines parse confidence + RAG grounding +
+   the validator's verdict + (for calculations/mcq) the math/MCQ verifier's verdict into
+   `SERVE`/`VERIFY`/`ESCALATE` (`_fold_verifier()` applies the same match-bonus/mismatch-penalty
+   logic to both verifiers, since they're structurally identical signals — "does this answer agree
+   with an objectively known-correct value"). A verifier MISMATCH (either one) forces `ESCALATE`
+   directly, overriding everything else — disagreeing with an independent recompute or a verified
+   answer key is stronger evidence than any structural heuristic; a `checked=False` verdict (formula/
+   reference question not recognized) is a complete no-op on the score, never nudges the decision
+   either way.
    `from_cache=True` always short-circuits to `SERVE` (trust was already established by admin
    moderation). `ESCALATE` does **not** trigger a hidden retry with a stronger model — `quick=True`
    requests are deliberately pinned to OpenAI only (self-consistency with the detailed step that

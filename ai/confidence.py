@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """Confidence-роутинг: объединяет сигналы уверенности с разных этапов конвейера (уверенность
 vision-парсера в разборе самого задания, была ли найдена релевантная база РАГ, прошёл ли ответ
-детерминированный валидатор — см. ai/validator.py, и, для calculation-заданий, сошёлся ли
-независимый пересчёт по формуле — см. ai/math_verifier.py) в одно решение, что делать с готовым
+детерминированный валидатор — см. ai/validator.py, для calculation-заданий — сошёлся ли независимый
+пересчёт по формуле (ai/math_verifier.py), для mcq-заданий — совпал ли выбранный вариант с
+эталонным (ai/mcq_verifier.py, см. ai/reference_bank.py)) в одно решение, что делать с готовым
 ответом:
 
 - SERVE — отдать как есть.
@@ -43,26 +44,42 @@ class ConfidenceDecision:
     reasons: list = field(default_factory=list)
 
 
-MATH_MISMATCH_PENALTY = 0.8  # штраф при несовпадении пересчёта — заведомо сильнее любого штрафа
-# ai.validator (максимум 0.4-1.0 там за структурные нестыковки): независимый пересчёт по формуле,
-# который НЕ совпал с ответом, — куда более веское доказательство ошибки, чем "в ответе есть цифра"
-MATH_MATCH_BONUS = 0.2  # подтверждённый пересчёт — сильный положительный сигнал, сильнее RAG
+MISMATCH_PENALTY = 0.8  # штраф при несовпадении объективной проверки (пересчёт формулы ИЛИ сверка
+# с эталонной базой) — заведомо сильнее любого штрафа ai.validator (максимум 0.4-1.0 там, за
+# структурные нестыковки): расхождение с независимо посчитанным/эталонным значением — куда более
+# веское доказательство ошибки, чем "в ответе вообще есть цифра" или "ответ ссылается на вариант"
+MATCH_BONUS = 0.2  # подтверждённая объективная проверка — сильный положительный сигнал, сильнее RAG
+
+
+def _fold_verifier(score: float, reasons: list, verification, *, kind: str) -> tuple:
+    """Общая логика для math_verification (ai.math_verifier) и mcq_verification (ai.mcq_verifier)
+    — checked=False (формула/эталонный вопрос не распознаны, verifier не имеет мнения) не влияет
+    на score вообще; matched=True даёт MATCH_BONUS; matched=False даёт MISMATCH_PENALTY и сообщает
+    вызывающему коду, что нужно форсировать ESCALATE (второй элемент возвращаемого кортежа)."""
+    if verification is None or not verification.checked:
+        return score, False
+    if verification.matched:
+        reasons.append(f"{kind} подтверждена: {verification.note}")
+        return score + MATCH_BONUS, False
+    reasons.append(f"{kind} разошлась с ответом: {verification.note}")
+    return score - MISMATCH_PENALTY, True
 
 
 def decide(
     task: TaskRepresentation, validation: ValidationResult, *,
-    rag_grounded: bool = False, from_cache: bool = False, math_verification=None,
+    rag_grounded: bool = False, from_cache: bool = False, math_verification=None, mcq_verification=None,
 ) -> ConfidenceDecision:
     """from_cache=True — ответ уже одобрен админом через кэш точных совпадений (см.
     telegram_bot.get_cached_ai_answer): доверие установлено модерацией заранее, пересчитывать
-    нечего — всегда SERVE немедленно, без обращения к validation/task/math_verification вообще.
+    нечего — всегда SERVE немедленно, без обращения к validation/task/*_verification вообще.
 
-    math_verification — ai.math_verifier.MathVerification, если задание было типа "calculation" и
-    формула распозналась (checked=True); при checked=False (формула не распознана — verifier не
-    имеет мнения об этом задании) не влияет на решение вообще. matched=False — единственный сигнал
-    в этой функции, который форсирует ESCALATE НАПРЯМУЮ, независимо от validation/score: несовпадение
-    независимого пересчёта — куда более веское доказательство ошибки, чем любая структурная
-    эвристика validator'а."""
+    math_verification (ai.math_verifier.MathVerification) и mcq_verification
+    (ai.mcq_verifier.MCQVerification) — оба опциональны и независимы друг от друга (задание либо
+    calculation, либо mcq, оба сразу не бывают заполнены осмысленно). При checked=False (формула
+    или эталонный вопрос не распознаны) — верификатор не имеет мнения, не влияет на решение вообще.
+    matched=False у ЛЮБОГО из них форсирует ESCALATE НАПРЯМУЮ, независимо от validation/score:
+    расхождение с объективно проверяемым значением — куда более веское доказательство ошибки, чем
+    любая структурная эвристика validator'а."""
     if from_cache:
         return ConfidenceDecision(SERVE, 1.0, ["ответ из промодерированного кэша"])
 
@@ -80,17 +97,10 @@ def decide(
     score += validation.confidence_adjustment
     reasons.extend(validation.warnings)
 
-    math_mismatch = False
-    if math_verification is not None and math_verification.checked:
-        if math_verification.matched:
-            score += MATH_MATCH_BONUS
-            reasons.append(f"независимый пересчёт подтверждён: {math_verification.note}")
-        else:
-            math_mismatch = True
-            score -= MATH_MISMATCH_PENALTY
-            reasons.append(f"независимый пересчёт разошёлся с ответом: {math_verification.note}")
+    score, math_mismatch = _fold_verifier(score, reasons, math_verification, kind="независимая математическая проверка")
+    score, mcq_mismatch = _fold_verifier(score, reasons, mcq_verification, kind="сверка с эталонной базой")
 
-    if math_mismatch or (not validation.passed and validation.confidence_adjustment <= ESCALATE_THRESHOLD):
+    if math_mismatch or mcq_mismatch or (not validation.passed and validation.confidence_adjustment <= ESCALATE_THRESHOLD):
         return ConfidenceDecision(ESCALATE, score, reasons)
     if not validation.passed or score < VERIFY_SCORE_THRESHOLD:
         return ConfidenceDecision(VERIFY, score, reasons)

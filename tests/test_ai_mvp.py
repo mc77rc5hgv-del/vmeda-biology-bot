@@ -1920,7 +1920,7 @@ async def main():
     clean_validation57 = tb.ai_validator.validate_answer(ohm_task_u, "Напряжение равно 10 В")
     decision_match = tb.ai_confidence.decide(ohm_task_u, clean_validation57, math_verification=r54)
     assert decision_match.action == tb.ai_confidence.SERVE
-    assert any("подтверждён" in r for r in decision_match.reasons)
+    assert any("подтверждена" in r for r in decision_match.reasons)
 
     clean_validation_wrong = tb.ai_validator.validate_answer(ohm_task_u, "Напряжение равно 12 В")
     decision_mismatch = tb.ai_confidence.decide(ohm_task_u, clean_validation_wrong, math_verification=r54_wrong)
@@ -1966,6 +1966,120 @@ async def main():
     fp_next58, _ = tb.get_next_pending_ai_cache_entry()
     assert fp_next58 == fp58, "the math-verifier-flagged ESCALATE entry must be reviewed before a plain SERVE one"
     print("58. get_first_message_ai_answer: math verifier mismatch triggers the warning and queue priority: OK")
+
+    tb.stats["ai_answer_cache"].clear()
+    tb.stats["ai_usage"].pop(str(uid), None)
+    tb.solve_ai_request = orig_solve
+
+    # ==================== ЧАСТЬ J: ai.reference_bank + ai.mcq_verifier ====================
+
+    # ---- 59. reference_bank.configure()/find_reference_match(): matches a real question from
+    # the actual production bank (already configured at telegram_bot import time — the same 1040
+    # verified questions that power "🎓 Экзамен → ✅ ТЕСТ"), no match for unrelated text ----
+    assert len(tb.ai_reference_bank._index) == 1040, "the real anatomy exam bank must be loaded at startup"
+    known_question = "Кто является «отцом» научной медицины?"
+    match59 = tb.ai_reference_bank.find_reference_match(known_question)
+    assert match59 is not None
+    assert match59["correct"] == "б"
+    assert match59["options"]["б"] == "Гиппократ"
+
+    no_match59 = tb.ai_reference_bank.find_reference_match("Совершенно не связанный вопрос про игру в шахматы")
+    assert no_match59 is None
+    print("59. reference_bank matches a real bank question, no false match on unrelated text: OK")
+
+    # ---- 59b. reference_bank on a small controlled fake index — an empty index (before
+    # configure(), or after configure([])) must degrade to no match, not crash ----
+    orig_ref_index = tb.ai_reference_bank._index
+    tb.ai_reference_bank.configure([])
+    assert tb.ai_reference_bank.find_reference_match(known_question) is None
+    tb.ai_reference_bank.configure([{
+        "questions": [{"question": "Тестовый вопрос номер один", "options": {"а": "верно", "б": "неверно"}, "correct": "а"}],
+    }])
+    assert len(tb.ai_reference_bank._index) == 1
+    match59b = tb.ai_reference_bank.find_reference_match("Тестовый вопрос номер один")
+    assert match59b is not None and match59b["correct"] == "а"
+    tb.ai_reference_bank.configure(tb.ANATOMY_EXAM_TEST_PARTS)
+    assert len(tb.ai_reference_bank._index) == 1040, "re-configuring with the real bank must restore it fully"
+    assert tb.ai_reference_bank._index == orig_ref_index
+    print("59b. reference_bank degrades cleanly on an empty/tiny index, configure() is idempotent: OK")
+
+    # ---- 60. verify_mcq: correct/wrong answer against the real bank, and the honest scope
+    # limits — no reference match, non-mcq task, mcq task with no options all -> checked=False ----
+    mcq_task60 = TaskRepresentation(
+        type="mcq", question=known_question,
+        options=["Аристотель", "Гиппократ", "Авиценна", "А. Везалий", "Н.И. Пирогов"],
+    )
+    r60_correct = tb.ai_mcq_verifier.verify_mcq(mcq_task60, "Правильный ответ: б) Гиппократ")
+    assert r60_correct.checked and r60_correct.matched
+    assert r60_correct.correct_option == "б" and r60_correct.found_option == "б"
+
+    r60_wrong = tb.ai_mcq_verifier.verify_mcq(mcq_task60, "Правильный ответ: а) Аристотель")
+    assert r60_wrong.checked and not r60_wrong.matched
+    assert r60_wrong.correct_option == "б" and r60_wrong.found_option == "а"
+
+    r60_by_text = tb.ai_mcq_verifier.verify_mcq(mcq_task60, "Это был Гиппократ, знаменитый древнегреческий врач.")
+    assert r60_by_text.checked and r60_by_text.matched, "must also recognize the option by its TEXT, not only its letter"
+
+    r60_unparseable = tb.ai_mcq_verifier.verify_mcq(mcq_task60, "Затрудняюсь ответить однозначно.")
+    assert r60_unparseable.checked and not r60_unparseable.matched, "an unparseable answer must count as a mismatch, not a silent pass"
+
+    unrelated_task60 = TaskRepresentation(type="mcq", question="Вопрос не из банка вообще", options=["x", "y"])
+    r60_nomatch = tb.ai_mcq_verifier.verify_mcq(unrelated_task60, "x")
+    assert not r60_nomatch.checked
+
+    r60_noncalc = tb.ai_mcq_verifier.verify_mcq(TaskRepresentation(type="theory", question=known_question), "Гиппократ")
+    assert not r60_noncalc.checked, "verifier only applies to mcq-typed tasks"
+
+    r60_nooptions = tb.ai_mcq_verifier.verify_mcq(TaskRepresentation(type="mcq", question=known_question, options=[]), "Гиппократ")
+    assert not r60_nooptions.checked, "an mcq task the parser couldn't extract options for has no options to verify against"
+    print("60. verify_mcq: correct/wrong/by-text/unparseable against the real bank, honest scope limits: OK")
+
+    # ---- 61. ai.confidence.decide: mcq_verification wiring mirrors math_verification exactly —
+    # match is a bonus, mismatch forces ESCALATE, checked=False is a complete no-op ----
+    clean_validation61 = tb.ai_validator.validate_answer(mcq_task60, "Правильный ответ: б) Гиппократ")
+    decision61_match = tb.ai_confidence.decide(mcq_task60, clean_validation61, mcq_verification=r60_correct)
+    assert decision61_match.action == tb.ai_confidence.SERVE
+    assert any("подтверждена" in r for r in decision61_match.reasons)
+
+    clean_validation61_wrong = tb.ai_validator.validate_answer(mcq_task60, "Правильный ответ: а) Аристотель")
+    decision61_mismatch = tb.ai_confidence.decide(mcq_task60, clean_validation61_wrong, mcq_verification=r60_wrong)
+    assert decision61_mismatch.action == tb.ai_confidence.ESCALATE
+
+    decision61_noopinion = tb.ai_confidence.decide(unrelated_task60, clean_validation61, mcq_verification=r60_nomatch)
+    decision61_baseline = tb.ai_confidence.decide(unrelated_task60, clean_validation61, mcq_verification=None)
+    assert decision61_noopinion.action == decision61_baseline.action
+    assert decision61_noopinion.score == decision61_baseline.score
+    print("61. ai.confidence.decide: mcq_verification wiring — match bonus, mismatch forces ESCALATE, no-op when unchecked: OK")
+
+    # ---- 62. end-to-end: get_first_message_ai_answer runs the MCQ verifier for mcq tasks — a
+    # wrong answer against a real bank question gets the low-confidence warning AND jumps the
+    # moderation queue ahead of a plain SERVE entry ----
+    tb.stats["ai_answer_cache"].clear()
+    tb.stats["ai_usage"].pop(str(uid), None)
+    async def fake_solve_62(*, task=None, text=None, history=None, quick=False, bucket=None, rag_context=None):
+        return (
+            "Правильный ответ: а) Аристотель",  # wrong — the real answer key says «б» (Гиппократ)
+            {"role": "user", "content": task.to_prompt_text() + tb.ai_prompts.QUICK_SUFFIX},
+            dict(FAKE_USAGE, provider="openai"),
+            [{"provider": "openai", "status": "success", "usage": dict(FAKE_USAGE)}],
+        )
+    tb.solve_ai_request = fake_solve_62
+    mcq_task_62 = TaskRepresentation(
+        type="mcq", question=known_question,
+        options=["Аристотель", "Гиппократ", "Авиценна", "А. Везалий", "Н.И. Пирогов"],
+        raw_text=known_question,
+    )
+    session62 = {"messages": [], "bucket": "theory_simple", "rag_context": None, "quick_answer": None}
+    display62, _ = await tb.get_first_message_ai_answer(uid, session62, mcq_task_62)
+    assert tb.AI_LOW_CONFIDENCE_NOTE in display62
+    fp62 = mcq_task_62.fingerprint()
+    assert tb.stats["ai_answer_cache"][fp62]["confidence_action"] == tb.ai_confidence.ESCALATE
+
+    plain_task_62 = TaskRepresentation(question="Ещё один обычный вопрос без варианта ответа")
+    tb.submit_ai_answer_for_moderation(plain_task_62, "ok", confidence_action=tb.ai_confidence.SERVE)
+    fp_next62, _ = tb.get_next_pending_ai_cache_entry()
+    assert fp_next62 == fp62, "the MCQ-verifier-flagged ESCALATE entry must be reviewed before a plain SERVE one"
+    print("62. get_first_message_ai_answer: MCQ verifier mismatch triggers the warning and queue priority: OK")
 
     tb.stats["ai_answer_cache"].clear()
     tb.stats["ai_usage"].pop(str(uid), None)

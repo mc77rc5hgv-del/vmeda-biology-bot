@@ -34,6 +34,8 @@ from ai.providers import openai as ai_openai
 from ai.providers import xai as ai_xai
 from ai import confidence as ai_confidence
 from ai import math_verifier as ai_math_verifier
+from ai import mcq_verifier as ai_mcq_verifier
+from ai import reference_bank as ai_reference_bank
 from ai import validator as ai_validator
 from ai import vision_parser as ai_vision_parser
 from ai.router import AIRefusalError
@@ -107,6 +109,7 @@ ai_rag.configure(
     chemistry_theory_tickets=CHEMISTRY_THEORY_TICKETS, chemistry_practice_tickets=CHEMISTRY_PRACTICE_TICKETS,
     anatomy=ANATOMY,
 )
+ai_reference_bank.configure(ANATOMY_EXAM_TEST_PARTS)
 
 # ==================== СТАТИСТИКА (СОХРАНЯЕТСЯ НА ДИСК) ====================
 def load_stats() -> dict:
@@ -4086,7 +4089,9 @@ async def get_first_message_ai_answer(user_id: int, session: dict, task) -> tupl
     стоимости. При промахе — обычный запрос к solve_ai_request (списывает квоту, учитывает
     стоимость всех попыток), затем ответ прогоняется через детерминированный валидатор (см.
     ai/validator.py), для calculation-заданий — ещё и через независимый математический verifier
-    (ai/math_verifier.py, пересчитывает результат по распознанной формуле и сверяет с ответом), и
+    (ai/math_verifier.py, пересчитывает результат по распознанной формуле и сверяет с ответом), для
+    mcq-заданий — через сверку с эталонной базой (ai/mcq_verifier.py, ai/reference_bank.py:
+    1040 вопросов теста кафедры анатомии с объективно известным правильным вариантом), и
     через confidence-роутер (ai/confidence.py) — при низкой уверенности пользователю честно
     показывается предупреждение (AI_LOW_CONFIDENCE_NOTE), а запись в очереди модерации получает
     более высокий приоритет на проверку. session["quick_answer"] всегда хранит ИСХОДНЫЙ
@@ -4112,8 +4117,10 @@ async def get_first_message_ai_answer(user_id: int, session: dict, task) -> tupl
 
     validation = ai_validator.validate_answer(task, answer)
     math_verification = ai_math_verifier.verify_calculation(task, answer)
+    mcq_verification = ai_mcq_verifier.verify_mcq(task, answer)
     decision = ai_confidence.decide(
-        task, validation, rag_grounded=bool(session.get("rag_context")), math_verification=math_verification,
+        task, validation, rag_grounded=bool(session.get("rag_context")),
+        math_verification=math_verification, mcq_verification=mcq_verification,
     )
     submit_ai_answer_for_moderation(task, answer, decision.action, decision.reasons)
     session["quick_answer"] = answer
