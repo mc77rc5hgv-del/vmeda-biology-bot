@@ -2333,6 +2333,57 @@ async def main():
     tb.solve_ai_request = orig_solve
     print("65b. cb_ai_show_explanation computes RAG lazily when the session never had it: OK")
 
+    # ---- 66. AI_USER_LOCKS: a session replaced mid-flight by start_ai_session() (which resets
+    # session["processing"] to False on the NEW dict) must still block a second concurrent,
+    # quota-charging request for the same user — this is the exact race the per-session
+    # "processing" flag alone cannot catch, since AI_USER_LOCKS lives OUTSIDE AI_SESSIONS and is
+    # never replaced along with it ----
+    tb.stats["ai_usage"].pop(str(uid), None)
+    release_event_66 = asyncio.Event()
+    solve_entered_event_66 = asyncio.Event()
+    async def slow_parse_task_66(*, image_bytes=None, text=None):
+        solve_entered_event_66.set()
+        await release_event_66.wait()
+        return TaskRepresentation(type="theory", question=text or "", raw_text=text or ""), dict(FAKE_PARSE_USAGE)
+    tb.ai_vision_parser.parse_task = slow_parse_task_66
+    tb.ai_rag.search_for_task = fake_search_for_task
+    async def fake_solve_66(*, task=None, text=None, history=None, quick=False, bucket=None, rag_context=None):
+        text_part = task.to_prompt_text() + tb.ai_prompts.QUICK_SUFFIX
+        return (
+            "ответ 66", {"role": "user", "content": text_part}, dict(FAKE_USAGE, provider="openai"),
+            [{"provider": "openai", "status": "success", "usage": dict(FAKE_USAGE)}],
+        )
+    tb.solve_ai_request = fake_solve_66
+
+    tb.start_ai_session(uid)
+    msg_first_66 = FakeMsg(uid=uid, text="Первое сообщение сессии")
+    first_task_66 = asyncio.ensure_future(tb.handle_ai_text_input(msg_first_66))
+    await solve_entered_event_66.wait()  # first request is now mid-flight, holding AI_USER_LOCKS[uid]
+
+    # simulate the user tapping "AI" again mid-flight -> a brand-new session, processing flag reset
+    tb.start_ai_session(uid)
+    assert tb.AI_SESSIONS[uid]["processing"] is False, "sanity: the new session's own flag is reset"
+
+    before66 = tb.ai_requests_left(uid)
+    msg_second_66 = FakeMsg(uid=uid, text="Второе сообщение уже новой сессии")
+    try:
+        await tb.handle_ai_text_input(msg_second_66)
+        raised66 = False
+    except SkipHandler:
+        raised66 = True
+    assert raised66, "a second request racing an in-flight one for the same user must be rejected via SkipHandler"
+    assert tb.ai_requests_left(uid) == before66, "the blocked second request must not spend quota"
+
+    release_event_66.set()
+    await first_task_66
+    assert tb.ai_requests_left(uid) == before66 - 1, (
+        "the original in-flight request must complete normally and spend exactly its own quota"
+    )
+    tb.end_ai_session(uid)
+    tb.stats["ai_usage"].pop(str(uid), None)
+    tb.solve_ai_request = orig_solve
+    print("66. AI_USER_LOCKS blocks a concurrent request even after the session dict is replaced: OK")
+
     # ==================== cleanup ====================
     tb.solve_ai_request = orig_solve
     tb.ai_vision_parser.parse_task = orig_parse_task

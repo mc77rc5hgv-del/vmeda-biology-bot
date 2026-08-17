@@ -622,6 +622,21 @@ final one) and skips only zero-usage `"failed"` entries.
 parsed exactly once, the moment it arrives — never resent as raw bytes to the solver), but is no
 longer treated as "first" and doesn't recompute `bucket`/`rag_context`.
 
+**`AI_USER_LOCKS[user_id]`** (`asyncio.Lock`, `_get_ai_user_lock()`) is a SEPARATE dict from
+`AI_SESSIONS`, deliberately never touched by `start_ai_session()` — closes a race the per-session
+`session["processing"]` flag alone cannot: `start_ai_session()` REPLACES the whole
+`AI_SESSIONS[user_id]` dict wholesale (a fresh `"processing": False`), so if a user taps "AI" again
+while a previous request from the OLD session object is still mid-flight (holding that old dict's
+`processing=True`), the new session's own `processing` flag reads `False` and would let a second,
+quota-charging model call fire concurrently with the first — a duplicate spend the old flag can't
+see, because it lives inside the very object being swapped out. All three cost-incurring entry
+points (`handle_ai_photo_input`, `handle_ai_text_input`, `cb_ai_show_explanation`) now ALSO check
+`lock.locked()` immediately after the existing `session["processing"]` check (same reject-not-queue
+UX: silently drop the duplicate, don't wait for the lock) before acquiring it via `async with lock:`
+for the request's full duration — the two checks aren't redundant, `session["processing"]` still
+catches a same-session double-tap exactly as before, `lock.locked()` catches the cross-session case
+the flag was blind to.
+
 **`scripts/ai_benchmark.py`** measures real pipeline accuracy against `ai/reference_bank.py`'s 1040
 questions — same "not part of the bot/requirements.txt, run manually, costs real tokens" pattern as
 `scripts/ai_model_compare.py`. Runs the actual `ai.vision_parser -> ai.router.route_bucket ->
