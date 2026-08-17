@@ -7,7 +7,12 @@
 Как и ai/math_verifier.py, честно ограничен по охвату: покрывает только вопросы, достаточно
 похожие на один из 1040 вопросов теста кафедры анатомии (см. ai/reference_bank.py) — для всего
 остального (в том числе MCQ по биологии/физике/химии, которых в эталонной базе просто нет)
-возвращает checked=False, не выдавая мнения без основания."""
+возвращает checked=False, не выдавая мнения без основания. Совпадение по тексту вопроса — не
+единственный барьер: ai.reference_bank также требует совпадения "полярности" (не/нет/кроме/
+неверно/исключение — без этого "какая структура относится к X" и "какая структура НЕ относится к
+X" читались бы как один и тот же вопрос) и, если распознаны варианты ответа, их достаточного
+сходства с вариантами эталонного вопроса — оба барьера снижают охват, но именно так и задумано:
+лучше checked=False, чем уверенное подтверждение/опровержение ответа на другой вопрос."""
 from __future__ import annotations
 
 import re
@@ -30,10 +35,12 @@ class MCQVerification:
 
 def _letter_pattern(letter: str) -> re.Pattern:
     """Кэшируем скомпилированные паттерны — одни и те же буквы (а-д) встречаются в каждом
-    вопросе эталонной базы, пересобирать regex на каждый вызов незачем."""
+    вопросе эталонной базы, пересобирать regex на каждый вызов незачем. Замыкающая группа —
+    разделитель ИЛИ конец строки: "Ответ: Б" с буквой в самом конце ответа (без точки/пробела
+    после неё) раньше не совпадал бы вообще, потому что паттерн требовал разделитель ПОСЛЕ буквы."""
     pattern = _OPTION_LETTER_RE_CACHE.get(letter)
     if pattern is None:
-        pattern = re.compile(rf"(?:^|[\s:«\"'(]){re.escape(letter.lower())}[.)\s]")
+        pattern = re.compile(rf"(?:^|[\s:«\"'(]){re.escape(letter.lower())}(?:[.)\s]|$)")
         _OPTION_LETTER_RE_CACHE[letter] = pattern
     return pattern
 
@@ -56,7 +63,7 @@ def verify_mcq(task: TaskRepresentation, answer: str) -> MCQVerification:
     if task.type != "mcq" or not task.options:
         return MCQVerification(checked=False, note="verifier применяется только к mcq-заданиям со списком вариантов")
 
-    reference = reference_bank.find_reference_match(task.question_text())
+    reference = reference_bank.find_reference_match(task.question_text(), options=task.options)
     if reference is None:
         return MCQVerification(checked=False, note="совпадений в эталонной базе не найдено")
 

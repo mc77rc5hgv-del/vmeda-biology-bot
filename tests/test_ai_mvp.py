@@ -1884,12 +1884,47 @@ async def main():
     )
     r54_r = tb.ai_math_verifier.verify_calculation(ohm_task_r, "Сопротивление равно 5 Ом")
     assert r54_r.checked and r54_r.matched
-    print("54. verify_calculation: Ohm's law solves for U/I/R, catches wrong and order-of-magnitude answers: OK")
+
+    # ---- 54b. SI prefixes (mA/kOhm) must be converted to base units before comparing, not
+    # treated as an unrecognized unit string ----
+    ohm_task_si = TaskRepresentation(
+        type="calculation", question="Закон Ома: найти напряжение",
+        values={"I": "20", "R": "2"}, units={"I": "мА", "R": "кОм"},
+    )
+    r54_si = tb.ai_math_verifier.verify_calculation(ohm_task_si, "Напряжение равно 40 В")
+    assert r54_si.checked and r54_si.matched, "20 mA * 2 kOhm = 40 V — SI prefixes must be converted, not ignored"
+
+    # ---- 54c. unit matching is EXACT (after normalization), not substring — "Па" (pascal) must
+    # never be mistaken for "А" (ampere) just because it contains the letter ----
+    ohm_task_pa = TaskRepresentation(
+        type="calculation", question="Закон Ома для участка цепи: ток и сопротивление",
+        values={"P": "5", "R": "2"}, units={"P": "Па", "R": "Ом"},
+    )
+    r54_pa = tb.ai_math_verifier.verify_calculation(ohm_task_pa, "что угодно")
+    assert not r54_pa.checked, "Pa must never be picked up as current just because it contains the letter 'а'"
+
+    # ---- 54d. verify_calculation prefers the number after a final-answer marker ("Итог:"/
+    # "Ответ:"/"Результат:") over the closest number anywhere in the text — a detailed answer's
+    # WRONG final claim must not be waved through just because a correct intermediate number
+    # happens to appear earlier in the same text ----
+    r54_final = tb.ai_math_verifier.verify_calculation(
+        ohm_task_u, "U = 10 В, R = 5 Ом, I = 2 А (промежуточно). Итог: I = 3 А"
+    )
+    assert r54_final.checked and not r54_final.matched, (
+        "the model's actual final claim (3) is wrong even though the correct value (2) appears "
+        "earlier as an intermediate — must grade the final claim, not the closest number anywhere"
+    )
+    assert abs(r54_final.found_value - 3.0) < 1e-9
+    print("54. verify_calculation: Ohm's law solves for U/I/R, SI prefixes, exact unit matching, final-answer extraction: OK")
 
     # ---- 55. verify_calculation: pH from concentration — the exact "3.2 instead of 3.7"-shaped
-    # regression this feature targets; tolerance is generous enough for rounding, not for a wrong digit ----
+    # regression this feature targets; tolerance is generous enough for rounding, not for a wrong
+    # digit. The condition's key must EXPLICITLY mark [H+]/[H3O+] — a generic concentration key
+    # (or a question about a BASE like NaOH, where pH is not -log10([OH-])) must stay checked=False,
+    # never guess and risk a confident wrong answer ----
     ph_task = TaskRepresentation(
-        type="calculation", question="Найти pH раствора", values={"c": "0.001"}, units={"c": "моль/л"},
+        type="calculation", question="Найти pH раствора по концентрации [H+]",
+        values={"[H+]": "0.001"}, units={"[H+]": "моль/л"},
     )
     r55_correct = tb.ai_math_verifier.verify_calculation(ph_task, "pH раствора равен 3")
     assert r55_correct.checked and r55_correct.matched
@@ -1897,7 +1932,25 @@ async def main():
     assert r55_close_enough.checked and r55_close_enough.matched, "small rounding must stay within tolerance"
     r55_wrong = tb.ai_math_verifier.verify_calculation(ph_task, "pH раствора равен 3,7")
     assert r55_wrong.checked and not r55_wrong.matched, "a genuinely wrong digit must fail, not just be waved through"
-    print("55. verify_calculation: pH from [H+], generous rounding tolerance but catches real errors: OK")
+
+    # ---- 55b. a generic concentration key with no H+/H3O+ marker must NOT be treated as [H+] —
+    # this is the honest-scope fix, not just an incidental restriction ----
+    ph_task_generic = TaskRepresentation(
+        type="calculation", question="Найти pH раствора", values={"c": "0.001"}, units={"c": "моль/л"},
+    )
+    r55_generic = tb.ai_math_verifier.verify_calculation(ph_task_generic, "pH раствора равен 3")
+    assert not r55_generic.checked, "a generic 'c' key with no explicit H+/H3O+ marker must not be assumed to be [H+]"
+
+    # ---- 55c. a base (NaOH) question must never be solved via pH = -log10([OH-]) — this is the
+    # exact false-positive scenario flagged in review: 0.01 mol/L NaOH gives pH ≈ 12, but the old
+    # unguarded formula would have silently computed -log10(0.01) = 2 and called it verified ----
+    ph_task_base = TaskRepresentation(
+        type="calculation", question="Найти pH раствора 0.01 моль/л NaOH",
+        values={"c": "0.01"}, units={"c": "моль/л"},
+    )
+    r55_base = tb.ai_math_verifier.verify_calculation(ph_task_base, "pH = 12")
+    assert not r55_base.checked, "a base/NaOH question must stay checked=False, never confidently apply the [H+] formula"
+    print("55. verify_calculation: pH requires an explicit [H+]/[H3O+] marker, refuses NaOH/base questions: OK")
 
     # ---- 56. verify_calculation: honest scope — unrecognized formulas and non-calculation tasks
     # are checked=False (no opinion), never a false "matched" verdict; malformed/non-numeric
@@ -1949,8 +2002,9 @@ async def main():
         )
     tb.solve_ai_request = fake_solve_58
     ph_task_58 = TaskRepresentation(
-        type="calculation", question="Найти pH раствора", values={"c": "0.001"}, units={"c": "моль/л"},
-        raw_text="Найти pH раствора",
+        type="calculation", question="Найти pH раствора по концентрации [H+]",
+        values={"[H+]": "0.001"}, units={"[H+]": "моль/л"},
+        raw_text="Найти pH раствора по концентрации [H+]",
     )
     session58 = {"messages": [], "bucket": "problem", "rag_context": None, "quick_answer": None}
     display58, _ = await tb.get_first_message_ai_answer(uid, session58, ph_task_58)
@@ -2033,6 +2087,50 @@ async def main():
     r60_nooptions = tb.ai_mcq_verifier.verify_mcq(TaskRepresentation(type="mcq", question=known_question, options=[]), "Гиппократ")
     assert not r60_nooptions.checked, "an mcq task the parser couldn't extract options for has no options to verify against"
     print("60. verify_mcq: correct/wrong/by-text/unparseable against the real bank, honest scope limits: OK")
+
+    # ---- 60b. extract_chosen_letter: the letter must be recognized even at the ABSOLUTE END of
+    # the answer string, with no trailing delimiter character at all — the old pattern required a
+    # separator AFTER the letter, so a bare "Ответ: Б" (letter as the very last character) failed ----
+    end_of_string_letter = tb.ai_mcq_verifier.extract_chosen_letter("Ответ: б", match59["options"])
+    assert end_of_string_letter == "б", "a letter with no trailing delimiter (end of string) must still be recognized"
+    print("60b. extract_chosen_letter recognizes a letter at the absolute end of the answer string: OK")
+
+    # ---- 60c. reference_bank polarity guard: a negated question ("НЕ относится") must never
+    # match its positive counterpart ("относится") even though they share almost every other word —
+    # a false match here would hand back the OPPOSITE question's correct answer ----
+    orig_ref_index_60c = tb.ai_reference_bank._index
+    tb.ai_reference_bank.configure([{"questions": [
+        {"question": "Какая структура относится к органам грудной полости?",
+         "options": {"а": "Сердце", "б": "Печень"}, "correct": "а"},
+        {"question": "Какая структура НЕ относится к органам грудной полости?",
+         "options": {"а": "Сердце", "б": "Печень"}, "correct": "б"},
+    ]}])
+    positive_match = tb.ai_reference_bank.find_reference_match("Какая структура относится к органам грудной полости?")
+    negative_match = tb.ai_reference_bank.find_reference_match("Какая структура НЕ относится к органам грудной полости?")
+    assert positive_match is not None and positive_match["correct"] == "а"
+    assert negative_match is not None and negative_match["correct"] == "б"
+    assert positive_match is not negative_match, "the positive and negated questions must resolve to different entries"
+    print("60c. reference_bank: a negated question never matches its positive counterpart (or vice versa): OK")
+
+    # ---- 60d. reference_bank options guard: similar question text but a DIFFERENT set of answer
+    # options must not match — could be an unrelated question or a different version of the same
+    # question with different distractors, either way too risky to trust for an objective verdict ----
+    tb.ai_reference_bank.configure([{"questions": [
+        {"question": "Что изучает анатомия?",
+         "options": {"а": "Форму и строение тела", "б": "Химические реакции"}, "correct": "а"},
+    ]}])
+    mismatched_options = tb.ai_reference_bank.find_reference_match(
+        "Что изучает анатомия?", options=["Совершенно другой набор вариантов", "Ничего общего с эталоном"],
+    )
+    assert mismatched_options is None, "matching question text with a mismatched option set must not resolve"
+    matching_options = tb.ai_reference_bank.find_reference_match(
+        "Что изучает анатомия?", options=["Форму и строение тела человека", "Химические реакции веществ"],
+    )
+    assert matching_options is not None, "matching question text WITH a plausible option set must still resolve"
+    no_options_given = tb.ai_reference_bank.find_reference_match("Что изучает анатомия?")
+    assert no_options_given is not None, "omitting options entirely must not block a match on question text alone"
+    tb.ai_reference_bank._index = orig_ref_index_60c
+    print("60d. reference_bank: mismatched answer options block a match even when question text is similar: OK")
 
     # ---- 61. ai.confidence.decide: mcq_verification wiring mirrors math_verification exactly —
     # match is a bonus, mismatch forces ESCALATE, checked=False is a complete no-op ----

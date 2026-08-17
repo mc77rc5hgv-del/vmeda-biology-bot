@@ -521,13 +521,22 @@ Pipeline, in call order, for the **first** message of a session (photo or text):
    *some* digit is present. Deliberately does NOT attempt to infer an arbitrary formula from free
    text (that would need either another model call, defeating "zero tokens", or a full CAS) —
    instead it holds a small, explicit registry of formulas it can recognize with confidence (today:
-   Ohm's law, pH from `[H+]`), matched via `task.values`/`task.units` (the parser's own structured
-   fields — units there are unambiguous, unlike scanning raw prose where a bare "в" is usually just
-   the preposition "in", not Volts). A question whose formula isn't in the registry comes back
-   `checked=False` — the verifier stays silent rather than guessing. When it does have an opinion,
-   it extracts the closest number in the model's answer, compares within `RELATIVE_TOLERANCE` (5%,
-   generous enough for rounding, not for a wrong digit), and flags a ≥10× gap specifically as a
-   likely unit/order-of-magnitude mix-up.
+   Ohm's law, pH from `[H+]`/`[H3O+]`), matched via `task.values`/`task.units` (the parser's own
+   structured fields) with unit strings compared EXACTLY against a known dict of SI-prefixed
+   spellings (`_UNIT_MULTIPLIERS` — "А"/"мА"/"мкА", etc.), not by substring — a substring check on
+   "а" for amperes previously risked matching inside unrelated units like "Па". The pH formula
+   additionally requires the condition's own key to explicitly name the ion (`H+`/`H3O+`/`Н+`, see
+   `_H_ION_KEY_MARKERS`) and bails out entirely (`checked=False`) if the question mentions a base
+   (`_BASE_MARKERS` — NaOH, KOH, "гидроксид", "щёлочь", ...): pH of a base isn't `-log10([OH-])`,
+   and applying the formula anyway would confidently return a wrong-by-14-minus-pOH answer. A
+   question whose formula isn't in the registry (or isn't safely applicable) comes back
+   `checked=False` — the verifier stays silent rather than guessing; a false "confirmation" is worse
+   than no verifier at all. When it does have an opinion, it compares against `RELATIVE_TOLERANCE`
+   (5%, generous enough for rounding, not for a wrong digit) and flags a ≥10× gap specifically as a
+   likely unit/order-of-magnitude mix-up — and it grades the number found *after* a final-answer
+   marker ("Итог:"/"Ответ:"/"Результат:") when the answer has one, not just the closest number
+   anywhere in the text, so a correct intermediate value can't accidentally validate a wrong final
+   claim in a detailed solution.
    **`ai/reference_bank.py`** + **`ai/mcq_verifier.py`** do the same job as the math verifier, but
    for `task.type == "mcq"`, against an actually objective source: the 1040-question official test
    bank of the ВМедА normal-anatomy department (`anatomy_exam_test.json`, the same content that
@@ -537,11 +546,22 @@ Pipeline, in call order, for the **first** message of a session (photo or text):
    no objectively-checkable "correct" field, so grading it would need another model call as judge
    (defeating "zero tokens"). `reference_bank.configure(ANATOMY_EXAM_TEST_PARTS)` (called at startup
    next to `ai_rag.configure()`) builds a keyword/stem index over the 1040 questions;
-   `find_reference_match(question_text)` returns the closest match only above `MIN_MATCH_SCORE`
-   (0.6 Jaccard-style overlap) — high on purpose, since a wrong match would silently hand back
-   *someone else's* correct answer. `mcq_verifier.verify_mcq(task, answer)` then extracts which
-   option letter the model's answer names (by explicit letter mention, or by the option's own text)
-   and compares it to the matched question's `correct` field.
+   `find_reference_match(question_text, options=None)` returns the closest match only above
+   `MIN_MATCH_SCORE` (0.6 Jaccard-style overlap) — high on purpose, since a wrong match would
+   silently hand back *someone else's* correct answer. Two more guards sit on top of the text score:
+   negation/exclusion words ("не"/"нет"/"кроме"/"неверно"/"исключение") are tracked as a separate
+   "polarity" token set (see `_POLARITY_EXACT_WORDS`/`_POLARITY_PREFIXES` — short words match
+   exactly, not by prefix, so "не" doesn't swallow unrelated words like "невролог") and a query's
+   polarity must match a candidate's EXACTLY, since normal keyword stemming drops words shorter
+   than 4 characters and would otherwise treat "какая структура относится к X" and "какая структура
+   НЕ относится к X" as the same question; and if the caller passes `options` (the parser's own
+   `task.options`), they must be sufficiently similar (`_options_match`, ≥60% of query options
+   found a plausible match) to the reference question's options, or the match is rejected — similar
+   question text with a different set of answer choices is too risky to trust. `mcq_verifier.
+   verify_mcq(task, answer)` then extracts which option letter the model's answer names (by
+   explicit letter mention — matched at a delimiter OR end-of-string, so a bare "Ответ: Б" with
+   nothing trailing the letter still counts — or by the option's own text) and compares it to the
+   matched question's `correct` field.
 6. **`ai/confidence.py`** (`decide(task, validation, *, rag_grounded=False, from_cache=False,
    math_verification=None, mcq_verification=None)`) — combines parse confidence + RAG grounding +
    the validator's verdict + (for calculations/mcq) the math/MCQ verifier's verdict into
