@@ -498,7 +498,17 @@ Pipeline, in call order, for the **first** message of a session (photo or text):
    `_embed_query`/`_embed_queries`/`build_embeddings` degrade to `None`/no-op otherwise, so the
    feature is fully functional (keyword-only) with no key at all. Embeddings are cached to disk keyed
    by `_entry_key()` (a content hash, not a list index), so re-running `build_embeddings()` on every
-   bot restart only pays for genuinely new/changed content. `task.type == "list"` with
+   bot restart only pays for genuinely new/changed content. `build_embeddings(cache_path, max_items)`
+   caps how many missing entries get embedded in ONE call — `max_items` defaults to
+   `MAX_EMBEDDING_BUILD_ITEMS_PER_START` (500) unless the caller overrides it; `telegram_bot.main()`
+   passes `AI_MAX_EMBEDDING_BUILD_ITEMS_PER_START` (env-overridable) and gates the whole call behind
+   `AI_BUILD_EMBEDDINGS_ON_START` (env `AI_BUILD_EMBEDDINGS_ON_START=0` skips it entirely) — without
+   this, a lost/corrupted/non-persistent cache file (or a bot stuck crash-looping) would re-pay to
+   embed the WHOLE content base on every single restart; with the cap, a full rebuild instead spreads
+   across several restarts, each picking up more of the still-missing entries (the incremental
+   per-batch disk save inside `build_embeddings` already makes this safe — nothing already embedded
+   is ever re-paid for). Returns the count actually embedded this call, so the caller/logs can see
+   rebuild progress. `task.type == "list"` with
    `task.subquestions` filled queries each subquestion separately and unions the results (a single
    blob query over a 13-item list was observed to match nothing, even when half the items
    individually ground fine) — the old `search_snippets_multi()` did the same thing by regex-splitting

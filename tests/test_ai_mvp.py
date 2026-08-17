@@ -1234,6 +1234,35 @@ async def main():
     tb.ai_openai.get_client = orig_get_client
     print("34. build_embeddings() is incremental: skips cached keys, embeds only missing ones: OK")
 
+    # ---- 34b. build_embeddings(max_items=...): caps how many MISSING entries get embedded in ONE
+    # call — protects against a lost/corrupted/non-persistent cache file (or a crash-looping
+    # process) paying to re-embed the WHOLE base on every single restart; the rest stay "missing"
+    # for a later call to pick up, and the return value reports how many actually got embedded ----
+    fake_emb_client_34b = FakeEmbeddingsClient()
+    tb.ai_openai.get_client = lambda: fake_emb_client_34b
+    five_entry_index = [
+        {"subject": "биология", "title": t, "text": f"текст {t}", "key": f"key{t}", "stems": set()}
+        for t in "ABCDE"
+    ]
+    tb.ai_rag._index = five_entry_index
+    tb.ai_rag._embeddings = {}
+    embedded_count = await tb.ai_rag.build_embeddings(max_items=2)
+    assert embedded_count == 2, "must embed only up to the budget, not all 5 missing entries"
+    assert len(fake_emb_client_34b.embeddings.calls) == 1 and len(fake_emb_client_34b.embeddings.calls[0]) == 2
+    assert len(tb.ai_rag._embeddings) == 2
+    embedded_count_2 = await tb.ai_rag.build_embeddings(max_items=2)
+    assert embedded_count_2 == 2, "a second call picks up more of the still-missing entries"
+    assert len(tb.ai_rag._embeddings) == 4
+    embedded_count_3 = await tb.ai_rag.build_embeddings(max_items=2)
+    assert embedded_count_3 == 1, "a third call finishes off the last remaining entry, budget or not"
+    assert len(tb.ai_rag._embeddings) == 5
+    embedded_count_4 = await tb.ai_rag.build_embeddings(max_items=2)
+    assert embedded_count_4 == 0, "nothing left to embed once the whole index is covered"
+    tb.ai_rag._index, tb.ai_rag._idf = orig_rag_index, orig_rag_idf
+    tb.ai_rag._embeddings = {}
+    tb.ai_openai.get_client = orig_get_client
+    print("34b. build_embeddings(max_items=...) caps per-call spend, spreads a rebuild across calls: OK")
+
     # ==================== ЧАСТЬ D: ai.vision_parser (одноразовый разбор фото/текста) ====================
 
     # ---- 35. parse_task(): no OpenAI client configured -> degrades to a raw-text task, zero

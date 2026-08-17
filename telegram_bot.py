@@ -4946,15 +4946,33 @@ async def setup_bot_commands() -> None:
         except Exception:
             logger.exception("Не удалось установить админ-команды для %s", admin_id)
 
+# AI_BUILD_EMBEDDINGS_ON_START=0 полностью отключает пересчёт эмбеддингов на старте (RAG падает
+# на чистый keyword/IDF-поиск, как без ключа OpenAI вообще) — аварийный рубильник на случай, если
+# кэш-файл потерян/повреждён/лежит не на постоянном томе или бот попал в crash-loop: без него
+# КАЖДЫЙ рестарт пытался бы заново оплатить эмбеддинги всей базы. AI_MAX_EMBEDDING_BUILD_ITEMS_PER_START
+# — более мягкая версия той же защиты (см. ai_rag.MAX_EMBEDDING_BUILD_ITEMS_PER_START): не отключает
+# пересчёт целиком, а ограничивает бюджет ОДНОГО прогона, размазывая полный пересчёт по нескольким
+# рестартам вместо одного большого счёта.
+AI_BUILD_EMBEDDINGS_ON_START = os.environ.get("AI_BUILD_EMBEDDINGS_ON_START", "1") != "0"
+AI_MAX_EMBEDDING_BUILD_ITEMS_PER_START = int(
+    os.environ.get("AI_MAX_EMBEDDING_BUILD_ITEMS_PER_START", str(ai_rag.MAX_EMBEDDING_BUILD_ITEMS_PER_START))
+)
+
 async def main():
     logger.info("Бот запускается...")
     logger.info("Загружена статистика: %d пользователей", len(stats["total_users"]))
     await setup_bot_commands()
     resume_battle_timer_if_needed()
-    # Фоновой задачей, не блокируя polling — на первом прогоне подсчёт эмбеддингов всей базы
-    # может занять заметное время (см. ai_rag.build_embeddings); инкрементальный кэш на диске
-    # делает все последующие запуски бота почти мгновенными.
-    asyncio.create_task(ai_rag.build_embeddings(os.path.join(STATS_DIR, "ai_rag_embeddings_cache.json")))
+    if AI_BUILD_EMBEDDINGS_ON_START:
+        # Фоновой задачей, не блокируя polling — на первом прогоне подсчёт эмбеддингов всей базы
+        # может занять заметное время (см. ai_rag.build_embeddings); инкрементальный кэш на диске
+        # делает все последующие запуски бота почти мгновенными.
+        asyncio.create_task(ai_rag.build_embeddings(
+            os.path.join(STATS_DIR, "ai_rag_embeddings_cache.json"),
+            max_items=AI_MAX_EMBEDDING_BUILD_ITEMS_PER_START,
+        ))
+    else:
+        logger.info("AI_BUILD_EMBEDDINGS_ON_START=0 — пересчёт эмбеддингов RAG на старте пропущен")
     try:
         await dp.start_polling(bot)
     finally:

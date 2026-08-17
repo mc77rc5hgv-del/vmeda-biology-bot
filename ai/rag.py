@@ -183,6 +183,14 @@ MAX_RAG_QUERIES = 8  # верхний предел числа отдельных
 # запросу на КАЖДЫЙ пункт; теперь не только ограничено сверху, но и все запросы уходят ОДНИМ
 # батч-вызовом API (см. _embed_queries), а не по одному на пункт
 
+MAX_EMBEDDING_BUILD_ITEMS_PER_START = 500  # верхний бюджет build_embeddings() ЗА ОДИН вызов
+# (обычно — за один старт бота) по умолчанию, если вызывающий код не передал свой max_items.
+# Без этого потерянный/повреждённый/не-персистентный кэш-файл (или бот в crash-loop) на КАЖДОМ
+# рестарте пытался бы заново оплатить эмбеддинги ВСЕЙ базы разом. С бюджетом полный пересчёт при
+# потере кэша растягивается на несколько рестартов подряд — каждый добивает ещё до max_items
+# записей, а уже посчитанные (см. incremental-сохранение по батчам в build_embeddings) остаются
+# в кэше и не переоплачиваются следующим рестартом.
+
 _embeddings: dict = {}  # entry["key"] -> vector (list[float])
 
 
@@ -202,13 +210,20 @@ def _save_embeddings_cache(path: str, embeddings: dict) -> None:
         logger.exception("Не удалось сохранить кэш эмбеддингов RAG на диск")
 
 
-async def build_embeddings(cache_path: str = None) -> None:
-    """Считает эмбеддинги для всех записей ТЕКУЩЕГО индекса (после configure()), которых ещё нет
+async def build_embeddings(cache_path: str = None, max_items: int = None) -> int:
+    """Считает эмбеддинги для записей ТЕКУЩЕГО индекса (после configure()), которых ещё нет
     в кэше — вызывать один раз при старте бота, желательно фоновой задачей (не блокируя запуск
     polling), т.к. на первом прогоне это может занять заметное время. Инкрементально: запись
     индексируется по содержимому (см. _entry_key), поэтому неизменившиеся записи между
     перезапусками бота не переоплачиваются и не пересчитываются — платится только за реально
     новый/изменившийся контент.
+
+    max_items ограничивает БЮДЖЕТ этого конкретного вызова (по умолчанию —
+    MAX_EMBEDDING_BUILD_ITEMS_PER_START, передайте None явно, чтобы снять ограничение вовсе) — если
+    записей без эмбеддинга больше, чем max_items, эмбедятся только первые max_items, остальные
+    останутся "missing" и будут подхвачены СЛЕДУЮЩИМ вызовом (обычно — следующим рестартом бота),
+    а не оплачены все разом за один раз. Возвращает число реально проэмбеженных записей за этот
+    вызов (0 — нет клиента/индекса/новых записей).
 
     Полностью необязательный шаг — RAG прекрасно работает и без него (просто без семантического
     слоя, только keyword/IDF, как раньше), поэтому любая ошибка (нет ключа, сеть, лимиты API)
@@ -218,10 +233,19 @@ async def build_embeddings(cache_path: str = None) -> None:
         _embeddings = _load_embeddings_cache(cache_path)
     client = openai_provider.get_client()
     if client is None or not _index:
-        return
+        return 0
     missing = [e for e in _index if e["key"] not in _embeddings]
     if not missing:
-        return
+        return 0
+    budget = MAX_EMBEDDING_BUILD_ITEMS_PER_START if max_items is None else max_items
+    if budget is not None and len(missing) > budget:
+        logger.warning(
+            "RAG: %d записей без эмбеддинга, но бюджет этого запуска ограничен %d — остальные "
+            "будут посчитаны следующим запуском build_embeddings() (обычно — следующим рестартом бота)",
+            len(missing), budget,
+        )
+        missing = missing[:budget]
+    embedded = 0
     try:
         for i in range(0, len(missing), EMBEDDING_BATCH_SIZE):
             batch = missing[i:i + EMBEDDING_BATCH_SIZE]
@@ -229,18 +253,20 @@ async def build_embeddings(cache_path: str = None) -> None:
             response = await client.embeddings.create(model=EMBEDDING_MODEL, input=texts)
             for entry, item in zip(batch, response.data):
                 _embeddings[entry["key"]] = item.embedding
+            embedded += len(batch)
             if cache_path:
                 _save_embeddings_cache(cache_path, _embeddings)  # сохраняем инкрементально, батч
                 # за батчем — обрыв на середине (сеть/рестарт бота) не теряет уже посчитанное
         logger.info(
             "RAG: посчитаны эмбеддинги для %d новых записей базы (всего в кэше %d)",
-            len(missing), len(_embeddings),
+            embedded, len(_embeddings),
         )
     except Exception:
         logger.exception(
             "Не удалось посчитать эмбеддинги базы RAG — семантический поиск будет недоступен, "
             "keyword-поиск продолжит работать как обычно"
         )
+    return embedded
 
 
 async def _embed_query(text: str):
