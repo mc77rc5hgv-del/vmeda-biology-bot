@@ -448,6 +448,96 @@ via `stats["temporary_access"]` — the same mechanism the referral-exhausted re
 `SUBSCRIPTION_TIERS` entry, since it's promotional and unlocks only Biology/Physics/Chemistry (not
 Histology/Anatomy, which check their own subscription-specific flags, not `has_temp_access()`).
 
+### VMedA AI (AI-помощник) — pipeline architecture
+
+The `ai/` package is a self-contained pipeline that never imports `telegram_bot` (to avoid a
+circular import) — content/config is handed in once via `ai_rag.configure()` (called right after
+the JSON banks load, near the top of `telegram_bot.py`) and `ai_rag.build_embeddings()` (fired as a
+background `asyncio.create_task()` from `main()`, keyed to a `STATS_DIR`-based cache file so it
+doesn't block bot startup/polling). Everything that needs `stats`/`save_stats()` (quota, cost
+tracking, the answer cache) stays in `telegram_bot.py`; the `ai/` modules themselves are pure
+functions/classes over their inputs.
+
+Pipeline, in call order, for the **first** message of a session (photo or text):
+1. **`ai/vision_parser.py`** (`parse_task(*, image_bytes=None, text=None)`) — the ONLY place a
+   photo is ever sent to a model, exactly once. Returns a `TaskRepresentation` (see `ai/task.py`:
+   `subject/type/complexity/question/options/values/units/subquestions/confidence/raw_text`) plus
+   usage for cost tracking. On any failure (no `OPENAI_API_KEY`, network error, non-JSON response)
+   it degrades to a raw-text task with `confidence=0.0` instead of raising — the rest of the
+   pipeline always has *something* to work with, never a hard failure at this step. `type`/
+   `complexity` are classified from the QUESTION itself, not from a later answer — this is what
+   lets `ai.router.route_bucket(task)` pick a provider before any answer exists (replaced the old
+   `classify_quick_answer()`, which inferred provider from the shape of an already-generated reply).
+2. **`ai/rag.py`** (`search_for_task(task, limit=TOP_K)`) — runs before BOTH the quick and the
+   detailed answer (not just the detailed one, unlike the original MVP). Hybrid: a keyword/IDF
+   layer (`_score_entries`, zero tokens, always available) plus an optional OpenAI-embeddings
+   semantic layer (`text-embedding-3-small`, cosine similarity, `MIN_COSINE`/`SEMANTIC_SCORE_SCALE`)
+   that only engages when `OPENAI_API_KEY` is set — `_embed_query`/`build_embeddings` degrade to
+   `None`/no-op otherwise, so the feature is fully functional (keyword-only) with no key at all.
+   Embeddings are cached to disk keyed by `_entry_key()` (a content hash, not a list index), so
+   re-running `build_embeddings()` on every bot restart only pays for genuinely new/changed content.
+   `task.type == "list"` with `task.subquestions` filled queries each subquestion separately and
+   unions the results (a single blob query over a 13-item list was observed to match nothing, even
+   when half the items individually ground fine) — the old `search_snippets_multi()` did the same
+   thing by regex-splitting the model's own numbered-list ANSWER text; the new version splits on the
+   parser's structured field instead, which is the whole point of having `TaskRepresentation`.
+3. **Exact-match answer cache** (`telegram_bot.get_cached_ai_answer`/`get_first_message_ai_answer`,
+   keyed by `TaskRepresentation.fingerprint()` — normalizes word order and folds in `values` so two
+   different phrasings of the same question with the same numbers collide, but two different numbers
+   never do) — checked BEFORE calling the model at all. A hit is free: no model call, no quota spent,
+   no cost recorded. **A freshly generated answer is never auto-trusted into the cache** —
+   `submit_ai_answer_for_moderation()` queues it as `"pending"` in `stats["ai_answer_cache"]`; only an
+   admin approving it via the moderation queue (admin panel → "🤖 Модерация AI-кэша",
+   `handlers/admin.py`: `cb_admin_ai_cache_queue`/`_approve`/`_reject`) makes it servable to other
+   users. Rejecting doesn't block the question forever — the next occurrence generates (and re-queues)
+   a fresh candidate. `submit_ai_answer_for_moderation()` never overwrites an already-`"approved"`
+   entry with a new candidate; only `moderate_ai_cache_entry()` can change an approved entry's fate.
+4. **`ai/service.py`** (`solve(*, task=None, text=None, history=None, quick=False, bucket=None,
+   rag_context=None)`) — only called on a cache MISS. `task` is passed only on the first turn of a
+   session (its `to_prompt_text()` becomes the request content); every later turn passes `text`
+   instead, since the task is already the first entry in `history`. `rag_context` is mixed into what
+   actually gets SENT to the model but is deliberately kept OUT of the returned/stored `user_turn` —
+   history isn't compacted on user turns (only old assistant turns get shortened, see
+   `_compact_history`), so baking `rag_context` into `user_turn` would resend and re-bill the same
+   grounding text on every subsequent turn of the session (the same cost-runaway class of bug that
+   photos-in-history used to cause, before photos stopped entering history at all).
+5. **`ai/validator.py`** (`validate_answer(task, answer)`) — pure-Python structural sanity checks,
+   zero model calls: a `"calculation"` answer with no digit, an `"mcq"` answer that names none of
+   `task.options`, a `"list"` answer with far fewer lines than `task.subquestions`, an empty answer,
+   or `ai.router.looks_like_refusal()` firing. Does NOT check factual correctness — only "does this
+   look like a plausible answer to this specific question shape".
+6. **`ai/confidence.py`** (`decide(task, validation, *, rag_grounded=False, from_cache=False)`) —
+   combines parse confidence + RAG grounding + the validator's verdict into `SERVE`/`VERIFY`/
+   `ESCALATE`. `from_cache=True` always short-circuits to `SERVE` (trust was already established by
+   admin moderation). `ESCALATE` does **not** trigger a hidden retry with a stronger model — `quick=True`
+   requests are deliberately pinned to OpenAI only (self-consistency with the detailed step that
+   follows), so there is no stronger provider to actually fall back to at this stage. Its real effect
+   is queue priority: `get_next_pending_ai_cache_entry()` sorts pending moderation entries
+   `ESCALATE` → `VERIFY` → `SERVE` (oldest-first within each tier) instead of pure arrival order, and
+   `VERIFY`/`ESCALATE` results get `AI_LOW_CONFIDENCE_NOTE` appended to what's shown to the user —
+   `session["quick_answer"]` (the canonical anchor `ai.prompts.explain_followup_text()` uses for the
+   "show step-by-step" follow-up) always stays the ORIGINAL, unmarked answer so the warning text never
+   leaks into what the model is asked to explain.
+
+**`ai/router.py`** (`route_bucket`/`pick_provider`/`build_attempts`/`try_providers`) — `quick=True`
+always uses OpenAI; `quick=False` routes by `bucket` (`"problem"` — calculation/list, stays on OpenAI
+for self-consistency with the quick step; `"theory_simple"` — Gemini if configured; `"theory_complex"`
+— Grok if `USE_GROK_FOR_DETAILED` and configured). `try_providers()` returns a full `attempts_log`
+(`[{"provider", "status": "success"|"refused"|"failed", "usage"}, ...]`) — a `"refused"` attempt (the
+model answered, just with a content-filter refusal) DID spend real tokens and must be billed;
+`"failed"` (network/API error) never reaches a response, so its usage is always zero. On total
+failure the raised exception (usually `AIRefusalError`) carries this log as `.ai_attempts_log`, so
+even a fully-failed request's partial cost can still be recovered.
+`telegram_bot.record_ai_attempts_cost(attempts_log)` is the one function that should ever record AI
+cost from a `solve()`/`get_first_message_ai_answer()` call — it iterates every attempt (not just the
+final one) and skips only zero-usage `"failed"` entries.
+
+`AI_SESSIONS[user_id]` caches `task`/`bucket`/`rag_context` computed once at first-message time —
+`is_first = session["task"] is None` gates both handlers (`handle_ai_photo_input`/
+`handle_ai_text_input`): a later photo in the same session still gets vision-parsed (every photo is
+parsed exactly once, the moment it arrives — never resent as raw bytes to the solver), but is no
+longer treated as "first" and doesn't recompute `bucket`/`rag_context`.
+
 ## Known pitfalls (bug classes that have already recurred)
 
 - **Per-topic keyboard labels hardcoded to one topic.** `get_anatomy_topic_keyboard()`'s bones-list button was
