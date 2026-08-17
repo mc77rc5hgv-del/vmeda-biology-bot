@@ -1591,10 +1591,12 @@ async def main():
     print("44b. get_first_message_ai_answer on a cache hit skips the model entirely, spends nothing: OK")
 
     # ---- 45. end-to-end handler regression: a fresh question is answered by the model and queued;
-    # once an admin approves it, a COMPLETELY SEPARATE session asking the exact same question gets
-    # served from cache — no model call, no quota spent, session/history still populate normally ----
+    # once an admin approves it, a COMPLETELY SEPARATE session asking the exact same RAW TEXT gets
+    # served from the raw-text pre-cache — no vision-parser call, no model call, no quota spent,
+    # session/history still populate normally (see get_raw_text_precache_answer) ----
     tb.stats["ai_answer_cache"].clear()
     tb.stats["ai_usage"].pop(str(uid), None)
+    tb.stats["ai_raw_text_aliases"].clear()
     tb.end_ai_session(uid)
     solve_calls_45 = []
     async def fake_solve_45(*, task=None, text=None, history=None, quick=False, bucket=None, rag_context=None):
@@ -1621,8 +1623,16 @@ async def main():
     tb.stats["ai_usage"].pop(str(uid), None)
     tb.start_ai_session(uid)
     before45b = tb.ai_requests_left(uid)
+    orig_parse_task_45 = tb.ai_vision_parser.parse_task
+    parse_calls_45b = []
+    async def counting_parse_task_45(*, image_bytes=None, text=None):
+        parse_calls_45b.append(text)
+        return await orig_parse_task_45(image_bytes=image_bytes, text=text)
+    tb.ai_vision_parser.parse_task = counting_parse_task_45
     msg45b = FakeMsg(uid=uid, text="Сколько хромосом в соматической клетке человека?")
     await tb.handle_ai_text_input(msg45b)
+    tb.ai_vision_parser.parse_task = orig_parse_task_45
+    assert not parse_calls_45b, "the raw-text pre-cache must skip the vision-parser call entirely"
     assert len(solve_calls_45) == 1, "must NOT call the model again — served from the approved cache"
     assert tb.ai_requests_left(uid) == before45b, "a cache hit must not spend quota"
     final_text_45b, final_kb_45b = msg45b.last_child.edits[-1]
@@ -1631,7 +1641,7 @@ async def main():
     assert tb.stats["ai_answer_cache"][fingerprint_45]["hits"] == 1
     tb.end_ai_session(uid)
     tb.stats["ai_usage"].pop(str(uid), None)
-    print("45. end-to-end: fresh question queued for moderation, approved answer served for free to a new session: OK")
+    print("45. end-to-end: fresh question queued for moderation, approved answer served via raw-text pre-cache to a new session, no vision-parser call: OK")
 
     tb.solve_ai_request = orig_solve
 
@@ -2558,6 +2568,73 @@ async def main():
     assert gate_69b._count == 2
     assert gate_69b.try_acquire() is True, "releasing a slot must make it acquirable again"
     print("69b. _AIConcurrencyGate.try_acquire()/release() are atomic and enforce the exact cap: OK")
+
+    # ---- 70. get_raw_text_precache_answer/record_raw_text_alias: unit-level behavior of the
+    # raw-text pre-cache — no alias yet -> None; alias exists but points at a not-yet-approved
+    # entry -> still None (get_cached_ai_answer only ever serves "approved"); alias exists AND the
+    # aliased entry is approved -> a real hit, with a sensible to_prompt_text() fallback built from
+    # raw_text alone (no parsed values/options/subquestions exist at this point) ----
+    tb.stats["ai_answer_cache"].clear()
+    tb.stats["ai_raw_text_aliases"].clear()
+    raw_text_70 = "Уникальный сырой текст для юнит-теста pre-cache"
+    assert tb.get_raw_text_precache_answer(raw_text_70) is None, "no alias recorded yet -> must miss"
+
+    task_70 = TaskRepresentation(question="Разобранная версия вопроса", raw_text=raw_text_70)
+    tb.record_raw_text_alias(raw_text_70, task_70)
+    raw_fp_70 = TaskRepresentation(raw_text=raw_text_70).fingerprint()
+    assert tb.stats["ai_raw_text_aliases"][raw_fp_70] == task_70.fingerprint()
+    assert tb.get_raw_text_precache_answer(raw_text_70) is None, (
+        "alias exists but the aliased cache entry isn't approved yet -> must still miss"
+    )
+
+    tb.submit_ai_answer_for_moderation(task_70, "кэшированный ответ 70")
+    assert tb.get_raw_text_precache_answer(raw_text_70) is None, "still pending, not approved -> must miss"
+    tb.moderate_ai_cache_entry(task_70.fingerprint(), approve=True)
+
+    precache_hit_70 = tb.get_raw_text_precache_answer(raw_text_70)
+    assert precache_hit_70 is not None, "approved aliased entry -> must hit"
+    answer_70, text_part_70 = precache_hit_70
+    assert answer_70 == "кэшированный ответ 70"
+    assert raw_text_70 in text_part_70, "the prompt-text fallback must be built from the raw text itself"
+    assert text_part_70.endswith(tb.ai_prompts.QUICK_SUFFIX), "must carry the same quick-answer suffix as a normal cache hit"
+
+    different_text_70 = "Совсем другой текст вопроса, никогда не встречавшийся раньше"
+    assert tb.get_raw_text_precache_answer(different_text_70) is None, "a genuinely different raw text must not collide"
+    tb.stats["ai_answer_cache"].clear()
+    tb.stats["ai_raw_text_aliases"].clear()
+    print("70. get_raw_text_precache_answer/record_raw_text_alias: miss/pending/approved/no-collision: OK")
+
+    # ---- 70b. handle_ai_text_input end-to-end: the FIRST time a raw text is ever seen, there is
+    # no alias yet, so parsing still happens as normal (the pre-cache can only ever help on a
+    # REPEAT of literally the same raw text, never on the very first occurrence) ----
+    tb.stats["ai_answer_cache"].clear()
+    tb.stats["ai_raw_text_aliases"].clear()
+    tb.stats["ai_usage"].pop(str(uid), None)
+    tb.end_ai_session(uid)
+    parse_calls_70b = []
+    async def counting_parse_task_70b(*, image_bytes=None, text=None):
+        parse_calls_70b.append(text)
+        return TaskRepresentation(type="theory", question=text or "", raw_text=text or ""), dict(FAKE_PARSE_USAGE)
+    tb.ai_vision_parser.parse_task = counting_parse_task_70b
+    async def fake_solve_70b(*, task=None, text=None, history=None, quick=False, bucket=None, rag_context=None):
+        text_part = task.to_prompt_text() + tb.ai_prompts.QUICK_SUFFIX
+        return (
+            "первый ответ 70b", {"role": "user", "content": text_part}, dict(FAKE_USAGE, provider="openai"),
+            [{"provider": "openai", "status": "success", "usage": dict(FAKE_USAGE)}],
+        )
+    tb.solve_ai_request = fake_solve_70b
+    tb.start_ai_session(uid)
+    msg_70b = FakeMsg(uid=uid, text="Никогда раньше не заданный вопрос про раздел 70b")
+    await tb.handle_ai_text_input(msg_70b)
+    assert len(parse_calls_70b) == 1, "the very first occurrence of a raw text must still be vision-parsed"
+    assert tb.stats["ai_raw_text_aliases"], "an alias must now be recorded for next time, hit or not"
+    tb.ai_vision_parser.parse_task = orig_parse_task
+    tb.solve_ai_request = orig_solve
+    tb.end_ai_session(uid)
+    tb.stats["ai_answer_cache"].clear()
+    tb.stats["ai_raw_text_aliases"].clear()
+    tb.stats["ai_usage"].pop(str(uid), None)
+    print("70b. a raw text's very first occurrence still parses normally, but records an alias for next time: OK")
 
     # ==================== cleanup ====================
     tb.solve_ai_request = orig_solve

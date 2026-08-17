@@ -480,16 +480,42 @@ Pipeline, in call order, for the **first** message of a session (photo or text):
    `get_first_message_ai_answer` BEFORE anything else — including RAG, see next item) — keyed by
    `TaskRepresentation.fingerprint()` — normalizes word order and folds in `values` so two different
    phrasings of the same question with the same numbers collide, but two different numbers never do.
-   A hit is free: no model call, no RAG/embedding call, no quota spent, no cost recorded at all —
-   this ordering (cache check strictly before RAG) is deliberate: RAG used to run for every first
-   message regardless, so even a cache HIT was paying for an embedding call before the cache was ever
-   consulted. **A freshly generated answer is never auto-trusted into the cache** —
+   A hit here is free of RAG/embedding/solver cost — this ordering (cache check strictly before RAG)
+   is deliberate: RAG used to run for every first message regardless, so even a cache HIT was paying
+   for an embedding call before the cache was ever consulted. **This cache is still keyed by the
+   PARSED task, though** — reaching it at all requires `ai_vision_parser.parse_task()` to have
+   already run (to get a `TaskRepresentation` to fingerprint), so a hit here is free of RAG/solver
+   cost but NOT free of the parser call itself. For photos this is unavoidable (there is no
+   fingerprint without recognizing the image first); for TEXT questions, `handle_ai_text_input`
+   additionally checks `get_raw_text_precache_answer()` *before* calling `parse_task()` at all — see
+   the raw-text pre-cache below, which is what actually makes a repeat TEXT question free end to
+   end. **A freshly generated answer is never auto-trusted into the cache** —
    `submit_ai_answer_for_moderation()` queues it as `"pending"` in `stats["ai_answer_cache"]`; only an
    admin approving it via the moderation queue (admin panel → "🤖 Модерация AI-кэша",
    `handlers/admin.py`: `cb_admin_ai_cache_queue`/`_approve`/`_reject`) makes it servable to other
    users. Rejecting doesn't block the question forever — the next occurrence generates (and re-queues)
    a fresh candidate. `submit_ai_answer_for_moderation()` never overwrites an already-`"approved"`
    entry with a new candidate; only `moderate_ai_cache_entry()` can change an approved entry's fate.
+
+   **Raw-text pre-cache** (`get_raw_text_precache_answer()`/`record_raw_text_alias()`,
+   `stats["ai_raw_text_aliases"]: {raw_fingerprint -> parsed_fingerprint}`) — text-only (photos have
+   no text to fingerprint before parsing). `handle_ai_text_input` calls
+   `get_raw_text_precache_answer(message.text)` before `ai_vision_parser.parse_task()` on the first
+   message of a session: it fingerprints the RAW text the same way `TaskRepresentation.fingerprint()`
+   would (via `TaskRepresentation(raw_text=text).fingerprint()` — `question` empty means
+   `question_text()` falls back to `raw_text`, so this is genuinely the same normalization, not a
+   second implementation to keep in sync by hand), looks up whether that exact raw text has been seen
+   before, and if so, whether its PARSED fingerprint is now `get_cached_ai_answer`-approved — a hit
+   skips the vision-parser call, RAG, and the solver entirely, so a literal repeat of the same raw
+   text is truly free end to end. `record_raw_text_alias()` is called unconditionally after every
+   first-message parse (hit or fresh generation alike) so the alias is ready the moment that
+   candidate later gets approved — it does NOT attempt to catch different phrasings of the same
+   question (the parser may reword text and extract `values`/`units` that raw text alone doesn't
+   have, so a paraphrase gets a different parsed fingerprint and this pre-cache simply misses,
+   falling through to the normal parse path) — only literal repeats of one exact raw text, which is
+   exactly what happens when many students paste the same question from a shared ticket/test bank.
+   Deliberately does not attempt to be more clever than that: a false pre-cache HIT would serve a
+   possibly-wrong cached answer without the parser or verifiers ever getting a chance to catch it.
 3. **`ai/rag.py`** (`search_for_task(task, limit=TOP_K) -> (snippets, usage)`) — runs on a cache
    MISS, before BOTH the quick and the detailed answer (not just the detailed one, unlike the
    original MVP). Hybrid: a keyword/IDF layer (`_score_entries`, zero tokens, always available) plus

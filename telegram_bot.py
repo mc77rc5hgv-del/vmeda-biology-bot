@@ -40,6 +40,7 @@ from ai import validator as ai_validator
 from ai import vision_parser as ai_vision_parser
 from ai.router import AIRefusalError
 from ai.service import solve as solve_ai_request
+from ai.task import TaskRepresentation
 from ai.vision import resize_image as resize_image_for_ai
 from repositories import knowledge
 
@@ -157,6 +158,7 @@ def load_stats() -> dict:
                 "hour_key": None, "hour_cost_usd": 0.0, "day_key": None, "day_cost_usd": 0.0,
                 "breaker_tripped": False, "breaker_alerted": False,
             })
+            data.setdefault("ai_raw_text_aliases", {})
             return data
         except (json.JSONDecodeError, OSError):
             logger.exception("Не удалось прочитать %s, статистика будет создана заново", STATS_FILE)
@@ -200,6 +202,7 @@ def load_stats() -> dict:
             "hour_key": None, "hour_cost_usd": 0.0, "day_key": None, "day_cost_usd": 0.0,
             "breaker_tripped": False, "breaker_alerted": False,
         },
+        "ai_raw_text_aliases": {},
     }
 
 # Один воркер сериализует записи на диск и не даёт им блокировать event loop бота.
@@ -4160,6 +4163,49 @@ def get_cached_ai_answer(fingerprint: str) -> str | None:
     save_stats()
     return entry["answer"]
 
+# ---- Pre-parse кэш по СЫРОМУ тексту вопроса (только для текстовых сообщений — для фото
+# fingerprint в принципе недостижим без распознавания) ----
+# get_cached_ai_answer выше проверяется уже ПОСЛЕ vision-парсера — а значит "cache hit ничего не
+# стоит" было верно только для RAG/эмбеддингов и solver'а, но не для самого parse_task(): даже при
+# полном попадании в кэш этот вызов уже произошёл и уже оплачен. stats["ai_raw_text_aliases"]
+# хранит {fingerprint СЫРОГО текста -> fingerprint РАЗОБРАННОГО задания} — если конкретно ЭТОТ
+# сырой текст уже когда-то встречался и его разобранная версия попала в одобренный кэш, повторный
+# буквальный ввод того же текста отдаётся вообще без единого обращения к модели (см.
+# get_raw_text_precache_answer, вызывается из handle_ai_text_input ДО ai_vision_parser.parse_task).
+# Не претендует на то же покрытие, что и обычный fingerprint (парсер может переформулировать текст
+# и вытащить values/units, каких у необработанного текста ещё нет — значит, разные ФОРМУЛИРОВКИ
+# одного и того же вопроса тут не совпадут, только буквально идентичный повторный ввод), но это
+# именно то, что реально накапливается на популярных вопросах из общей базы билетов/тестов, когда
+# разные студенты копируют один и тот же текст вопроса.
+def get_raw_text_precache_answer(text: str) -> tuple[str, str] | None:
+    """(answer, user_turn_content) при полном попадании — без единого обращения к модели, либо
+    None (обычный путь: парсинг как раньше)."""
+    raw_fingerprint = TaskRepresentation(raw_text=text).fingerprint()
+    parsed_fingerprint = stats["ai_raw_text_aliases"].get(raw_fingerprint)
+    if not parsed_fingerprint:
+        return None
+    cached_answer = get_cached_ai_answer(parsed_fingerprint)
+    if cached_answer is None:
+        return None
+    text_part = TaskRepresentation(raw_text=text).to_prompt_text()
+    text_part = (text_part + ai_prompts.QUICK_SUFFIX) if text_part else ai_prompts.QUICK_SUFFIX.strip()
+    return cached_answer, text_part
+
+def record_raw_text_alias(text: str, task) -> None:
+    """Запоминает, во что разобрался ДАННЫЙ сырой текст — вызывается на каждом первом сообщении
+    сессии (независимо от того, оказался ли РАЗОБРАННЫЙ fingerprint кэш-хитом или свежей
+    генерацией), чтобы alias был готов к моменту, когда исходный кандидат станет approved.
+    Перезаписывает существующий alias тем же сырым текстом — парсер не гарантированно
+    детерминирован (OCR/переформулировка), так что один и тот же сырой текст теоретически может
+    время от времени давать разные fingerprint'ы; в этом случае alias "плавает" на последнюю
+    версию, а не залипает на первую — не идеально, но не идёт вразрез с корректностью (промах
+    pre-cache просто скатывается на обычный путь с парсингом)."""
+    raw_fingerprint = TaskRepresentation(raw_text=text).fingerprint()
+    parsed_fingerprint = task.fingerprint()
+    if stats["ai_raw_text_aliases"].get(raw_fingerprint) != parsed_fingerprint:
+        stats["ai_raw_text_aliases"][raw_fingerprint] = parsed_fingerprint
+        save_stats()
+
 def submit_ai_answer_for_moderation(
     task, answer: str, confidence_action: str = ai_confidence.SERVE, confidence_reasons: list = None,
 ) -> None:
@@ -4602,12 +4648,24 @@ async def handle_ai_text_input(message: Message):
         thinking = await message.answer("🤖 Разбираю задание, подожди немного...")
         try:
             if is_first:
-                task_repr, parse_usage = await ai_vision_parser.parse_task(text=message.text)
-                if parse_usage.get("input_tokens") or parse_usage.get("output_tokens"):
-                    record_ai_cost(parse_usage)
-                session["task"] = task_repr
-                session["bucket"] = ai_router.route_bucket(task_repr)
-                answer, user_turn = await get_first_message_ai_answer(user_id, session, task_repr)
+                precache = get_raw_text_precache_answer(message.text)
+                if precache is not None:
+                    # буквально тот же сырой текст уже встречался и разобрался в одобренный кэш —
+                    # ни vision-парсер, ни RAG, ни solver не трогаются вообще (см. комментарий у
+                    # get_raw_text_precache_answer)
+                    cached_answer, text_part = precache
+                    session["task"] = TaskRepresentation(raw_text=message.text)
+                    session["bucket"] = ai_router.route_bucket(session["task"])
+                    session["quick_answer"] = cached_answer
+                    answer, user_turn = cached_answer, {"role": "user", "content": text_part}
+                else:
+                    task_repr, parse_usage = await ai_vision_parser.parse_task(text=message.text)
+                    if parse_usage.get("input_tokens") or parse_usage.get("output_tokens"):
+                        record_ai_cost(parse_usage)
+                    session["task"] = task_repr
+                    session["bucket"] = ai_router.route_bucket(task_repr)
+                    answer, user_turn = await get_first_message_ai_answer(user_id, session, task_repr)
+                    record_raw_text_alias(message.text, task_repr)
             else:
                 rag_context = await ensure_rag_context(session)
                 answer, user_turn, usage, attempts_log = await solve_ai_request(
