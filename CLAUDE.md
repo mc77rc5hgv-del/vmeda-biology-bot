@@ -582,6 +582,21 @@ final one) and skips only zero-usage `"failed"` entries.
 parsed exactly once, the moment it arrives — never resent as raw bytes to the solver), but is no
 longer treated as "first" and doesn't recompute `bucket`/`rag_context`.
 
+**`scripts/ai_benchmark.py`** measures real pipeline accuracy against `ai/reference_bank.py`'s 1040
+questions — same "not part of the bot/requirements.txt, run manually, costs real tokens" pattern as
+`scripts/ai_model_compare.py`. Runs the actual `ai.vision_parser -> ai.router.route_bucket ->
+ai.rag.search_for_task -> ai.service.solve(quick=True) -> ai.validator/ai.mcq_verifier ->
+ai.confidence.decide` chain per question, grades the quick answer against the known-correct option,
+and reports accuracy overall/by-part/by-`confidence_action`, plus a `verifier_flagging_rate` that is
+deliberately a self-consistency check (the benchmark tests against the SAME bank the verifier reads
+from, so it measures "did the confidence router correctly flag every wrong answer as ESCALATE",
+not "does the verifier catch errors on held-out questions" — a value well under 100% means a
+matching/extraction bug, not verifier weakness). Only unit-tested for its deterministic parts
+(`tests/test_ai_benchmark.py`: `format_question_text`/`sample_questions`/`summarize`/
+`format_report`/`format_comparison`) — `run_one()`/`main()` make real provider calls and are
+exercised manually. `--output`/`--compare-with` exist specifically so "did this architecture change
+actually help" can be answered by diffing two JSON runs, not by impression.
+
 ## Known pitfalls (bug classes that have already recurred)
 
 - **Per-topic keyboard labels hardcoded to one topic.** `get_anatomy_topic_keyboard()`'s bones-list button was

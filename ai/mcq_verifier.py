@@ -38,7 +38,7 @@ def _letter_pattern(letter: str) -> re.Pattern:
     return pattern
 
 
-def _extract_chosen_letter(answer: str, options: dict) -> str | None:
+def extract_chosen_letter(answer: str, options: dict) -> str | None:
     """Пытается понять, какой вариант назвала модель — сначала ищет явное упоминание буквы
     («вариант б», «б)», «ответ: б»), затем, если буква не встретилась явно, ищет в ответе текст
     самого варианта (модель иногда называет вариант текстом, не буквой)."""
@@ -60,7 +60,7 @@ def verify_mcq(task: TaskRepresentation, answer: str) -> MCQVerification:
     if reference is None:
         return MCQVerification(checked=False, note="совпадений в эталонной базе не найдено")
 
-    chosen = _extract_chosen_letter(answer, reference["options"])
+    chosen = extract_chosen_letter(answer, reference["options"])
     if chosen is None:
         return MCQVerification(
             checked=True, matched=False, correct_option=reference["correct"],
