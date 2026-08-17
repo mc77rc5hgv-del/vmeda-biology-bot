@@ -223,7 +223,7 @@ async def main():
     await tb.cb_ai_show_explanation(cb_explain)
     assert len(parse_calls) == 1, "the explanation step must NOT re-run vision parsing"
     assert solve_calls[-1]["quick"] is False
-    assert solve_calls[-1]["text"] == tb.ai_prompts.explain_followup_text("Ответ: Б")
+    assert solve_calls[-1]["text"] == tb.ai_prompts.explain_followup_text("Ответ: Б", "mcq")
     assert solve_calls[-1]["bucket"] == "theory_simple", "must reuse the bucket computed at first-message parse time"
     assert solve_calls[-1]["history"] == [
         {"role": "user", "content": parsed_tasks[-1].to_prompt_text()},
@@ -2635,6 +2635,83 @@ async def main():
     tb.stats["ai_raw_text_aliases"].clear()
     tb.stats["ai_usage"].pop(str(uid), None)
     print("70b. a raw text's very first occurrence still parses normally, but records an alias for next time: OK")
+
+    # ---- 71. explain_followup_text: the follow-up prompt for "show step-by-step" is TYPE-DEPENDENT
+    # — the real bug this fixes (see CLAUDE.md): the old one-size-fits-all "explain HOW you got
+    # this answer" wording made the model narrate its own reasoning process ("сначала я определил
+    # термины, затем собрал информацию...") for list/theory questions instead of giving useful
+    # content (definitions, topography, distinctions between similar terms). calculation/mcq keep
+    # asking for a real walkthrough (steps/why-this-option), since that phrasing genuinely fits
+    # those types; list/theory get a content-focused instruction that explicitly forbids narrating
+    # the reasoning process ----
+    calc_text_71 = tb.ai_prompts.explain_followup_text("42 г/моль", "calculation")
+    assert "формула" in calc_text_71 and "подставляются" in calc_text_71
+    assert "42 г/моль" in calc_text_71, "the canonical quick answer must still be anchored in the prompt"
+
+    mcq_text_71 = tb.ai_prompts.explain_followup_text("Ответ: Б", "mcq")
+    assert "почему" in mcq_text_71.lower() and "вариант" in mcq_text_71.lower()
+
+    for list_type_71 in ("list", "theory"):
+        text_71 = tb.ai_prompts.explain_followup_text("Брюшина, полость брюшины, брюшная полость", list_type_71)
+        assert "топографию" in text_71 or "строение" in text_71
+        assert "отличается" in text_71 or "путаемых" in text_71, "must ask for distinctions between similar terms"
+        assert "запомнить" in text_71, "must ask for an exam-focused takeaway"
+        assert "процесс" in text_71 and "рассуждения" in text_71, "must explicitly forbid narrating the reasoning process"
+
+    default_text_71 = tb.ai_prompts.explain_followup_text("какой-то ответ", None)
+    assert default_text_71, "an unknown/missing task type must still degrade to a sensible default, not crash"
+    assert default_text_71 != tb.ai_prompts.explain_followup_text("какой-то ответ", "list"), (
+        "the default (unknown type) prompt must differ from the list/theory-specific one"
+    )
+    print("71. explain_followup_text branches by task.type — list/theory forbids reasoning-process narration: OK")
+
+    # ---- 71b. end-to-end: cb_ai_show_explanation passes the LIST/THEORY-specific follow-up text
+    # (not the generic one) when the session's parsed task is type=="list", reproducing the exact
+    # real-world anatomy question that surfaced this bug ----
+    tb.stats["ai_answer_cache"].clear()
+    tb.stats["ai_usage"].pop(str(uid), None)
+    tb.end_ai_session(uid)
+    solve_calls_71b = []
+
+    async def fake_parse_71b(*, image_bytes=None, text=None):
+        return TaskRepresentation(type="list", question=text or "", raw_text=text or ""), dict(FAKE_PARSE_USAGE)
+
+    async def fake_solve_71b(*, task=None, text=None, history=None, quick=False, bucket=None, rag_context=None):
+        solve_calls_71b.append({"text": text, "quick": quick})
+        if quick:
+            return (
+                "Брюшина — серозная оболочка. Полость брюшины — щель между листками. Брюшная "
+                "полость — пространство, ограниченное стенками живота и диафрагмой.",
+                {"role": "user", "content": task.to_prompt_text() + tb.ai_prompts.QUICK_SUFFIX},
+                dict(FAKE_USAGE, provider="openai"),
+                [{"provider": "openai", "status": "success", "usage": dict(FAKE_USAGE)}],
+            )
+        return (
+            "подробный ответ 71b", {"role": "user", "content": text},
+            dict(FAKE_USAGE, provider="openai"),
+            [{"provider": "openai", "status": "success", "usage": dict(FAKE_USAGE)}],
+        )
+
+    tb.ai_vision_parser.parse_task = fake_parse_71b
+    tb.solve_ai_request = fake_solve_71b
+    tb.start_ai_session(uid)
+    msg_71b = FakeMsg(uid=uid, text="Брюшина, полость брюшины, брюшная полость, плевра, полость плевры")
+    await tb.handle_ai_text_input(msg_71b)
+    assert tb.AI_SESSIONS[uid]["task"].type == "list", "sanity: the session's parsed task must be type=='list'"
+    cb_explain_71b = FakeCB("ai_show_explanation", uid=uid)
+    await tb.cb_ai_show_explanation(cb_explain_71b)
+    followup_sent_71b = solve_calls_71b[-1]["text"]
+    assert "отличается" in followup_sent_71b or "путаемых" in followup_sent_71b
+    assert "процесс" in followup_sent_71b and "рассуждения" in followup_sent_71b
+    assert followup_sent_71b == tb.ai_prompts.explain_followup_text(
+        tb.AI_SESSIONS[uid]["quick_answer"], "list",
+    )
+    tb.end_ai_session(uid)
+    tb.stats["ai_answer_cache"].clear()
+    tb.stats["ai_usage"].pop(str(uid), None)
+    tb.ai_vision_parser.parse_task = orig_parse_task
+    tb.solve_ai_request = orig_solve
+    print("71b. cb_ai_show_explanation uses the list/theory follow-up for a real list-type anatomy question: OK")
 
     # ==================== cleanup ====================
     tb.solve_ai_request = orig_solve

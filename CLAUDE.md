@@ -639,6 +639,23 @@ Pipeline, in call order, for the **first** message of a session (photo or text):
    "show step-by-step" follow-up) always stays the ORIGINAL, unmarked answer so the warning text never
    leaks into what the model is asked to explain.
 
+   **`ai.prompts.explain_followup_text(quick_answer, task_type)`** — the "🧠 Показать решение по
+   шагам" follow-up prompt is branched by `task.type` (`cb_ai_show_explanation` passes
+   `session["task"].type`), not one wording for every task shape. A real production case is why:
+   the old universal wording ("explain HOW you got exactly this answer") is exactly right for
+   `"calculation"` (there really is a step-by-step derivation to show) and works for `"mcq"`
+   (explain why the right option is right and the others aren't), but for `"list"`/`"theory"`
+   questions it made the model narrate its OWN reasoning process ("сначала я определил термины,
+   затем собрал информацию...") instead of giving useful content — observed live on a list-type
+   anatomy question. `"list"`/`"theory"` now get a content-focused instruction instead: expand each
+   term (definition, structure/topography, significance), explicitly call out distinctions between
+   similar/easily-confused terms ("X ≠ Y"), end with an exam-focused "what to remember" summary, and
+   explicitly forbid narrating the reasoning process. All variants share one `_EXPLAIN_ANCHOR` (the
+   canonical-answer anchor described above) so the consistency guarantee isn't lost per type. A
+   missing/unrecognized `task_type` (e.g. a session whose first message was served from the
+   raw-text pre-cache, which never parses and so never learns a real type) falls back to the
+   original generic wording rather than guessing.
+
 **`ai/router.py`** (`route_bucket`/`pick_provider`/`build_attempts`/`try_providers`) — `quick=True`
 always uses OpenAI; `quick=False` routes by `bucket` (`"problem"` — calculation/list, stays on OpenAI
 for self-consistency with the quick step; `"theory_simple"` — Gemini if configured; `"theory_complex"`

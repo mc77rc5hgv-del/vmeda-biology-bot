@@ -4508,7 +4508,8 @@ async def cb_ai_show_explanation(callback: CallbackQuery):
     async with lock:
         session["processing"] = True
         thinking = await callback.message.answer("🤖 Готовлю решение по шагам...")
-        followup_text = ai_prompts.explain_followup_text(session.get("quick_answer") or "")
+        task_type = session["task"].type if session.get("task") is not None else None
+        followup_text = ai_prompts.explain_followup_text(session.get("quick_answer") or "", task_type)
         try:
             rag_context = await ensure_rag_context(session)
             answer, user_turn, usage, attempts_log = await solve_ai_request(
