@@ -1315,6 +1315,71 @@ async def main():
     tb.ai_openai.get_client = orig_get_client
     print("38. photos are sent to the vision parser at detail=low: OK")
 
+    # ---- 38b. parse_task(): OpenAI unavailable (no client) but Gemini configured -> falls back
+    # to Gemini and succeeds, instead of degrading straight to confidence=0 raw text (the real fix
+    # for "a photo with only OpenAI down used to get almost no useful answer") ----
+    orig_gemini_key_38b = tb.ai_gemini.GEMINI_API_KEY
+    orig_gemini_call_38b = tb.ai_gemini.call
+    tb.ai_gemini.GEMINI_API_KEY = "fake-gemini-key-for-tests"
+    tb.ai_openai.get_client = lambda: None
+    payload38b = json.dumps({
+        "subject": "biology", "type": "theory", "complexity": "simple",
+        "question": "Что такое митоз?", "options": [], "values": {}, "units": {},
+        "subquestions": [], "confidence": 0.8, "raw_text": "Что такое митоз?",
+    })
+    gemini_calls_38b = []
+    async def fake_gemini_call_38b(messages, max_tokens):
+        gemini_calls_38b.append((messages, max_tokens))
+        return payload38b, {"input_tokens": 120, "output_tokens": 45}
+    tb.ai_gemini.call = fake_gemini_call_38b
+    task38b, usage38b = await tb.ai_vision_parser.parse_task(text="Что такое митоз?")
+    assert len(gemini_calls_38b) == 1
+    assert task38b.subject == "biology" and task38b.type == "theory"
+    assert usage38b == {"input_tokens": 120, "output_tokens": 45, "provider": "gemini"}
+    print("38b. parse_task() falls back to Gemini when OpenAI has no client configured: OK")
+
+    # ---- 38c. parse_task(): OpenAI raises (network/API failure, not just "no client") — Gemini
+    # still catches it, same fallback path ----
+    class FailingOpenAICompletions38c:
+        async def create(self, **kwargs):
+            raise RuntimeError("simulated OpenAI outage")
+    class FailingOpenAIChat38c:
+        completions = FailingOpenAICompletions38c()
+    class FailingOpenAIClient38c:
+        chat = FailingOpenAIChat38c()
+    tb.ai_openai.get_client = lambda: FailingOpenAIClient38c()
+    gemini_calls_38b.clear()
+    task38c, usage38c = await tb.ai_vision_parser.parse_task(text="Что такое митоз?")
+    assert len(gemini_calls_38b) == 1
+    assert usage38c["provider"] == "gemini"
+    print("38c. parse_task() falls back to Gemini when OpenAI raises, not just when unconfigured: OK")
+
+    # ---- 38d. parse_task(): Gemini has no response_format=json_object guarantee (unlike OpenAI,
+    # this is a raw HTTP call) and sometimes wraps its JSON in a ``` fence despite the prompt
+    # instruction — must still parse correctly ----
+    async def fake_gemini_call_fenced(messages, max_tokens):
+        return f"```json\n{payload38b}\n```", {"input_tokens": 100, "output_tokens": 40}
+    tb.ai_gemini.call = fake_gemini_call_fenced
+    task38d, usage38d = await tb.ai_vision_parser.parse_task(text="Что такое митоз?")
+    assert task38d.subject == "biology" and task38d.type == "theory"
+    assert usage38d["provider"] == "gemini"
+    print("38d. parse_task() strips a Gemini ``` json fence before parsing: OK")
+
+    # ---- 38e. parse_task(): both OpenAI and Gemini fail -> still degrades gracefully to a
+    # raw-text task instead of raising ----
+    async def failing_gemini_call_38e(messages, max_tokens):
+        raise RuntimeError("simulated Gemini outage too")
+    tb.ai_gemini.call = failing_gemini_call_38e
+    task38e, usage38e = await tb.ai_vision_parser.parse_task(text="Что такое митоз?")
+    assert task38e.raw_text == "Что такое митоз?"
+    assert task38e.confidence == 0.0
+    assert usage38e == {"input_tokens": 0, "output_tokens": 0, "provider": "openai"}
+    print("38e. parse_task() degrades gracefully when both OpenAI and Gemini fail: OK")
+
+    tb.ai_gemini.call = orig_gemini_call_38b
+    tb.ai_gemini.GEMINI_API_KEY = orig_gemini_key_38b
+    tb.ai_openai.get_client = orig_get_client
+
     # ==================== ЧАСТЬ E: ai.task.TaskRepresentation ====================
 
     # ---- 39. TaskRepresentation: prompt rendering, round trip, and fingerprint semantics —

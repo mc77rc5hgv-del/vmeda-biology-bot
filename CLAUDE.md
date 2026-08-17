@@ -463,14 +463,19 @@ functions/classes over their inputs.
 
 Pipeline, in call order, for the **first** message of a session (photo or text):
 1. **`ai/vision_parser.py`** (`parse_task(*, image_bytes=None, text=None)`) — the ONLY place a
-   photo is ever sent to a model, exactly once. Returns a `TaskRepresentation` (see `ai/task.py`:
-   `subject/type/complexity/question/options/values/units/subquestions/confidence/raw_text`) plus
-   usage for cost tracking. On any failure (no `OPENAI_API_KEY`, network error, non-JSON response)
-   it degrades to a raw-text task with `confidence=0.0` instead of raising — the rest of the
-   pipeline always has *something* to work with, never a hard failure at this step. `type`/
-   `complexity` are classified from the QUESTION itself, not from a later answer — this is what
-   lets `ai.router.route_bucket(task)` pick a provider before any answer exists (replaced the old
-   `classify_quick_answer()`, which inferred provider from the shape of an already-generated reply).
+   photo is ever sent to a model, exactly once. Tries OpenAI first, then Gemini if configured
+   (`_PARSE_ATTEMPTS` — same fallback shape as `ai.router.try_providers`, since Gemini's `call()`
+   already accepts the same OpenAI-style `messages` and converts `image_url` blocks to `inline_data`
+   itself); Gemini has no `response_format=json_object` guarantee (raw HTTP call, not the OpenAI SDK),
+   so its response is stripped of a possible ```` ```json ```` fence before parsing. Returns a
+   `TaskRepresentation` (see `ai/task.py`: `subject/type/complexity/question/options/values/units/
+   subquestions/confidence/raw_text`) plus usage for cost tracking. Only if BOTH providers fail (no
+   keys, network error, non-JSON response from both) does it degrade to a raw-text task with
+   `confidence=0.0` instead of raising — the rest of the pipeline always has *something* to work
+   with, never a hard failure at this step. `type`/`complexity` are classified from the QUESTION
+   itself, not from a later answer — this is what lets `ai.router.route_bucket(task)` pick a
+   provider before any answer exists (replaced the old `classify_quick_answer()`, which inferred
+   provider from the shape of an already-generated reply).
 2. **`ai/rag.py`** (`search_for_task(task, limit=TOP_K)`) — runs before BOTH the quick and the
    detailed answer (not just the detailed one, unlike the original MVP). Hybrid: a keyword/IDF
    layer (`_score_entries`, zero tokens, always available) plus an optional OpenAI-embeddings
