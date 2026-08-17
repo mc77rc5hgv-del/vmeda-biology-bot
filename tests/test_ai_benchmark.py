@@ -83,6 +83,37 @@ def main():
     assert "+0.0%" in comparison_text, "comparing a summary with itself must show a zero delta"
     print("4. format_report/format_comparison render without crashing, contain the key numbers: OK")
 
+    # ---- 5. estimate_result_cost_usd: deterministic token->USD conversion for the --max-cost-usd
+    # safety cap (uses OpenAI's own price constants, not a made-up number) ----
+    price_in = ai_benchmark.ai_openai_provider.PRICE_INPUT_PER_1M
+    price_out = ai_benchmark.ai_openai_provider.PRICE_OUTPUT_PER_1M
+    cost = ai_benchmark.estimate_result_cost_usd({"input_tokens": 1_000_000, "output_tokens": 1_000_000})
+    assert abs(cost - (price_in + price_out)) < 1e-9
+    assert ai_benchmark.estimate_result_cost_usd({}) == 0.0, "missing token fields must not crash, cost 0"
+    print("5. estimate_result_cost_usd: converts tokens to USD via OpenAI's own price constants: OK")
+
+    # ---- 6. main(): --all without --confirm-cost must abort via sys.exit(1) BEFORE touching any
+    # provider — this is the actual safety property (a copy-pasted --all command can't silently
+    # burn through the whole 1040-question bank), not just an argparse detail ----
+    import asyncio
+    import contextlib
+    import io
+    orig_argv = sys.argv
+    sys.argv = ["ai_benchmark.py", "--all"]
+    captured_err = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(captured_err):
+            try:
+                asyncio.run(ai_benchmark.main())
+                exited, exit_code = False, None
+            except SystemExit as exc:
+                exited, exit_code = True, exc.code
+    finally:
+        sys.argv = orig_argv
+    assert exited and exit_code == 1, "a run above CONFIRM_COST_QUESTION_THRESHOLD without --confirm-cost must sys.exit(1)"
+    assert "--confirm-cost" in captured_err.getvalue()
+    print("6. main(): --all without --confirm-cost aborts before any provider call: OK")
+
     print("\nAll ai_benchmark tests passed!")
 
 

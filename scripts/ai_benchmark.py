@@ -25,8 +25,8 @@ on Railway — тратит реальные токены реальных пр�
 
     export OPENAI_API_KEY=...
     python3 scripts/ai_benchmark.py --sample 50
-    python3 scripts/ai_benchmark.py --all --concurrency 8 --output results_before.json
-    python3 scripts/ai_benchmark.py --all --compare-with results_before.json
+    python3 scripts/ai_benchmark.py --all --confirm-cost --concurrency 8 --output results_before.json
+    python3 scripts/ai_benchmark.py --all --confirm-cost --compare-with results_before.json
 
 Опции:
     --sample N        сколько вопросов взять случайной выборкой (по умолчанию 50)
@@ -36,6 +36,11 @@ on Railway — тратит реальные токены реальных пр�
     --concurrency N    сколько вопросов гонять параллельно (по умолчанию 5 — не долбить API)
     --output PATH      куда сохранить полный JSON с результатами
     --compare-with PATH  путь к JSON предыдущего запуска — показать разницу в точности
+    --confirm-cost      обязателен для прогонов дороже CONFIRM_COST_QUESTION_THRESHOLD вопросов —
+                         предохранитель от случайного --all (1040 реальных платных вызовов), если
+                         команда скопирована из документации/истории без --sample
+    --max-cost-usd USD  прервать оставшиеся вопросы, если оценочная накопленная стоимость (по
+                         прайсу OpenAI — грубая оценка для safety cap, не билинг) превысит порог
 """
 import argparse
 import asyncio
@@ -61,6 +66,9 @@ from ai import router as ai_router  # noqa: E402
 from ai import service as ai_service  # noqa: E402
 from ai import validator as ai_validator  # noqa: E402
 from ai import vision_parser as ai_vision_parser  # noqa: E402
+from ai.providers import openai as ai_openai_provider  # noqa: E402
+
+CONFIRM_COST_QUESTION_THRESHOLD = 200  # прогон дороже этого числа вопросов требует --confirm-cost
 
 # repositories.knowledge читает JSON-файлы контента относительными путями (см. CLAUDE.md) —
 # импортировать нужно с корнем репозитория в качестве текущей рабочей директории.
@@ -142,6 +150,18 @@ async def run_one(part_id: int, part_title: str, q: dict) -> dict:
             "elapsed_sec": round(time.monotonic() - started, 2), "error": repr(exc),
         })
     return result
+
+
+def estimate_result_cost_usd(result: dict) -> float:
+    """Грубая оценка стоимости ОДНОГО результата run_one() для --max-cost-usd — намеренно считает
+    все токены по прайсу OpenAI (quick=True всегда закреплён за OpenAI, vision-парсер пробует
+    OpenAI первым, RAG-эмбеддинги биллятся отдельно, но заметно дешевле per-token) — этого
+    достаточно для safety cap'а, точный билинг для этого не нужен."""
+    price_in, price_out = ai_openai_provider.PRICE_INPUT_PER_1M, ai_openai_provider.PRICE_OUTPUT_PER_1M
+    return (
+        result.get("input_tokens", 0) * price_in / 1_000_000
+        + result.get("output_tokens", 0) * price_out / 1_000_000
+    )
 
 
 def summarize(results: list) -> dict:
@@ -236,6 +256,14 @@ async def main() -> None:
     parser.add_argument("--concurrency", type=int, default=5, help="сколько вопросов гонять параллельно (по умолчанию 5)")
     parser.add_argument("--output", type=str, default=None, help="куда сохранить JSON с результатами")
     parser.add_argument("--compare-with", type=str, default=None, help="JSON предыдущего запуска — показать разницу")
+    parser.add_argument(
+        "--confirm-cost", action="store_true",
+        help=f"обязателен для прогонов дороже {CONFIRM_COST_QUESTION_THRESHOLD} вопросов",
+    )
+    parser.add_argument(
+        "--max-cost-usd", type=float, default=None,
+        help="прервать оставшиеся вопросы, если оценочная накопленная стоимость превысит порог (USD)",
+    )
     args = parser.parse_args()
 
     if not (os.getenv("OPENAI_API_KEY") or os.getenv("GEMINI_API_KEY") or os.getenv("XAI_API_KEY")):
@@ -258,16 +286,44 @@ async def main() -> None:
     if not pool:
         print("Пустая выборка (проверь --part) — нечего запускать.", file=sys.stderr)
         return
+    if len(pool) > CONFIRM_COST_QUESTION_THRESHOLD and not args.confirm_cost:
+        print(
+            f"ОШИБКА: запрошено {len(pool)} вопросов — это реальные платные вызовы провайдеров "
+            "(vision-парсинг + quick-решение на каждый, плюс RAG-эмбеддинги). Прогоны дороже "
+            f"{CONFIRM_COST_QUESTION_THRESHOLD} вопросов требуют явного флага --confirm-cost, "
+            "чтобы такой прогон нельзя было запустить случайно (например, скопировав команду с "
+            "--all из документации/истории без --sample). Добавь --confirm-cost, если это "
+            "осознанное решение, либо ограничь прогон через --sample N / --max-cost-usd.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
     print(f"Прогоняю {len(pool)} вопрос(ов), параллельно по {args.concurrency}...", file=sys.stderr)
+    if args.max_cost_usd is not None:
+        print(f"Оценочный потолок расхода: ${args.max_cost_usd:.2f} (грубая оценка по прайсу OpenAI)", file=sys.stderr)
 
     semaphore = asyncio.Semaphore(args.concurrency)
     total = len(pool)
     done_count = 0
+    cost_state = {"total_usd": 0.0, "capped": False}
 
     async def run_bounded(part_id, part_title, q):
         nonlocal done_count
         async with semaphore:
+            if args.max_cost_usd is not None and cost_state["total_usd"] >= args.max_cost_usd:
+                if not cost_state["capped"]:
+                    cost_state["capped"] = True
+                    print(
+                        f"\n🛑 Достигнут --max-cost-usd={args.max_cost_usd:.2f} — оставшиеся "
+                        "вопросы пропускаются без обращения к провайдерам.", file=sys.stderr,
+                    )
+                done_count += 1
+                return {
+                    "part_id": part_id, "part_title": part_title, "question": q["question"],
+                    "correct_option": q["correct"], "answer": None, "chosen_option": None,
+                    "raw_correct": False, "elapsed_sec": 0.0, "error": "skipped: --max-cost-usd cap reached",
+                }
             result = await run_one(part_id, part_title, q)
+            cost_state["total_usd"] += estimate_result_cost_usd(result)
             done_count += 1
             status = "ERR" if result.get("error") else ("OK" if result["raw_correct"] else "WRONG")
             print(f"[{done_count}/{total}] часть {part_id} — {status}", file=sys.stderr)

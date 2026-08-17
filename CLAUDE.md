@@ -690,9 +690,21 @@ from, so it measures "did the confidence router correctly flag every wrong answe
 not "does the verifier catch errors on held-out questions" — a value well under 100% means a
 matching/extraction bug, not verifier weakness). Only unit-tested for its deterministic parts
 (`tests/test_ai_benchmark.py`: `format_question_text`/`sample_questions`/`summarize`/
-`format_report`/`format_comparison`) — `run_one()`/`main()` make real provider calls and are
-exercised manually. `--output`/`--compare-with` exist specifically so "did this architecture change
-actually help" can be answered by diffing two JSON runs, not by impression.
+`format_report`/`format_comparison`/`estimate_result_cost_usd`, plus the `--confirm-cost` gate
+itself, which IS safe to exercise in CI — it `sys.exit(1)`s before any provider call) —
+`run_one()`/full successful `main()` runs make real provider calls and are exercised manually.
+`--output`/`--compare-with` exist specifically so "did this architecture change actually help" can
+be answered by diffing two JSON runs, not by impression. **Two independent cost guards**, since a
+copy-pasted `--all` command (1040 real questions) with no other flags is an easy accident:
+`CONFIRM_COST_QUESTION_THRESHOLD` (200) — any run requesting more questions than this (`--all` or a
+large `--sample`) refuses to start at all (`sys.exit(1)`, explicit stderr message) unless
+`--confirm-cost` is also passed; and `--max-cost-usd`, which lets a large confirmed run still bound
+itself — `estimate_result_cost_usd()` (a deliberately rough OpenAI-price-only estimate, not real
+billing) accumulates as each question finishes, and once the running total reaches the cap, every
+further queued question is skipped (`error: "skipped: --max-cost-usd cap reached"`, no provider
+call at all) rather than launched — remaining in-flight questions already past the semaphore still
+finish normally, so the cap can be overshot slightly by however many are concurrently in flight
+(bounded by `--concurrency`), not blown open-endedly.
 
 ## Known pitfalls (bug classes that have already recurred)
 
