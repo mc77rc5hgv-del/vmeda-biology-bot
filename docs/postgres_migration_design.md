@@ -80,6 +80,9 @@ users → subscriptions → payments → manual_grants → referrals(+warnings) 
 
 ## 3. Схема
 
+Реализовано в `db/migrations/0001_phase1_schema.sql` (идемпотентно, `IF NOT EXISTS` везде) —
+при расхождении с блоком ниже актуален файл, не этот документ.
+
 ```sql
 -- ==================== users ====================
 CREATE TABLE users (
@@ -110,7 +113,9 @@ CREATE TABLE subscriptions (
     price               INT NOT NULL,
     ai_used_period      INT NOT NULL DEFAULT 0,
     ai_used_monthly_month TEXT,                -- "YYYY-MM", МСК (см. APP_TIMEZONE)
-    ai_used_monthly_count INT NOT NULL DEFAULT 0
+    ai_used_monthly_count INT NOT NULL DEFAULT 0,
+    UNIQUE (user_id, purchased_at)  -- естественный ключ для идемпотентного backfill'а (§4/§5) —
+                                     -- две РЕАЛЬНЫЕ покупки не могут совпасть до микросекунды
 );
 CREATE INDEX idx_subscriptions_current ON subscriptions (user_id, purchased_at DESC);
 -- "действующая подписка юзера" = первая строка при таком индексе -> дешёвый point-lookup.

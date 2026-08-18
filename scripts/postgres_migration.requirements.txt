@@ -1,0 +1,5 @@
+# Only for scripts/migrate_stats_to_postgres.py and scripts/diff_json_vs_postgres.py -- NOT
+# installed as part of the bot (requirements.txt). These are one-off/periodic CLI tools run
+# manually against DATABASE_URL, not part of the deployed aiogram event loop, so a plain
+# synchronous driver is simplest -- no asyncio needed for a batch script.
+psycopg2-binary==2.9.12
