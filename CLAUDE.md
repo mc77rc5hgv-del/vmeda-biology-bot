@@ -461,6 +461,29 @@ dict literal — that must be updated together whenever a new top-level stats ke
 will `KeyError` on the migration path. `stats["total_users"]` is a `set` in memory, serialized to/from a `list` for
 JSON.
 
+### App timezone
+
+`APP_TIMEZONE` (`telegram_bot.py`, a fixed `timezone(timedelta(hours=3))`, i.e. MSK) plus `local_now()`/
+`local_today()` are the single source of truth for every recurring daily/monthly period boundary — the free AI
+daily limit (`get_ai_usage_today`/`increment_ai_usage`), the paid-tier monthly AI quota
+(`_current_ai_month_key`), the referral monthly gate (`services/access.py`'s `_current_referral_month_key`), the
+cost-circuit-breaker hour/day windows (`_current_hour_key`/`_current_day_key`), and the once-a-day helperchat
+promo. Before this they all called `date.today()`/`datetime.now()` directly, i.e. the CONTAINER's local time
+(UTC on Railway) — "a new day"/"a new month" flipped up to 3 hours later than it actually did in Moscow, where
+every student and admin actually is. A fixed offset (not `zoneinfo("Europe/Moscow")`) is deliberate: Russia has
+had no DST transitions since 2014, so MSK is UTC+3 year-round, and a fixed offset can't fail at runtime on a
+minimal Docker image that happens to be missing system tzdata the way `zoneinfo` could.
+
+`services/access.py`'s subscription-tier cutoff constants (`OCT_2026_CUTOFF` and friends) are built the same way,
+via `_msk_deadline(year, month, day)` (MSK midnight of that calendar date, as a timestamp) instead of
+`time.mktime(date(...).timetuple())` (container-local midnight). This only changes the instant a cutoff constant
+evaluates to for **future** `grant_subscription()` calls — it does NOT retroactively touch any `sub["expires"]`
+value already stored on an existing subscription record, since those are plain floats snapshotted once at grant
+time and never recomputed. `format_subscription_expiry()` was fixed for the same reason in the other direction:
+it used to format an expiry timestamp via the container's local timezone, which could show the wrong calendar
+DAY for a timestamp close to a UTC/MSK day boundary (e.g. 23:30 UTC is already 02:30 MSK the next day) — it now
+formats via `APP_TIMEZONE` explicitly instead of relying on system local time.
+
 ### Broadcasts
 
 Admin-triggered mass messages follow one recurring shape: a `_confirm` handler computes the target cohort and

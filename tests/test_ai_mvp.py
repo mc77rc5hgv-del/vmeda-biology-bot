@@ -327,7 +327,7 @@ async def main():
     tb.bot.download_file = orig_bot_download_file
 
     # ---- 10. daily limit blocks starting a NEW session ----
-    tb.stats["ai_usage"][str(uid)] = {"date": tb.date.today().isoformat(), "count": tb.AI_FREE_DAILY_LIMIT}
+    tb.stats["ai_usage"][str(uid)] = {"date": tb.local_today().isoformat(), "count": tb.AI_FREE_DAILY_LIMIT}
     assert tb.ai_requests_left(uid) == 0
     cb_limit = FakeCB("ai_solve_start", uid=uid)
     await tb.cb_ai_solve_start(cb_limit)
@@ -338,7 +338,7 @@ async def main():
     # ---- 10b. exhausting the quota MID-dialog auto-closes the session, no explanation/continue buttons ----
     tb.stats["ai_usage"].pop(str(uid), None)
     tb.start_ai_session(uid)
-    tb.stats["ai_usage"][str(uid)] = {"date": tb.date.today().isoformat(), "count": tb.AI_FREE_DAILY_LIMIT - 1}
+    tb.stats["ai_usage"][str(uid)] = {"date": tb.local_today().isoformat(), "count": tb.AI_FREE_DAILY_LIMIT - 1}
     msg_last = FakeMsg(uid=uid, text="Последний бесплатный вопрос")
     await tb.handle_ai_text_input(msg_last)
     assert not tb.is_ai_session_active(uid), "session must auto-close once the daily quota hits 0"
@@ -356,7 +356,7 @@ async def main():
     tb.AI_SESSIONS[uid]["messages"] = [
         {"role": "user", "content": "x"}, {"role": "assistant", "content": "Ответ: А"},
     ]
-    tb.stats["ai_usage"][str(uid)] = {"date": tb.date.today().isoformat(), "count": tb.AI_FREE_DAILY_LIMIT}
+    tb.stats["ai_usage"][str(uid)] = {"date": tb.local_today().isoformat(), "count": tb.AI_FREE_DAILY_LIMIT}
     calls_before_10c = len(solve_calls)
     cb_explain_blocked = FakeCB("ai_show_explanation", uid=uid)
     await tb.cb_ai_show_explanation(cb_explain_blocked)
@@ -440,8 +440,8 @@ async def main():
     # ---- 15. admin has unlimited AI requests, even at/over the daily quota ----
     FAKE_TASK_TYPE.update(type="unknown", complexity=None)
     tb.end_ai_session(ADMIN_ID)
-    tb.stats["ai_usage"][str(ADMIN_ID)] = {"date": tb.date.today().isoformat(), "count": tb.AI_FREE_DAILY_LIMIT + 5}
-    tb.stats["ai_usage"][str(uid)] = {"date": tb.date.today().isoformat(), "count": tb.AI_FREE_DAILY_LIMIT}
+    tb.stats["ai_usage"][str(ADMIN_ID)] = {"date": tb.local_today().isoformat(), "count": tb.AI_FREE_DAILY_LIMIT + 5}
+    tb.stats["ai_usage"][str(uid)] = {"date": tb.local_today().isoformat(), "count": tb.AI_FREE_DAILY_LIMIT}
     assert tb.has_unlimited_ai(ADMIN_ID)
     assert tb.ai_quota_ok(ADMIN_ID)
     assert not tb.has_unlimited_ai(uid) and not tb.ai_quota_ok(uid), "regular user stays capped as before"

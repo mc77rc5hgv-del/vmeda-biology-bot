@@ -10,7 +10,7 @@ import sys
 import time
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import (
     Message, CallbackQuery, InlineKeyboardButton, FSInputFile, BufferedInputFile, Update,
@@ -69,6 +69,25 @@ CHANNEL_ID = "@Vmeda_examen"
 ADMIN_IDS = {1326779223, 8601892147}
 STATS_DIR = os.getenv("STATS_DIR", ".")
 STATS_FILE = os.path.join(STATS_DIR, "stats.json")
+
+# Все студенты и админы бота — в России, но контейнер (Railway) по умолчанию работает в UTC,
+# так что "новый день"/"новый месяц" по системному времени наступает на 3 часа позже реального
+# московского. Фиксированный offset, а не zoneinfo("Europe/Moscow") — Россия с 2014 года не
+# переходит на летнее/зимнее время, МСК = UTC+3 круглый год, и фиксированный offset не зависит
+# от наличия системной tzdata на минимальном Docker-образе (zoneinfo мог бы упасть рантайм-
+# ошибкой, если tzdata не установлена). Используется для ВСЕХ повторяющихся суточных/месячных
+# периодов (дневной лимит AI, реферальный месяц, окна cost circuit breaker и т.п.) — но НЕ трогает
+# уже сохранённые sub["expires"] существующих подписок, только то, как будущие грант-моменты и
+# константы-дедлайны (services/access.py) вычисляются с этого момента.
+APP_TIMEZONE = timezone(timedelta(hours=3), name="MSK")
+
+def local_now() -> datetime:
+    """Текущее время в APP_TIMEZONE (МСК) — единая точка отсчёта для всех дневных/месячных
+    период-ключей вместо часового пояса контейнера."""
+    return datetime.now(APP_TIMEZONE)
+
+def local_today() -> date:
+    return local_now().date()
 # Ключи провайдеров AI живут в ai/providers/*.py (каждый модуль сам читает свою переменную
 # окружения) — эти два имени просто ре-экспортированы, потому что UI-уровень бота (кнопка
 # "Отправить фото", текст меню AI) должен знать, доступен ли AI, не заглядывая внутрь пакета ai.
@@ -335,7 +354,7 @@ def get_helperchat_promo_keyboard():
     return builder.as_markup()
 
 async def send_helperchat_promo_if_new_day(user_id: int) -> None:
-    today = date.today().isoformat()
+    today = local_today().isoformat()
     seen = stats["helperchat_promo_seen"]
     if seen.get(str(user_id)) == today:
         return
@@ -3043,7 +3062,9 @@ async def cb_donate_rubles_custom(callback: CallbackQuery):
 def format_subscription_expiry(expires) -> str:
     if expires is None:
         return "навсегда"
-    return f"до {date.fromtimestamp(expires).strftime('%d.%m.%Y')}"
+    # МСК, а не системный часовой пояс контейнера (UTC) — иначе дата истечения, вычисленная как
+    # московская полночь (см. APP_TIMEZONE/services/access.py), могла бы отобразиться на день раньше.
+    return f"до {datetime.fromtimestamp(expires, APP_TIMEZONE).strftime('%d.%m.%Y')}"
 
 async def grant_subscription_and_notify_buyer(
     target_id: int, tier_id: int, method: str, price: int, subject: str | None = None
@@ -3978,7 +3999,7 @@ AI_CONCURRENCY_GATE = _AIConcurrencyGate(MAX_AI_CONCURRENT_REQUESTS)
 
 def get_ai_usage_today(user_id: int) -> int:
     entry = stats["ai_usage"].get(str(user_id))
-    if not entry or entry.get("date") != date.today().isoformat():
+    if not entry or entry.get("date") != local_today().isoformat():
         return 0
     return entry.get("count", 0)
 
@@ -4009,7 +4030,7 @@ def _sub_ai_plan(user_id: int) -> tuple[str | None, int | None]:
     return "monthly", LEGACY_PAID_AI_MONTHLY_BONUS
 
 def _current_ai_month_key() -> str:
-    return date.today().strftime("%Y-%m")
+    return local_today().strftime("%Y-%m")
 
 def _get_sub_ai_used(sub: dict, limit_type: str) -> int:
     if limit_type == "monthly":
@@ -4047,7 +4068,7 @@ def increment_ai_usage(user_id: int) -> None:
     if limit_type is not None:
         _increment_sub_ai_usage(user_id, limit_type)
         return
-    today = date.today().isoformat()
+    today = local_today().isoformat()
     entry = stats["ai_usage"].get(str(user_id))
     if not entry or entry.get("date") != today:
         entry = {"date": today, "count": 0}
@@ -4140,10 +4161,10 @@ AI_COST_HOUR_LIMIT_USD = float(os.environ.get("AI_COST_HOUR_LIMIT_USD", "5.0"))
 AI_COST_DAY_LIMIT_USD = float(os.environ.get("AI_COST_DAY_LIMIT_USD", "30.0"))
 
 def _current_hour_key() -> str:
-    return datetime.now().strftime("%Y-%m-%d-%H")
+    return local_now().strftime("%Y-%m-%d-%H")
 
 def _current_day_key() -> str:
-    return date.today().isoformat()
+    return local_today().isoformat()
 
 def _update_ai_cost_windows(cost: float) -> None:
     """Вызывается из record_ai_cost() на КАЖДУЮ записанную стоимость (включая эмбеддинги) —

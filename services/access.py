@@ -6,9 +6,18 @@
 плоский реэкспорт (см. блок рядом с исходным местом каждой секции в telegram_bot.py).
 """
 import time
-from datetime import date
+from datetime import datetime
 
 import telegram_bot as tb
+
+
+def _msk_deadline(year: int, month: int, day: int) -> float:
+    """Полночь по МСК (tb.APP_TIMEZONE) указанной календарной даты, как unix-timestamp — а не
+    time.mktime(date(...).timetuple()), который интерпретирует дату в часовом поясе КОНТЕЙНЕРА
+    (Railway по умолчанию UTC). Меняет момент срабатывания константы-дедлайна для БУДУЩИХ выдач
+    подписки на ~3 часа, но НИКОГДА не переписывает уже сохранённый sub["expires"] у существующих
+    подписок — grant_subscription() лишь читает текущее значение константы в момент выдачи."""
+    return datetime(year, month, day, tzinfo=tb.APP_TIMEZONE).timestamp()
 
 
 def is_admin(user_id: int) -> bool:
@@ -63,7 +72,7 @@ def get_referral_count(user_id: int) -> int:
     return len(tb.stats["referrals"].get(str(user_id), []))
 
 def _current_referral_month_key() -> str:
-    return date.today().strftime("%Y-%m")
+    return tb.local_today().strftime("%Y-%m")
 
 def get_referral_count_this_month(user_id: int) -> int:
     """Рефералы, приведённые ИМЕННО в текущем календарном месяце — то, что реально сравнивается с
@@ -100,22 +109,22 @@ def has_temp_access(user_id: int) -> bool:
 # Никогда не переиспользуй id 1-19 для нового смысла — старые записи хранят только числовой tier id,
 # и часть кода живьём резолвит его через SUBSCRIPTION_TIERS, так что переиспользование id задним
 # числом переинтерпретировало бы то, что реальный покупатель уже оплатил.
-TIER1_HISTOLOGY_DEADLINE = time.mktime(date(2027, 1, 1).timetuple())  # легаси: гистология по СТАРЫМ выдачам тарифа 1 — до конца 2026 года
-JULY_END_2026 = time.mktime(date(2026, 8, 1).timetuple())  # тариф «Месяц» — предпросмотр Гистологии до конца июля 2026
-OCT_2026_CUTOFF = time.mktime(date(2026, 10, 1).timetuple())  # тариф 239₽ — до 1 октября 2026
-NOV_END_2026_CUTOFF = time.mktime(date(2026, 12, 1).timetuple())  # тариф 389₽ — до конца ноября 2026
-FEB_2027_CUTOFF = time.mktime(date(2027, 2, 1).timetuple())  # тариф 749₽ — до февраля 2027
+TIER1_HISTOLOGY_DEADLINE = _msk_deadline(2027, 1, 1)  # легаси: гистология по СТАРЫМ выдачам тарифа 1 — до конца 2026 года
+JULY_END_2026 = _msk_deadline(2026, 8, 1)  # тариф «Месяц» — предпросмотр Гистологии до конца июля 2026
+OCT_2026_CUTOFF = _msk_deadline(2026, 10, 1)  # тариф 239₽ — до 1 октября 2026
+NOV_END_2026_CUTOFF = _msk_deadline(2026, 12, 1)  # тариф 389₽ — до конца ноября 2026
+FEB_2027_CUTOFF = _msk_deadline(2027, 2, 1)  # тариф 749₽ — до февраля 2027
 # «До конца второго курса» — точная дата учебного календаря не была уточнена, взята оценка
 # (конец лета 2027). Поправь SECOND_YEAR_END_2027, если известна точная дата окончания 2 курса.
 # Используется и старым тарифом 9, и новым тарифом 26 — дата единая для обоих, менять с осторожностью:
 # сдвиг задним числом изменил бы срок уже выданных подписок тарифа 9.
-SECOND_YEAR_END_2027 = time.mktime(date(2027, 9, 1).timetuple())
+SECOND_YEAR_END_2027 = _msk_deadline(2027, 9, 1)
 
 # --- Новая линейка (тарифы 20-28) ---
-NOV_1_2026_CUTOFF = time.mktime(date(2026, 11, 1).timetuple())  # тариф 22 «Все пересдачи» — до конца октября 2026
-JAN_1_2027_CUTOFF = time.mktime(date(2027, 1, 1).timetuple())  # тариф 23 «До зачёта по химии» — до конца декабря 2026
-MAR_1_2027_CUTOFF = time.mktime(date(2027, 3, 1).timetuple())  # тариф 24 «Зимняя сессия» — до конца февраля 2027
-FIRST_YEAR_END_2027 = time.mktime(date(2027, 8, 1).timetuple())  # тариф 25 «Весь первый курс» — до летних экзаменов 2027
+NOV_1_2026_CUTOFF = _msk_deadline(2026, 11, 1)  # тариф 22 «Все пересдачи» — до конца октября 2026
+JAN_1_2027_CUTOFF = _msk_deadline(2027, 1, 1)  # тариф 23 «До зачёта по химии» — до конца декабря 2026
+MAR_1_2027_CUTOFF = _msk_deadline(2027, 3, 1)  # тариф 24 «Зимняя сессия» — до конца февраля 2027
+FIRST_YEAR_END_2027 = _msk_deadline(2027, 8, 1)  # тариф 25 «Весь первый курс» — до летних экзаменов 2027
 
 # Старым платным подпискам (subscription_version 1, т.е. поле отсутствует в записи) — небольшой
 # фиксированный AI-бонус поверх обычного бесплатного дневного лимита, не завязанный ни на один
