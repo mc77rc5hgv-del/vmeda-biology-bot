@@ -8,6 +8,9 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")  # без него AI-раздел 
 MODEL = "gpt-4o-mini"
 PRICE_INPUT_PER_1M = 0.15   # $/1M input tokens — держать в синхроне с реальным прайсом OpenAI
 PRICE_OUTPUT_PER_1M = 0.60  # $/1M output tokens
+REQUEST_TIMEOUT_SECONDS = 30  # без этого SDK по умолчанию ждёт до 10 минут — зависший запрос
+                               # держал бы AI_USER_LOCKS/concurrency-слот, а ai.router.try_providers
+                               # не переходил бы к следующему провайдеру
 
 _client = None
 
@@ -18,7 +21,7 @@ def get_client():
     global _client
     if _client is None and OPENAI_API_KEY:
         from openai import AsyncOpenAI
-        _client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+        _client = AsyncOpenAI(api_key=OPENAI_API_KEY, timeout=REQUEST_TIMEOUT_SECONDS)
     return _client
 
 

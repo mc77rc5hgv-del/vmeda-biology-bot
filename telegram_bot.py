@@ -4196,6 +4196,17 @@ def start_ai_session(user_id: int) -> None:
 
 def end_ai_session(user_id: int) -> None:
     AI_SESSIONS.pop(user_id, None)
+    # AI_USER_LOCKS иначе растёт вечно — один Lock на каждого КОГДА-ЛИБО пользовавшегося AI
+    # user_id, и ничего никогда его не убирало. Убираем только НЕзаблокированный lock — если он
+    # прямо сейчас держится реальным запросом (async with lock: где-то в стеке), .locked() вернёт
+    # True и мы его не трогаем: pop() из словаря не разрывает уже существующую ссылку на объект
+    # у держащей его корутины, но create нового Lock под тем же user_id, пока старый ещё жив,
+    # завёл бы ДВА разных объекта на одного пользователя — тогда второй параллельный запрос мог
+    # бы получить "свежий" незалоченный lock и проскочить мимо защиты, которую AI_USER_LOCKS и
+    # существует. Проверка и pop синхронны (без await между ними), так что гонки здесь нет.
+    lock = AI_USER_LOCKS.get(user_id)
+    if lock is not None and not lock.locked():
+        AI_USER_LOCKS.pop(user_id, None)
 
 def record_ai_attempts_cost(attempts_log: list) -> None:
     """Учитывает стоимость КАЖДОЙ попытки провайдера из attempts_log (см. ai.router.try_providers)

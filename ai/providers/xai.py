@@ -10,6 +10,7 @@ XAI_API_KEY = os.getenv("XAI_API_KEY")
 MODEL = "grok-4.3"
 PRICE_INPUT_PER_1M = 1.25   # $/1M input tokens — держать в синхроне с прайсом xAI
 PRICE_OUTPUT_PER_1M = 2.50  # $/1M output tokens
+REQUEST_TIMEOUT_SECONDS = 30  # см. ai/providers/openai.py — тот же риск зависшего запроса
 
 _client = None
 
@@ -19,7 +20,7 @@ def get_client():
     global _client
     if _client is None and XAI_API_KEY:
         from openai import AsyncOpenAI
-        _client = AsyncOpenAI(api_key=XAI_API_KEY, base_url="https://api.x.ai/v1")
+        _client = AsyncOpenAI(api_key=XAI_API_KEY, base_url="https://api.x.ai/v1", timeout=REQUEST_TIMEOUT_SECONDS)
     return _client
 
 

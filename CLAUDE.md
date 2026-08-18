@@ -719,7 +719,20 @@ points (`handle_ai_photo_input`, `handle_ai_text_input`, `cb_ai_show_explanation
 UX: silently drop the duplicate, don't wait for the lock) before acquiring it via `async with lock:`
 for the request's full duration — the two checks aren't redundant, `session["processing"]` still
 catches a same-session double-tap exactly as before, `lock.locked()` catches the cross-session case
-the flag was blind to.
+the flag was blind to. `end_ai_session(user_id)` pops `AI_SESSIONS[user_id]` unconditionally but only pops
+`AI_USER_LOCKS[user_id]` when `lock.locked()` is `False` — popping a currently-held lock would let a future
+`_get_ai_user_lock()` call lazily create a second, different `Lock` object for the same user, defeating the very
+mutual-exclusion guarantee the lock exists for. The check-and-pop is safe as one synchronous block: no `await`
+sits between reading `.locked()` and the `pop()`, so nothing else on the event loop can acquire the lock in
+between. Without this cleanup `AI_USER_LOCKS` would grow one entry per distinct user forever and never shrink.
+
+**Provider request timeouts** — `ai/providers/openai.py` and `ai/providers/xai.py` both construct their
+`AsyncOpenAI` client with `timeout=REQUEST_TIMEOUT_SECONDS` (30s; the SDK default is several minutes), and
+`ai/providers/gemini.py`'s raw `aiohttp` call already used `aiohttp.ClientTimeout(total=30)`. A hung upstream
+request needs to fail fast — `ai.router.try_providers()` catches any exception (a timeout raises like any other
+provider failure) as a generic `"failed"` attempt and moves on to the next provider in the fallback chain, so a
+stuck OpenAI call no longer holds `AI_USER_LOCKS`/`AI_CONCURRENCY_GATE` slots open indefinitely or leaves a user
+waiting with no fallback.
 
 **Bot-wide AI safety net** (on top of the per-user quota/lock above — a traffic spike is many
 *different* users, each within their own daily quota, so a per-user limit alone can't cap total

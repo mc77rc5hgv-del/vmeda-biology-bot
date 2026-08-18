@@ -2713,6 +2713,29 @@ async def main():
     tb.solve_ai_request = orig_solve
     print("71b. cb_ai_show_explanation uses the list/theory follow-up for a real list-type anatomy question: OK")
 
+    # ---- 72. end_ai_session() cleans up AI_USER_LOCKS for a user with no held lock (prevents the
+    # dict from growing forever, one entry per user who EVER used AI, once), but leaves a
+    # currently-held lock alone — popping it while a coroutine holds a reference to it would let a
+    # second request lazily create a "fresh" unlocked lock and slip past the very protection
+    # AI_USER_LOCKS exists for ----
+    tb.AI_USER_LOCKS.pop(uid, None)
+    tb._get_ai_user_lock(uid)
+    assert uid in tb.AI_USER_LOCKS
+    tb.end_ai_session(uid)
+    assert uid not in tb.AI_USER_LOCKS, "an unlocked lock must be cleaned up when the session ends"
+
+    lock_72b = tb._get_ai_user_lock(uid)
+    await lock_72b.acquire()
+    try:
+        tb.end_ai_session(uid)
+        assert uid in tb.AI_USER_LOCKS, "a currently-held lock must NOT be removed while still in use"
+        assert tb._get_ai_user_lock(uid) is lock_72b, "must keep returning the SAME lock object while it's held"
+    finally:
+        lock_72b.release()
+    tb.end_ai_session(uid)
+    assert uid not in tb.AI_USER_LOCKS, "once released, a later end_ai_session cleans it up"
+    print("72. end_ai_session() cleans up AI_USER_LOCKS unless the lock is currently held: OK")
+
     # ==================== cleanup ====================
     tb.solve_ai_request = orig_solve
     tb.ai_vision_parser.parse_task = orig_parse_task
