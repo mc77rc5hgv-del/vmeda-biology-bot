@@ -1,8 +1,16 @@
 # PostgreSQL: technical design (Phase 1 — критическое состояние)
 
-Статус: **дизайн, кода миграции ещё нет**. Цель — зафиксировать план перед тем, как трогать
-`stats.json`, который сегодня является единственным persistence-слоем бота (см. CLAUDE.md →
-"Stats persistence").
+Статус: **review round 2**. Цель — зафиксировать план перед тем, как трогать `stats.json`, который
+сегодня является единственным persistence-слоем бота (см. CLAUDE.md → "Stats persistence").
+
+> ⚠️ **Расхождение с уже написанным кодом.** `db/migrations/0001_phase1_schema.sql` и
+> `scripts/migrate_stats_to_postgres.py` уже существуют в репозитории (написаны и протестированы
+> против реального локального Postgres 16 ДО этого раунда ревью) и реализуют схему ДО трёх правок
+> ниже — в частности, `subscriptions` там дедуплицируется через `UNIQUE(user_id, purchased_at)`,
+> а не через `source_legacy_key`; `referrals.created_at` там `NOT NULL`, без legacy-credit таблицы;
+> RUB-дедуп в дизайне (но не в реальном коде админ-панели — там дедупа на уровне БД сегодня нет
+> вообще) описан через `rub_{user_id}_{tier}_{ts}`. Этот документ правится first — код будет
+> обновлён отдельным шагом, после следующего go, а не в этом заходе.
 
 Скоуп сознательно ограничен: переносим только то, что действительно рискованно держать в одном
 JSON-файле без транзакций и constraints — платежи, подписки, права доступа, рефералы, счётчики
@@ -42,7 +50,10 @@ AI-квоты и сами пользователи. Кэш (`ai_answer_cache`, `
 users → subscriptions → payments → manual_grants → referrals(+warnings) → ai_usage_daily
 
 Порядок важен только для FK (`user_id` везде ссылается на `users`), сам перенос — одна транзакция
-на таблицу, весь Phase 1 разворачивается одним прогоном backfill-скрипта.
+на таблицу, весь Phase 1 разворачивается одним прогоном backfill-скрипта. `payment_requests` и
+`referral_monthly_legacy_credit` (новые вспомогательные таблицы, см. §3) в этот список не входят
+отдельными доменами: для первой в JSON нет исторических данных вообще (backfill её не наполняет,
+только создаёт — см. §3/§9), вторая наполняется как часть переноса `referrals`.
 
 **Осознанные отступления от 1:1 копии JSON** (каждое — низкий риск, объясняю почему):
 
@@ -51,19 +62,56 @@ users → subscriptions → payments → manual_grants → referrals(+warnings) 
   прямо сейчас, но раз всё равно переносим в реляционную модель, дешевле сразу писать `INSERT`
   вместо `UPDATE ... WHERE user_id=?`. Действующая подписка — это `SELECT ... WHERE user_id=?
   ORDER BY purchased_at DESC LIMIT 1`, что для приложения ведёт себя ИДЕНТИЧНО сегодняшнему
-  `stats["subscriptions"][uid]`. Если это кажется лишним расширением скоупа — можно откатить до
-  чистого upsert-по-`user_id`, это отдельная строка в DDL, скажи и поменяю.
+  `stats["subscriptions"][uid]`.
+  **Идемпотентность backfill'а через `source_legacy_key`, не через `(user_id, purchased_at)`.**
+  У append-only таблицы без бизнес-ключа `BIGSERIAL id` сам по себе НЕ мешает повторному запуску
+  `migrate_stats_to_postgres.py` вставить одну и ту же legacy-подписку второй раз — это реальная
+  дыра, а не гипотетическая (проявилась на практике при первом тестовом прогоне скрипта: 2
+  вызова подряд задвоили строку). Решение — отдельная колонка
+  `source_legacy_key TEXT UNIQUE`, которую backfill проставляет как `legacy_subscription_{user_id}`
+  (в JSON ровно одна подписка на юзера, так что этого достаточно для уникальности), а обычный
+  `grant_subscription()` в проде НИКОГДА её не трогает (значение остаётся `NULL`) — постгресовый
+  `UNIQUE` не считает несколько `NULL` конфликтующими, так что колонка не создаёт для живых покупок
+  никаких новых ограничений и полностью изолирует "это строка из одноразового бэкфилла" от "это
+  реальная покупка". См. схему в §3.
 - **`manual_access_granted` / `manual_anatomy_demo_granted` / `temporary_access` /
   `histology_temp_access` схлопываются в одну таблицу `manual_grants(user_id, grant_type,
   expires_at)`.** Сегодня это четыре независимые структуры ради одного и того же факта ("у юзера
   X есть право Y до момента Z или навсегда") — везде разный код чтения (`in list` vs `dict.get`),
   везде отдельно нужно было не забыть завести ключ в `load_stats()`. Одна таблица с
   `PRIMARY KEY(user_id, grant_type)` и `expires_at NULL = навсегда`.
-- **`referral_monthly` не переносится как структура** — сегодня это отдельный бегущий счётчик,
-  который надо не забыть инкрементировать синхронно с `referrals` (источник настоящего бага,
-  если где-то забыть). В Postgres это просто `COUNT(*) FROM referrals WHERE referrer_id=? AND
-  created_at >= <начало месяца, МСК>` — тот же результат, но без риска рассинхронизации, потому
-  что нет второго счётчика, который нужно поддерживать в ногу с первым.
+- **`referral_monthly` в конечном виде заменяется на `COUNT(*) FROM referrals WHERE
+  created_at >= <начало месяца, МСК>`** — тот же результат, но без риска рассинхронизации между
+  двумя счётчиками, которые сегодня нужно инкрементировать синхронно вручную. **Но у backfill'а
+  здесь есть дыра, которую нельзя закрывать наивно.** У исторических `stats["referrals"][referrer]`
+  НЕТ даты каждого конкретного реферала — это плоский список `referred_id` без таймстампов. Если
+  проставить всем backfilled-строкам `created_at = <время миграции>`, то сразу после cutover
+  `COUNT(*) WHERE created_at >= начало месяца` посчитает вообще ВСЕ рефералы каждого юзера за всё
+  время как "рефералы этого месяца" — например, у реферера с 50 рефералами за год внезапно
+  окажется 50 "новых" в месяц миграции, хотя по факту в этом месяце их могло не быть вообще.
+  Решение — двухчастная **transition-схема**, а не мгновенная замена:
+  - `referrals.created_at` становится **`NULLABLE`**. Исторические (backfilled) строки получают
+    `created_at = NULL` — явное "неизвестно", а не угаданная дата. Новые рефералы (dual-write и
+    далее) всегда пишут настоящий `created_at = now()`.
+  - Текущее значение `stats["referral_monthly"][uid] = {month, count}` переносится ОДИН РАЗ как
+    снимок в отдельную таблицу `referral_monthly_legacy_credit(user_id, month, count)` — "вот
+    сколько рефералов уже было засчитано за месяц `month` ДО того, как появились точные даты".
+  - На весь переходный период (до конца ТОГО САМОГО месяца, что записан в `month`) месячный счёт
+    считается как **`legacy_credit.count (если legacy_credit.month = текущий месяц, иначе 0) +
+    COUNT(*) FROM referrals WHERE referrer_id=? AND created_at >= начало текущего месяца`** —
+    старые рефералы (без даты) в `COUNT(*)` не попадают вообще (их `created_at IS NULL` не
+    проходит сравнение `>=`), а всё, что было НАКОПЛЕНО в счётчике до бэкфилла, учтено ровно один
+    раз через legacy-снимок. Двойного счёта нет: legacy-снимок покрывает период "до миграции", а
+    `COUNT(*)` — период "с момента миграции и позже", это непересекающиеся окна одного месяца.
+  - Как только реальный календарный месяц меняется, условие `legacy_credit.month = текущий месяц`
+    перестаёт выполняться само по себе (без единой миграции/крона) — legacy-credit перестаёт что-
+    либо давать, и формула сама по себе становится чистым `COUNT(*) FROM referrals WHERE
+    created_at >= начало месяца`, что и есть целевая steady-state архитектура. Таблицу
+    `referral_monthly_legacy_credit` после этого можно спокойно дропнуть (не обязательно сразу).
+  - **Инвариант, который это должно гарантировать**: ни один пользователь не должен ни получить,
+    ни потерять реферальный доступ из-за отсутствующих исторических таймстампов — ровно то число,
+    что сегодня отдаёт `get_referral_count_this_month()`, должно совпадать с формулой выше в
+    момент cutover (это должен проверять `diff_json_vs_postgres.py`, см. §5).
 - **`referred_by` не отдельная таблица** — это тот же `referrals`, прочитанный в обратную
   сторону (`SELECT referrer_id FROM referrals WHERE referred_id=?`), и заодно `referred_id` как
   `PRIMARY KEY` — это ровно та проверка анти-фрода ("у пользователя уже есть реферер"), которая
@@ -114,26 +162,49 @@ CREATE TABLE subscriptions (
     ai_used_period      INT NOT NULL DEFAULT 0,
     ai_used_monthly_month TEXT,                -- "YYYY-MM", МСК (см. APP_TIMEZONE)
     ai_used_monthly_count INT NOT NULL DEFAULT 0,
-    UNIQUE (user_id, purchased_at)  -- естественный ключ для идемпотентного backfill'а (§4/§5) —
-                                     -- две РЕАЛЬНЫЕ покупки не могут совпасть до микросекунды
+    source_legacy_key TEXT UNIQUE            -- ТОЛЬКО для backfill: 'legacy_subscription_{user_id}'.
+                                              -- Живые продовые INSERT'ы всегда оставляют NULL —
+                                              -- несколько NULL в UNIQUE-колонке друг другу не
+                                              -- конфликтуют, так что прод от этой колонки не зависит.
 );
 CREATE INDEX idx_subscriptions_current ON subscriptions (user_id, purchased_at DESC);
 -- "действующая подписка юзера" = первая строка при таком индексе -> дешёвый point-lookup.
 
+-- ==================== payment_requests (RUB-заявки — см. §6/§9) ====================
+CREATE TABLE payment_requests (
+    id          BIGSERIAL PRIMARY KEY,
+    user_id     BIGINT NOT NULL REFERENCES users(user_id),
+    tier        INT NOT NULL,
+    subject     TEXT,                 -- см. subject_choice_required в SUBSCRIPTION_TIERS
+    price       INT NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+-- Заводится РОВНО ОДИН РАЗ в момент, когда покупатель жмёт "💵 Оплатить X₽" (там же, где сегодня
+-- notify_admins_of_payment_request() рассылает кнопки всем ADMIN_IDS) — id этой строки (короткое
+-- целое, безопасно помещается в 64-байтный лимит callback_data Telegram, в отличие от полного
+-- UUID4) идёт в callback_data КАЖДОЙ admin_confirm_sub-кнопки у КАЖДОГО админа. Это и есть
+-- стабильный payment_request_id: оба админа ссылаются на одну и ту же строку, а не каждый
+-- генерирует свой идентификатор в момент собственного клика.
+
 -- ==================== payments ====================
 CREATE TABLE payments (
-    charge_id   TEXT PRIMARY KEY,     -- Stars: telegram_payment_charge_id;
-                                       -- рубли: синтетический 'rub_{user_id}_{tier}_{ts}' (см. §6)
+    charge_id   TEXT PRIMARY KEY,     -- Stars: telegram_payment_charge_id (от Telegram);
+                                       -- рубли: 'rub_req_{payment_requests.id}' (см. §6/§9) —
+                                       -- НЕ производное от времени клика, единое для всех попыток
+                                       -- подтвердить одну и ту же заявку.
     user_id     BIGINT NOT NULL REFERENCES users(user_id),
     kind        TEXT NOT NULL CHECK (kind IN
                     ('sub_stars', 'sub_rubles', 'sub_rubles_manual', 'donation_stars', 'donation_rubles')),
     amount      INT NOT NULL,
     tier        INT,                  -- NULL для донатов
     payload     TEXT,
+    payment_request_id BIGINT REFERENCES payment_requests(id),  -- NULL для Stars/донатов
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
--- UNIQUE уже даёт PRIMARY KEY. Это прямая замена stats["processed_payment_charge_ids"] —
--- ключевая гарантия идемпотентности платежей из твоего пункта 1.
+-- UNIQUE уже даёт PRIMARY KEY. Для Stars это прямая замена stats["processed_payment_charge_ids"].
+-- Для RUB это то же самое constraint'ом на charge_id, но теперь СЕМАНТИЧЕСКИ корректное — оба
+-- админа, подтверждающие ОДНУ заявку, порождают ОДИНАКОВЫЙ charge_id, так что второй INSERT
+-- гарантированно ловится ON CONFLICT, а не проходит как "новый, но с виду похожий" платёж.
 
 -- ==================== manual_grants (см. §2) ====================
 CREATE TABLE manual_grants (
@@ -150,12 +221,25 @@ CREATE TABLE manual_grants (
 CREATE TABLE referrals (
     referred_id BIGINT PRIMARY KEY REFERENCES users(user_id),  -- 1 реферер на юзера — сама схема это гарантирует
     referrer_id BIGINT NOT NULL REFERENCES users(user_id),
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at  TIMESTAMPTZ         -- NULL = дата неизвестна (legacy backfill, см. §2/§4).
+                                     -- Новые рефералы (dual-write и далее) ВСЕГДА пишут now().
 );
 CREATE INDEX idx_referrals_referrer ON referrals (referrer_id, created_at);
--- get_referral_count()        = COUNT(*) WHERE referrer_id=?
--- get_referral_count_this_month() = COUNT(*) WHERE referrer_id=? AND created_at >= <МСК-начало месяца>
--- get_referral_link "кто меня пригласил"  = SELECT referrer_id WHERE referred_id=?
+-- get_referral_count()             = COUNT(*) WHERE referrer_id=? (NULL created_at не мешает —
+--                                     COUNT(*) считает строки, а не непустые значения колонки)
+-- get_referral_count_this_month()  = см. transition-формулу в §2 (legacy_credit + COUNT(*) WHERE
+--                                     created_at >= МСК-начало месяца — NULL в это сравнение не
+--                                     попадает никогда, ровно то поведение, которое нужно)
+-- get_referral_link "кто меня пригласил" = SELECT referrer_id WHERE referred_id=?
+
+-- Одноразовый снимок stats["referral_monthly"] на момент backfill'а — см. §2 (transition-схема)
+-- и §4. Актуален только пока month = текущий календарный месяц; после смены месяца больше не
+-- участвует ни в одном запросе, можно дропнуть.
+CREATE TABLE referral_monthly_legacy_credit (
+    user_id BIGINT PRIMARY KEY REFERENCES users(user_id),
+    month   TEXT NOT NULL,   -- "YYYY-MM", МСК — тот же формат, что stats["referral_monthly"][uid]["month"]
+    count   INT NOT NULL
+);
 
 CREATE TABLE referral_warnings (
     user_id     BIGINT PRIMARY KEY REFERENCES users(user_id),
@@ -199,13 +283,22 @@ Postgres. Требования к скрипту:
 
 Особые случаи при переносе:
 - `subscriptions`: в JSON только последняя подписка на юзера — переносим как ОДНУ строку (первая
-  запись в новой append-only истории). Дальнейшие покупки уже в Postgres добавляют новые строки.
+  запись в новой append-only истории), `source_legacy_key = 'legacy_subscription_{user_id}'`.
+  `INSERT ... ON CONFLICT (source_legacy_key) DO NOTHING` — повторный прогон скрипта не задваивает
+  строку. Дальнейшие покупки уже в Postgres добавляют новые строки с `source_legacy_key = NULL`.
 - `payments`: `processed_payment_charge_ids` уже имеет `user_id`/`stars`/`payload`/`at` — прямое
   отображение полей, `kind` реконструируется из `payload` (`sub_stars_` → `sub_stars`, иначе
   `donation_stars`, рублёвые оплаты в этот dict сегодня не попадают вообще — см. §6 про их
-  отдельный путь).
+  отдельный путь через `payment_requests`, для которого исторических данных в JSON просто нет: до
+  этой правки рублёвые платежи не оставляли в `stats.json` НИКАКОГО журнала отдельных транзакций,
+  только текущее состояние в `subscriptions[uid]["method"]`).
 - `manual_grants`: четыре JSON-структуры → до четырёх строк на юзера, `expires_at` только у
   `temp_access`/`histology_temp`.
+- `referrals`: список `referred_id` на реферера переносится в хронологическом порядке (порядок
+  списка сохраняет `register_referral()`, всегда `append`), но `created_at = NULL` для всех строк
+  — backfill НЕ пытается угадать дату. `referral_monthly` переносится отдельно, один снимок на
+  юзера, в `referral_monthly_legacy_credit` — см. §2 за тем, как оба факта вместе восстанавливают
+  корректный месячный счёт на переходный период.
 
 ---
 
@@ -247,13 +340,28 @@ Postgres. Требования к скрипту:
   трогается (для остальных доменов — кэш/вторичная статистика — JSON продолжает быть
   единственным хранилищем, ничего не меняется).
 
-Про рублёвые платежи отдельно: у Stars есть `telegram_payment_charge_id` от Telegram, у ручного/
-one-tap рублёвого подтверждения (`cb_admin_confirm_sub`) — нет внешнего ID вообще, сегодня
-дедуп там держится на 10-минутном окне по времени + tier + user_id внутри одного процесса. В
-`payments.charge_id` для этого пути пишем синтетический `f"rub_{user_id}_{tier}_{int(purchased_at)}"`,
-сформированный ВНУТРИ той же транзакции, что и сама выдача (см. §8) — двойное нажатие кнопки
-двумя админами одновременно теперь ловится настоящим `UNIQUE`-конфликтом на уровне БД, а не
-эвристикой "искать похожую запись за последние 10 минут" в Python.
+**Про рублёвые платежи отдельно — сам механизм оплаты (ручное подтверждение админом в чате,
+кнопка "💵 Оплатить X₽" → всем ADMIN_IDS уходит one-tap-кнопка подтверждения) НЕ меняется.**
+Меняется только то, ЧТО в Postgres становится ключом дедупликации.
+
+У Stars есть `telegram_payment_charge_id` от Telegram — готовый внешний ID, дедуп тривиален
+(§9). У рублёвого one-tap подтверждения (`cb_admin_confirm_sub`) внешнего ID нет вообще — сегодня
+дедуп держится на 10-минутном окне по времени + tier + user_id внутри одного процесса (эвристика,
+не гарантия). **Синтетический `rub_{user_id}_{tier}_{int(purchased_at)}` (первая версия этого
+документа) НЕ решает проблему** — если два админа тапают "подтвердить" в разные секунды, каждый
+формирует id в момент СВОЕГО клика, получает два РАЗНЫХ значения `int(purchased_at)`, и оба
+`INSERT` проходят как два разных платежа: `UNIQUE(charge_id)` тут ничего не ловит, потому что
+"уникальные" id и должны были быть разными для одного и того же события.
+
+Правильный источник стабильности — не момент подтверждения, а момент СОЗДАНИЯ заявки. Когда
+покупатель жмёт "💵 Оплатить X₽" (тот же самый момент, когда сегодня `notify_admins_of_payment_request()`
+рассылает кнопки), заводится ОДНА строка в `payment_requests` (см. §3), и её `id` подставляется в
+callback_data КАЖДОЙ отправленной админам кнопки — оба админа видят кнопки, ссылающиеся на один и
+тот же `payment_requests.id`, а не каждый порождает свой идентификатор по факту клика.
+`payments.charge_id` для этого пути = `f"rub_req_{payment_requests.id}"` — стабильно независимо от
+того, кто из админов кликнул первым и с какой задержкой. Двойное нажатие теперь ловится настоящим
+`UNIQUE`-конфликтом на уровне БД (см. транзакцию в §9), а не эвристикой "похожая запись за
+последние 10 минут" в Python.
 
 ---
 
@@ -305,13 +413,59 @@ Python-проверка `if charge_id in stats[...]` с отдельным по�
 которыми в JSON-модели теоретически мог быть промежуток без надёжной атомарности при двух
 параллельных вызовах.
 
+**Тот же паттерн для RUB one-tap подтверждения** (`cb_admin_confirm_sub`, см. §6) — единственное
+отличие от Stars-пути в том, что здесь `charge_id` не приходит от Telegram, а строится из уже
+существующей заявки:
+
+```sql
+BEGIN;
+INSERT INTO payments (charge_id, user_id, kind, amount, tier, payload, payment_request_id)
+VALUES ('rub_req_' || $1, $2, 'sub_rubles', $3, $4, NULL, $1)
+ON CONFLICT (charge_id) DO NOTHING;
+-- 0 затронутых строк -> это НЕ первое подтверждение этой заявки (второй админ), ROLLBACK, ничего
+-- не выдаём, второй тап становится обычным "уже подтверждено" в UI, как и сегодня
+INSERT INTO subscriptions (user_id, tier, ..., purchased_at, method, price)
+VALUES ($2, $4, ..., now(), 'rubles', $3);
+COMMIT;
+```
+
+Оба админа могут нажать "подтвердить" на СВОЙ экземпляр кнопки в любой момент, в любом порядке,
+с любой задержкой — обе попытки бьются об один и тот же `payment_requests.id = $1`, и ровно ОДНА
+из двух транзакций реально доходит до `INSERT INTO subscriptions`; какая именно — решает СУБД, а
+не порядок обращения к Python-словарю в памяти, так что гарантия не зависит ни от количества
+процессов бота, ни от рестарта между двумя кликами.
+
+Ручной flow (`method="rubles_manual"` — админ через `ADMIN_PENDING` дарит подписку без покупателя,
+проходящего через кнопки, см. CLAUDE.md → "Manual flow") этой схемой не затронут вообще: там нет
+`payment_requests`, нет гонки двух админов (действие совершает один админ последовательным вводом
+текста), поэтому нечего дедуплицировать. Такая выдача просто пишет `subscriptions` без
+соответствующей строки в `payments` (либо со строкой без `payment_request_id`, если аудит важнее)
+— в точности как сегодня `"rubles_manual"` уже сознательно исключён из `sub_revenue_rubles`, см.
+CLAUDE.md.
+
 ---
 
 ## Что дальше
 
-Это чистый дизайн — прежде чем писать код (`scripts/migrate_stats_to_postgres.py`, слой доступа к
-Postgres, флаг `PERSISTENCE_BACKEND`, замену `save_stats()`-вызовов в шести доменах), нужен твой
-go/no-go по трём отмеченным "осознанным отступлениям" в §2 (append-only `subscriptions`,
-схлопывание `manual_grants` в одну таблицу, замена `referral_monthly`-счётчика на `COUNT(*)`) —
-если все три ок, начинаю с DDL-миграции и `scripts/migrate_stats_to_postgres.py`, самих продовых
-данных ещё не касаясь (только читаю `stats.json`, ничего в него не пишу назад).
+**Review round 2 закрывает три пункта, поднятых по итогам round 1:**
+1. `subscriptions` — идемпотентность backfill'а теперь через `source_legacy_key`, а не через
+   совпадение `(user_id, purchased_at)`.
+2. `referrals` — исторические `created_at` теперь `NULL`, а не время миграции; месячный счёт на
+   переходный период = `referral_monthly_legacy_credit` + `COUNT(*)` по известным датам,
+   автоматически перестающий учитывать legacy-снимок после смены календарного месяца.
+3. RUB-платежи — дедуп-ключ теперь строится от `payment_requests.id`, заводимого один раз в
+   момент создания заявки, а не от `int(purchased_at)` в момент клика админа — это была реальная
+   P0-дыра в исходном дизайне (два клика двух админов в разные секунды раньше давали два разных
+   "уникальных" id и потенциально двойную выдачу). Механизм ручного подтверждения оплаты (кнопка
+   у покупателя → одна кнопка каждому админу → первый клик выигрывает) не меняется, меняется
+   только то, что физически кладётся в `charge_id`.
+
+**Код (`db/migrations/0001_phase1_schema.sql`, `scripts/migrate_stats_to_postgres.py`) пока НЕ
+обновлён под эти три правки** — см. предупреждение в начале документа. Он реализует более раннюю
+версию дизайна (протестированную и рабочую саму по себе, но с дырой #1 и без правок #2/#3) и
+требует отдельного прохода после следующего go, прежде чем на него можно полагаться для реальных
+подписок/платежей.
+
+Жду следующего review — после него обновляю DDL + `migrate_stats_to_postgres.py` под три правки
+выше (по-прежнему только запись в отдельную Postgres-БД, без dual-write/cutover), и тогда же можно
+приступать к `scripts/diff_json_vs_postgres.py` (§5).
