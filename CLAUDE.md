@@ -400,7 +400,16 @@ cheapest anatomy-granting tier for this reason, unlike the full locked-screen te
 
 Stars payments go through the real Telegram Bot API invoice flow (`send_invoice` → `pre_checkout_query` →
 `successful_payment`, `currency="XTR"`); rubles payments have no real gateway — the buyer is deep-linked to
-`@vmeda_helper` to pay manually. Two independent paths grant a rubles subscription, and both must keep working:
+`@vmeda_helper` to pay manually. `handle_pre_checkout` validates `sub_stars_*` payloads before answering — parses
+the tier id out of the payload, rejects (`ok=False, error_message=...`) if the tier doesn't exist or is retired, and
+rejects if `total_amount` doesn't match the tier's `price_stars` (or its 10%-discount variant) — so a stale/tampered
+invoice payload can't sneak through pre-checkout. `handle_successful_payment` is idempotent against Telegram
+redelivering the same `successful_payment` event twice: it keys `payment.telegram_payment_charge_id` into
+`stats["processed_payment_charge_ids"]` and checks it BEFORE granting anything — a charge id already seen there
+short-circuits to a no-op (logged, nothing re-granted, no duplicate spend/donation) instead of re-running the
+subscription-grant/donation branches a second time.
+
+Two independent paths grant a rubles subscription, and both must keep working:
 1. **One-tap confirm** (fast path) — the moment the buyer taps "💵 Оплатить X₽" (`cb_buy_sub_rubles`/`_subj`),
    every `ADMIN_IDS` entry immediately gets a `admin_confirm_sub:{tier}:{user_id}:{subject|-}` inline button via
    `notify_admins_of_payment_request()` — the admin just taps it once they see the transfer land, no typing.

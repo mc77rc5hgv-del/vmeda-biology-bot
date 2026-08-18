@@ -56,10 +56,17 @@ def kb_texts(markup):
 def kb_data(markup):
     return [b.callback_data for row in markup.inline_keyboard for b in row]
 
+_fake_charge_id_counter = [0]
+
 class FakeSuccessfulPayment:
-    def __init__(self, total_amount, invoice_payload):
+    def __init__(self, total_amount, invoice_payload, telegram_payment_charge_id=None):
         self.total_amount = total_amount
         self.invoice_payload = invoice_payload
+        if telegram_payment_charge_id is None:
+            _fake_charge_id_counter[0] += 1
+            telegram_payment_charge_id = f"fake_charge_{_fake_charge_id_counter[0]}"
+        self.telegram_payment_charge_id = telegram_payment_charge_id
+        self.provider_payment_charge_id = ""
 
 # Тарифы 1-11 (старая линейка) — ВСЕ сняты с продажи после введения новой линейки 20-28, но их
 # условия (цена/срок/права) не меняются задним числом, и записи, уже выданные по ним, продолжают
@@ -618,6 +625,84 @@ async def main():
     assert msg2.answers and "Спасибо" in msg2.answers[0][0]
     print("successful_payment (donation payload) still works, grants no subscription: OK")
 
+    # 18b. idempotency: replaying the SAME telegram_payment_charge_id must not grant a second time
+    tb.stats["subscriptions"].pop(str(non_admin), None)
+    dup_charge_id = "dup_charge_test_18b"
+    msg_dup1 = FakeMsg(from_user=FakeUser(non_admin))
+    msg_dup1.successful_payment = FakeSuccessfulPayment(
+        129, f"sub_stars_21_-_{non_admin}_{int(time.time())}", telegram_payment_charge_id=dup_charge_id,
+    )
+    await tb.handle_successful_payment(msg_dup1)
+    assert tb.get_subscription(non_admin)["tier"] == 21
+    assert dup_charge_id in tb.stats["processed_payment_charge_ids"]
+
+    tb.stats["subscriptions"].pop(str(non_admin), None)  # simulate: tier no longer active for this user
+    msg_dup2 = FakeMsg(from_user=FakeUser(non_admin))
+    msg_dup2.successful_payment = FakeSuccessfulPayment(
+        129, f"sub_stars_21_-_{non_admin}_{int(time.time())}", telegram_payment_charge_id=dup_charge_id,
+    )
+    await tb.handle_successful_payment(msg_dup2)
+    assert tb.get_subscription(non_admin) is None, "a replayed successful_payment must NOT re-grant the subscription"
+    print("18b. successful_payment is idempotent on telegram_payment_charge_id: OK")
+
+    # 18c. duplicate donation charge_id must not double-count the donation total either
+    donations_before_dup = tb.stats["donations_stars_total"]
+    donor_dup_id = "dup_charge_test_18c"
+    msg_donate1 = FakeMsg(from_user=FakeUser(non_admin))
+    msg_donate1.successful_payment = FakeSuccessfulPayment(
+        30, f"donate_stars_30_{non_admin}_{int(time.time())}", telegram_payment_charge_id=donor_dup_id,
+    )
+    await tb.handle_successful_payment(msg_donate1)
+    assert tb.stats["donations_stars_total"] == donations_before_dup + 30
+    msg_donate2 = FakeMsg(from_user=FakeUser(non_admin))
+    msg_donate2.successful_payment = FakeSuccessfulPayment(
+        30, f"donate_stars_30_{non_admin}_{int(time.time())}", telegram_payment_charge_id=donor_dup_id,
+    )
+    await tb.handle_successful_payment(msg_donate2)
+    assert tb.stats["donations_stars_total"] == donations_before_dup + 30, "replayed donation charge must not double-count"
+    print("18c. duplicate donation charge_id does not double-count: OK")
+
+    # 18d. pre_checkout_query: valid subscription payload -> ok=True
+    class FakePreCheckout:
+        def __init__(self, invoice_payload, total_amount):
+            self.invoice_payload = invoice_payload
+            self.total_amount = total_amount
+            self.calls = []
+        async def answer(self, ok, error_message=None):
+            self.calls.append((ok, error_message))
+
+    pc_ok = FakePreCheckout(f"sub_stars_21_-_{non_admin}_{int(time.time())}", tb.SUBSCRIPTION_TIERS[21]["price_stars"])
+    await tb.handle_pre_checkout(pc_ok)
+    assert pc_ok.calls == [(True, None)]
+    print("18d. pre_checkout_query accepts a valid subscription payload/amount: OK")
+
+    # 18e. pre_checkout_query: retired tier id in payload -> rejected
+    pc_retired = FakePreCheckout(f"sub_stars_1_-_{non_admin}_{int(time.time())}", 89)
+    await tb.handle_pre_checkout(pc_retired)
+    assert pc_retired.calls[0][0] is False and pc_retired.calls[0][1]
+    print("18e. pre_checkout_query rejects a retired tier: OK")
+
+    # 18f. pre_checkout_query: amount mismatch vs. the tier's real price -> rejected
+    pc_bad_amount = FakePreCheckout(f"sub_stars_21_-_{non_admin}_{int(time.time())}", 1)
+    await tb.handle_pre_checkout(pc_bad_amount)
+    assert pc_bad_amount.calls[0][0] is False and pc_bad_amount.calls[0][1]
+    print("18f. pre_checkout_query rejects an amount that doesn't match the tier's price: OK")
+
+    # 18g. pre_checkout_query: the DISCOUNTED price is also accepted (buy_sub_stars_discount flow)
+    pc_discount = FakePreCheckout(
+        f"sub_stars_21_-_{non_admin}_{int(time.time())}", tb.discount_price(tb.SUBSCRIPTION_TIERS[21]["price_stars"]),
+    )
+    await tb.handle_pre_checkout(pc_discount)
+    assert pc_discount.calls == [(True, None)]
+    print("18g. pre_checkout_query accepts the discounted price too: OK")
+
+    # 18h. pre_checkout_query: a non-subscription (donation) payload passes through untouched
+    pc_donate = FakePreCheckout(f"donate_stars_20_{non_admin}_{int(time.time())}", 20)
+    await tb.handle_pre_checkout(pc_donate)
+    assert pc_donate.calls == [(True, None)]
+    print("18h. pre_checkout_query accepts donation payloads without tier validation: OK")
+
+    tb.stats["subscriptions"].pop(str(non_admin), None)
     tb.bot.send_invoice = orig_send_invoice
     tb.bot.send_message = orig_send_message
 

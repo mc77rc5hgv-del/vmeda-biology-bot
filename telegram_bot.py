@@ -160,6 +160,7 @@ def load_stats() -> dict:
                 "breaker_tripped": False, "breaker_alerted": False,
             })
             data.setdefault("ai_raw_text_aliases", {})
+            data.setdefault("processed_payment_charge_ids", {})
             return data
         except (json.JSONDecodeError, OSError):
             logger.exception("Не удалось прочитать %s, статистика будет создана заново", STATS_FILE)
@@ -205,6 +206,7 @@ def load_stats() -> dict:
             "breaker_tripped": False, "breaker_alerted": False,
         },
         "ai_raw_text_aliases": {},
+        "processed_payment_charge_ids": {},
     }
 
 # Один воркер сериализует записи на диск и не даёт им блокировать event loop бота.
@@ -3662,6 +3664,32 @@ async def cb_admin_reject_sub(callback: CallbackQuery):
 
 @dp.pre_checkout_query()
 async def handle_pre_checkout(pre_checkout_query) -> None:
+    """Проверяет payload/тариф/сумму НЕПОСРЕДСТВЕННО перед оплатой, а не только доверяет тому, что
+    сам инвойс когда-то был создан правильно (send_subscription_stars_invoice формирует payload/
+    цену из живого SUBSCRIPTION_TIERS в момент выставления счёта — но между выставлением и оплатой
+    тариф теоретически мог быть снят с продажи админом/деплоем, а сумма — не совпасть с ожидаемой
+    из-за бага при формировании инвойса; отклонить здесь дешевле и безопаснее, чем молча выдать
+    несоответствующую payload'у подписку в handle_successful_payment)."""
+    payload = pre_checkout_query.invoice_payload or ""
+    if payload.startswith("sub_stars_"):
+        parts = payload.split("_")
+        try:
+            tier_id = int(parts[2])
+        except (IndexError, ValueError):
+            await pre_checkout_query.answer(ok=False, error_message="Некорректные данные платежа — попробуй оформить подписку заново.")
+            return
+        cfg = SUBSCRIPTION_TIERS.get(tier_id)
+        if cfg is None or cfg.get("retired"):
+            await pre_checkout_query.answer(ok=False, error_message="Этот тариф больше не продаётся — выбери другой в разделе «Подписка».")
+            return
+        expected_prices = {cfg["price_stars"], discount_price(cfg["price_stars"])}
+        if pre_checkout_query.total_amount not in expected_prices:
+            logger.error(
+                "pre_checkout_query: сумма %s не совпадает с ожидаемой ценой тарифа %s (%s), payload=%s",
+                pre_checkout_query.total_amount, tier_id, expected_prices, payload,
+            )
+            await pre_checkout_query.answer(ok=False, error_message="Сумма платежа не совпадает с ценой тарифа — попробуй оформить подписку заново.")
+            return
     await pre_checkout_query.answer(ok=True)
 
 @dp.message(F.successful_payment)
@@ -3669,6 +3697,25 @@ async def handle_successful_payment(message: Message):
     payment = message.successful_payment
     stars = payment.total_amount
     payload = payment.invoice_payload or ""
+
+    # Идемпотентность: telegram_payment_charge_id — уникальный ID именно ЭТОЙ транзакции (у Stars
+    # provider_payment_charge_id пуст, внешнего провайдера нет). Без этой проверки повторная
+    # доставка одного и того же successful_payment (сетевой ретрай Telegram, повторный webhook и
+    # т.п.) выдала бы подписку/донат ещё раз — списание у пользователя при этом одно, а не выдать
+    # оплаченное только затем не дать выдать это же ещё раз важнее, чем пропустить с виду похожий,
+    # но на самом деле новый платёж, у которого будет свой charge_id.
+    charge_id = payment.telegram_payment_charge_id
+    if charge_id and charge_id in stats["processed_payment_charge_ids"]:
+        logger.warning(
+            "Повторная доставка successful_payment для telegram_payment_charge_id=%s (user %s) — "
+            "игнорируем, чтобы не выдать подписку/донат повторно", charge_id, message.from_user.id,
+        )
+        return
+    if charge_id:
+        stats["processed_payment_charge_ids"][charge_id] = {
+            "user_id": message.from_user.id, "stars": stars, "payload": payload, "at": time.time(),
+        }
+        save_stats()
 
     if payload.startswith("sub_stars_"):
         parts = payload.split("_")
