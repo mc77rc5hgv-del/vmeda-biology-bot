@@ -117,6 +117,27 @@ async def main():
     assert not tb.is_ai_session_active(uid)
     assert cb_no_key._answers and cb_no_key._answers[0][1] is True  # show_alert
     print("3. AI unavailable without API key: OK")
+
+    # ---- 3b. ai_provider_available()/the UI gate must NOT hard-require OPENAI_API_KEY
+    # specifically — the pipeline already falls back to Gemini for both vision parsing
+    # (ai.vision_parser.parse_task) and quick-answer solving (ai.router.build_attempts adds
+    # "gemini" even when primary=="openai"), so a bot with only GEMINI_API_KEY configured must
+    # still let users into the AI section instead of showing "temporarily unavailable" ----
+    orig_gemini_key_3b = tb.ai_gemini.GEMINI_API_KEY
+    tb.ai_gemini.GEMINI_API_KEY = None
+    assert not tb.ai_provider_available(), "neither OpenAI nor Gemini configured -> unavailable"
+    assert "финальные настройки" in tb.get_ai_menu_text(uid)
+
+    tb.ai_gemini.GEMINI_API_KEY = "fake-gemini-key-for-tests"
+    assert tb.ai_provider_available(), "Gemini alone must be enough to consider AI available"
+    assert "финальные настройки" not in tb.get_ai_menu_text(uid)
+    cb_gemini_only = FakeCB("ai_solve_start", uid=uid)
+    await tb.cb_ai_solve_start(cb_gemini_only)
+    assert tb.is_ai_session_active(uid), "cb_ai_solve_start must not block when only Gemini is configured"
+    tb.end_ai_session(uid)
+    tb.ai_gemini.GEMINI_API_KEY = orig_gemini_key_3b
+    print("3b. AI stays available with only Gemini configured (no hard OPENAI_API_KEY requirement): OK")
+
     tb.OPENAI_API_KEY = "fake-key-for-tests"
 
     # ---- 4. starting a solve session opens an empty session (task not yet parsed) and shows

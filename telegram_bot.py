@@ -74,6 +74,19 @@ STATS_FILE = os.path.join(STATS_DIR, "stats.json")
 # "Отправить фото", текст меню AI) должен знать, доступен ли AI, не заглядывая внутрь пакета ai.
 OPENAI_API_KEY = ai_openai.OPENAI_API_KEY  # без него AI-раздел показывает "временно недоступен"
 
+def ai_provider_available() -> bool:
+    """True, если доступен хотя бы ОДИН провайдер, способный реально провести пользователя через
+    конвейер VMedA AI целиком — не просто "какой-то ключ где-то задан". И vision-парсинг (см.
+    ai.vision_parser.parse_task), и quick-ответ (см. ai.router.build_attempts — даже когда
+    primary="openai", список попыток становится ["openai", "gemini"], если Gemini настроен) уже
+    умеют падать с OpenAI на Gemini автоматически, поэтому UI не должен требовать именно
+    OPENAI_API_KEY — бот полностью в состоянии обслужить AI-запрос на одном Gemini, если OpenAI не
+    настроен вообще. xAI/Grok сюда сознательно не входит: он никогда не используется ни для
+    vision-парсинга, ни как единственный провайдер quick-ответа (только как один из вариантов
+    ПОДРОБНОГО разбора для theory_complex) — если настроен только он, конвейер всё равно не
+    сможет даже разобрать первое сообщение сессии."""
+    return bool(OPENAI_API_KEY) or bool(ai_gemini.GEMINI_API_KEY)
+
 DIVIDER = "━━━━━━━━━━━━━━"
 IMAGES_DIR = "images"
 ANATOMY_IMAGES_DIR = os.path.join(IMAGES_DIR, "anatomy")
@@ -4411,7 +4424,7 @@ async def get_first_message_ai_answer(user_id: int, session: dict, task) -> tupl
     return display_answer, user_turn
 
 def get_ai_menu_text(user_id: int) -> str:
-    availability = "" if OPENAI_API_KEY else "\n\n🔧 Идут финальные настройки — совсем скоро запустим."
+    availability = "" if ai_provider_available() else "\n\n🔧 Идут финальные настройки — совсем скоро запустим."
     return (
         f"🤖 <b>VMedA AI</b>\n{DIVIDER}\n\n"
         "AI-помощник, который разбирает задание по фото или тексту и сразу выдаёт решение: "
@@ -4501,7 +4514,7 @@ async def cb_ai_menu(callback: CallbackQuery):
 @dp.callback_query(F.data == "ai_solve_start")
 async def cb_ai_solve_start(callback: CallbackQuery):
     user_id = callback.from_user.id
-    if not OPENAI_API_KEY:
+    if not ai_provider_available():
         await callback.answer("AI сейчас на техническом обслуживании, загляни позже.", show_alert=True)
         return
     if ai_circuit_breaker_tripped():

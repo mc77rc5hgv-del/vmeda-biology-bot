@@ -492,6 +492,17 @@ doesn't block bot startup/polling). Everything that needs `stats`/`save_stats()`
 tracking, the answer cache) stays in `telegram_bot.py`; the `ai/` modules themselves are pure
 functions/classes over their inputs.
 
+`telegram_bot.ai_provider_available()` — `bool(OPENAI_API_KEY) or bool(ai_gemini.GEMINI_API_KEY)` — is the single
+predicate the AI section's UI gates on (`get_ai_menu_text()`'s "🔧 Идут финальные настройки" line,
+`cb_ai_solve_start()`'s block), replacing an old hard `if not OPENAI_API_KEY` check. It reflects that the
+pipeline already has a real fallback to Gemini alone: `ai.vision_parser.parse_task()` tries OpenAI then Gemini for
+photo parsing, and `ai.router.build_attempts("openai")` appends `"gemini"` as a fallback whenever
+`GEMINI_API_KEY` is set — even on the `quick=True` path, whose *primary* provider is always OpenAI. So a
+deployment with only `GEMINI_API_KEY` configured (no `OPENAI_API_KEY` at all) can genuinely serve AI requests end
+to end and must not be told the section is unavailable. `XAI_API_KEY`/Grok is deliberately excluded from this
+predicate — it's never used for vision parsing and never a fallback for the quick-answer step, only an optional
+detailed-answer provider for `bucket=="theory_complex"`.
+
 Pipeline, in call order, for the **first** message of a session (photo or text):
 1. **`ai/vision_parser.py`** (`parse_task(*, image_bytes=None, text=None)`) — the ONLY place a
    photo is ever sent to a model, exactly once. Tries OpenAI first, then Gemini if configured
