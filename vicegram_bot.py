@@ -32,6 +32,7 @@ import shutil
 import sqlite3
 import tempfile
 import time
+import unicodedata
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
@@ -1068,6 +1069,18 @@ def find_custom_command(chat_id: int, text: str):
 
 
 # ==================== АКТИВНЫЕ ЗАМЕТКИ (ЛИЧНЫЕ ЧАТЫ) ====================
+def normalize_trigger(text: str) -> str:
+    """NFKC схлопывает визуально одинаковые, но разные по коду символы Юникода
+    в одно представление, \\s+ схлопывает любые пробельные символы (обычный
+    пробел, неразрывный NBSP и т.п.) в один — без этого два визуально
+    идентичных триггера, набранных по-разному (например, один скопирован
+    с неразрывным пробелом), превращались бы в разные строки и переставали
+    считаться «тем же триггером» при группировке в find_active_notes."""
+    normalized = unicodedata.normalize("NFKC", text or "")
+    normalized = re.sub(r"\s+", " ", normalized)
+    return normalized.strip().lower()
+
+
 def add_active_note(owner_id: int, trigger: str, text: str = None, media_type: str = None, file_id: str = None) -> None:
     """Обычная вставка, не replace — на один триггер может висеть несколько
     заметок, тогда при срабатывании отправляются все (см. find_active_notes)."""
@@ -1077,7 +1090,7 @@ def add_active_note(owner_id: int, trigger: str, text: str = None, media_type: s
         INSERT INTO active_notes (owner_id, trigger, text, media_type, file_id, created_at)
         VALUES (?, ?, ?, ?, ?, ?)
         """,
-        (owner_id, trigger.strip().lower(), text, media_type, file_id, int(time.time())),
+        (owner_id, normalize_trigger(trigger), text, media_type, file_id, int(time.time())),
     )
     conn.commit()
     conn.close()
@@ -1109,8 +1122,12 @@ def find_active_notes(owner_id: int, text: str) -> list:
     совпадение по-прежнему находится: оно частный случай вхождения подстроки.
     Если подходит несколько РАЗНЫХ триггеров — побеждает самый длинный (самый
     специфичный); возвращаются ВСЕ заметки, повешенные на этот триггер (может
-    быть несколько — тогда уйдут все по очереди)."""
-    haystack = (text or "").strip().lower()
+    быть несколько — тогда уйдут все по очереди). Триггер каждой заметки
+    перенормализуется здесь же (а не берётся как есть из БД) — так группировка
+    «одинаковых» триггеров работает надёжно, даже если в старых записях до
+    normalize_trigger() успели осесть визуально неразличимые расхождения
+    (неразрывный пробел вместо обычного и т.п.)."""
+    haystack = normalize_trigger(text)
     if not haystack:
         return []
     conn = db_connect()
@@ -1118,12 +1135,18 @@ def find_active_notes(owner_id: int, text: str) -> list:
         "SELECT * FROM active_notes WHERE owner_id = ?", (owner_id,)
     ).fetchall()
     conn.close()
-    candidates = [dict(r) for r in rows if r["trigger"] and r["trigger"] in haystack]
+    candidates = []
+    for r in rows:
+        norm_trigger = normalize_trigger(r["trigger"] or "")
+        if norm_trigger and norm_trigger in haystack:
+            note = dict(r)
+            note["_norm_trigger"] = norm_trigger
+            candidates.append(note)
     if not candidates:
         return []
-    best_len = max(len(n["trigger"]) for n in candidates)
-    winning_trigger = next(n["trigger"] for n in candidates if len(n["trigger"]) == best_len)
-    return [n for n in candidates if n["trigger"] == winning_trigger]
+    best_len = max(len(n["_norm_trigger"]) for n in candidates)
+    winning_trigger = next(n["_norm_trigger"] for n in candidates if len(n["_norm_trigger"]) == best_len)
+    return [n for n in candidates if n["_norm_trigger"] == winning_trigger]
 
 
 # в памяти: ожидание ввода триггера/содержимого новой заметки, ключ owner_id
