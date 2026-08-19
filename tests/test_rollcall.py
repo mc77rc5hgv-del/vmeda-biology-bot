@@ -215,10 +215,14 @@ async def main():
     tb._broadcast = orig_broadcast
     print("admin rollcall-announcement broadcast (preview/confirm/go, non-admin blocked): OK")
 
-    # 15. admin_panel keyboard exposes the new announce button
+    # 15. admin panel's Announcements submenu exposes the rollcall announce button (not the
+    # top-level admin_panel menu directly — all admin_announce_* buttons live in the submenu)
     admin_panel_data = kb_data(tb.get_admin_menu())
-    assert "admin_announce_rollcall_confirm" in admin_panel_data
-    print("admin panel exposes the rollcall announcement button: OK")
+    assert "admin_announce_rollcall_confirm" not in admin_panel_data
+    assert "admin_announcements_menu" in admin_panel_data
+    announcements_submenu_data = kb_data(tb.get_admin_announcements_keyboard())
+    assert "admin_announce_rollcall_confirm" in announcements_submenu_data
+    print("admin Announcements submenu exposes the rollcall announcement button: OK")
 
     print("ALL ROLLCALL TESTS PASSED")
 

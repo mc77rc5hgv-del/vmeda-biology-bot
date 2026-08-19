@@ -33,7 +33,7 @@ EXEMPT_EXAMPLES = [
     "donate_stars_menu", "donate_stars_amount:100", "donate_stars_confirm:100",
     "donate_stars_custom", "donate_rubles_menu", "donate_rubles_amount:500",
     "donate_rubles_confirm:500", "donate_rubles_custom",
-    "admin_panel", "admin_battle_menu", "admin_battle_start_confirm", "admin_battle_start_go",
+    "admin_panel", "admin_announcements_menu", "admin_battle_menu", "admin_battle_start_confirm", "admin_battle_start_go",
     "admin_battle_end_confirm", "admin_battle_end_go", "admin_stats", "admin_userlist:0",
     "admin_grant_prompt", "admin_revoke_prompt", "admin_dm_prompt", "admin_donation_prompt",
     "admin_announce_support_confirm", "admin_announce_support_go",

@@ -1184,7 +1184,7 @@ async def cb_admin_announce_rollcall_confirm(callback: CallbackQuery):
     await callback.answer()
     builder = InlineKeyboardBuilder()
     builder.button(text="✅ Отправить всем", callback_data="admin_announce_rollcall_go")
-    builder.button(text="❌ Отмена", callback_data="admin_panel")
+    builder.button(text="❌ Отмена", callback_data="admin_announcements_menu")
     builder.adjust(1)
     preview = (
         f"👀 <b>Предпросмотр анонса</b>\n{DIVIDER}\n\n"
@@ -2476,6 +2476,7 @@ build_channel_post_keyboard = admin_handlers.build_channel_post_keyboard
 get_admin_menu = admin_handlers.get_admin_menu
 get_admin_battle_keyboard = admin_handlers.get_admin_battle_keyboard
 get_admin_battle_text = admin_handlers.get_admin_battle_text
+get_admin_announcements_keyboard = admin_handlers.get_admin_announcements_keyboard
 get_admin_back_keyboard = admin_handlers.get_admin_back_keyboard
 resolve_user_by_username = admin_handlers.resolve_user_by_username
 format_admin_target_label = admin_handlers.format_admin_target_label
@@ -2483,6 +2484,7 @@ format_user_line = admin_handlers.format_user_line
 get_admin_userlist_page = admin_handlers.get_admin_userlist_page
 cb_admin_panel = admin_handlers.cb_admin_panel
 cb_admin_battle_menu = admin_handlers.cb_admin_battle_menu
+cb_admin_announcements_menu = admin_handlers.cb_admin_announcements_menu
 cb_admin_battle_last_results = admin_handlers.cb_admin_battle_last_results
 cb_admin_battle_start_confirm = admin_handlers.cb_admin_battle_start_confirm
 cb_admin_battle_start_go = admin_handlers.cb_admin_battle_start_go

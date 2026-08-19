@@ -76,8 +76,6 @@ def get_admin_menu():
     builder.button(text="⚔️ Битва рефералов", callback_data="admin_battle_menu")
     builder.button(text="💰 Записать донат рублями", callback_data="admin_donation_prompt")
     builder.button(text="💎 Выдать подписку по username/ID", callback_data="admin_subscription_prompt")
-    builder.button(text="📣 Оповещение о подписке", callback_data="admin_announce_subscription_confirm")
-    builder.button(text="📣 Анонс раздела поддержки", callback_data="admin_announce_support_confirm")
     builder.button(text="🎁 Восстановить доступ исчерпавшим (7 дней)", callback_data="admin_restore_access_confirm")
     builder.button(
         text=f"📣 Напомнить о реферале/подписке (<{tb.REFERRAL_FULL_ACCESS_THRESHOLD} реф.)",
@@ -87,16 +85,12 @@ def get_admin_menu():
         text=f"🔥 Скидка 10% без рефералов (<{tb.REFERRAL_FULL_ACCESS_THRESHOLD} реф.)",
         callback_data="admin_discount_promo_confirm",
     )
-    builder.button(text="📣 Анонс раздела Анатомия", callback_data="admin_announce_anatomy_confirm")
-    builder.button(text="📣 Анонс Экзамена (ТЕСТ/теория/практика)", callback_data="admin_announce_anatomy_exam_confirm")
-    builder.button(text="📣 Анонс теста по латыни", callback_data="admin_announce_anatomy_latin_confirm")
-    builder.button(text="📣 Анонс VMedA AI", callback_data="admin_announce_ai_confirm")
+    builder.button(text="📣 Анонсы", callback_data="admin_announcements_menu")
     builder.button(text="📤 Опубликовать пост в канал", callback_data="admin_channel_post_prompt")
     builder.button(text="🔬 Открыть Гистологию всем на 24ч", callback_data="admin_histology_promo_confirm")
     builder.button(text="🎉 Снять все ограничения всем на 24ч", callback_data="admin_global_promo_confirm")
     builder.button(text="🎉 Снять все ограничения всем на 12ч", callback_data="admin_global_promo_12h_confirm")
     builder.button(text="🔒 Вернуть ограничения", callback_data="admin_restore_restrictions_confirm")
-    builder.button(text="📋 Анонс переклички групп", callback_data="admin_announce_rollcall_confirm")
     pending_ai_cache = tb.get_pending_ai_cache_count()
     builder.button(
         text=f"🤖 Модерация AI-кэша ({pending_ai_cache})" if pending_ai_cache else "🤖 Модерация AI-кэша",
@@ -145,6 +139,23 @@ def get_admin_battle_text() -> str:
         f"получат призы:\n\n{tb.format_battle_prizes_block()}\n\n"
         "Всем пользователям бота придёт рассылка с объявлением о старте и правилах."
     )
+
+def get_admin_announcements_keyboard():
+    """Подраздел «Анонсы» — все admin_announce_* рассылки собраны сюда с главного экрана
+    админ-панели одной кнопкой, чтобы не захламлять его; каждая кнопка ведёт напрямую в свой
+    already-existing _confirm-хендлер (см. cb_admin_announce_*_confirm ниже и в telegram_bot.py
+    для переклички), сама рассылочная логика не меняется."""
+    builder = InlineKeyboardBuilder()
+    builder.button(text="📣 Оповещение о подписке", callback_data="admin_announce_subscription_confirm")
+    builder.button(text="📣 Анонс раздела поддержки", callback_data="admin_announce_support_confirm")
+    builder.button(text="📣 Анонс раздела Анатомия", callback_data="admin_announce_anatomy_confirm")
+    builder.button(text="📣 Анонс Экзамена (ТЕСТ/теория/практика)", callback_data="admin_announce_anatomy_exam_confirm")
+    builder.button(text="📣 Анонс теста по латыни", callback_data="admin_announce_anatomy_latin_confirm")
+    builder.button(text="📣 Анонс VMedA AI", callback_data="admin_announce_ai_confirm")
+    builder.button(text="📋 Анонс переклички групп", callback_data="admin_announce_rollcall_confirm")
+    builder.button(text="🔙 В админ-панель", callback_data="admin_panel")
+    builder.adjust(1)
+    return builder.as_markup()
 
 def get_admin_back_keyboard():
     builder = InlineKeyboardBuilder()
@@ -233,6 +244,19 @@ async def cb_admin_battle_menu(callback: CallbackQuery):
         get_admin_battle_text(),
         parse_mode="HTML",
         reply_markup=get_admin_battle_keyboard()
+    )
+
+@router.callback_query(F.data == "admin_announcements_menu")
+async def cb_admin_announcements_menu(callback: CallbackQuery):
+    if not tb.is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer()
+    await tb.safe_edit_text(
+        callback.message,
+        f"📣 <b>Анонсы</b>\n{tb.DIVIDER}\n\nВыбери, что разослать:",
+        parse_mode="HTML",
+        reply_markup=get_admin_announcements_keyboard()
     )
 
 @router.callback_query(F.data == "admin_battle_last_results")
@@ -992,7 +1016,7 @@ async def cb_admin_announce_support_confirm(callback: CallbackQuery):
     await callback.answer()
     builder = InlineKeyboardBuilder()
     builder.button(text="✅ Отправить всем", callback_data="admin_announce_support_go")
-    builder.button(text="❌ Отмена", callback_data="admin_panel")
+    builder.button(text="❌ Отмена", callback_data="admin_announcements_menu")
     builder.adjust(1)
     preview = (
         f"👀 <b>Предпросмотр анонса</b>\n{tb.DIVIDER}\n\n"
@@ -1026,7 +1050,7 @@ async def cb_admin_announce_subscription_confirm(callback: CallbackQuery):
     await callback.answer()
     builder = InlineKeyboardBuilder()
     builder.button(text="✅ Отправить всем", callback_data="admin_announce_subscription_go")
-    builder.button(text="❌ Отмена", callback_data="admin_panel")
+    builder.button(text="❌ Отмена", callback_data="admin_announcements_menu")
     builder.adjust(1)
     preview = (
         f"👀 <b>Предпросмотр анонса</b>\n{tb.DIVIDER}\n\n"
@@ -1060,7 +1084,7 @@ async def cb_admin_announce_anatomy_confirm(callback: CallbackQuery):
     await callback.answer()
     builder = InlineKeyboardBuilder()
     builder.button(text="✅ Отправить всем", callback_data="admin_announce_anatomy_go")
-    builder.button(text="❌ Отмена", callback_data="admin_panel")
+    builder.button(text="❌ Отмена", callback_data="admin_announcements_menu")
     builder.adjust(1)
     preview = (
         f"👀 <b>Предпросмотр анонса</b>\n{tb.DIVIDER}\n\n"
@@ -1097,7 +1121,7 @@ async def cb_admin_announce_ai_confirm(callback: CallbackQuery):
     await callback.answer()
     builder = InlineKeyboardBuilder()
     builder.button(text="✅ Отправить всем", callback_data="admin_announce_ai_go")
-    builder.button(text="❌ Отмена", callback_data="admin_panel")
+    builder.button(text="❌ Отмена", callback_data="admin_announcements_menu")
     builder.adjust(1)
     preview = (
         f"👀 <b>Предпросмотр анонса</b>\n{tb.DIVIDER}\n\n"
@@ -1131,7 +1155,7 @@ async def cb_admin_announce_anatomy_exam_confirm(callback: CallbackQuery):
     await callback.answer()
     builder = InlineKeyboardBuilder()
     builder.button(text="✅ Отправить всем", callback_data="admin_announce_anatomy_exam_go")
-    builder.button(text="❌ Отмена", callback_data="admin_panel")
+    builder.button(text="❌ Отмена", callback_data="admin_announcements_menu")
     builder.adjust(1)
     preview = (
         f"👀 <b>Предпросмотр анонса</b>\n{tb.DIVIDER}\n\n"
@@ -1165,7 +1189,7 @@ async def cb_admin_announce_anatomy_latin_confirm(callback: CallbackQuery):
     await callback.answer()
     builder = InlineKeyboardBuilder()
     builder.button(text="✅ Отправить всем", callback_data="admin_announce_anatomy_latin_go")
-    builder.button(text="❌ Отмена", callback_data="admin_panel")
+    builder.button(text="❌ Отмена", callback_data="admin_announcements_menu")
     builder.adjust(1)
     preview = (
         f"👀 <b>Предпросмотр анонса</b>\n{tb.DIVIDER}\n\n"

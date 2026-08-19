@@ -1153,10 +1153,24 @@ async def main():
     tb._broadcast = orig_broadcast2
     print("admin Anatomy-announcement broadcast lists only anatomy-granting active tiers: OK")
 
-    # 26c. Admin panel exposes the new Anatomy-announcement button
+    # 26c. Admin panel groups all announcement broadcasts under one "Анонсы" submenu button
     admin_menu_texts = kb_texts(tb.get_admin_menu())
-    assert "📣 Анонс раздела Анатомия" in admin_menu_texts
-    print("admin panel exposes Anatomy-announcement button: OK")
+    assert "📣 Анонсы" in admin_menu_texts
+    assert "📣 Анонс раздела Анатомия" not in admin_menu_texts, "must live in the submenu, not the top-level menu"
+    announcements_submenu_texts = kb_texts(tb.get_admin_announcements_keyboard())
+    assert "📣 Анонс раздела Анатомия" in announcements_submenu_texts
+    print("admin panel exposes an Announcements submenu, not individual top-level buttons: OK")
+
+    # 26c-bis. cb_admin_announcements_menu itself renders the submenu and blocks non-admins
+    cb_ann_menu = FakeCB("admin_announcements_menu")
+    await tb.cb_admin_announcements_menu(cb_ann_menu)
+    assert cb_ann_menu.message.edits and "Анонсы" in cb_ann_menu.message.edits[0][0]
+    assert kb_data(cb_ann_menu.message.edits[0][1]) == kb_data(tb.get_admin_announcements_keyboard())
+
+    cb_ann_menu_non_admin = FakeCB("admin_announcements_menu", uid=non_admin)
+    await tb.cb_admin_announcements_menu(cb_ann_menu_non_admin)
+    assert not cb_ann_menu_non_admin.message.edits, "non-admin must be blocked"
+    print("cb_admin_announcements_menu renders the submenu, non-admin blocked: OK")
 
     # 26c2. Admin Anatomy-exam announcement broadcast (ТЕСТ/теория/практика): preview -> confirm -> broadcast
     orig_broadcast_exam = tb._broadcast
@@ -1192,8 +1206,8 @@ async def main():
     assert not cb_exam3.message.edits, "non-admin must be blocked"
 
     tb._broadcast = orig_broadcast_exam
-    assert "📣 Анонс Экзамена (ТЕСТ/теория/практика)" in admin_menu_texts
-    print("admin Anatomy-exam-announcement broadcast + admin panel button: OK")
+    assert "📣 Анонс Экзамена (ТЕСТ/теория/практика)" in kb_texts(tb.get_admin_announcements_keyboard())
+    print("admin Anatomy-exam-announcement broadcast + Announcements submenu button: OK")
 
     # 26d. Admin announcement for the global Latin-terminology quiz: preview -> confirm -> broadcast
     orig_broadcast3 = tb._broadcast
@@ -1227,8 +1241,8 @@ async def main():
     assert not cb_latin3.message.edits, "non-admin must be blocked"
 
     tb._broadcast = orig_broadcast3
-    assert "📣 Анонс теста по латыни" in kb_texts(tb.get_admin_menu())
-    print("admin Latin-quiz announcement broadcast + admin panel button: OK")
+    assert "📣 Анонс теста по латыни" in kb_texts(tb.get_admin_announcements_keyboard())
+    print("admin Latin-quiz announcement broadcast + Announcements submenu button: OK")
 
     # 26e. Admin VMedA AI announcement broadcast: maintenance-mode block, then preview -> confirm -> broadcast
     orig_openai_key = tb.OPENAI_API_KEY
@@ -1272,8 +1286,8 @@ async def main():
 
     tb._broadcast = orig_broadcast4
     tb.OPENAI_API_KEY, tb.ai_gemini.GEMINI_API_KEY = orig_openai_key, orig_gemini_key
-    assert "📣 Анонс VMedA AI" in kb_texts(tb.get_admin_menu())
-    print("admin VMedA AI announcement broadcast + admin panel button: OK")
+    assert "📣 Анонс VMedA AI" in kb_texts(tb.get_admin_announcements_keyboard())
+    print("admin VMedA AI announcement broadcast + Announcements submenu button: OK")
 
     # 27. Menu order: active tiers appear in ascending price order (menu_number), 20 first, 28
     # (the most expensive, "Вся академия") last — tier 29 ("5 лет", cheaper than 28) sits just

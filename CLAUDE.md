@@ -491,6 +491,18 @@ shows a preview + confirm button, a `_go` handler re-validates the cohort (it ma
 `_broadcast()` (all users) or `_broadcast_to(cohort, text, keyboard=None)` (a filtered list), then increments
 `stats["broadcast_count"]`. Reuse this shape for new admin broadcasts rather than inventing a new one.
 
+The `admin_announce_*_confirm` "send this to everyone" broadcasts specifically (subscription, support, Anatomy,
+Anatomy-exam, Latin-quiz, VMedA AI, rollcall — one-shot feature-announcement blasts, as opposed to targeted
+reminders like the referral/discount ones) live in their own submenu off the main admin panel
+(`get_admin_announcements_keyboard()` / `cb_admin_announcements_menu`, `callback_data="admin_announcements_menu"`)
+instead of each getting its own top-level button — same "submenu off the main panel" shape as
+`admin_battle_menu`/`get_admin_battle_keyboard()`. Each announcement's own `_confirm`/`_go` pair and its
+"❌ Отмена" button are unchanged except the cancel button now returns to the Анонсы submenu
+(`admin_announcements_menu`) instead of jumping all the way back to `admin_panel` — mirrors how the battle
+submenu's own cancel buttons return to `admin_battle_menu`. A new announcement broadcast should add its
+`_confirm`/`_go` handlers the same way as before, then add ONE button inside `get_admin_announcements_keyboard()`
+— never a new top-level button in `get_admin_menu()` — to avoid re-flattening the panel back out.
+
 ### Group roll-call (перекличка)
 
 Recruits one point-of-contact per group. `ROLLCALL_GROUP_COUNT` (45) generates group names on the fly via
