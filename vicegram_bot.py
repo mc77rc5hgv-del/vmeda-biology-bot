@@ -2249,27 +2249,49 @@ async def cb_dm_referral(callback: CallbackQuery):
 
 
 # ==================== АКТИВНЫЕ ЗАМЕТКИ: UI ====================
+NOTES_INTRO_LINES = [
+    "📝 <b>Активные заметки</b>",
+    DIVIDER,
+    "",
+    "Задай фразу-триггер и содержимое (текст или фото). Когда в подключённом "
+    "личном чате кто-то пришлёт сообщение, где ГДЕ-ТО ВСТРЕЧАЕТСЯ эта фраза "
+    "(не обязательно всё сообщение целиком — подходит и часть текста, например "
+    "заготовленный шаблон с переменной суммой), — я сразу отправлю заметку в "
+    "этот же чат (Telegram подпишет её «via @бот», это не подмена личности). "
+    "Если под сообщение подходит сразу несколько заметок — сработает та, у "
+    "которой триггер длиннее (точнее совпадает).",
+    "",
+]
+# Экран заметок всегда уходит как фото+подпись (send_dm_screen/edit_dm_screen), а
+# у подписи к фото у Telegram лимит 1024 символа — не 4096, как у обычного текста.
+# Превышение не обрежется само, а завалит отправку целиком (и следом — её же
+# фолбэк с той же самой длинной подписью), так что подстраховываемся заранее.
+NOTES_CAPTION_SAFE_LIMIT = 1000
+
+
 def build_notes_text(notes: list) -> str:
-    lines = [
-        "📝 <b>Активные заметки</b>",
-        DIVIDER,
-        "",
-        "Задай фразу-триггер и содержимое (текст или фото). Когда в подключённом "
-        "личном чате кто-то пришлёт сообщение, где ГДЕ-ТО ВСТРЕЧАЕТСЯ эта фраза "
-        "(не обязательно всё сообщение целиком — подходит и часть текста, например "
-        "заготовленный шаблон с переменной суммой), — я сразу отправлю заметку в "
-        "этот же чат (Telegram подпишет её «via @бот», это не подмена личности). "
-        "Если под сообщение подходит сразу несколько заметок — сработает та, у "
-        "которой триггер длиннее (точнее совпадает).",
-        "",
-    ]
+    lines = list(NOTES_INTRO_LINES)
     if not notes:
         lines.append("Пока нет ни одной заметки.")
     else:
         for n in notes:
             kind = "📷 фото" if n["media_type"] else html.escape((n["text"] or "")[:40])
-            lines.append(f"• <code>{html.escape(n['trigger'])}</code> → {kind}")
-    return "\n".join(lines)
+            trigger_label = n["trigger"] if len(n["trigger"]) <= 40 else n["trigger"][:39] + "…"
+            lines.append(f"• <code>{html.escape(trigger_label)}</code> → {kind}")
+    text = "\n".join(lines)
+    if len(text) <= NOTES_CAPTION_SAFE_LIMIT:
+        return text
+
+    # Слишком много/длинных заметок для одного экрана — сжимаем до одних триггеров.
+    lines = list(NOTES_INTRO_LINES)
+    lines.append(f"Заметок: {len(notes)} (список длинный — показаны только триггеры)")
+    for n in notes:
+        trigger_label = n["trigger"] if len(n["trigger"]) <= 40 else n["trigger"][:39] + "…"
+        lines.append(f"• <code>{html.escape(trigger_label)}</code>")
+    text = "\n".join(lines)
+    if len(text) > NOTES_CAPTION_SAFE_LIMIT:
+        text = text[:NOTES_CAPTION_SAFE_LIMIT - 1] + "…"
+    return text
 
 
 def get_notes_keyboard(notes: list):
