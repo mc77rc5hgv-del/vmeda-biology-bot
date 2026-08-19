@@ -443,6 +443,37 @@ hand-typed text) instead of making the admin memorize/type a bare number — rem
 only be sent via `message.answer(...)` (a new message), never attached to `safe_edit_text`/`edit_text`, unlike
 the `InlineKeyboardBuilder` markup used everywhere else in the file.
 
+### Three admin roles
+
+`is_admin(user_id)` (`user_id in ADMIN_IDS`, a hardcoded set) is the only role with unrestricted access to the
+full `get_admin_menu()` tree. Two separate, narrower roles exist alongside it, each its own flat list in `stats`,
+each granted/revoked from the main admin panel via the standard `ADMIN_PENDING` username/ID flow (see below) —
+**deliberately not merged into one "elevated" role**, since they grant non-overlapping capabilities and merging
+them would silently over-grant whichever capability came second:
+
+- **Assistant admin** (`is_assistant_admin`/`stats["assistant_admins"]`) — full content access to every gated
+  section via `is_admin_or_assistant()` (used ONLY in content gates: `has_subject_access`, `has_free_access`,
+  `biology_tickets_download_ok`, `chemistry_tickets_access_ok`, anatomy maintenance-mode bypass, etc.), plus a
+  tiny separate panel (`get_assistant_admin_menu_keyboard()`, reached via `/admin` — assistants never see or reach
+  `admin_panel`/`get_admin_menu()`) offering only a reduced stats view (`get_assistant_stats_text()`, no
+  subscriptions/payments) and a moderated DM (`assistant_dm_prompt` → queued in `ASSISTANT_DM_REQUESTS` → a real
+  admin must `assistant_dm_approve`/`_reject` before it actually sends). Zero admin-panel rights (grant/revoke
+  access, subscriptions, broadcasts) by design.
+- **Payment admin** (`is_payment_admin`/`stats["payment_admins"]`) — the inverse scope: zero content-access
+  bypass, but (1) receives the same one-tap RUB payment-confirm push notification real admins get
+  (`notify_admins_of_payment_request()` iterates `ADMIN_IDS | set(stats["payment_admins"])`) and can tap
+  `cb_admin_confirm_sub`/`cb_admin_reject_sub` exactly like a real admin, and (2) can reach the "📣 Анонсы"
+  submenu (see Broadcasts below) via its own tiny panel (`get_payment_admin_menu_keyboard()`, one button, reached
+  via `/admin` → `payment_admin_panel`). `get_admin_announcements_keyboard(back_callback)` and every
+  `cb_admin_announce_*_confirm`/`_go` handler are gated `is_admin(...) or is_payment_admin(...)` and take a
+  `back_callback` parameter precisely so a payment admin's "🔙 Назад" (both mid-flow and on the post-broadcast
+  success screen) returns to `payment_admin_panel` instead of the `admin_panel` it can't reach — never hardcode
+  `admin_panel` as the back target on a screen reachable by this role.
+
+Neither narrower role should ever be extended to cover the other's territory (e.g. don't add payment-confirm
+rights to `is_assistant_admin`, or content access to `is_payment_admin`) — if a future role needs both, add a
+fourth flat list rather than widening one of these two past its documented contract.
+
 ### Admin panel pending-action state machine
 
 `ADMIN_PENDING: dict[user_id -> {"action": ..., ...}]` drives every multi-step admin text-input flow (grant/revoke
@@ -501,7 +532,9 @@ instead of each getting its own top-level button — same "submenu off the main 
 (`admin_announcements_menu`) instead of jumping all the way back to `admin_panel` — mirrors how the battle
 submenu's own cancel buttons return to `admin_battle_menu`. A new announcement broadcast should add its
 `_confirm`/`_go` handlers the same way as before, then add ONE button inside `get_admin_announcements_keyboard()`
-— never a new top-level button in `get_admin_menu()` — to avoid re-flattening the panel back out.
+— never a new top-level button in `get_admin_menu()` — to avoid re-flattening the panel back out. This submenu is
+also reachable by the payment-admin role, not just full admins — see "Three admin roles" above for why its
+`back_callback` parameter exists.
 
 ### Group roll-call (перекличка)
 

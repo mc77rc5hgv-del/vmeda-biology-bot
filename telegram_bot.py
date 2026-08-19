@@ -168,6 +168,7 @@ def load_stats() -> dict:
             data.setdefault("manual_access_granted", [])
             data.setdefault("manual_anatomy_demo_granted", [])
             data.setdefault("assistant_admins", [])
+            data.setdefault("payment_admins", [])
             data.setdefault("referral_battle", None)
             data.setdefault("donations_stars_total", 0)
             data.setdefault("donations_stars_count", 0)
@@ -214,6 +215,7 @@ def load_stats() -> dict:
         "manual_access_granted": [],
         "manual_anatomy_demo_granted": [],
         "assistant_admins": [],
+        "payment_admins": [],
         "referral_battle": None,
         "donations_stars_total": 0,
         "donations_stars_count": 0,
@@ -274,6 +276,7 @@ from services import access  # noqa: E402 — mid-file by design, see above
 is_admin = access.is_admin
 is_assistant_admin = access.is_assistant_admin
 is_admin_or_assistant = access.is_admin_or_assistant
+is_payment_admin = access.is_payment_admin
 start_section_promo = access.start_section_promo
 is_section_promo_active = access.is_section_promo_active
 BOT_USERNAME = access.BOT_USERNAME
@@ -1178,7 +1181,7 @@ async def cb_rollcall_confirm(callback: CallbackQuery):
 
 @dp.callback_query(F.data == "admin_announce_rollcall_confirm")
 async def cb_admin_announce_rollcall_confirm(callback: CallbackQuery):
-    if not is_admin(callback.from_user.id):
+    if not (is_admin(callback.from_user.id) or is_payment_admin(callback.from_user.id)):
         await callback.answer()
         return
     await callback.answer()
@@ -1195,7 +1198,7 @@ async def cb_admin_announce_rollcall_confirm(callback: CallbackQuery):
 
 @dp.callback_query(F.data == "admin_announce_rollcall_go")
 async def cb_admin_announce_rollcall_go(callback: CallbackQuery):
-    if not is_admin(callback.from_user.id):
+    if not (is_admin(callback.from_user.id) or is_payment_admin(callback.from_user.id)):
         await callback.answer()
         return
     await callback.answer("📣 Рассылка запущена!", show_alert=True)
@@ -1207,7 +1210,9 @@ async def cb_admin_announce_rollcall_go(callback: CallbackQuery):
         callback.message,
         f"✅ Анонс переклички отправлен (попытка охватить {recipients} пользователей).",
         parse_mode="HTML",
-        reply_markup=get_admin_back_keyboard()
+        reply_markup=get_admin_announcements_keyboard(
+            "admin_panel" if is_admin(callback.from_user.id) else "payment_admin_panel"
+        )
     )
 
 # ==================== ПОДДЕРЖКА АВТОРА ====================
@@ -2522,6 +2527,8 @@ cb_admin_grant_anatomy_demo_prompt = admin_handlers.cb_admin_grant_anatomy_demo_
 cb_admin_revoke_anatomy_demo_prompt = admin_handlers.cb_admin_revoke_anatomy_demo_prompt
 cb_admin_grant_assistant_prompt = admin_handlers.cb_admin_grant_assistant_prompt
 cb_admin_revoke_assistant_prompt = admin_handlers.cb_admin_revoke_assistant_prompt
+cb_admin_grant_payment_admin_prompt = admin_handlers.cb_admin_grant_payment_admin_prompt
+cb_admin_revoke_payment_admin_prompt = admin_handlers.cb_admin_revoke_payment_admin_prompt
 cb_admin_dm_prompt = admin_handlers.cb_admin_dm_prompt
 cb_admin_donation_prompt = admin_handlers.cb_admin_donation_prompt
 cb_admin_subscription_prompt = admin_handlers.cb_admin_subscription_prompt
@@ -2549,6 +2556,9 @@ cb_assistant_stats = admin_handlers.cb_assistant_stats
 cb_assistant_dm_prompt = admin_handlers.cb_assistant_dm_prompt
 cb_assistant_dm_approve = admin_handlers.cb_assistant_dm_approve
 cb_assistant_dm_reject = admin_handlers.cb_assistant_dm_reject
+get_payment_admin_menu_text = admin_handlers.get_payment_admin_menu_text
+get_payment_admin_menu_keyboard = admin_handlers.get_payment_admin_menu_keyboard
+cb_payment_admin_panel = admin_handlers.cb_payment_admin_panel
 
 @dp.message(Command("admin"))
 async def cmd_admin(message: Message):
@@ -2565,6 +2575,13 @@ async def cmd_admin(message: Message):
             get_assistant_admin_menu_text(),
             parse_mode="HTML",
             reply_markup=get_assistant_admin_menu_keyboard()
+        )
+        return
+    if is_payment_admin(user_id):
+        await message.answer(
+            get_payment_admin_menu_text(),
+            parse_mode="HTML",
+            reply_markup=get_payment_admin_menu_keyboard()
         )
 
 # Все callback_query-хендлеры и клавиатуры/тексты-хелперы админ-панели (cb_admin_panel и далее,
@@ -2587,6 +2604,7 @@ async def handle_admin_pending_action(message: Message):
     if action in (
         "grant", "revoke", "grant_anatomy_demo", "revoke_anatomy_demo",
         "grant_assistant_admin", "revoke_assistant_admin",
+        "grant_payment_admin", "revoke_payment_admin",
         "dm_username", "record_donation_username", "record_subscription_username",
     ):
         raw_input = message.text.strip()
@@ -2682,6 +2700,31 @@ async def handle_admin_pending_action(message: Message):
                 save_stats()
             del ADMIN_PENDING[admin_id]
             await message.answer(f"✅ {label} больше не помощник администратора.", parse_mode="HTML")
+
+        elif action == "grant_payment_admin":
+            if target_id not in stats["payment_admins"]:
+                stats["payment_admins"].append(target_id)
+                save_stats()
+            del ADMIN_PENDING[admin_id]
+            await message.answer(f"✅ {label} назначен(а) админом платежей.", parse_mode="HTML")
+            try:
+                await bot.send_message(
+                    target_id,
+                    "💳 Тебя назначили админом платежей!\n\n"
+                    "Открой /admin — там доступно подтверждение рублёвых заявок на оплату (те же "
+                    "one-tap кнопки, что приходят обычным админам) и рассылка анонсов из подраздела "
+                    "«Анонсы».",
+                    parse_mode="HTML"
+                )
+            except Exception:
+                logger.exception("Не удалось уведомить пользователя %s о назначении админом платежей", target_id)
+
+        elif action == "revoke_payment_admin":
+            if target_id in stats["payment_admins"]:
+                stats["payment_admins"].remove(target_id)
+                save_stats()
+            del ADMIN_PENDING[admin_id]
+            await message.answer(f"✅ {label} больше не админ платежей.", parse_mode="HTML")
 
         elif action == "dm_username":
             ADMIN_PENDING[admin_id] = {"action": "dm_message", "target_id": target_id, "target_label": label}
@@ -3148,11 +3191,13 @@ async def notify_admins_of_payment_request(
     cfg = SUBSCRIPTION_TIERS[tier_id]
     text = get_admin_payment_confirm_text(cfg, user, subject, price)
     keyboard = get_admin_payment_confirm_keyboard(tier_id, target_id, subject, price)
-    for admin_id in ADMIN_IDS:
+    # Админы платежей (отдельная роль, stats["payment_admins"]) тоже должны увидеть one-tap
+    # кнопку подтверждения — иначе назначение роли ничего не даёт, см. cb_admin_confirm_sub.
+    for recipient_id in ADMIN_IDS | set(stats["payment_admins"]):
         try:
-            await bot.send_message(admin_id, text, parse_mode="HTML", reply_markup=keyboard)
+            await bot.send_message(recipient_id, text, parse_mode="HTML", reply_markup=keyboard)
         except Exception:
-            logger.exception("Не удалось уведомить админа %s о запросе оплаты", admin_id)
+            logger.exception("Не удалось уведомить админа %s о запросе оплаты", recipient_id)
 
 def get_my_subscription_status_block(user_id: int) -> str:
     sub = get_subscription(user_id)
@@ -3661,7 +3706,7 @@ async def cb_buy_sub_rubles_discount(callback: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("admin_confirm_sub:"))
 async def cb_admin_confirm_sub(callback: CallbackQuery):
-    if not is_admin(callback.from_user.id):
+    if not (is_admin(callback.from_user.id) or is_payment_admin(callback.from_user.id)):
         await callback.answer()
         return
     parts = callback.data.split(":")
@@ -3704,7 +3749,7 @@ async def cb_admin_reject_sub(callback: CallbackQuery):
     """Позволяет закрыть запрос на подтверждение оплаты, если покупатель так и не перевёл
     деньги (например, проигнорировал) — просто убирает заявку, ничего не выдаёт и не трогает
     статистику."""
-    if not is_admin(callback.from_user.id):
+    if not (is_admin(callback.from_user.id) or is_payment_admin(callback.from_user.id)):
         await callback.answer()
         return
     _, tier_id_raw, target_id_raw, subject_raw = callback.data.split(":")

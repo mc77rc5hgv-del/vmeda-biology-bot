@@ -34,6 +34,17 @@ def is_admin_or_assistant(user_id: int) -> bool:
     ограниченную панель помощника, см. секцию «ПОМОЩНИК АДМИНИСТРАТОРА»)."""
     return is_admin(user_id) or is_assistant_admin(user_id)
 
+def is_payment_admin(user_id: int) -> bool:
+    """Третья, отдельная от помощника роль — «админ платежей»: подтверждает рублёвые one-tap
+    заявки (см. notify_admins_of_payment_request/cb_admin_confirm_sub в telegram_bot.py) и
+    рассылает анонсы (подраздел «Анонсы», cb_admin_announcements_menu). НЕ пересекается с
+    is_assistant_admin — у помощника свой контракт (доступ к разделам контента + урезанная
+    панель "статистика + модерируемое сообщение"), сознательно без прав на платежи/рассылки;
+    расширять его вместо создания отдельной роли значило бы менять уже задокументированный
+    контракт помощника. stats["payment_admins"] — такой же плоский список user_id, как
+    stats["assistant_admins"]."""
+    return user_id in tb.stats["payment_admins"]
+
 
 # ==================== ВРЕМЕННЫЕ ПРОМО-ОКНА ДОСТУПА ДЛЯ РАЗДЕЛОВ ====================
 def start_section_promo(section: str, duration_seconds: int) -> float:

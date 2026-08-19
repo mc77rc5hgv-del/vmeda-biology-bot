@@ -72,6 +72,8 @@ def get_admin_menu():
     builder.button(text="🦴🚫 Забрать демо-доступ к Анатомии", callback_data="admin_revoke_anatomy_demo_prompt")
     builder.button(text="🧑‍💼 Назначить помощника админа", callback_data="admin_grant_assistant_prompt")
     builder.button(text="🧑‍💼🚫 Снять помощника админа", callback_data="admin_revoke_assistant_prompt")
+    builder.button(text="💳 Назначить админа платежей", callback_data="admin_grant_payment_admin_prompt")
+    builder.button(text="💳🚫 Снять админа платежей", callback_data="admin_revoke_payment_admin_prompt")
     builder.button(text="✉️ Написать пользователю", callback_data="admin_dm_prompt")
     builder.button(text="⚔️ Битва рефералов", callback_data="admin_battle_menu")
     builder.button(text="💰 Записать донат рублями", callback_data="admin_donation_prompt")
@@ -140,11 +142,14 @@ def get_admin_battle_text() -> str:
         "Всем пользователям бота придёт рассылка с объявлением о старте и правилах."
     )
 
-def get_admin_announcements_keyboard():
+def get_admin_announcements_keyboard(back_callback: str = "admin_panel"):
     """Подраздел «Анонсы» — все admin_announce_* рассылки собраны сюда с главного экрана
     админ-панели одной кнопкой, чтобы не захламлять его; каждая кнопка ведёт напрямую в свой
     already-existing _confirm-хендлер (см. cb_admin_announce_*_confirm ниже и в telegram_bot.py
-    для переклички), сама рассылочная логика не меняется."""
+    для переклички), сама рассылочная логика не меняется. Доступен и полным админам, и отдельной
+    роли «админ платежей» (is_payment_admin) — back_callback параметризован именно поэтому:
+    полный админ возвращается в admin_panel, а админ платежей — в свою отдельную panel, см.
+    cb_admin_announcements_menu, который выбирает нужное значение."""
     builder = InlineKeyboardBuilder()
     builder.button(text="📣 Оповещение о подписке", callback_data="admin_announce_subscription_confirm")
     builder.button(text="📣 Анонс раздела поддержки", callback_data="admin_announce_support_confirm")
@@ -153,7 +158,7 @@ def get_admin_announcements_keyboard():
     builder.button(text="📣 Анонс теста по латыни", callback_data="admin_announce_anatomy_latin_confirm")
     builder.button(text="📣 Анонс VMedA AI", callback_data="admin_announce_ai_confirm")
     builder.button(text="📋 Анонс переклички групп", callback_data="admin_announce_rollcall_confirm")
-    builder.button(text="🔙 В админ-панель", callback_data="admin_panel")
+    builder.button(text="🔙 Назад", callback_data=back_callback)
     builder.adjust(1)
     return builder.as_markup()
 
@@ -197,7 +202,8 @@ def format_user_line(user_id: int) -> str:
     granted = " 🔓" if user_id in tb.stats["manual_access_granted"] else ""
     anatomy_demo = " 🦴" if user_id in tb.stats["manual_anatomy_demo_granted"] else ""
     assistant = " 🧑‍💼" if user_id in tb.stats["assistant_admins"] else ""
-    return f"<code>{user_id}</code> — {handle} — {name} — реф: {refs}{granted}{anatomy_demo}{assistant}"
+    payment_admin = " 💳" if user_id in tb.stats["payment_admins"] else ""
+    return f"<code>{user_id}</code> — {handle} — {name} — реф: {refs}{granted}{anatomy_demo}{assistant}{payment_admin}"
 
 def get_admin_userlist_page(page: int):
     all_ids = sorted(tb.stats["total_users"])
@@ -248,15 +254,17 @@ async def cb_admin_battle_menu(callback: CallbackQuery):
 
 @router.callback_query(F.data == "admin_announcements_menu")
 async def cb_admin_announcements_menu(callback: CallbackQuery):
-    if not tb.is_admin(callback.from_user.id):
+    user_id = callback.from_user.id
+    if not (tb.is_admin(user_id) or tb.is_payment_admin(user_id)):
         await callback.answer()
         return
     await callback.answer()
+    back_callback = "admin_panel" if tb.is_admin(user_id) else "payment_admin_panel"
     await tb.safe_edit_text(
         callback.message,
         f"📣 <b>Анонсы</b>\n{tb.DIVIDER}\n\nВыбери, что разослать:",
         parse_mode="HTML",
-        reply_markup=get_admin_announcements_keyboard()
+        reply_markup=get_admin_announcements_keyboard(back_callback)
     )
 
 @router.callback_query(F.data == "admin_battle_last_results")
@@ -959,6 +967,39 @@ async def cb_admin_revoke_assistant_prompt(callback: CallbackQuery):
         reply_markup=get_admin_back_keyboard()
     )
 
+@router.callback_query(F.data == "admin_grant_payment_admin_prompt")
+async def cb_admin_grant_payment_admin_prompt(callback: CallbackQuery):
+    if not tb.is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer()
+    tb.ADMIN_PENDING[callback.from_user.id] = {"action": "grant_payment_admin"}
+    await tb.safe_edit_text(
+        callback.message,
+        "💳 <b>Назначить админа платежей</b>\n\n"
+        "Админ платежей сможет подтверждать рублёвые заявки на оплату (те же one-tap кнопки, что "
+        "приходят тебе) и рассылать анонсы из подраздела «Анонсы». Остальных прав полной "
+        "админ-панели (выдача/отзыв доступа, выдача подписок, статистика) у него не будет — это "
+        "отдельная от «помощника» роль.\n\n"
+        "Отправь username пользователя (с @ или без, например <code>@ivanov</code>) или его числовой ID",
+        parse_mode="HTML",
+        reply_markup=get_admin_back_keyboard()
+    )
+
+@router.callback_query(F.data == "admin_revoke_payment_admin_prompt")
+async def cb_admin_revoke_payment_admin_prompt(callback: CallbackQuery):
+    if not tb.is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer()
+    tb.ADMIN_PENDING[callback.from_user.id] = {"action": "revoke_payment_admin"}
+    await tb.safe_edit_text(
+        callback.message,
+        "💳🚫 <b>Снять админа платежей</b>\n\nОтправь username пользователя (с @ или без) или его числовой ID",
+        parse_mode="HTML",
+        reply_markup=get_admin_back_keyboard()
+    )
+
 @router.callback_query(F.data == "admin_dm_prompt")
 async def cb_admin_dm_prompt(callback: CallbackQuery):
     if not tb.is_admin(callback.from_user.id):
@@ -1010,7 +1051,7 @@ async def cb_admin_subscription_prompt(callback: CallbackQuery):
 
 @router.callback_query(F.data == "admin_announce_support_confirm")
 async def cb_admin_announce_support_confirm(callback: CallbackQuery):
-    if not tb.is_admin(callback.from_user.id):
+    if not (tb.is_admin(callback.from_user.id) or tb.is_payment_admin(callback.from_user.id)):
         await callback.answer()
         return
     await callback.answer()
@@ -1027,7 +1068,7 @@ async def cb_admin_announce_support_confirm(callback: CallbackQuery):
 
 @router.callback_query(F.data == "admin_announce_support_go")
 async def cb_admin_announce_support_go(callback: CallbackQuery):
-    if not tb.is_admin(callback.from_user.id):
+    if not (tb.is_admin(callback.from_user.id) or tb.is_payment_admin(callback.from_user.id)):
         await callback.answer()
         return
     await callback.answer("📣 Рассылка запущена!", show_alert=True)
@@ -1039,12 +1080,14 @@ async def cb_admin_announce_support_go(callback: CallbackQuery):
         callback.message,
         f"✅ Анонс раздела поддержки отправлен (попытка охватить {recipients} пользователей).",
         parse_mode="HTML",
-        reply_markup=get_admin_back_keyboard()
+        reply_markup=get_admin_announcements_keyboard(
+            "admin_panel" if tb.is_admin(callback.from_user.id) else "payment_admin_panel"
+        )
     )
 
 @router.callback_query(F.data == "admin_announce_subscription_confirm")
 async def cb_admin_announce_subscription_confirm(callback: CallbackQuery):
-    if not tb.is_admin(callback.from_user.id):
+    if not (tb.is_admin(callback.from_user.id) or tb.is_payment_admin(callback.from_user.id)):
         await callback.answer()
         return
     await callback.answer()
@@ -1061,7 +1104,7 @@ async def cb_admin_announce_subscription_confirm(callback: CallbackQuery):
 
 @router.callback_query(F.data == "admin_announce_subscription_go")
 async def cb_admin_announce_subscription_go(callback: CallbackQuery):
-    if not tb.is_admin(callback.from_user.id):
+    if not (tb.is_admin(callback.from_user.id) or tb.is_payment_admin(callback.from_user.id)):
         await callback.answer()
         return
     await callback.answer("📣 Рассылка запущена!", show_alert=True)
@@ -1073,12 +1116,14 @@ async def cb_admin_announce_subscription_go(callback: CallbackQuery):
         callback.message,
         f"✅ Оповещение о подписке отправлено (попытка охватить {recipients} пользователей).",
         parse_mode="HTML",
-        reply_markup=get_admin_back_keyboard()
+        reply_markup=get_admin_announcements_keyboard(
+            "admin_panel" if tb.is_admin(callback.from_user.id) else "payment_admin_panel"
+        )
     )
 
 @router.callback_query(F.data == "admin_announce_anatomy_confirm")
 async def cb_admin_announce_anatomy_confirm(callback: CallbackQuery):
-    if not tb.is_admin(callback.from_user.id):
+    if not (tb.is_admin(callback.from_user.id) or tb.is_payment_admin(callback.from_user.id)):
         await callback.answer()
         return
     await callback.answer()
@@ -1095,7 +1140,7 @@ async def cb_admin_announce_anatomy_confirm(callback: CallbackQuery):
 
 @router.callback_query(F.data == "admin_announce_anatomy_go")
 async def cb_admin_announce_anatomy_go(callback: CallbackQuery):
-    if not tb.is_admin(callback.from_user.id):
+    if not (tb.is_admin(callback.from_user.id) or tb.is_payment_admin(callback.from_user.id)):
         await callback.answer()
         return
     await callback.answer("📣 Рассылка запущена!", show_alert=True)
@@ -1107,12 +1152,14 @@ async def cb_admin_announce_anatomy_go(callback: CallbackQuery):
         callback.message,
         f"✅ Анонс раздела Анатомия отправлен (попытка охватить {recipients} пользователей).",
         parse_mode="HTML",
-        reply_markup=get_admin_back_keyboard()
+        reply_markup=get_admin_announcements_keyboard(
+            "admin_panel" if tb.is_admin(callback.from_user.id) else "payment_admin_panel"
+        )
     )
 
 @router.callback_query(F.data == "admin_announce_ai_confirm")
 async def cb_admin_announce_ai_confirm(callback: CallbackQuery):
-    if not tb.is_admin(callback.from_user.id):
+    if not (tb.is_admin(callback.from_user.id) or tb.is_payment_admin(callback.from_user.id)):
         await callback.answer()
         return
     if not tb.ai_provider_available():
@@ -1132,7 +1179,7 @@ async def cb_admin_announce_ai_confirm(callback: CallbackQuery):
 
 @router.callback_query(F.data == "admin_announce_ai_go")
 async def cb_admin_announce_ai_go(callback: CallbackQuery):
-    if not tb.is_admin(callback.from_user.id):
+    if not (tb.is_admin(callback.from_user.id) or tb.is_payment_admin(callback.from_user.id)):
         await callback.answer()
         return
     await callback.answer("📣 Рассылка запущена!", show_alert=True)
@@ -1144,12 +1191,14 @@ async def cb_admin_announce_ai_go(callback: CallbackQuery):
         callback.message,
         f"✅ Анонс VMedA AI отправлен (попытка охватить {recipients} пользователей).",
         parse_mode="HTML",
-        reply_markup=get_admin_back_keyboard()
+        reply_markup=get_admin_announcements_keyboard(
+            "admin_panel" if tb.is_admin(callback.from_user.id) else "payment_admin_panel"
+        )
     )
 
 @router.callback_query(F.data == "admin_announce_anatomy_exam_confirm")
 async def cb_admin_announce_anatomy_exam_confirm(callback: CallbackQuery):
-    if not tb.is_admin(callback.from_user.id):
+    if not (tb.is_admin(callback.from_user.id) or tb.is_payment_admin(callback.from_user.id)):
         await callback.answer()
         return
     await callback.answer()
@@ -1166,7 +1215,7 @@ async def cb_admin_announce_anatomy_exam_confirm(callback: CallbackQuery):
 
 @router.callback_query(F.data == "admin_announce_anatomy_exam_go")
 async def cb_admin_announce_anatomy_exam_go(callback: CallbackQuery):
-    if not tb.is_admin(callback.from_user.id):
+    if not (tb.is_admin(callback.from_user.id) or tb.is_payment_admin(callback.from_user.id)):
         await callback.answer()
         return
     await callback.answer("📣 Рассылка запущена!", show_alert=True)
@@ -1178,12 +1227,14 @@ async def cb_admin_announce_anatomy_exam_go(callback: CallbackQuery):
         callback.message,
         f"✅ Анонс раздела Экзамен отправлен (попытка охватить {recipients} пользователей).",
         parse_mode="HTML",
-        reply_markup=get_admin_back_keyboard()
+        reply_markup=get_admin_announcements_keyboard(
+            "admin_panel" if tb.is_admin(callback.from_user.id) else "payment_admin_panel"
+        )
     )
 
 @router.callback_query(F.data == "admin_announce_anatomy_latin_confirm")
 async def cb_admin_announce_anatomy_latin_confirm(callback: CallbackQuery):
-    if not tb.is_admin(callback.from_user.id):
+    if not (tb.is_admin(callback.from_user.id) or tb.is_payment_admin(callback.from_user.id)):
         await callback.answer()
         return
     await callback.answer()
@@ -1200,7 +1251,7 @@ async def cb_admin_announce_anatomy_latin_confirm(callback: CallbackQuery):
 
 @router.callback_query(F.data == "admin_announce_anatomy_latin_go")
 async def cb_admin_announce_anatomy_latin_go(callback: CallbackQuery):
-    if not tb.is_admin(callback.from_user.id):
+    if not (tb.is_admin(callback.from_user.id) or tb.is_payment_admin(callback.from_user.id)):
         await callback.answer()
         return
     await callback.answer("📣 Рассылка запущена!", show_alert=True)
@@ -1212,7 +1263,9 @@ async def cb_admin_announce_anatomy_latin_go(callback: CallbackQuery):
         callback.message,
         f"✅ Анонс теста по латыни отправлен (попытка охватить {recipients} пользователей).",
         parse_mode="HTML",
-        reply_markup=get_admin_back_keyboard()
+        reply_markup=get_admin_announcements_keyboard(
+            "admin_panel" if tb.is_admin(callback.from_user.id) else "payment_admin_panel"
+        )
     )
 
 @router.callback_query(F.data == "admin_channel_post_prompt")
@@ -1426,3 +1479,40 @@ async def cb_assistant_dm_reject(callback: CallbackQuery):
         )
     except Exception:
         tb.logger.exception("Не удалось уведомить помощника %s об отклонении сообщения", req["assistant_id"])
+
+
+# ==================== АДМИН ПЛАТЕЖЕЙ ====================
+# Третья, отдельная от помощника роль (см. is_payment_admin в services/access.py) — не расширяет
+# помощника, потому что у того уже задокументированный, сознательно урезанный контракт (доступ к
+# разделам контента + статистика/модерируемое DM, без прав на платежи/рассылки). Админ платежей
+# получает ровно две вещи: (1) one-tap подтверждение рублёвых заявок — это push-механизм, кнопка
+# приходит прямо в личку через notify_admins_of_payment_request(), отдельного экрана в панели не
+# нужно; (2) доступ к подразделу «Анонсы» (см. get_admin_announcements_keyboard, параметризован
+# back_callback'ом именно ради этой роли — у неё нет доступа к полной admin_panel).
+
+def get_payment_admin_menu_text() -> str:
+    return (
+        f"💳 <b>Панель админа платежей</b>\n{tb.DIVIDER}\n\n"
+        "Заявки на оплату рублями приходят тебе личным сообщением с кнопкой подтверждения — "
+        "открывать эту панель для этого не нужно. Здесь доступна рассылка анонсов.\n\n"
+        "Выбери действие:"
+    )
+
+def get_payment_admin_menu_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="📣 Анонсы", callback_data="admin_announcements_menu")
+    builder.adjust(1)
+    return builder.as_markup()
+
+@router.callback_query(F.data == "payment_admin_panel")
+async def cb_payment_admin_panel(callback: CallbackQuery):
+    if not tb.is_payment_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer()
+    await tb.safe_edit_text(
+        callback.message,
+        get_payment_admin_menu_text(),
+        parse_mode="HTML",
+        reply_markup=get_payment_admin_menu_keyboard()
+    )
