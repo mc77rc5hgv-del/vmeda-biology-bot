@@ -1132,7 +1132,10 @@ def find_active_notes(owner_id: int, text: str) -> list:
         return []
     conn = db_connect()
     rows = conn.execute(
-        "SELECT * FROM active_notes WHERE owner_id = ?", (owner_id,)
+        # rowid дублируется через AS для единообразия с list_active_notes — без
+        # алиаса "*" вернул бы позицию под именем настоящей колонки (id), а не
+        # "rowid", хотя значение то же самое.
+        "SELECT *, rowid AS rowid FROM active_notes WHERE owner_id = ?", (owner_id,)
     ).fetchall()
     conn.close()
     candidates = []
@@ -3912,6 +3915,43 @@ async def cmd_ocr_check(message: Message):
         )
 
 
+@dp.message(Command("notes_debug"), F.chat.type == ChatType.PRIVATE, F.from_user.id.in_(ADMIN_IDS))
+async def cmd_notes_debug(message: Message, command: CommandObject):
+    """Диагностика активных заметок: repr() триггеров вскрывает невидимые
+    символы (NBSP и т.п.), а /notes_debug <текст> прогоняет find_active_notes
+    как для настоящего входящего сообщения и показывает, что реально сработало —
+    без этого пришлось бы гадать вслепую, почему что-то не совпадает."""
+    owner_id = message.from_user.id
+    conn = db_connect()
+    rows = conn.execute(
+        "SELECT rowid AS rowid, trigger, text, media_type FROM active_notes WHERE owner_id = ? ORDER BY trigger, rowid",
+        (owner_id,),
+    ).fetchall()
+    conn.close()
+
+    lines = [f"Всего заметок: {len(rows)}"]
+    for r in rows:
+        trig = r["trigger"]
+        norm = normalize_trigger(trig)
+        preview = (r["text"] or "(фото)" if r["media_type"] else r["text"] or "")[:30]
+        lines.append(f"#{r['rowid']}: {trig!r} len={len(trig)} norm={norm!r} → {preview!r}")
+
+    sample = command.args
+    if sample:
+        matched = find_active_notes(owner_id, sample)
+        lines.append(f"\nТест на: {sample!r}")
+        lines.append(f"Совпало заметок: {len(matched)}")
+        for n in matched:
+            lines.append(f"  → #{n['rowid']}: {(n['text'] or '(фото)')[:40]!r}")
+    else:
+        lines.append("\nЧтобы проверить конкретное сообщение: /notes_debug текст сообщения клиента")
+
+    text = "\n".join(lines)
+    if len(text) > 3900:
+        text = text[:3900] + "…"
+    await message.answer(f"<code>{html.escape(text)}</code>", parse_mode="HTML")
+
+
 # ==================== ОБРАБОТЧИК: "ПОЙМАЙ ВСЁ" НА ЛИЧКУ ====================
 # Регистрируется после всех приватных команд — иначе перехватит /start,
 # /settings и /admin ещё до того, как они сработают.
@@ -4046,6 +4086,7 @@ async def setup_bot_commands() -> None:
                     BotCommand(command="admin", description="🛠 Панель администратора"),
                     BotCommand(command="stats", description="📊 Статистика бота"),
                     BotCommand(command="ocr_check", description="🧾 Проверить OCR (Tesseract)"),
+                    BotCommand(command="notes_debug", description="🔍 Диагностика активных заметок"),
                 ],
                 scope=BotCommandScopeChat(chat_id=admin_id),
             )
