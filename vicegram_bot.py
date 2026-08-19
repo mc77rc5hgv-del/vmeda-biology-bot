@@ -304,14 +304,15 @@ def init_db() -> None:
         );
 
         CREATE TABLE IF NOT EXISTS active_notes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
             owner_id INTEGER NOT NULL,
             trigger TEXT NOT NULL,
             text TEXT,
             media_type TEXT,
             file_id TEXT,
-            created_at INTEGER NOT NULL,
-            PRIMARY KEY (owner_id, trigger)
+            created_at INTEGER NOT NULL
         );
+        CREATE INDEX IF NOT EXISTS idx_active_notes_owner ON active_notes (owner_id);
 
         CREATE TABLE IF NOT EXISTS reminders (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -342,6 +343,32 @@ def init_db() -> None:
     if "username" not in user_columns:
         conn.execute("ALTER TABLE users ADD COLUMN username TEXT")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_users_username ON users (username)")
+    # Раньше на active_notes стоял PRIMARY KEY (owner_id, trigger) — одна заметка на
+    # триггер, вторая с тем же триггером тихо затирала первую. Нужно несколько
+    # заметок на один триггер — SQLite не даёт снять ограничение через ALTER TABLE,
+    # поэтому пересоздаём таблицу с автоинкрементным id и переносим все строки.
+    notes_schema = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'active_notes'"
+    ).fetchone()
+    if notes_schema and "PRIMARY KEY (owner_id, trigger)" in (notes_schema["sql"] or ""):
+        conn.executescript(
+            """
+            ALTER TABLE active_notes RENAME TO active_notes_old;
+            CREATE TABLE active_notes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                owner_id INTEGER NOT NULL,
+                trigger TEXT NOT NULL,
+                text TEXT,
+                media_type TEXT,
+                file_id TEXT,
+                created_at INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_active_notes_owner ON active_notes (owner_id);
+            INSERT INTO active_notes (owner_id, trigger, text, media_type, file_id, created_at)
+                SELECT owner_id, trigger, text, media_type, file_id, created_at FROM active_notes_old;
+            DROP TABLE active_notes_old;
+            """
+        )
     conn.commit()
     conn.close()
 
@@ -1042,10 +1069,12 @@ def find_custom_command(chat_id: int, text: str):
 
 # ==================== АКТИВНЫЕ ЗАМЕТКИ (ЛИЧНЫЕ ЧАТЫ) ====================
 def add_active_note(owner_id: int, trigger: str, text: str = None, media_type: str = None, file_id: str = None) -> None:
+    """Обычная вставка, не replace — на один триггер может висеть несколько
+    заметок, тогда при срабатывании отправляются все (см. find_active_notes)."""
     conn = db_connect()
     conn.execute(
         """
-        INSERT OR REPLACE INTO active_notes (owner_id, trigger, text, media_type, file_id, created_at)
+        INSERT INTO active_notes (owner_id, trigger, text, media_type, file_id, created_at)
         VALUES (?, ?, ?, ?, ?, ?)
         """,
         (owner_id, trigger.strip().lower(), text, media_type, file_id, int(time.time())),
@@ -1064,23 +1093,26 @@ def remove_active_note_by_rowid(owner_id: int, rowid: int) -> None:
 def list_active_notes(owner_id: int):
     conn = db_connect()
     rows = conn.execute(
-        "SELECT rowid, trigger, text, media_type FROM active_notes WHERE owner_id = ? ORDER BY trigger",
+        # "rowid" без AS вернулся бы в результате под именем реальной колонки (id),
+        # раз в таблице теперь явный INTEGER PRIMARY KEY — с алиасом ключ стабилен.
+        "SELECT rowid AS rowid, trigger, text, media_type FROM active_notes WHERE owner_id = ? ORDER BY trigger, rowid",
         (owner_id,),
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
 
-def find_active_note(owner_id: int, text: str):
-    """Ищет заметку, чей триггер встречается ГДЕ-ТО в тексте сообщения (а не только
+def find_active_notes(owner_id: int, text: str) -> list:
+    """Ищет заметки, чей триггер встречается ГДЕ-ТО в тексте сообщения (а не только
     при полном совпадении) — это позволяет ловить шаблонные сообщения с переменной
     частью (например, суммой), если в них есть неизменная фраза-триггер. Полное
     совпадение по-прежнему находится: оно частный случай вхождения подстроки.
-    Если подходит несколько заметок, побеждает самый длинный (самый специфичный)
-    триггер."""
+    Если подходит несколько РАЗНЫХ триггеров — побеждает самый длинный (самый
+    специфичный); возвращаются ВСЕ заметки, повешенные на этот триггер (может
+    быть несколько — тогда уйдут все по очереди)."""
     haystack = (text or "").strip().lower()
     if not haystack:
-        return None
+        return []
     conn = db_connect()
     rows = conn.execute(
         "SELECT * FROM active_notes WHERE owner_id = ?", (owner_id,)
@@ -1088,8 +1120,10 @@ def find_active_note(owner_id: int, text: str):
     conn.close()
     candidates = [dict(r) for r in rows if r["trigger"] and r["trigger"] in haystack]
     if not candidates:
-        return None
-    return max(candidates, key=lambda n: len(n["trigger"]))
+        return []
+    best_len = max(len(n["trigger"]) for n in candidates)
+    winning_trigger = next(n["trigger"] for n in candidates if len(n["trigger"]) == best_len)
+    return [n for n in candidates if n["trigger"] == winning_trigger]
 
 
 # в памяти: ожидание ввода триггера/содержимого новой заметки, ключ owner_id
@@ -2258,8 +2292,10 @@ NOTES_INTRO_LINES = [
     "(не обязательно всё сообщение целиком — подходит и часть текста, например "
     "заготовленный шаблон с переменной суммой), — я сразу отправлю заметку в "
     "этот же чат (Telegram подпишет её «via @бот», это не подмена личности). "
-    "Если под сообщение подходит сразу несколько заметок — сработает та, у "
-    "которой триггер длиннее (точнее совпадает).",
+    "Если под сообщение подходит сразу несколько РАЗНЫХ триггеров — сработает "
+    "тот, что длиннее (точнее совпадает). Можно повесить на один и тот же "
+    "триггер несколько заметок — просто добавь ещё одну с той же фразой, "
+    "и при срабатывании уйдут все по очереди.",
     "",
 ]
 # Экран заметок всегда уходит как фото+подпись (send_dm_screen/edit_dm_screen), а
@@ -2386,25 +2422,26 @@ async def maybe_reply_active_note(owner_id: int, message: Message) -> None:
     text = message.text or message.caption
     if not text:
         return
-    note = find_active_note(owner_id, text)
-    if not note or not await gate_by_trial(owner_id):
+    notes = find_active_notes(owner_id, text)
+    if not notes or not await gate_by_trial(owner_id):
         return
-    try:
-        if note["media_type"] == "photo" and note["file_id"]:
-            await bot.send_photo(
-                chat_id=message.chat.id,
-                photo=note["file_id"],
-                caption=note["text"] or None,
-                business_connection_id=message.business_connection_id,
-            )
-        else:
-            await bot.send_message(
-                chat_id=message.chat.id,
-                text=note["text"] or "(пусто)",
-                business_connection_id=message.business_connection_id,
-            )
-    except Exception:
-        logger.warning("Не удалось отправить активную заметку владельца %s", owner_id)
+    for note in notes:
+        try:
+            if note["media_type"] == "photo" and note["file_id"]:
+                await bot.send_photo(
+                    chat_id=message.chat.id,
+                    photo=note["file_id"],
+                    caption=note["text"] or None,
+                    business_connection_id=message.business_connection_id,
+                )
+            else:
+                await bot.send_message(
+                    chat_id=message.chat.id,
+                    text=note["text"] or "(пусто)",
+                    business_connection_id=message.business_connection_id,
+                )
+        except Exception:
+            logger.warning("Не удалось отправить активную заметку владельца %s", owner_id)
 
 
 # ==================== НАПОМИНАНИЯ ====================
