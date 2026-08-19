@@ -3915,7 +3915,7 @@ async def cmd_ocr_check(message: Message):
         )
 
 
-@dp.message(Command("notes_debug"), F.chat.type == ChatType.PRIVATE, F.from_user.id.in_(ADMIN_IDS))
+@dp.message(Command("notes_debug"), F.chat.type == ChatType.PRIVATE)
 async def cmd_notes_debug(message: Message, command: CommandObject):
     """Диагностика активных заметок: repr() триггеров вскрывает невидимые
     символы (NBSP и т.п.), а /notes_debug <текст> прогоняет find_active_notes
@@ -4066,6 +4066,7 @@ async def setup_bot_commands() -> None:
             BotCommand(command="start", description="🎣 Запустить / открыть меню"),
             BotCommand(command="settings", description="⚙️ Настройки"),
             BotCommand(command="calc", description="🧮 Посчитать пример"),
+            BotCommand(command="notes_debug", description="🔍 Диагностика активных заметок"),
         ],
         scope=BotCommandScopeAllPrivateChats(),
     )
@@ -4086,7 +4087,6 @@ async def setup_bot_commands() -> None:
                     BotCommand(command="admin", description="🛠 Панель администратора"),
                     BotCommand(command="stats", description="📊 Статистика бота"),
                     BotCommand(command="ocr_check", description="🧾 Проверить OCR (Tesseract)"),
-                    BotCommand(command="notes_debug", description="🔍 Диагностика активных заметок"),
                 ],
                 scope=BotCommandScopeChat(chat_id=admin_id),
             )
