@@ -1230,6 +1230,51 @@ async def main():
     assert "📣 Анонс теста по латыни" in kb_texts(tb.get_admin_menu())
     print("admin Latin-quiz announcement broadcast + admin panel button: OK")
 
+    # 26e. Admin VMedA AI announcement broadcast: maintenance-mode block, then preview -> confirm -> broadcast
+    orig_openai_key = tb.OPENAI_API_KEY
+    orig_gemini_key = tb.ai_gemini.GEMINI_API_KEY
+    tb.OPENAI_API_KEY, tb.ai_gemini.GEMINI_API_KEY = None, None
+    cb_ai_maint = FakeCB("admin_announce_ai_confirm")
+    await tb.cb_admin_announce_ai_confirm(cb_ai_maint)
+    assert not cb_ai_maint.message.edits, "must not show preview while AI has no provider configured"
+    assert cb_ai_maint._answers and cb_ai_maint._answers[0][1] is True  # show_alert
+
+    tb.OPENAI_API_KEY = "fake-key-for-tests"
+    orig_broadcast4 = tb._broadcast
+    ai_broadcast_calls = []
+    async def fake_broadcast4(text, keyboard=None):
+        ai_broadcast_calls.append((text, keyboard))
+    tb._broadcast = fake_broadcast4
+
+    ai_ann_text = tb.get_ai_announcement_text()
+    check_html(ai_ann_text)
+    ai_ann_kb = tb.get_ai_announcement_keyboard()
+    ai_ann_data = kb_data(ai_ann_kb)
+    assert "ai_menu" in ai_ann_data
+    assert "subscription_menu" in ai_ann_data
+
+    cb_ai1 = FakeCB("admin_announce_ai_confirm")
+    await tb.cb_admin_announce_ai_confirm(cb_ai1)
+    assert cb_ai1.message.edits and "Отправить" in cb_ai1.message.edits[0][0]
+    assert not ai_broadcast_calls, "must not broadcast before confirmation"
+
+    broadcasts_before4 = tb.stats.get("broadcast_count", 0)
+    cb_ai2 = FakeCB("admin_announce_ai_go")
+    await tb.cb_admin_announce_ai_go(cb_ai2)
+    assert ai_broadcast_calls, "expected broadcast to be sent"
+    assert ai_broadcast_calls[0][0] == ai_ann_text
+    assert tb.stats["broadcast_count"] == broadcasts_before4 + 1
+    assert cb_ai2.message.edits and "отправлен" in cb_ai2.message.edits[0][0]
+
+    cb_ai3 = FakeCB("admin_announce_ai_confirm", uid=non_admin)
+    await tb.cb_admin_announce_ai_confirm(cb_ai3)
+    assert not cb_ai3.message.edits, "non-admin must be blocked"
+
+    tb._broadcast = orig_broadcast4
+    tb.OPENAI_API_KEY, tb.ai_gemini.GEMINI_API_KEY = orig_openai_key, orig_gemini_key
+    assert "📣 Анонс VMedA AI" in kb_texts(tb.get_admin_menu())
+    print("admin VMedA AI announcement broadcast + admin panel button: OK")
+
     # 27. Menu order: active tiers appear in ascending price order (menu_number), 20 first, 28
     # (the most expensive, "Вся академия") last — tier 29 ("5 лет", cheaper than 28) sits just
     # before it. (Checked via the keyboard's button order, not text position — the teaser

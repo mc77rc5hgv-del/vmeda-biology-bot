@@ -90,6 +90,7 @@ def get_admin_menu():
     builder.button(text="📣 Анонс раздела Анатомия", callback_data="admin_announce_anatomy_confirm")
     builder.button(text="📣 Анонс Экзамена (ТЕСТ/теория/практика)", callback_data="admin_announce_anatomy_exam_confirm")
     builder.button(text="📣 Анонс теста по латыни", callback_data="admin_announce_anatomy_latin_confirm")
+    builder.button(text="📣 Анонс VMedA AI", callback_data="admin_announce_ai_confirm")
     builder.button(text="📤 Опубликовать пост в канал", callback_data="admin_channel_post_prompt")
     builder.button(text="🔬 Открыть Гистологию всем на 24ч", callback_data="admin_histology_promo_confirm")
     builder.button(text="🎉 Снять все ограничения всем на 24ч", callback_data="admin_global_promo_confirm")
@@ -1081,6 +1082,43 @@ async def cb_admin_announce_anatomy_go(callback: CallbackQuery):
     await tb.safe_edit_text(
         callback.message,
         f"✅ Анонс раздела Анатомия отправлен (попытка охватить {recipients} пользователей).",
+        parse_mode="HTML",
+        reply_markup=get_admin_back_keyboard()
+    )
+
+@router.callback_query(F.data == "admin_announce_ai_confirm")
+async def cb_admin_announce_ai_confirm(callback: CallbackQuery):
+    if not tb.is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    if not tb.ai_provider_available():
+        await callback.answer("AI сейчас не настроен (нет ни одного провайдера) — рассылать нечего.", show_alert=True)
+        return
+    await callback.answer()
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Отправить всем", callback_data="admin_announce_ai_go")
+    builder.button(text="❌ Отмена", callback_data="admin_panel")
+    builder.adjust(1)
+    preview = (
+        f"👀 <b>Предпросмотр анонса</b>\n{tb.DIVIDER}\n\n"
+        f"{tb.get_ai_announcement_text()}\n\n{tb.DIVIDER}\n"
+        f"Отправить это всем {len(tb.stats['total_users'])} пользователям?"
+    )
+    await tb.safe_edit_text(callback.message, preview, parse_mode="HTML", reply_markup=builder.as_markup())
+
+@router.callback_query(F.data == "admin_announce_ai_go")
+async def cb_admin_announce_ai_go(callback: CallbackQuery):
+    if not tb.is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer("📣 Рассылка запущена!", show_alert=True)
+    recipients = len(tb.stats["total_users"])
+    tb.stats["broadcast_count"] = tb.stats.get("broadcast_count", 0) + 1
+    tb.save_stats()
+    await tb._broadcast(tb.get_ai_announcement_text(), tb.get_ai_announcement_keyboard())
+    await tb.safe_edit_text(
+        callback.message,
+        f"✅ Анонс VMedA AI отправлен (попытка охватить {recipients} пользователей).",
         parse_mode="HTML",
         reply_markup=get_admin_back_keyboard()
     )

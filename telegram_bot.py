@@ -1284,6 +1284,27 @@ def get_subscription_announcement_keyboard():
     builder.button(text="💎 Подписка без рефералов", callback_data="subscription_menu")
     return builder.as_markup()
 
+def get_ai_announcement_text() -> str:
+    # Каждый активный тариф (20-29) уже несёт свой ai_limit_type/ai_limit — см. CLAUDE.md,
+    # "VMedA AI" — поэтому здесь достаточно общей фразы про подписку, без переноса конкретных
+    # цифр по тарифам в текст (см. пункт "Values duplicated out of SUBSCRIPTION_TIERS").
+    return (
+        f"🤖 <b>Новое в боте — VMedA AI!</b>\n{DIVIDER}\n\n"
+        "AI-помощник, который разбирает задание по фото или тексту и сразу выдаёт решение: "
+        "чёткий ответ и объяснение по шагам. Работает по биологии, физике, химии и анатомии — "
+        "тесты, билеты, контрольные, летучки. Просто присылаешь фото — получаешь разбор.\n\n"
+        f"Бесплатно — до {AI_FREE_DAILY_LIMIT} запросов в день. Любая подписка добавляет к этому "
+        "лимиту дополнительные запросы VMedA AI поверх обычного доступа к разделам бота.\n\n"
+        "Жми на кнопку ниже, чтобы попробовать 👇"
+    )
+
+def get_ai_announcement_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🤖 Попробовать VMedA AI", callback_data="ai_menu")
+    builder.button(text="💎 Подписка", callback_data="subscription_menu")
+    builder.adjust(1)
+    return builder.as_markup()
+
 def get_anatomy_announcement_text() -> str:
     tier_lines = " или ".join(
         f"«{cfg['emoji']} {cfg['title']}» ({cfg['price_rub']}₽)"
@@ -2512,6 +2533,8 @@ cb_admin_announce_anatomy_exam_confirm = admin_handlers.cb_admin_announce_anatom
 cb_admin_announce_anatomy_exam_go = admin_handlers.cb_admin_announce_anatomy_exam_go
 cb_admin_announce_anatomy_latin_confirm = admin_handlers.cb_admin_announce_anatomy_latin_confirm
 cb_admin_announce_anatomy_latin_go = admin_handlers.cb_admin_announce_anatomy_latin_go
+cb_admin_announce_ai_confirm = admin_handlers.cb_admin_announce_ai_confirm
+cb_admin_announce_ai_go = admin_handlers.cb_admin_announce_ai_go
 cb_admin_channel_post_prompt = admin_handlers.cb_admin_channel_post_prompt
 cb_admin_channel_post_go = admin_handlers.cb_admin_channel_post_go
 cb_admin_channel_post_cancel = admin_handlers.cb_admin_channel_post_cancel
