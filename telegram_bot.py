@@ -1576,27 +1576,36 @@ def search_questions_by_keyword(query: str, limit: int = SEARCH_RESULTS_LIMIT):
     return matches
 
 def search_operative_surgery(query: str, limit: int = 15):
-    """Простой регистронезависимый поиск по подстроке — раздел маленький (23 занятия, ~85
-    инструментов, 15 проекций), стеммированный IDF-индекс как у search_questions_by_keyword тут
-    overkill. Ищет по названию/сводке занятия, названию инструмента, названию структуры проекции —
-    только по реально заполненным полям (needs_editor_review-заглушки в поиск не попадают)."""
+    """Простой регистронезависимый поиск по подстроке — стеммированный IDF-индекс как у
+    search_questions_by_keyword тут overkill для четырёх плоских списков. Ищет по названию/тексту
+    темы (все 61 темы полнотекстовые — см. operative_surgery.json v2), названию инструмента,
+    названию структуры проекции, названию практической станции."""
     q = query.strip().lower()
     if not q:
-        return [], [], []
-    lessons = [
-        e for e in OPERATIVE_SURGERY["curriculum"]
-        if q in e["title"].lower() or (e.get("summary") and q in e["summary"].lower())
+        return [], [], [], []
+    topics = [
+        t for t in OPERATIVE_SURGERY["topics"]
+        if q in t["title"].lower() or any(q in s["text"].lower() for s in t["subtopics"])
     ][:limit]
     instruments = [
-        (group["group"], item["name"])
+        (group["group"], name)
         for group in OPERATIVE_SURGERY["instrument_groups"]
-        for item in group["items"]
-        if q in item["name"].lower()
+        for name in group["items"]
+        if q in name.lower()
     ][:limit]
     projections = [
-        p for p in OPERATIVE_SURGERY["projections"] if q in p["structure"].lower()
+        (group["group"], item)
+        for group in OPERATIVE_SURGERY["projections"]
+        for item in group["items"]
+        if q in item["structure"].lower()
     ][:limit]
-    return lessons, instruments, projections
+    stations = [
+        (group["group"], name)
+        for group in OPERATIVE_SURGERY["practical_stations"]
+        for name in group["items"]
+        if q in name.lower()
+    ][:limit]
+    return topics, instruments, projections, stations
 
 OH_SEARCH_PENDING: set = set()  # user_id, ждущих следующее текстовое сообщение как поисковый
 # запрос по разделу «Оперативная хирургия» (см. cb_oh_search_prompt в handlers/operative_surgery.py
@@ -4949,9 +4958,9 @@ async def handle_oh_search_query(message: Message):
     OH_SEARCH_PENDING.discard(user_id)
     query = message.text.strip()
     safe_query = html.escape(query)
-    lessons, instruments, projections = search_operative_surgery(query)
+    topics, instruments, projections, stations = search_operative_surgery(query)
     builder = InlineKeyboardBuilder()
-    if not lessons and not instruments and not projections:
+    if not topics and not instruments and not projections and not stations:
         builder.row(InlineKeyboardButton(text="🔙 К разделу", callback_data="oh:menu"))
         await message.answer(
             f"🔍 По запросу «{safe_query}» в разделе «Оперативная хирургия» ничего не найдено.",
@@ -4959,20 +4968,26 @@ async def handle_oh_search_query(message: Message):
         )
         return
     lines = [f"🔍 <b>Оперативная хирургия — результаты поиска:</b> «{safe_query}»\n{DIVIDER}"]
-    if lessons:
-        lines.append("\n📅 <b>Занятия:</b>")
-        for e in lessons:
-            lines.append(f"• {e['id']}. {e['title']}")
-            builder.button(text=f"{e['id']}. {e['title'][:40]}", callback_data=f"oh:lesson:{e['id']}")
+    if topics:
+        lines.append("\n📚 <b>Темы:</b>")
+        for t in topics:
+            lines.append(f"• {t['number']}. {t['title']}")
+            builder.button(text=f"{t['number']}. {t['title'][:40]}", callback_data=f"oh:topic:{t['id']}")
     if instruments:
         lines.append("\n🛠 <b>Инструменты:</b>")
         for group_name, name in instruments:
             lines.append(f"• {name} ({group_name})")
+        builder.button(text="🛠 Открыть инструменты", callback_data="oh:instruments")
     if projections:
         lines.append("\n📍 <b>Проекции:</b>")
-        for p in projections:
-            lines.append(f"• {p['structure']}")
+        for group_name, item in projections:
+            lines.append(f"• {item['structure']}")
         builder.button(text="📍 Открыть проекции", callback_data="oh:projections")
+    if stations:
+        lines.append("\n🎓 <b>Практические станции:</b>")
+        for group_name, name in stations:
+            lines.append(f"• {name}")
+        builder.button(text="🎓 Открыть станции", callback_data="oh:stations")
     builder.adjust(1)
     builder.row(InlineKeyboardButton(text="🔙 К разделу", callback_data="oh:menu"))
     await message.answer("\n".join(lines), parse_mode="HTML", reply_markup=builder.as_markup())
@@ -5276,28 +5291,50 @@ from handlers import operative_surgery as operative_surgery_handlers  # noqa: E4
 
 dp.include_router(operative_surgery_handlers.router)
 
-get_oh_lesson = operative_surgery_handlers.get_oh_lesson
+get_oh_topic = operative_surgery_handlers.get_oh_topic
+get_oh_volume = operative_surgery_handlers.get_oh_volume
 get_oh_menu_text = operative_surgery_handlers.get_oh_menu_text
 get_oh_menu_keyboard = operative_surgery_handlers.get_oh_menu_keyboard
-get_oh_curriculum_text = operative_surgery_handlers.get_oh_curriculum_text
-get_oh_curriculum_keyboard = operative_surgery_handlers.get_oh_curriculum_keyboard
-get_oh_lesson_text = operative_surgery_handlers.get_oh_lesson_text
-get_oh_lesson_keyboard = operative_surgery_handlers.get_oh_lesson_keyboard
-get_oh_facet_text = operative_surgery_handlers.get_oh_facet_text
-get_oh_facet_keyboard = operative_surgery_handlers.get_oh_facet_keyboard
+get_oh_volumes_text = operative_surgery_handlers.get_oh_volumes_text
+get_oh_volumes_keyboard = operative_surgery_handlers.get_oh_volumes_keyboard
+get_oh_volume_text = operative_surgery_handlers.get_oh_volume_text
+get_oh_volume_keyboard = operative_surgery_handlers.get_oh_volume_keyboard
+get_oh_volume_control_text = operative_surgery_handlers.get_oh_volume_control_text
+get_oh_volume_control_keyboard = operative_surgery_handlers.get_oh_volume_control_keyboard
+get_oh_topic_text = operative_surgery_handlers.get_oh_topic_text
+get_oh_topic_keyboard = operative_surgery_handlers.get_oh_topic_keyboard
+get_oh_material_text = operative_surgery_handlers.get_oh_material_text
+get_oh_material_keyboard = operative_surgery_handlers.get_oh_material_keyboard
+get_oh_quick_text = operative_surgery_handlers.get_oh_quick_text
+get_oh_quick_keyboard = operative_surgery_handlers.get_oh_quick_keyboard
+get_oh_topic_control_text = operative_surgery_handlers.get_oh_topic_control_text
+get_oh_topic_control_keyboard = operative_surgery_handlers.get_oh_topic_control_keyboard
 get_oh_instruments_text = operative_surgery_handlers.get_oh_instruments_text
 get_oh_instruments_keyboard = operative_surgery_handlers.get_oh_instruments_keyboard
 get_oh_instrument_group_text = operative_surgery_handlers.get_oh_instrument_group_text
 get_oh_instrument_group_keyboard = operative_surgery_handlers.get_oh_instrument_group_keyboard
 get_oh_projections_text = operative_surgery_handlers.get_oh_projections_text
 get_oh_projections_keyboard = operative_surgery_handlers.get_oh_projections_keyboard
+get_oh_projection_group_text = operative_surgery_handlers.get_oh_projection_group_text
+get_oh_projection_group_keyboard = operative_surgery_handlers.get_oh_projection_group_keyboard
+get_oh_stations_text = operative_surgery_handlers.get_oh_stations_text
+get_oh_stations_keyboard = operative_surgery_handlers.get_oh_stations_keyboard
+get_oh_station_group_text = operative_surgery_handlers.get_oh_station_group_text
+get_oh_station_group_keyboard = operative_surgery_handlers.get_oh_station_group_keyboard
 cb_oh_menu = operative_surgery_handlers.cb_oh_menu
-cb_oh_curriculum = operative_surgery_handlers.cb_oh_curriculum
-cb_oh_lesson = operative_surgery_handlers.cb_oh_lesson
-cb_oh_facet = operative_surgery_handlers.cb_oh_facet
+cb_oh_volumes = operative_surgery_handlers.cb_oh_volumes
+cb_oh_volume = operative_surgery_handlers.cb_oh_volume
+cb_oh_volume_control = operative_surgery_handlers.cb_oh_volume_control
+cb_oh_topic = operative_surgery_handlers.cb_oh_topic
+cb_oh_material = operative_surgery_handlers.cb_oh_material
+cb_oh_quick = operative_surgery_handlers.cb_oh_quick
+cb_oh_topic_control = operative_surgery_handlers.cb_oh_topic_control
 cb_oh_instruments = operative_surgery_handlers.cb_oh_instruments
 cb_oh_instrument_group = operative_surgery_handlers.cb_oh_instrument_group
 cb_oh_projections = operative_surgery_handlers.cb_oh_projections
+cb_oh_projection_group = operative_surgery_handlers.cb_oh_projection_group
+cb_oh_stations = operative_surgery_handlers.cb_oh_stations
+cb_oh_station_group = operative_surgery_handlers.cb_oh_station_group
 cb_oh_search_prompt = operative_surgery_handlers.cb_oh_search_prompt
 
 # ==================== ЗАПУСК ====================

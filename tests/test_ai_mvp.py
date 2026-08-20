@@ -1090,7 +1090,11 @@ async def main():
     list_task = TaskRepresentation(type="list", subquestions=numbered_anatomy_items)
     multi_matches, _ = await tb.ai_rag.search_for_task(list_task, limit=10)
     assert multi_matches, "searching each list item separately must find real anatomy grounding"
-    assert all(s["subject"] == "анатомия" for s in multi_matches)
+    # "оперативная хирургия" (topographic anatomy, real full-text since v2 — see CLAUDE.md) shares
+    # genuine vocabulary with these body-cavity terms (e.g. "Мочеточник" covers "забрюшинное
+    # пространство"), so a match there is legitimate grounding too, not noise — only a totally
+    # unrelated subject (биология/физика/химия) would indicate the search went off track.
+    assert all(s["subject"] in ("анатомия", "оперативная хирургия") for s in multi_matches)
     matched_blob = " ".join(s["title"] + " " + s["text"] for s in multi_matches).lower()
     assert "плевр" in matched_blob, "must ground the pleura term specifically (the one the model got wrong live)"
     print("25c. task.type=='list'+subquestions finds per-item matches a single blob query misses: OK")

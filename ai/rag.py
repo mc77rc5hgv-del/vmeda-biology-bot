@@ -86,10 +86,11 @@ def build_index(
     """Собирает единый список {subject, title, text, stems, key} из банков вопросов/ответов бота:
     биология/физика/химия (основная заявленная область AI-помощника) и анатомия (вопросы по
     ней реально задают через этот же AI-режим, и без точных терминов из ANATOMY модель на них
-    иногда путает термины по памяти). operative_surgery — тем же путём: раздел новый и заполнен
-    частично (см. CLAUDE.md), в индекс идёт только то, что реально заполнено (summary непустой у
-    занятия, сам список проекций) — пустые/needs_editor_review поля не участвуют, RAG никогда не
-    подмешивает заглушку "материал ещё не добавлен" как будто это факт."""
+    иногда путает термины по памяти). operative_surgery — тем же путём: каждая тема (v2 —
+    полнотекстовый материал по 61 теме, не сводка-заглушка, см. CLAUDE.md) индексируется целиком
+    (текст всех подтем темы склеен в одну запись), плюс каждая проекция из справочника —
+    инструменты/практические станции не индексируются (это голые списки названий без
+    объяснительного текста, отвечать по ним нечем)."""
     raw_entries = []
     for q in questions.values():
         raw_entries.append(("биология", q.get("title", ""), q.get("answer", "")))
@@ -106,11 +107,13 @@ def build_index(
                 raw_entries.append(("анатомия", item.get("title", ""), item.get("content", "")))
             for card in topic.get("flashcards") or []:
                 raw_entries.append(("анатомия", card.get("front", ""), card.get("back", "")))
-    for entry in (operative_surgery or {}).get("curriculum", []):
-        if entry.get("summary"):
-            raw_entries.append(("оперативная хирургия", entry["title"], entry["summary"]))
-    for proj in (operative_surgery or {}).get("projections", []):
-        raw_entries.append(("оперативная хирургия", proj["structure"], proj["projection"]))
+    for topic in (operative_surgery or {}).get("topics", []):
+        full_text = "\n".join(sub.get("text", "") for sub in topic.get("subtopics", []))
+        if full_text.strip():
+            raw_entries.append(("оперативная хирургия", topic["title"], full_text))
+    for group in (operative_surgery or {}).get("projections", []):
+        for item in group.get("items", []):
+            raw_entries.append(("оперативная хирургия", item["structure"], item["projection"]))
     return [
         {
             "subject": subject, "title": title, "text": text, "stems": _entry_stems(title, text),

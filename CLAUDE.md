@@ -170,27 +170,55 @@ it's a safe no-op when `sent_message` has no `.photo` (e.g. test mocks), so test
 
 ### Operative Surgery (Оперативная хирургия)
 
-A new top-level subject (`operative_surgery.json`, loaded via `repositories/knowledge.py` like every other content
+A top-level subject (`operative_surgery.json`, loaded via `repositories/knowledge.py` like every other content
 bank, handlers in `handlers/operative_surgery.py` — own `Router`, imported at the very end of `telegram_bot.py`
 next to `handlers/histology.py`, same reason: needs `tb.OPERATIVE_SURGERY`/`DIVIDER`/`safe_edit_text` already
 defined). **Deliberately free for everyone** — no referral gate, no subscription tier references it, callback
 prefix `oh:*` never appears in `GATED_CALLBACKS_*`/`GATED_PREFIXES_*`, so it passes through
 `referral_gate_middleware` ungated by default like Anatomy's admin bypass or the support/donation screens.
 
-**Content is honestly incomplete, and the code is built to say so rather than fake depth.** The source pack this
-section was built from (a kafedral curriculum outline + a projections reference + an instrument-name catalog) had
-real prose for only ONE of the 13 planned per-lesson facets (`summary`, shown as "🎯 Что нужно знать") — the actual
-source textbooks (Практикум ВМедА 2017, Николаев, the instrument album) were never supplied, only page numbers.
-Rather than fabricate surgical detail for the other 12 facets (ориентиры/слои/сосуды/фасции/доступы/операции/
-инструменты/ошибки/мнемоники/контрольные вопросы/ответ за 2 минуты), `operative_surgery.json`'s 23 curriculum
-entries carry `summary` (real text on 21 of them) plus a `missing_sections`/`needs_editor_review` marker, and every
-one of the 12 facet buttons on a lesson screen (`get_oh_facet_text()`) renders honestly — real content if present,
-otherwise an explicit "🚧 материал ещё не добавлен" screen, never invented content. Two lessons (`15`, `23`,
-"Итог: ...") are marked `is_review: true` in the source curriculum itself (end-of-block recap, no dedicated new
-material) — their lesson screen shows `review_note` instead of `summary` and skips the facet-button row entirely
-(nothing to click into). `instrument_groups` (10 groups, ~85 real kafedral instrument names from the exam album)
-and `projections` (15 real projection lines) ARE fully populated — those two came with real content in the source
-pack, unlike the per-lesson facets, and are shown as-is with no placeholder needed.
+**v2 (current): real full-text content, not a summary-only skeleton.** The section was first shipped (v1) from a
+thin source pack that only had real prose for 1 of 13 planned per-lesson facets; it was then rebuilt from a second,
+much larger source pack ("VMEDA Operative Surgery Full Content") — a genuine 69-section topographic-anatomy/
+operative-surgery text (kafedral practicum + textbook material, `Практикум ВМедА 2017` as top source priority,
+same `source_priority` list as v1). `operative_surgery.json`'s schema changed completely as a result:
+`curriculum` (23 lesson stubs, one per practicum session) was replaced by `topics` — 61 entries organized into 4
+`volumes` (`I`–`IV`, mirroring the source's own "ТОМ I..IV" grouping: конечности → голова/шея → грудь/живот →
+забрюшинное пространство/почка/таз), each topic broken into real `subtopics` (`id`, `title`, `text` — HTML-ready,
+`**bold**` already converted to `<b>`) totaling ~33K characters of real material across the whole bank, built by a
+one-time parser script (not committed — scratchpad-only ETL, see the session that authored this) that walked the
+source markdown's `#`/`##`/`###` heading structure. **Nothing here is fabricated** — `text` is the source's own
+prose; `quick_review` per topic is mechanically extracted from the source's own callout lines (headings like
+"Запомнить"/"Практическое значение"/"Почему это важно" plus any standalone `**bold**` line), falling back to a
+one-line-per-subtopic recap (still literal text pulled from `text`, never new content) only for the handful of
+topics whose source prose has no such callout at all — so every topic always has *something* to show under
+"⚡ Быстро повторить", but it's always traceable back to real sourced text.
+
+**Control questions follow the source's own granularity, not a forced per-topic one.** The source only writes
+questions at two levels: topic `"01"` ("Общая оперативная техника") has its own list (the source's own §1.8) —
+`topics[0]["control_questions"]` — and volumes I/II/III each end with a "Контроль тома" cross-topic list, stored
+as `volume["control_questions"]`. **Volume IV has no such list in the source at all** — `get_oh_volume_keyboard()`
+simply doesn't render a "📋 Контрольные вопросы тома" button for it, and no other topic besides `"01"` gets a
+"❓ Контрольные вопросы" button on its topic-hub screen (`get_oh_topic_keyboard()` only adds it when
+`topic["control_questions"]` is non-empty) — same "honest gap, no invented content" principle as v1, just scoped
+tighter now that almost everything else is real. The source itself never supplies an answer key for these
+questions either, so they're rendered as a plain self-check list ("ответ ищи в полном материале"), not a
+tap-to-reveal quiz — building reveal-answer infrastructure for a question bank with no verified answers would risk
+serving a wrong "official" answer nobody actually wrote.
+
+`instrument_groups` (10 groups, ~82 real kafedral instrument names — plain strings now, not `{"name": ...}` dicts)
+and `projections` (now 6 anatomical-area groups — верхняя/нижняя конечность, суставы, голова, лицо, шея — instead
+of one flat 15-entry list, 28 entries total) come from the same source's own reference sections (§65/§66) and are
+fully populated, same as v1. New in v2: `practical_stations` (2 groups — "Конечности, голова, шея" and "Грудь,
+живот, забрюшинное пространство, таз", 24 real station names total from the source's own §67), reachable from the
+root menu ("🎓 Практические станции") the same way instruments/projections are.
+
+Navigation is `oh:menu` → `oh:volumes` → `oh:volume:{id}:{page}` (paginated, `OH_TOPIC_PAGE_SIZE = 10` — volume
+III alone has 25 topics) → `oh:topic:{id}` (hub screen: intro + "📖 Полный материал"/"⚡ Быстро повторить"/
+optional "❓ Контрольные вопросы") → `oh:material:{id}:{page}` (one subtopic per page, prev/next). Instruments/
+projections/stations each follow the same two-level "group list → group contents" shape
+(`oh:instruments`→`oh:instr_group:{idx}`, `oh:projections`→`oh:proj_group:{idx}`, `oh:stations`→
+`oh:station_group:{idx}`).
 
 Search (`oh:search_prompt` → `OH_SEARCH_PENDING` (a plain `set[user_id]`, not a multi-step dict like
 `ADMIN_PENDING`/`ASSISTANT_PENDING`) → `handle_oh_search_query`) is defined directly in `telegram_bot.py`, NOT
@@ -200,16 +228,19 @@ This ordering is load-bearing: message handlers registered via `dp.include_route
 (same spot as the rest of this section) would land AFTER `handle_keyword_search` in the dispatch chain, so it
 would swallow every OH search query before `handle_oh_search_query` ever saw it. Same reasoning `ADMIN_PENDING`/
 `ASSISTANT_PENDING`'s own text handlers already live in `telegram_bot.py` rather than their respective handler
-modules — see `handlers/admin.py`'s own docstring for the precedent.
+modules — see `handlers/admin.py`'s own docstring for the precedent. `search_operative_surgery()` now searches all
+four data shapes (topics by title/full subtopic text, instruments, projections, stations) and returns a 4-tuple,
+up from v1's 3.
 
 `ai.rag.build_index()`/`configure()` take an `operative_surgery: dict = None` parameter (default `None` keeps the
-function's existing callers, including `scripts/`-level ones that don't pass it, working unchanged) and index only
-what's actually filled: lesson `summary` where non-empty, and every `projections` entry — `needs_editor_review`
-placeholder text is never indexed, so VMedA AI can ground answers in this section's real content without ever
-citing a "not added yet" stub as if it were fact. `ai/prompts.py`'s `SYSTEM_PROMPT` and the AI section's own menu
-copy (`get_ai_menu_text()`/`get_ai_announcement_text()`) mention "оперативной хирургии" alongside the other four
-subjects for the same reason anatomy was added there earlier — the RAG index genuinely covers it now, however
-thin.
+function's existing callers, including `scripts/`-level ones that don't pass it, working unchanged) and index
+every topic's full subtopic text (concatenated into one entry per topic) plus every `projections` item — 61 + 28
+entries. `instrument_groups`/`practical_stations` are deliberately NOT indexed (bare name lists with no
+explanatory prose to ground an answer in). Because this content is now genuine topographic anatomy, RAG queries
+about body cavities/organs legitimately surface both `"анатомия"` and `"оперативная хирургия"` matches side by
+side (see `tests/test_ai_mvp.py`'s check 25c) — that's real cross-subject grounding, not noise. `ai/prompts.py`'s
+`SYSTEM_PROMPT` and the AI section's own menu copy (`get_ai_menu_text()`/`get_ai_announcement_text()`) mention
+"оперативной хирургии" alongside the other four subjects for the same reason anatomy was added there earlier.
 
 ### Access control (two independent gates)
 
