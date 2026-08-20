@@ -168,6 +168,49 @@ once one exists, so repeat views of the same photo skip re-reading the file from
 `_cache_anatomy_file_id(img, sent_message)` populates the cache from the real `Message.photo` Telegram returns;
 it's a safe no-op when `sent_message` has no `.photo` (e.g. test mocks), so tests never need to simulate the cache.
 
+### Operative Surgery (Оперативная хирургия)
+
+A new top-level subject (`operative_surgery.json`, loaded via `repositories/knowledge.py` like every other content
+bank, handlers in `handlers/operative_surgery.py` — own `Router`, imported at the very end of `telegram_bot.py`
+next to `handlers/histology.py`, same reason: needs `tb.OPERATIVE_SURGERY`/`DIVIDER`/`safe_edit_text` already
+defined). **Deliberately free for everyone** — no referral gate, no subscription tier references it, callback
+prefix `oh:*` never appears in `GATED_CALLBACKS_*`/`GATED_PREFIXES_*`, so it passes through
+`referral_gate_middleware` ungated by default like Anatomy's admin bypass or the support/donation screens.
+
+**Content is honestly incomplete, and the code is built to say so rather than fake depth.** The source pack this
+section was built from (a kafedral curriculum outline + a projections reference + an instrument-name catalog) had
+real prose for only ONE of the 13 planned per-lesson facets (`summary`, shown as "🎯 Что нужно знать") — the actual
+source textbooks (Практикум ВМедА 2017, Николаев, the instrument album) were never supplied, only page numbers.
+Rather than fabricate surgical detail for the other 12 facets (ориентиры/слои/сосуды/фасции/доступы/операции/
+инструменты/ошибки/мнемоники/контрольные вопросы/ответ за 2 минуты), `operative_surgery.json`'s 23 curriculum
+entries carry `summary` (real text on 21 of them) plus a `missing_sections`/`needs_editor_review` marker, and every
+one of the 12 facet buttons on a lesson screen (`get_oh_facet_text()`) renders honestly — real content if present,
+otherwise an explicit "🚧 материал ещё не добавлен" screen, never invented content. Two lessons (`15`, `23`,
+"Итог: ...") are marked `is_review: true` in the source curriculum itself (end-of-block recap, no dedicated new
+material) — their lesson screen shows `review_note` instead of `summary` and skips the facet-button row entirely
+(nothing to click into). `instrument_groups` (10 groups, ~85 real kafedral instrument names from the exam album)
+and `projections` (15 real projection lines) ARE fully populated — those two came with real content in the source
+pack, unlike the per-lesson facets, and are shown as-is with no placeholder needed.
+
+Search (`oh:search_prompt` → `OH_SEARCH_PENDING` (a plain `set[user_id]`, not a multi-step dict like
+`ADMIN_PENDING`/`ASSISTANT_PENDING`) → `handle_oh_search_query`) is defined directly in `telegram_bot.py`, NOT
+inside `handlers/operative_surgery.py`, and positioned in the file BEFORE `handle_keyword_search` (the
+Biology-keyword-search fallback that unconditionally handles any plain-text message with no `SkipHandler` guard).
+This ordering is load-bearing: message handlers registered via `dp.include_router()` at the very end of the file
+(same spot as the rest of this section) would land AFTER `handle_keyword_search` in the dispatch chain, so it
+would swallow every OH search query before `handle_oh_search_query` ever saw it. Same reasoning `ADMIN_PENDING`/
+`ASSISTANT_PENDING`'s own text handlers already live in `telegram_bot.py` rather than their respective handler
+modules — see `handlers/admin.py`'s own docstring for the precedent.
+
+`ai.rag.build_index()`/`configure()` take an `operative_surgery: dict = None` parameter (default `None` keeps the
+function's existing callers, including `scripts/`-level ones that don't pass it, working unchanged) and index only
+what's actually filled: lesson `summary` where non-empty, and every `projections` entry — `needs_editor_review`
+placeholder text is never indexed, so VMedA AI can ground answers in this section's real content without ever
+citing a "not added yet" stub as if it were fact. `ai/prompts.py`'s `SYSTEM_PROMPT` and the AI section's own menu
+copy (`get_ai_menu_text()`/`get_ai_announcement_text()`) mention "оперативной хирургии" alongside the other four
+subjects for the same reason anatomy was added there earlier — the RAG index genuinely covers it now, however
+thin.
+
 ### Access control (two independent gates)
 
 1. **Referral gate** (`referral_gate_middleware`, an `@dp.update.outer_middleware()`): gates only Biology/Physics/

@@ -136,11 +136,12 @@ ANATOMY_EXAM_TEST_PARTS = knowledge.ANATOMY_EXAM_TEST_PARTS
 ANATOMY_EXAM_THEORY_SECTIONS = knowledge.ANATOMY_EXAM_THEORY_SECTIONS
 ANATOMY_EXAM_PRACTICE_SECTIONS = knowledge.ANATOMY_EXAM_PRACTICE_SECTIONS
 HISTOLOGY = knowledge.HISTOLOGY
+OPERATIVE_SURGERY = knowledge.OPERATIVE_SURGERY
 
 ai_rag.configure(
     questions=QUESTIONS, physics_questions=PHYSICS_QUESTIONS, chemistry_theory=CHEMISTRY_THEORY,
     chemistry_theory_tickets=CHEMISTRY_THEORY_TICKETS, chemistry_practice_tickets=CHEMISTRY_PRACTICE_TICKETS,
-    anatomy=ANATOMY,
+    anatomy=ANATOMY, operative_surgery=OPERATIVE_SURGERY,
 )
 ai_reference_bank.configure(ANATOMY_EXAM_TEST_PARTS)
 
@@ -1296,7 +1297,7 @@ def get_ai_announcement_text() -> str:
     return (
         f"🤖 <b>Новое в боте — VMedA AI!</b>\n{DIVIDER}\n\n"
         "AI-помощник, который разбирает задание по фото или тексту и сразу выдаёт решение: "
-        "чёткий ответ и объяснение по шагам. Работает по биологии, физике, химии и анатомии — "
+        "чёткий ответ и объяснение по шагам. Работает по биологии, физике, химии, анатомии и оперативной хирургии — "
         "тесты, билеты, контрольные, летучки. Просто присылаешь фото — получаешь разбор.\n\n"
         f"Бесплатно — до {AI_FREE_DAILY_LIMIT} запросов в день. Любая подписка добавляет к этому "
         "лимиту дополнительные запросы VMedA AI поверх обычного доступа к разделам бота.\n\n"
@@ -1574,6 +1575,34 @@ def search_questions_by_keyword(query: str, limit: int = SEARCH_RESULTS_LIMIT):
                 break
     return matches
 
+def search_operative_surgery(query: str, limit: int = 15):
+    """Простой регистронезависимый поиск по подстроке — раздел маленький (23 занятия, ~85
+    инструментов, 15 проекций), стеммированный IDF-индекс как у search_questions_by_keyword тут
+    overkill. Ищет по названию/сводке занятия, названию инструмента, названию структуры проекции —
+    только по реально заполненным полям (needs_editor_review-заглушки в поиск не попадают)."""
+    q = query.strip().lower()
+    if not q:
+        return [], [], []
+    lessons = [
+        e for e in OPERATIVE_SURGERY["curriculum"]
+        if q in e["title"].lower() or (e.get("summary") and q in e["summary"].lower())
+    ][:limit]
+    instruments = [
+        (group["group"], item["name"])
+        for group in OPERATIVE_SURGERY["instrument_groups"]
+        for item in group["items"]
+        if q in item["name"].lower()
+    ][:limit]
+    projections = [
+        p for p in OPERATIVE_SURGERY["projections"] if q in p["structure"].lower()
+    ][:limit]
+    return lessons, instruments, projections
+
+OH_SEARCH_PENDING: set = set()  # user_id, ждущих следующее текстовое сообщение как поисковый
+# запрос по разделу «Оперативная хирургия» (см. cb_oh_search_prompt в handlers/operative_surgery.py
+# и handle_oh_search_query ниже) — тот же паттерн, что ADMIN_PENDING/ASSISTANT_PENDING, только без
+# многошагового действия, просто факт "этот юзер сейчас ищет".
+
 # AI RAG-lite (индекс/поиск/подмес материалов ВМедА) перенесён в ai/rag.py — см. ai_rag.configure()
 # (вызывается один раз при старте, см. конец файла) и ai_rag.search_snippets_multi()/format_context()
 # (используются в обработчиках AI-режима).
@@ -1829,6 +1858,7 @@ def get_main_menu(user_id: int = None):
     else:
         histology_label = "🔬 Гистология (рефералы/подписка)"
     builder.button(text=histology_label, callback_data="histology_menu")
+    builder.button(text="🔪 Оперативная хирургия", callback_data="oh:menu")
     builder.button(text="👥 Пригласить друзей", callback_data="referral_info")
     builder.button(text="🏆 Рейтинг", callback_data="referral_leaderboard")
     rollcall_confirmed_count = len(stats["rollcall_confirmed"])
@@ -4519,7 +4549,7 @@ def get_ai_menu_text(user_id: int) -> str:
     return (
         f"🤖 <b>VMedA AI</b>\n{DIVIDER}\n\n"
         "AI-помощник, который разбирает задание по фото или тексту и сразу выдаёт решение: "
-        "чёткий ответ и объяснение по шагам. Работает по биологии, физике, химии и анатомии — "
+        "чёткий ответ и объяснение по шагам. Работает по биологии, физике, химии, анатомии и оперативной хирургии — "
         "тесты, билеты, контрольные, летучки. Просто присылаешь фото — получаешь разбор.\n\n"
         f"Бесплатных запросов сегодня: <b>{get_ai_quota_label(user_id)}</b>"
         f"{availability}"
@@ -4902,6 +4932,51 @@ async def handle_hidden_ticket_dump(message: Message):
                 logger.exception("Не удалось отправить изображение %s", image_path)
         await message.answer(body, parse_mode="HTML")
 
+# ==================== ПОИСК ПО ОПЕРАТИВНОЙ ХИРУРГИИ (обработчик) ====================
+# Должен стоять РАНЬШЕ handle_keyword_search ниже — тот не проверяет никакого pending-состояния
+# и обрабатывает ЛЮБОЙ текст как биологический поиск, так что если зарегистрировать этот хендлер
+# позже (например, через dp.include_router() в самом конце файла, как handlers/histology.py),
+# handle_keyword_search перехватывал бы поисковый запрос по ОХ первым и он сюда никогда бы не
+# доходил. Поэтому — как ADMIN_PENDING/ASSISTANT_PENDING — живёт прямо в telegram_bot.py, до
+# handle_keyword_search по порядку в файле.
+@dp.message(F.text)
+async def handle_oh_search_query(message: Message):
+    user_id = message.from_user.id
+    if user_id not in OH_SEARCH_PENDING:
+        raise SkipHandler
+    if message.text.startswith("/"):
+        raise SkipHandler
+    OH_SEARCH_PENDING.discard(user_id)
+    query = message.text.strip()
+    safe_query = html.escape(query)
+    lessons, instruments, projections = search_operative_surgery(query)
+    builder = InlineKeyboardBuilder()
+    if not lessons and not instruments and not projections:
+        builder.row(InlineKeyboardButton(text="🔙 К разделу", callback_data="oh:menu"))
+        await message.answer(
+            f"🔍 По запросу «{safe_query}» в разделе «Оперативная хирургия» ничего не найдено.",
+            reply_markup=builder.as_markup()
+        )
+        return
+    lines = [f"🔍 <b>Оперативная хирургия — результаты поиска:</b> «{safe_query}»\n{DIVIDER}"]
+    if lessons:
+        lines.append("\n📅 <b>Занятия:</b>")
+        for e in lessons:
+            lines.append(f"• {e['id']}. {e['title']}")
+            builder.button(text=f"{e['id']}. {e['title'][:40]}", callback_data=f"oh:lesson:{e['id']}")
+    if instruments:
+        lines.append("\n🛠 <b>Инструменты:</b>")
+        for group_name, name in instruments:
+            lines.append(f"• {name} ({group_name})")
+    if projections:
+        lines.append("\n📍 <b>Проекции:</b>")
+        for p in projections:
+            lines.append(f"• {p['structure']}")
+        builder.button(text="📍 Открыть проекции", callback_data="oh:projections")
+    builder.adjust(1)
+    builder.row(InlineKeyboardButton(text="🔙 К разделу", callback_data="oh:menu"))
+    await message.answer("\n".join(lines), parse_mode="HTML", reply_markup=builder.as_markup())
+
 # ==================== ПОИСК ПО КЛЮЧЕВЫМ СЛОВАМ (обработчик) ====================
 @dp.message(F.text)
 async def handle_keyword_search(message: Message):
@@ -5190,6 +5265,40 @@ cb_histology_guess_start = histology_handlers.cb_histology_guess_start
 cb_histology_guess_show_answer = histology_handlers.cb_histology_guess_show_answer
 cb_histology_guess_answer = histology_handlers.cb_histology_guess_answer
 cb_histology_guess_stop = histology_handlers.cb_histology_guess_stop
+
+# ==================== ОПЕРАТИВНАЯ ХИРУРГИЯ ====================
+# Тот же паттерн, что ГИСТОЛОГИЯ выше — свой Router, импортируется в самом конце файла, когда
+# все нужные оттуда имена (OPERATIVE_SURGERY, DIVIDER, safe_edit_text, OH_SEARCH_PENDING,
+# search_operative_surgery) уже определены здесь. Раздел свободен для всех — своего гейта нет,
+# поэтому здесь реэкспортированы только клавиатуры/тексты и сами callback-хендлеры, без
+# вспомогательных access-предикатов (их для этого раздела попросту нет).
+from handlers import operative_surgery as operative_surgery_handlers  # noqa: E402 — deliberately late, see above
+
+dp.include_router(operative_surgery_handlers.router)
+
+get_oh_lesson = operative_surgery_handlers.get_oh_lesson
+get_oh_menu_text = operative_surgery_handlers.get_oh_menu_text
+get_oh_menu_keyboard = operative_surgery_handlers.get_oh_menu_keyboard
+get_oh_curriculum_text = operative_surgery_handlers.get_oh_curriculum_text
+get_oh_curriculum_keyboard = operative_surgery_handlers.get_oh_curriculum_keyboard
+get_oh_lesson_text = operative_surgery_handlers.get_oh_lesson_text
+get_oh_lesson_keyboard = operative_surgery_handlers.get_oh_lesson_keyboard
+get_oh_facet_text = operative_surgery_handlers.get_oh_facet_text
+get_oh_facet_keyboard = operative_surgery_handlers.get_oh_facet_keyboard
+get_oh_instruments_text = operative_surgery_handlers.get_oh_instruments_text
+get_oh_instruments_keyboard = operative_surgery_handlers.get_oh_instruments_keyboard
+get_oh_instrument_group_text = operative_surgery_handlers.get_oh_instrument_group_text
+get_oh_instrument_group_keyboard = operative_surgery_handlers.get_oh_instrument_group_keyboard
+get_oh_projections_text = operative_surgery_handlers.get_oh_projections_text
+get_oh_projections_keyboard = operative_surgery_handlers.get_oh_projections_keyboard
+cb_oh_menu = operative_surgery_handlers.cb_oh_menu
+cb_oh_curriculum = operative_surgery_handlers.cb_oh_curriculum
+cb_oh_lesson = operative_surgery_handlers.cb_oh_lesson
+cb_oh_facet = operative_surgery_handlers.cb_oh_facet
+cb_oh_instruments = operative_surgery_handlers.cb_oh_instruments
+cb_oh_instrument_group = operative_surgery_handlers.cb_oh_instrument_group
+cb_oh_projections = operative_surgery_handlers.cb_oh_projections
+cb_oh_search_prompt = operative_surgery_handlers.cb_oh_search_prompt
 
 # ==================== ЗАПУСК ====================
 async def setup_bot_commands() -> None:

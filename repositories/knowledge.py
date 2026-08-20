@@ -68,3 +68,6 @@ with open("anatomy_exam_practice.json", "r", encoding="utf-8") as f:
 
 with open("histology.json", "r", encoding="utf-8") as f:
     HISTOLOGY = json.load(f)
+
+with open("operative_surgery.json", "r", encoding="utf-8") as f:
+    OPERATIVE_SURGERY = json.load(f)

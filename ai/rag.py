@@ -81,11 +81,15 @@ def _entry_key(subject: str, title: str, text: str) -> str:
 def build_index(
     *, questions: dict, physics_questions: dict, chemistry_theory: dict,
     chemistry_theory_tickets: dict, chemistry_practice_tickets: dict, anatomy: dict,
+    operative_surgery: dict = None,
 ) -> list:
     """Собирает единый список {subject, title, text, stems, key} из банков вопросов/ответов бота:
     биология/физика/химия (основная заявленная область AI-помощника) и анатомия (вопросы по
     ней реально задают через этот же AI-режим, и без точных терминов из ANATOMY модель на них
-    иногда путает термины по памяти)."""
+    иногда путает термины по памяти). operative_surgery — тем же путём: раздел новый и заполнен
+    частично (см. CLAUDE.md), в индекс идёт только то, что реально заполнено (summary непустой у
+    занятия, сам список проекций) — пустые/needs_editor_review поля не участвуют, RAG никогда не
+    подмешивает заглушку "материал ещё не добавлен" как будто это факт."""
     raw_entries = []
     for q in questions.values():
         raw_entries.append(("биология", q.get("title", ""), q.get("answer", "")))
@@ -102,6 +106,11 @@ def build_index(
                 raw_entries.append(("анатомия", item.get("title", ""), item.get("content", "")))
             for card in topic.get("flashcards") or []:
                 raw_entries.append(("анатомия", card.get("front", ""), card.get("back", "")))
+    for entry in (operative_surgery or {}).get("curriculum", []):
+        if entry.get("summary"):
+            raw_entries.append(("оперативная хирургия", entry["title"], entry["summary"]))
+    for proj in (operative_surgery or {}).get("projections", []):
+        raw_entries.append(("оперативная хирургия", proj["structure"], proj["projection"]))
     return [
         {
             "subject": subject, "title": title, "text": text, "stems": _entry_stems(title, text),
@@ -133,6 +142,7 @@ _idf = None
 def configure(
     *, questions: dict, physics_questions: dict, chemistry_theory: dict,
     chemistry_theory_tickets: dict, chemistry_practice_tickets: dict, anatomy: dict,
+    operative_surgery: dict = None,
 ) -> None:
     """Вызывается один раз при старте бота, после загрузки JSON-файлов — строит индекс и IDF-веса
     сразу (не лениво), чтобы разовая задержка (~0.1с на текущем объёме) не попала на первый живой
@@ -142,6 +152,7 @@ def configure(
         questions=questions, physics_questions=physics_questions, chemistry_theory=chemistry_theory,
         chemistry_theory_tickets=chemistry_theory_tickets,
         chemistry_practice_tickets=chemistry_practice_tickets, anatomy=anatomy,
+        operative_surgery=operative_surgery,
     )
     _idf = build_stem_idf(_index)
 

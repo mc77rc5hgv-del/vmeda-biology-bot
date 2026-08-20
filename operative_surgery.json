@@ -1,0 +1,1160 @@
+{
+  "meta": {
+    "section_id": "operative_surgery",
+    "title": "🔪 Оперативная хирургия",
+    "institution": "ВМедА им. С. М. Кирова",
+    "source_priority": [
+      "Практикум ВМедА 2017 «Практические занятия по оперативной хирургии и топографической анатомии» — структура курса, навыки, контроль",
+      "Экзаменационный альбом инструментов кафедры оперативной хирургии ВМедА — названия/фото",
+      "Проекции.pdf — проекционные линии сосудов/нервов/суставов",
+      "А. В. Николаев, «Топографическая анатомия и оперативная хирургия», 3-е изд. — подробная теория"
+    ],
+    "card_logic": {
+      "area": "Границы → ориентиры → слои → фасции → клетчаточные пространства → сосуды/нервы → проекции → пути распространения → клиническое значение",
+      "organ": "Положение → части → фиксирующий аппарат → кровоснабжение → иннервация → лимфоотток → синтопия → хирургическое значение",
+      "operation": "Показания → цель → положение больного → обезболивание → инструменты → проекция/линия разреза → послойный доступ → оперативный приём → гемостаз → завершение → ошибки/осложнения"
+    }
+  },
+  "curriculum": [
+    {
+      "id": "01",
+      "title": "Общая оперативная техника: разъединение и соединение тканей",
+      "source": "Практикум ВМедА 2017",
+      "source_pages": [
+        26
+      ],
+      "is_review": false,
+      "summary": "Раздел разбирает общехирургический инструментарий, организацию операционного поля, местную анестезию, разъединение тканей, гемостаз, соединение тканей, швы и узлы.\n\nРазъединение тканей — послойное, с контролем глубины и сохранением анатомически важных образований. Длина доступа должна обеспечивать обзор без чрезмерной ретракции.\n\nМестная анестезия: инфильтрационная, футлярная, проводниковая. Всегда объяснять анатомическую основу блока.\n\nГемостаз: временный и окончательный. Не захватывать нерв вместе с сосудом.\n\nСоединение тканей: точное сопоставление однородных слоёв, отсутствие чрезмерного натяжения, сохранение кровоснабжения, отсутствие ненужных полостей.\n\nОтдельные карточки узлов: простой, морской, хирургический.",
+      "control_questions": [],
+      "needs_editor_review": true,
+      "missing_sections": [
+        "landmarks",
+        "layers",
+        "vessels_nerves",
+        "fascia_spaces",
+        "projections_note",
+        "approaches",
+        "operations",
+        "instruments_note",
+        "pitfalls",
+        "mnemonics",
+        "control_questions",
+        "quick_answer"
+      ]
+    },
+    {
+      "id": "02",
+      "title": "Топографическая анатомия верхней конечности",
+      "source": "Практикум ВМедА 2017",
+      "source_pages": [
+        33
+      ],
+      "is_review": false,
+      "summary": "Подмышечная область: подмышечные сосуды и плечевое сплетение; проекция на границе передней и средней третей подмышечной ямки, по Пирогову — по переднему краю роста волос.\n\nПлечо: плечевая артерия и срединный нерв в медиальной борозде; локтевой нерв направляется к борозде за медиальным надмыщелком; лучевой нерв имеет спиральный ход по задней поверхности плеча.\n\nЛоктевая область: плечевая артерия у середины локтевого сгиба медиальнее сухожилия двуглавой мышцы; срединный нерв ещё медиальнее; локтевой нерв позади медиального надмыщелка.\n\nПредплечье: лучевая артерия к шиловидному отростку лучевой кости; локтевой нерв к гороховидной; срединный нерв центрально.\n\nКисть: поверхностная и глубокая ладонные дуги; глубокая проксимальнее. Отдельно «запретная зона» кисти: опасны не только двигательные ветви срединного нерва, но и локтевой нерв, лучевая/локтевая артерии, синовиальные влагалища.",
+      "control_questions": [],
+      "needs_editor_review": true,
+      "missing_sections": [
+        "landmarks",
+        "layers",
+        "vessels_nerves",
+        "fascia_spaces",
+        "projections_note",
+        "approaches",
+        "operations",
+        "instruments_note",
+        "pitfalls",
+        "mnemonics",
+        "control_questions",
+        "quick_answer"
+      ]
+    },
+    {
+      "id": "03",
+      "title": "Топографическая анатомия бедра и ягодичной области",
+      "source": "Практикум ВМедА 2017",
+      "source_pages": [
+        39
+      ],
+      "is_review": false,
+      "summary": "Бедренный треугольник, бедренный канал, запирательный канал, бедренно-подколенный канал, фасции и клетчаточные пространства.\n\nБедренная артерия и вена: от границы средней и медиальной третей паховой складки к медиальному мыщелку. Бедренный нерв латеральнее сосудов.\n\nЯгодичная область: над- и подгрушевидные отверстия; верхние/нижние ягодичные сосуды и нервы; седалищный нерв. Проекция седалищного нерва — от середины между большим вертелом и седалищным бугром к середине подколенной ямки.",
+      "control_questions": [],
+      "needs_editor_review": true,
+      "missing_sections": [
+        "landmarks",
+        "layers",
+        "vessels_nerves",
+        "fascia_spaces",
+        "projections_note",
+        "approaches",
+        "operations",
+        "instruments_note",
+        "pitfalls",
+        "mnemonics",
+        "control_questions",
+        "quick_answer"
+      ]
+    },
+    {
+      "id": "04",
+      "title": "Подколенная ямка, голень, голеностопный сустав",
+      "source": "Практикум ВМедА 2017",
+      "source_pages": [
+        45
+      ],
+      "is_review": false,
+      "summary": "Подколенный пучок: большеберцовый нерв поверхностнее, вена глубже, артерия наиболее глубоко. Общий малоберцовый нерв идёт к головке малоберцовой кости.\n\nГолень: переднее, латеральное, задние фасциальные ложа. Передняя большеберцовая артерия + глубокий малоберцовый нерв в переднем ложе; задняя большеберцовая артерия + большеберцовый нерв в глубоком заднем.\n\nГоленостоп: сухожильные каналы, сосуды/нервы вокруг лодыжек, суставная щель, пункция.",
+      "control_questions": [],
+      "needs_editor_review": true,
+      "missing_sections": [
+        "landmarks",
+        "layers",
+        "vessels_nerves",
+        "fascia_spaces",
+        "projections_note",
+        "approaches",
+        "operations",
+        "instruments_note",
+        "pitfalls",
+        "mnemonics",
+        "control_questions",
+        "quick_answer"
+      ]
+    },
+    {
+      "id": "05",
+      "title": "Оперативные доступы к сосудам и нервам конечностей",
+      "source": "Практикум ВМедА 2017",
+      "source_pages": [
+        51
+      ],
+      "is_review": false,
+      "summary": "Обнажения лучевой, локтевой, плечевой, подмышечной, бедренной, подколенной, большеберцовых артерий и основных нервов.\n\nАлгоритм: проекция → ориентиры → разрез → слои → фасциальное влагалище → выделение → защита соседних структур.\n\nОтдельно: прямой и окольный доступ; уровень перевязки и коллатеральное кровообращение; нервный шов.",
+      "control_questions": [],
+      "needs_editor_review": true,
+      "missing_sections": [
+        "landmarks",
+        "layers",
+        "vessels_nerves",
+        "fascia_spaces",
+        "projections_note",
+        "approaches",
+        "operations",
+        "instruments_note",
+        "pitfalls",
+        "mnemonics",
+        "control_questions",
+        "quick_answer"
+      ]
+    },
+    {
+      "id": "06",
+      "title": "ПХО ран и техника операций на сосудах конечностей",
+      "source": "Практикум ВМедА 2017",
+      "source_pages": [
+        58
+      ],
+      "is_review": false,
+      "summary": "ПХО: доступ к раневому каналу → экономное иссечение нежизнеспособных тканей → удаление инородных тел → гемостаз → ревизия сосудов/нервов → дренирование → решение о закрытии.\n\nВенесекция: выделение поверхностной вены, фиксация, открытие просвета, катетер.\n\nВременное протезирование артерии: восстановление магистрального кровотока на время, фиксация шунта, исключение воздуха, контроль дистального кровотока.\n\nСосудистый шов: атравматичность, сопоставление интимы, сохранение просвета, герметичность.",
+      "control_questions": [],
+      "needs_editor_review": true,
+      "missing_sections": [
+        "landmarks",
+        "layers",
+        "vessels_nerves",
+        "fascia_spaces",
+        "projections_note",
+        "approaches",
+        "operations",
+        "instruments_note",
+        "pitfalls",
+        "mnemonics",
+        "control_questions",
+        "quick_answer"
+      ]
+    },
+    {
+      "id": "07",
+      "title": "Операции при гнойных заболеваниях конечностей",
+      "source": "Практикум ВМедА 2017",
+      "source_pages": [
+        64
+      ],
+      "is_review": false,
+      "summary": "Основная идея: разрез определяется анатомией гнойного пространства.\n\nКисть: панариции, тендовагиниты, флегмоны ладони/тенара/гипотенара, пути распространения на предплечье.\n\nДля каждого: где расположен очаг → куда распространяется → какой разрез → что сохранить → как дренировать.",
+      "control_questions": [],
+      "needs_editor_review": true,
+      "missing_sections": [
+        "landmarks",
+        "layers",
+        "vessels_nerves",
+        "fascia_spaces",
+        "projections_note",
+        "approaches",
+        "operations",
+        "instruments_note",
+        "pitfalls",
+        "mnemonics",
+        "control_questions",
+        "quick_answer"
+      ]
+    },
+    {
+      "id": "08",
+      "title": "Хирургическая анатомия и операции на суставах верхней конечности",
+      "source": "Практикум ВМедА 2017",
+      "source_pages": [
+        71
+      ],
+      "is_review": false,
+      "summary": "Верхняя конечность: плечевой, локтевой, лучезапястный — капсула, завороты, связки, соседние сосуды/нервы, пункции и артротомии.\n\nНижняя: тазобедренный, коленный, голеностопный — капсула, связки, сумки/завороты, проекции, пункции.\n\nЛинии Розера—Нелатона и Куслика — отдельная карточка.\n\n(Материал по суставам в источнике дан одним общим блоком на верхнюю и нижнюю конечность — см. также тему 9.)",
+      "control_questions": [],
+      "needs_editor_review": true,
+      "missing_sections": [
+        "landmarks",
+        "layers",
+        "vessels_nerves",
+        "fascia_spaces",
+        "projections_note",
+        "approaches",
+        "operations",
+        "instruments_note",
+        "pitfalls",
+        "mnemonics",
+        "control_questions",
+        "quick_answer"
+      ]
+    },
+    {
+      "id": "09",
+      "title": "Хирургическая анатомия и операции на суставах нижней конечности",
+      "source": "Практикум ВМедА 2017",
+      "source_pages": [
+        75
+      ],
+      "is_review": false,
+      "summary": "Верхняя конечность: плечевой, локтевой, лучезапястный — капсула, завороты, связки, соседние сосуды/нервы, пункции и артротомии.\n\nНижняя: тазобедренный, коленный, голеностопный — капсула, связки, сумки/завороты, проекции, пункции.\n\nЛинии Розера—Нелатона и Куслика — отдельная карточка.\n\n(Материал по суставам в источнике дан одним общим блоком на верхнюю и нижнюю конечность — см. также тему 9.)",
+      "control_questions": [],
+      "needs_editor_review": true,
+      "missing_sections": [
+        "landmarks",
+        "layers",
+        "vessels_nerves",
+        "fascia_spaces",
+        "projections_note",
+        "approaches",
+        "operations",
+        "instruments_note",
+        "pitfalls",
+        "mnemonics",
+        "control_questions",
+        "quick_answer"
+      ]
+    },
+    {
+      "id": "10",
+      "title": "Ампутации и экзартикуляции",
+      "source": "Практикум ВМедА 2017",
+      "source_pages": [
+        80
+      ],
+      "is_review": false,
+      "summary": "Виды: круговые, лоскутные, костно-пластические, атипичные.\n\nЭтапы: уровень → лоскуты → мышцы → сосуды → высокое пересечение нервов → кость → культя → закрытие.\n\nОтдельно: костно-пластическая ампутация по Пирогову и экзартикуляции пальцев.",
+      "control_questions": [],
+      "needs_editor_review": true,
+      "missing_sections": [
+        "landmarks",
+        "layers",
+        "vessels_nerves",
+        "fascia_spaces",
+        "projections_note",
+        "approaches",
+        "operations",
+        "instruments_note",
+        "pitfalls",
+        "mnemonics",
+        "control_questions",
+        "quick_answer"
+      ]
+    },
+    {
+      "id": "11",
+      "title": "Мозговой отдел головы и операции",
+      "source": "Практикум ВМедА 2017",
+      "source_pages": [
+        88
+      ],
+      "is_review": false,
+      "summary": "Слои свода: кожа → клетчатка → апоневроз → подапоневротическое пространство → надкостница → поднадкостничное пространство → кость → ТМО.\n\nВисочная область, сосцевидная область, треугольник Шипо, синусы ТМО.\n\nТрепанации: резекционная и костно-пластическая. ПХО ран черепа: ревизия, гемостаз, обработка повреждённой кости, оценка ТМО и внутричерепных структур.",
+      "control_questions": [],
+      "needs_editor_review": true,
+      "missing_sections": [
+        "landmarks",
+        "layers",
+        "vessels_nerves",
+        "fascia_spaces",
+        "projections_note",
+        "approaches",
+        "operations",
+        "instruments_note",
+        "pitfalls",
+        "mnemonics",
+        "control_questions",
+        "quick_answer"
+      ]
+    },
+    {
+      "id": "12",
+      "title": "Лицевой отдел головы: топографо-анатомические обоснования операций",
+      "source": "Практикум ВМедА 2017",
+      "source_pages": [
+        97
+      ],
+      "is_review": false,
+      "summary": "Околоушная железа и проток, лицевая артерия, ветви лицевого нерва, глубокие клетчаточные пространства.\n\nРаны лица: экономия жизнеспособных тканей, гемостаз, восстановление функциональных структур, пластические швы, защита протока и лицевого нерва.",
+      "control_questions": [],
+      "needs_editor_review": true,
+      "missing_sections": [
+        "landmarks",
+        "layers",
+        "vessels_nerves",
+        "fascia_spaces",
+        "projections_note",
+        "approaches",
+        "operations",
+        "instruments_note",
+        "pitfalls",
+        "mnemonics",
+        "control_questions",
+        "quick_answer"
+      ]
+    },
+    {
+      "id": "13",
+      "title": "Сосуды и нервы шеи: топографо-анатомические основы и техника операций",
+      "source": "Практикум ВМедА 2017",
+      "source_pages": [
+        104
+      ],
+      "is_review": false,
+      "summary": "Треугольники, фасции, межфасциальные пространства и их связь со средостением.\n\nОсновной пучок: общая сонная артерия, внутренняя яремная вена, блуждающий нерв. Бифуркация сонной — уровень верхнего края щитовидного хряща.\n\nВагосимпатическая блокада по Вишневскому: анатомическая основа, ориентиры, распространение раствора, признаки правильности, осложнения.\n\nПункция/катетеризация подключичной вены: положение, ориентиры, направление иглы, пневмоторакс/артериальная пункция и другие риски.",
+      "control_questions": [],
+      "needs_editor_review": true,
+      "missing_sections": [
+        "landmarks",
+        "layers",
+        "vessels_nerves",
+        "fascia_spaces",
+        "projections_note",
+        "approaches",
+        "operations",
+        "instruments_note",
+        "pitfalls",
+        "mnemonics",
+        "control_questions",
+        "quick_answer"
+      ]
+    },
+    {
+      "id": "14",
+      "title": "Органы шеи и операции на них",
+      "source": "Практикум ВМедА 2017",
+      "source_pages": [
+        111
+      ],
+      "is_review": false,
+      "summary": "Щитовидная железа: доли, перешеек, сосуды, возвратные нервы, паращитовидные железы.\n\nГортань: хрящи, связки, голосовая щель, иннервация.\n\nТрахеостомия: верхняя/нижняя относительно перешейка, инструменты, этапы, ошибки.\n\nПищевод: шейная часть, отношение к трахее, сосудам и возвратным нервам.",
+      "control_questions": [],
+      "needs_editor_review": true,
+      "missing_sections": [
+        "landmarks",
+        "layers",
+        "vessels_nerves",
+        "fascia_spaces",
+        "projections_note",
+        "approaches",
+        "operations",
+        "instruments_note",
+        "pitfalls",
+        "mnemonics",
+        "control_questions",
+        "quick_answer"
+      ]
+    },
+    {
+      "id": "15",
+      "title": "Итог: конечности, голова, шея",
+      "source": "Практикум ВМедА 2017",
+      "source_pages": [
+        117
+      ],
+      "is_review": true,
+      "summary": null,
+      "control_questions": [],
+      "needs_editor_review": true,
+      "missing_sections": [
+        "landmarks",
+        "layers",
+        "vessels_nerves",
+        "fascia_spaces",
+        "projections_note",
+        "approaches",
+        "operations",
+        "instruments_note",
+        "pitfalls",
+        "mnemonics",
+        "control_questions",
+        "quick_answer"
+      ],
+      "review_note": "Итоговое занятие — повторение предыдущих тем этого блока перед контролем, отдельного нового материала практикум сюда не выносит."
+    },
+    {
+      "id": "16",
+      "title": "Грудная стенка и операции",
+      "source": "Практикум ВМедА 2017",
+      "source_pages": [
+        122
+      ],
+      "is_review": false,
+      "summary": "Межрёберный пучок и его отношение к ребру. Молочная железа, ретромаммарное пространство, лимфоотток.\n\nМаститы: субареолярный, интрамаммарный, ретромаммарный — отдельные доступы.\n\nВнутренняя грудная артерия. Резекция ребра с защитой межрёберного пучка.",
+      "control_questions": [],
+      "needs_editor_review": true,
+      "missing_sections": [
+        "landmarks",
+        "layers",
+        "vessels_nerves",
+        "fascia_spaces",
+        "projections_note",
+        "approaches",
+        "operations",
+        "instruments_note",
+        "pitfalls",
+        "mnemonics",
+        "control_questions",
+        "quick_answer"
+      ]
+    },
+    {
+      "id": "17",
+      "title": "Средостение и лёгкие. Торакотомия и операции",
+      "source": "Практикум ВМедА 2017",
+      "source_pages": [
+        130,
+        137
+      ],
+      "is_review": false,
+      "summary": "Плевра, синусы, торакоцентез, дренирование.\n\nПневмоторакс: закрытый, открытый, напряжённый. Отдельная неотложная карточка.\n\nЛёгкое: доли, корень, сосуды/бронхи. Торакотомия. Краевая резекция: гемостаз + герметичность шва + контроль утечки воздуха.",
+      "control_questions": [],
+      "needs_editor_review": true,
+      "missing_sections": [
+        "landmarks",
+        "layers",
+        "vessels_nerves",
+        "fascia_spaces",
+        "projections_note",
+        "approaches",
+        "operations",
+        "instruments_note",
+        "pitfalls",
+        "mnemonics",
+        "control_questions",
+        "quick_answer"
+      ]
+    },
+    {
+      "id": "18",
+      "title": "Передняя брюшная стенка и наружные грыжи",
+      "source": "Практикум ВМедА 2017",
+      "source_pages": [
+        141
+      ],
+      "is_review": false,
+      "summary": "Слои, белая линия, пупочное кольцо, влагалище прямой мышцы, паховый канал.\n\nКосая/прямая паховая грыжа — различать по отношению к нижним надчревным сосудам и глубокому паховому кольцу.\n\nОперации по Бассини, Жирару—Спасокукоцкому и другие варианты из практикума: что укрепляется, какими слоями, риски.",
+      "control_questions": [],
+      "needs_editor_review": true,
+      "missing_sections": [
+        "landmarks",
+        "layers",
+        "vessels_nerves",
+        "fascia_spaces",
+        "projections_note",
+        "approaches",
+        "operations",
+        "instruments_note",
+        "pitfalls",
+        "mnemonics",
+        "control_questions",
+        "quick_answer"
+      ]
+    },
+    {
+      "id": "19",
+      "title": "Брюшная полость: ревизия и органы верхнего этажа",
+      "source": "Практикум ВМедА 2017",
+      "source_pages": [
+        148
+      ],
+      "is_review": false,
+      "summary": "Пространства: сальники, сальниковая сумка, синусы, каналы, брыжейки.\n\nРевизия: контроль кровотечения → последовательный осмотр → полые органы/брыжейки → источник содержимого → повторная ревизия.\n\nЖелудок, печень, желчные пути, поджелудочная железа, селезёнка — анатомия + хирургическое значение.",
+      "control_questions": [],
+      "needs_editor_review": true,
+      "missing_sections": [
+        "landmarks",
+        "layers",
+        "vessels_nerves",
+        "fascia_spaces",
+        "projections_note",
+        "approaches",
+        "operations",
+        "instruments_note",
+        "pitfalls",
+        "mnemonics",
+        "control_questions",
+        "quick_answer"
+      ]
+    },
+    {
+      "id": "20",
+      "title": "ПХО полых и паренхиматозных органов. Аппендэктомия",
+      "source": "Практикум ВМедА 2017",
+      "source_pages": [
+        155
+      ],
+      "is_review": false,
+      "summary": "Кишечный шов: герметичность, гемостаз, сохранение кровоснабжения, сопоставление слоёв.\n\nАппендэктомия: доступ → слепая кишка → отросток → брыжейка → основание → варианты положения → ревизия → закрытие.\n\nРаны печени, желудка, кишки — отдельные алгоритмы.",
+      "control_questions": [],
+      "needs_editor_review": true,
+      "missing_sections": [
+        "landmarks",
+        "layers",
+        "vessels_nerves",
+        "fascia_spaces",
+        "projections_note",
+        "approaches",
+        "operations",
+        "instruments_note",
+        "pitfalls",
+        "mnemonics",
+        "control_questions",
+        "quick_answer"
+      ]
+    },
+    {
+      "id": "21",
+      "title": "Забрюшинное пространство, почка и мочеточник",
+      "source": "Практикум ВМедА 2017",
+      "source_pages": [
+        166
+      ],
+      "is_review": false,
+      "summary": "Поясничная область, фасции, клетчаточные пространства.\n\nПочка: оболочки, ворота, ножка, сегментарное кровоснабжение. Мочеточник, надпочечник.\n\nПаранефральная блокада. Доступы Фёдорова и Израэля. Резекция почки и нефрэктомия.",
+      "control_questions": [],
+      "needs_editor_review": true,
+      "missing_sections": [
+        "landmarks",
+        "layers",
+        "vessels_nerves",
+        "fascia_spaces",
+        "projections_note",
+        "approaches",
+        "operations",
+        "instruments_note",
+        "pitfalls",
+        "mnemonics",
+        "control_questions",
+        "quick_answer"
+      ]
+    },
+    {
+      "id": "22",
+      "title": "Хирургическая анатомия таза и операции",
+      "source": "Практикум ВМедА 2017",
+      "source_pages": [
+        172
+      ],
+      "is_review": false,
+      "summary": "Этажи, фасции, клетчаточные пространства, сосуды/нервы, венозные сплетения.\n\nМочевой пузырь, прямая кишка, предстательная железа/уретра, матка/придатки.\n\nМочевые затёки, тазовые гнойники, дренирование по Мак-Уортеру—Буяльскому и Кюприанову.\n\nКатетеризация, надлобковая пункция и цистостомия.",
+      "control_questions": [],
+      "needs_editor_review": true,
+      "missing_sections": [
+        "landmarks",
+        "layers",
+        "vessels_nerves",
+        "fascia_spaces",
+        "projections_note",
+        "approaches",
+        "operations",
+        "instruments_note",
+        "pitfalls",
+        "mnemonics",
+        "control_questions",
+        "quick_answer"
+      ]
+    },
+    {
+      "id": "23",
+      "title": "Итог: грудь, живот, забрюшинное пространство, таз",
+      "source": "Практикум ВМедА 2017",
+      "source_pages": [
+        178
+      ],
+      "is_review": true,
+      "summary": null,
+      "control_questions": [],
+      "needs_editor_review": true,
+      "missing_sections": [
+        "landmarks",
+        "layers",
+        "vessels_nerves",
+        "fascia_spaces",
+        "projections_note",
+        "approaches",
+        "operations",
+        "instruments_note",
+        "pitfalls",
+        "mnemonics",
+        "control_questions",
+        "quick_answer"
+      ],
+      "review_note": "Итоговое занятие — повторение предыдущих тем этого блока перед контролем, отдельного нового материала практикум сюда не выносит."
+    }
+  ],
+  "instrument_groups": [
+    {
+      "group": "Режущие",
+      "items": [
+        {
+          "name": "Скальпель брюшистый",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Скальпель остроконечный",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Ножницы Купера прямые",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Ножницы Купера изогнутые по плоскости",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Ножницы Рихтера",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Ножницы Бергмана",
+          "photo": null,
+          "needs_editor_review": true
+        }
+      ]
+    },
+    {
+      "group": "Вспомогательные",
+      "items": [
+        {
+          "name": "Зажимы Бакгауза",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Языкодержатель",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Корнцанг",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Пинцет анатомический",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Пинцет хирургический",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Пинцет лапчатый",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Зонд желобоватый",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Зонд пуговчатый",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Зонд Кохера",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Крючок четырехзубый тупой",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Крючок Фарабефа",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Лопаточка Буяльского",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Иглы Дешана правая/левая",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Игла Купера",
+          "photo": null,
+          "needs_editor_review": true
+        }
+      ]
+    },
+    {
+      "group": "Ушивание",
+      "items": [
+        {
+          "name": "Иглодержатель Матье",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Иглодержатель Троянова",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Иглодержатель Гегара",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Хирургические иглы",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Шёлк",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Кетгут",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Vicryl",
+          "photo": null,
+          "needs_editor_review": true
+        }
+      ]
+    },
+    {
+      "group": "Гемостаз",
+      "items": [
+        {
+          "name": "Пеан",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Бильрот",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Кохер",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Москит Холстеда изогнутый",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Москит Холстеда прямой",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Адсон",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Сосудистый зажим Гепфнера",
+          "photo": null,
+          "needs_editor_review": true
+        }
+      ]
+    },
+    {
+      "group": "Кости и суставы",
+      "items": [
+        {
+          "name": "Нож ампутационный",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Нож резекционный Бергмана",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Щипцы Лангенбека",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Щипцы Олье",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Щипцы Фарабефа",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Молоток",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Долото",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Остеотом Штилле",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Ампутационный ретрактор",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Кусачки Люэра",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Секвестральные щипцы",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Распаторы Фарабефа",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Ложки Брунса/Фолькмана",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Пила листовая",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Пила дуговая",
+          "photo": null,
+          "needs_editor_review": true
+        }
+      ]
+    },
+    {
+      "group": "Череп",
+      "items": [
+        {
+          "name": "Коловорот Хадсона",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Фреза Гребёнка",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Пила Джигли",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Проводник Поленова",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Кусачки Дальгрена",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Кусачки Егорова",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Кусачки Янсена",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Ножницы для ТМО",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Зажим Федорова для ТМО",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Долото Дьяконова",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Стамески Воячека",
+          "photo": null,
+          "needs_editor_review": true
+        }
+      ]
+    },
+    {
+      "group": "Трахеостомия",
+      "items": [
+        {
+          "name": "Однозубые острые крючки",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "S-образный крючок Люэра",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Расширитель Труссо",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Канюля Люэра",
+          "photo": null,
+          "needs_editor_review": true
+        }
+      ]
+    },
+    {
+      "group": "Грудь",
+      "items": [
+        {
+          "name": "Распатор усиленный",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Распатор Дуайена",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Кусачки Листона",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Ножницы Штилле",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Ранорасширитель Госсе",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Зажим Дюваля",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Зажим Люэра",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Диссектор",
+          "photo": null,
+          "needs_editor_review": true
+        }
+      ]
+    },
+    {
+      "group": "Брюшная полость",
+      "items": [
+        {
+          "name": "Шпатель Ревердена",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Ранорасширитель Микулича",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Печеночное зеркало",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Крючок-зеркало Фритша",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Зажим Микулича",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Жом Пайра",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Жомы Кохера",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Жомы Дуайена",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Зажим Люэра",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Троакар",
+          "photo": null,
+          "needs_editor_review": true
+        }
+      ]
+    },
+    {
+      "group": "Почка",
+      "items": [
+        {
+          "name": "Почечный крючок-зеркало",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Зажим Федорова",
+          "photo": null,
+          "needs_editor_review": true
+        },
+        {
+          "name": "Зажим Израэля",
+          "photo": null,
+          "needs_editor_review": true
+        }
+      ]
+    }
+  ],
+  "projections": [
+    {
+      "structure": "Подмышечные сосуды и плечевое сплетение",
+      "projection": "граница передней и средней третей ширины подмышечной ямки; по Пирогову — передний край роста волос"
+    },
+    {
+      "structure": "Плечевая артерия и срединный нерв",
+      "projection": "от нижней точки подмышечной проекции к середине локтевой ямки"
+    },
+    {
+      "structure": "Лучевая артерия",
+      "projection": "от середины локтевой ямки к шиловидному отростку лучевой кости"
+    },
+    {
+      "structure": "Локтевой нерв",
+      "projection": "к промежутку между медиальным надмыщелком и локтевым отростком; на предплечье — к гороховидной кости"
+    },
+    {
+      "structure": "Бедренная артерия и вена",
+      "projection": "от границы средней и медиальной третей паховой складки к заднему краю медиального мыщелка"
+    },
+    {
+      "structure": "Седалищный нерв",
+      "projection": "от середины между большим вертелом и седалищным бугром к середине подколенной ямки"
+    },
+    {
+      "structure": "Передняя большеберцовая артерия + глубокий малоберцовый нерв",
+      "projection": "к середине между лодыжками"
+    },
+    {
+      "structure": "Задняя большеберцовая артерия + большеберцовый нерв",
+      "projection": "от середины подколенной ямки к промежутку между медиальной лодыжкой и ахилловым сухожилием"
+    },
+    {
+      "structure": "Верхний сагиттальный синус",
+      "projection": "сагиттальная линия от основания носа к наружному затылочному бугру"
+    },
+    {
+      "structure": "Поперечный синус",
+      "projection": "от наружного затылочного бугра к верхнезадней части сосцевидного отростка"
+    },
+    {
+      "structure": "Сигмовидный синус",
+      "projection": "сосцевидный гребешок / задняя сторона треугольника Шипо"
+    },
+    {
+      "structure": "Лицевая артерия",
+      "projection": "от нижнего края нижней челюсти у переднего края жевательной мышцы к медиальному углу глаза"
+    },
+    {
+      "structure": "Проток околоушной железы",
+      "projection": "от наружного слухового прохода к точке между крылом носа и углом рта"
+    },
+    {
+      "structure": "Основной сосудисто-нервный пучок шеи",
+      "projection": "от области угла нижней челюсти/сосцевидного отростка к грудино-ключичному сочленению"
+    },
+    {
+      "structure": "Бифуркация общей сонной артерии",
+      "projection": "уровень верхнего края щитовидного хряща"
+    }
+  ]
+}

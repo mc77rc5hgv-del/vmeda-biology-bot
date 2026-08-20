@@ -54,6 +54,8 @@ EXEMPT_EXAMPLES = [
     "anatomy_bone_latin_start:skull:frontal", "anatomy_latin_all_start", "anatomy_latin_leaderboard",
     "sub_discount:7", "buy_sub_stars_discount:7", "buy_sub_rubles_discount:7",
     "admin_discount_promo_confirm", "admin_discount_promo_go",
+    "oh:menu", "oh:curriculum:0", "oh:lesson:02", "oh:facet:02:layers",
+    "oh:instruments", "oh:instr_group:0", "oh:projections", "oh:search_prompt",
 ]
 
 fail = False
