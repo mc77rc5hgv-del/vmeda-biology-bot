@@ -206,19 +206,37 @@ questions either, so they're rendered as a plain self-check list ("ответ и
 tap-to-reveal quiz — building reveal-answer infrastructure for a question bank with no verified answers would risk
 serving a wrong "official" answer nobody actually wrote.
 
-`instrument_groups` (10 groups, ~82 real kafedral instrument names — plain strings now, not `{"name": ...}` dicts)
-and `projections` (now 6 anatomical-area groups — верхняя/нижняя конечность, суставы, голова, лицо, шея — instead
-of one flat 15-entry list, 28 entries total) come from the same source's own reference sections (§65/§66) and are
-fully populated, same as v1. New in v2: `practical_stations` (2 groups — "Конечности, голова, шея" and "Грудь,
-живот, забрюшинное пространство, таз", 24 real station names total from the source's own §67), reachable from the
-root menu ("🎓 Практические станции") the same way instruments/projections are.
+`instrument_groups` (10 groups, ~93 real kafedral instrument names, precise official naming from the exam album's
+own manifest — up from v2's initial ~82-name text-only pass) and `projections` (6 anatomical-area groups —
+верхняя/нижняя конечность, суставы, голова, лицо, шея — instead of one flat 15-entry list, 28 entries total) come
+from the same source's own reference sections (§65/§66) and are fully populated, same as v1. New in v2:
+`practical_stations` (2 groups — "Конечности, голова, шея" and "Грудь, живот, забрюшинное пространство, таз", 24
+real station names total from the source's own §67), reachable from the root menu ("🎓 Практические станции") the
+same way instruments/projections are.
+
+**Instrument photos arrived as a separate, second real-photo pack** ("VMEDA Instruments Photo Pack", cropped from
+the same kafedral exam album, delivered in parts — only groups 1-5 photographed so far, 53 of ~93 positions;
+groups 6-10 are pending the pack's next part). Each instrument item is `{"name": str, "image": str}` — `image` is
+present only where a real photo exists; `handlers/operative_surgery.py`'s `oh_group_has_photos(group)` requires
+EVERY item in a group to have one before switching that group to photo mode — a group is never shown as a
+partially-filled album with unexplained gaps, it's all-or-nothing, same "honest gap" principle as everywhere else
+in this section. A photographed group (`send_oh_instrument_album`, `oh:instr_group:{idx}:{page}`) is sent as a
+native Telegram album exactly like Anatomy's `send_anatomy_album` (`OH_INSTR_ALBUM_PAGE_SIZE = 10` —
+`sendMediaGroup`'s own cap, a lone-item page falls back to `answer_photo`; captions are the instrument's real
+name) — including its own `file_id` cache (`OH_FILE_ID_CACHE`/`oh_instrument_file_id_cache.json` under
+`STATS_DIR`, same reasoning and shape as `ANATOMY_FILE_ID_CACHE`: skip re-uploading a photo Telegram has already
+seen). A not-yet-photographed group still renders as the plain text list `get_oh_instrument_group_text()` always
+supported. Images live under `images/operative_surgery/instruments/{01..10}/{NN}.png` — filenames are the
+position number, not the (Cyrillic, space-containing) name from the source album; the real name lives in the JSON
+`name` field. The group-picker keyboard (`get_oh_instruments_keyboard()`) prefixes a photographed group's button
+with 📷 so it's visible before tapping which groups already have real photos.
 
 Navigation is `oh:menu` → `oh:volumes` → `oh:volume:{id}:{page}` (paginated, `OH_TOPIC_PAGE_SIZE = 10` — volume
 III alone has 25 topics) → `oh:topic:{id}` (hub screen: intro + "📖 Полный материал"/"⚡ Быстро повторить"/
-optional "❓ Контрольные вопросы") → `oh:material:{id}:{page}` (one subtopic per page, prev/next). Instruments/
-projections/stations each follow the same two-level "group list → group contents" shape
-(`oh:instruments`→`oh:instr_group:{idx}`, `oh:projections`→`oh:proj_group:{idx}`, `oh:stations`→
-`oh:station_group:{idx}`).
+optional "❓ Контрольные вопросы") → `oh:material:{id}:{page}` (one subtopic per page, prev/next). Projections/
+stations follow the same two-level "group list → group contents" shape (`oh:projections`→`oh:proj_group:{idx}`,
+`oh:stations`→`oh:station_group:{idx}`); instruments follow it too but its `oh:instruments`→`oh:instr_group:{idx}:{page}`
+group-contents step branches on `oh_group_has_photos()` as described above.
 
 Search (`oh:search_prompt` → `OH_SEARCH_PENDING` (a plain `set[user_id]`, not a multi-step dict like
 `ADMIN_PENDING`/`ASSISTANT_PENDING`) → `handle_oh_search_query`) is defined directly in `telegram_bot.py`, NOT

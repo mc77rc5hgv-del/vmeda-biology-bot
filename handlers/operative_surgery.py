@@ -19,11 +19,21 @@
 Импортирует telegram_bot как tb (не `from telegram_bot import ...`) по той же причине, что и
 handlers/histology.py — сам telegram_bot.py импортирует этот модуль в самом конце файла, когда
 все нужные отсюда имена (OPERATIVE_SURGERY, DIVIDER, safe_edit_text, OH_SEARCH_PENDING,
-search_operative_surgery) уже определены в его модульном пространстве имён."""
+search_operative_surgery) уже определены в его модульном пространстве имён.
+
+Инструменты (instrument_groups) — единственная грань раздела с реальными фото: кафедральный
+экзаменационный альбом ВМедА пришёл вторым паком, по частям (см. images/operative_surgery/
+instruments/ и CLAUDE.md) — на момент этого коммита сфотографированы группы 1-5 (53 позиции),
+группы 6-10 (40 позиций) ещё текстом-заглушкой в ожидании следующей части пака. Каждый item —
+{"name": str, "image": str опционально}; `oh_group_has_photos()` решает по группе целиком
+(все позиции с фото или ни одной) — показывать ЧАСТИЧНО заполненный фотоальбом с необъяснённым
+пропуском было бы хуже, чем честный текстовый список для ещё не сфотографированной группы."""
+import json
 import math
+import os
 
 from aiogram import F, Router
-from aiogram.types import CallbackQuery, InlineKeyboardButton
+from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton, InputMediaPhoto
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 import telegram_bot as tb
@@ -31,6 +41,103 @@ import telegram_bot as tb
 router = Router()
 
 OH_TOPIC_PAGE_SIZE = 10
+OH_INSTR_ALBUM_PAGE_SIZE = 10  # sendMediaGroup hard cap — same reasoning as anatomy's ANATOMY_ALBUM_PAGE_SIZE
+
+OH_INSTRUMENTS_IMAGES_DIR = os.path.join(tb.IMAGES_DIR, "operative_surgery", "instruments")
+OH_FILE_ID_CACHE_PATH = os.path.join(tb.STATS_DIR, "oh_instrument_file_id_cache.json")
+
+
+def _load_oh_file_id_cache() -> dict:
+    try:
+        with open(OH_FILE_ID_CACHE_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+
+
+OH_FILE_ID_CACHE: dict[str, str] = _load_oh_file_id_cache()
+
+
+def _write_oh_file_id_cache(data: dict) -> None:
+    tmp_path = f"{OH_FILE_ID_CACHE_PATH}.tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp_path, OH_FILE_ID_CACHE_PATH)
+
+
+def save_oh_file_id_cache() -> None:
+    data = dict(OH_FILE_ID_CACHE)
+    future = tb._stats_executor.submit(_write_oh_file_id_cache, data)
+    future.add_done_callback(tb._log_stats_write_result)
+
+
+def _oh_instrument_image_media(item: dict):
+    cached = OH_FILE_ID_CACHE.get(item["image"])
+    if cached:
+        return cached
+    return FSInputFile(os.path.join(OH_INSTRUMENTS_IMAGES_DIR, item["image"]))
+
+
+def _cache_oh_instrument_file_id(item: dict, sent_message) -> bool:
+    """Mirrors handlers/anatomy.py's _cache_anatomy_file_id — safe no-op when sent_message has
+    no real Telegram .photo (e.g. test mocks)."""
+    key = item["image"]
+    if key in OH_FILE_ID_CACHE:
+        return False
+    photo_sizes = getattr(sent_message, "photo", None)
+    if not photo_sizes:
+        return False
+    OH_FILE_ID_CACHE[key] = photo_sizes[-1].file_id
+    return True
+
+
+def oh_group_has_photos(group: dict) -> bool:
+    return bool(group["items"]) and all("image" in item for item in group["items"])
+
+
+def oh_instrument_page_count(n_items: int) -> int:
+    return max(1, (n_items + OH_INSTR_ALBUM_PAGE_SIZE - 1) // OH_INSTR_ALBUM_PAGE_SIZE)
+
+
+def _oh_instrument_media(item: dict) -> InputMediaPhoto:
+    return InputMediaPhoto(media=_oh_instrument_image_media(item), caption=item["name"])
+
+
+async def send_oh_instrument_album(callback: CallbackQuery, group: dict, idx: int, page: int):
+    """Sends up to OH_INSTR_ALBUM_PAGE_SIZE instrument photos as one native Telegram album —
+    same shape as handlers/anatomy.py's send_anatomy_album (sendMediaGroup can't carry a
+    reply_markup, so prev/next/back follow as a separate small text message)."""
+    items = group["items"]
+    total_pages = oh_instrument_page_count(len(items))
+    start = page * OH_INSTR_ALBUM_PAGE_SIZE
+    chunk = items[start:start + OH_INSTR_ALBUM_PAGE_SIZE]
+    await callback.message.delete()
+    cache_changed = False
+    if len(chunk) == 1:
+        # sendMediaGroup requires 2-10 items — a lone photo must go through answer_photo instead.
+        item = chunk[0]
+        sent = await callback.message.answer_photo(_oh_instrument_image_media(item), caption=item["name"])
+        cache_changed = _cache_oh_instrument_file_id(item, sent)
+    else:
+        media = [_oh_instrument_media(item) for item in chunk]
+        sent_list = await callback.message.answer_media_group(media=media)
+        for item, sent in zip(chunk, sent_list or []):
+            if _cache_oh_instrument_file_id(item, sent):
+                cache_changed = True
+    if cache_changed:
+        save_oh_file_id_cache()
+    builder = InlineKeyboardBuilder()
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"oh:instr_group:{idx}:{page - 1}"))
+    if start + OH_INSTR_ALBUM_PAGE_SIZE < len(items):
+        nav.append(InlineKeyboardButton(text="➡️", callback_data=f"oh:instr_group:{idx}:{page + 1}"))
+    if nav:
+        builder.row(*nav)
+    builder.row(InlineKeyboardButton(text="🔙 К группам", callback_data="oh:instruments"))
+    await callback.message.answer(
+        f"🛠 <b>{group['group']}</b> ({page + 1}/{total_pages})", parse_mode="HTML", reply_markup=builder.as_markup()
+    )
 
 
 # ==================== data lookups ====================
@@ -227,17 +334,22 @@ def get_oh_topic_control_keyboard(topic_id: str):
 def get_oh_instruments_text() -> str:
     groups = tb.OPERATIVE_SURGERY["instrument_groups"]
     total = sum(len(g["items"]) for g in groups)
+    n_with_photos = sum(1 for g in groups if oh_group_has_photos(g))
     return (
         f"🛠 <b>Хирургические инструменты ВМедА</b>\n{tb.DIVIDER}\n\n"
         f"{total} инструментов по {len(groups)} группам — из кафедрального экзаменационного "
-        "альбома.\n\nВыбери группу:"
+        f"альбома. {n_with_photos} из {len(groups)} групп уже с реальными фото, остальные "
+        "добавляются по мере поступления материала.\n\nВыбери группу:"
     )
 
 
 def get_oh_instruments_keyboard():
     builder = InlineKeyboardBuilder()
     for idx, group in enumerate(tb.OPERATIVE_SURGERY["instrument_groups"]):
-        builder.button(text=f"{group['group']} ({len(group['items'])})", callback_data=f"oh:instr_group:{idx}")
+        photo_mark = "📷 " if oh_group_has_photos(group) else ""
+        builder.button(
+            text=f"{photo_mark}{group['group']} ({len(group['items'])})", callback_data=f"oh:instr_group:{idx}:0"
+        )
     builder.adjust(1)
     builder.row(InlineKeyboardButton(text="🔙 К разделу", callback_data="oh:menu"))
     return builder.as_markup()
@@ -245,7 +357,7 @@ def get_oh_instruments_keyboard():
 
 def get_oh_instrument_group_text(idx: int) -> str:
     group = tb.OPERATIVE_SURGERY["instrument_groups"][idx]
-    names = "\n".join(f"• {name}" for name in group["items"])
+    names = "\n".join(f"• {item['name']}" for item in group["items"])
     return f"🛠 <b>{group['group']}</b>\n{tb.DIVIDER}\n\n{names}"
 
 
@@ -433,10 +545,20 @@ async def cb_oh_instruments(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("oh:instr_group:"))
 async def cb_oh_instrument_group(callback: CallbackQuery):
-    idx = int(callback.data.split(":")[2])
+    parts = callback.data.split(":")
+    idx = int(parts[2])
     groups = tb.OPERATIVE_SURGERY["instrument_groups"]
     if not (0 <= idx < len(groups)):
         await callback.answer("Группа не найдена", show_alert=True)
+        return
+    group = groups[idx]
+    if oh_group_has_photos(group):
+        page = int(parts[3]) if len(parts) > 3 else 0
+        if not (0 <= page < oh_instrument_page_count(len(group["items"]))):
+            await callback.answer("Страница не найдена", show_alert=True)
+            return
+        await callback.answer()
+        await send_oh_instrument_album(callback, group, idx, page)
         return
     await callback.answer()
     await tb.safe_edit_text(

@@ -1588,10 +1588,10 @@ def search_operative_surgery(query: str, limit: int = 15):
         if q in t["title"].lower() or any(q in s["text"].lower() for s in t["subtopics"])
     ][:limit]
     instruments = [
-        (group["group"], name)
+        (group["group"], item["name"])
         for group in OPERATIVE_SURGERY["instrument_groups"]
-        for name in group["items"]
-        if q in name.lower()
+        for item in group["items"]
+        if q in item["name"].lower()
     ][:limit]
     projections = [
         (group["group"], item)

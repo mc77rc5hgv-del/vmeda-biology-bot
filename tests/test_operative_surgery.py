@@ -33,17 +33,36 @@ class FakeUser:
         self.id = uid
 
 
+class FakePhotoSize:
+    def __init__(self, file_id):
+        self.file_id = file_id
+
+
+class FakeSentPhoto:
+    def __init__(self, file_id="fake_file_id"):
+        self.photo = [FakePhotoSize(file_id)]
+
+
 class FakeMsg:
     def __init__(self):
         self.edits = []
+        self.deleted = False
+        self.photo_sends = []       # (media_or_path, caption)
+        self.media_group_sends = [] # list[media] per call
     async def edit_text(self, text, **kwargs):
         self.edits.append((text, kwargs.get("reply_markup")))
         return self
     async def delete(self):
-        pass
+        self.deleted = True
     async def answer(self, text, **kwargs):
         self.edits.append((text, kwargs.get("reply_markup")))
         return self
+    async def answer_photo(self, photo, **kwargs):
+        self.photo_sends.append((photo, kwargs.get("caption")))
+        return FakeSentPhoto()
+    async def answer_media_group(self, media, **kwargs):
+        self.media_group_sends.append(media)
+        return [FakeSentPhoto() for _ in media]
 
 
 class FakeCB:
@@ -233,7 +252,10 @@ async def main():
     assert cb_tctrl_missing._answers and cb_tctrl_missing._answers[0][1] is True
     print("8. topic-level control questions: real content where sourced, alert where absent: OK")
 
-    # ---- 9. instruments: group menu -> group contents (plain name strings now, not dicts) ----
+    # ---- 9. instruments: group menu -> group contents. Items are {"name", "image"?} dicts now —
+    # a group where EVERY item has a real photo (groups 1-5, from the kafedral exam album pack)
+    # renders as a native photo album; a group with no photos yet (6-10, pending the album's
+    # next part) falls back to the honest text list, same principle as before. ----
     cb_instr = FakeCB("oh:instruments", uid=non_admin)
     await tb.cb_oh_instruments(cb_instr)
     instr_text, instr_kb = cb_instr.message.edits[-1]
@@ -241,21 +263,64 @@ async def main():
     n_groups = len(data["instrument_groups"])
     instr_group_buttons = [d for d in kb_data(instr_kb) if d.startswith("oh:instr_group:")]
     assert len(instr_group_buttons) == n_groups
+    assert all(d.endswith(":0") for d in instr_group_buttons)
 
-    cb_group0 = FakeCB("oh:instr_group:0", uid=non_admin)
-    await tb.cb_oh_instrument_group(cb_group0)
-    group0_text = cb_group0.message.edits[-1][0]
-    check_html(group0_text)
-    first_group = data["instrument_groups"][0]
-    assert first_group["group"] in group0_text
-    for name in first_group["items"]:
-        assert name in group0_text
+    groups_with_photos = [g for g in data["instrument_groups"] if tb.operative_surgery_handlers.oh_group_has_photos(g)]
+    groups_without_photos = [g for g in data["instrument_groups"] if not tb.operative_surgery_handlers.oh_group_has_photos(g)]
+    assert groups_with_photos and groups_without_photos, "test assumes a mix of photographed/pending groups"
 
-    cb_group_bad = FakeCB(f"oh:instr_group:{n_groups}", uid=non_admin)
+    # 9a. a small photographed group (<=10 items) sends one media-group album + one nav message
+    photo_idx0 = data["instrument_groups"].index(groups_with_photos[0])
+    cb_group_photo = FakeCB(f"oh:instr_group:{photo_idx0}:0", uid=non_admin)
+    await tb.cb_oh_instrument_group(cb_group_photo)
+    assert cb_group_photo.message.deleted
+    assert len(cb_group_photo.message.media_group_sends) == 1
+    sent_media = cb_group_photo.message.media_group_sends[0]
+    assert len(sent_media) == len(groups_with_photos[0]["items"])
+    assert {m.caption for m in sent_media} == {item["name"] for item in groups_with_photos[0]["items"]}
+    nav_text, nav_kb = cb_group_photo.message.edits[-1]
+    check_html(nav_text)
+    assert "oh:instruments" in kb_data(nav_kb)
+
+    # 9b. a large photographed group (>10 items) paginates the album across two pages
+    big_photo_group = max(groups_with_photos, key=lambda g: len(g["items"]))
+    assert len(big_photo_group["items"]) > 10, "test assumes at least one photographed group needs pagination"
+    big_idx = data["instrument_groups"].index(big_photo_group)
+    cb_big_p0 = FakeCB(f"oh:instr_group:{big_idx}:0", uid=non_admin)
+    await tb.cb_oh_instrument_group(cb_big_p0)
+    assert len(cb_big_p0.message.media_group_sends[0]) == 10
+    p0_kb_data = kb_data(cb_big_p0.message.edits[-1][1])
+    assert f"oh:instr_group:{big_idx}:1" in p0_kb_data
+
+    cb_big_p1 = FakeCB(f"oh:instr_group:{big_idx}:1", uid=non_admin)
+    await tb.cb_oh_instrument_group(cb_big_p1)
+    assert len(cb_big_p1.message.media_group_sends[0]) == len(big_photo_group["items"]) - 10
+    p1_kb_data = kb_data(cb_big_p1.message.edits[-1][1])
+    assert not any(d == f"oh:instr_group:{big_idx}:2" for d in p1_kb_data)
+
+    # 9c. out-of-range page on a photographed group is rejected, not silently clamped
+    cb_bad_page = FakeCB(f"oh:instr_group:{photo_idx0}:5", uid=non_admin)
+    await tb.cb_oh_instrument_group(cb_bad_page)
+    assert not cb_bad_page.message.deleted
+    assert cb_bad_page._answers and cb_bad_page._answers[0][1] is True
+
+    # 9d. a group with no photos yet still falls back to the plain text list
+    text_idx = data["instrument_groups"].index(groups_without_photos[0])
+    cb_group_text = FakeCB(f"oh:instr_group:{text_idx}:0", uid=non_admin)
+    await tb.cb_oh_instrument_group(cb_group_text)
+    assert not cb_group_text.message.deleted
+    group_text = cb_group_text.message.edits[-1][0]
+    check_html(group_text)
+    assert groups_without_photos[0]["group"] in group_text
+    for item in groups_without_photos[0]["items"]:
+        assert item["name"] in group_text
+
+    # 9e. unknown group index is rejected with an alert, no crash
+    cb_group_bad = FakeCB(f"oh:instr_group:{n_groups}:0", uid=non_admin)
     await tb.cb_oh_instrument_group(cb_group_bad)
-    assert not cb_group_bad.message.edits
+    assert not cb_group_bad.message.edits and not cb_group_bad.message.deleted
     assert cb_group_bad._answers and cb_group_bad._answers[0][1] is True
-    print("9. instrument groups: menu, contents, out-of-range rejected: OK")
+    print("9. instrument groups: photo albums (paginated) + text fallback + out-of-range rejected: OK")
 
     # ---- 10. projections: now grouped (6 anatomical areas), not a flat list ----
     cb_proj = FakeCB("oh:projections", uid=non_admin)

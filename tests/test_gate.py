@@ -56,7 +56,7 @@ EXEMPT_EXAMPLES = [
     "admin_discount_promo_confirm", "admin_discount_promo_go",
     "oh:menu", "oh:volumes", "oh:volume:I:0", "oh:vcontrol:I", "oh:topic:01",
     "oh:material:01:0", "oh:quick:01", "oh:tcontrol:01",
-    "oh:instruments", "oh:instr_group:0", "oh:projections", "oh:proj_group:0",
+    "oh:instruments", "oh:instr_group:0:0", "oh:projections", "oh:proj_group:0",
     "oh:stations", "oh:station_group:0", "oh:search_prompt",
 ]
 
