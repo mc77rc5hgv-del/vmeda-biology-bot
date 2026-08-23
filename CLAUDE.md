@@ -206,35 +206,54 @@ questions either, so they're rendered as a plain self-check list ("ответ и
 tap-to-reveal quiz — building reveal-answer infrastructure for a question bank with no verified answers would risk
 serving a wrong "official" answer nobody actually wrote.
 
-`instrument_groups` (10 groups, ~93 real kafedral instrument names, precise official naming from the exam album's
-own manifest — up from v2's initial ~82-name text-only pass) and `projections` (6 anatomical-area groups —
-верхняя/нижняя конечность, суставы, голова, лицо, шея — instead of one flat 15-entry list, 28 entries total) come
-from the same source's own reference sections (§65/§66) and are fully populated, same as v1. New in v2:
-`practical_stations` (2 groups — "Конечности, голова, шея" and "Грудь, живот, забрюшинное пространство, таз", 24
-real station names total from the source's own §67), reachable from the root menu ("🎓 Практические станции") the
-same way instruments/projections are.
+`instrument_groups` (11 groups, 97 real kafedral instrument names — the list/naming/grouping is still exactly the
+exam album's own official structure) and `projections` (6 anatomical-area groups — верхняя/нижняя конечность,
+суставы, голова, лицо, шея — instead of one flat 15-entry list, 28 entries total) come from the same source's own
+reference sections (§65/§66) and are fully populated, same as v1. New in v2: `practical_stations` (2 groups —
+"Конечности, голова, шея" and "Грудь, живот, забрюшинное пространство, таз", 24 real station names total from the
+source's own §67), reachable from the root menu ("🎓 Практические станции") the same way instruments/projections
+are.
 
-**Instrument photos arrived as a separate real-photo pack** ("VMEDA Instruments Photo Pack", cropped from the same
-kafedral exam album, delivered in two parts — part 1: groups 1-5, part 2: groups 6-10). All 93 positions across
-all 10 groups now have real photos; both parts shipped the exact same 93-entry `manifest.json` (byte-identical —
-verified before either integration), so there was never a naming reconciliation to do between the parts, only a
-missing-files check. Each instrument item is `{"name": str, "image": str}`; `handlers/operative_surgery.py`'s
-`oh_group_has_photos(group)` requires EVERY item in a group to have `image` before switching that group to photo
-mode — a group is never shown as a partially-filled album with unexplained gaps, it's all-or-nothing, same
-"honest gap" principle as everywhere else in this section (a future 11th group or corrected position would fall
-back to `get_oh_instrument_group_text()`'s plain list automatically, not need a code change). A photographed group
-(`send_oh_instrument_album`, `oh:instr_group:{idx}:{page}`) is sent as a native Telegram album exactly like
-Anatomy's `send_anatomy_album` (`OH_INSTR_ALBUM_PAGE_SIZE = 10` — `sendMediaGroup`'s own cap, a lone-item page
-falls back to `answer_photo`; captions are the instrument's real name) — including its own `file_id` cache
-(`OH_FILE_ID_CACHE`/`oh_instrument_file_id_cache.json` under `STATS_DIR`, same reasoning and shape as
-`ANATOMY_FILE_ID_CACHE`: skip re-uploading a photo Telegram has already seen). Images live under
-`images/operative_surgery/instruments/{01..10}/{NN}.png` — filenames are the position number, not the (Cyrillic,
-space-containing) name from the source album; the real name lives in the JSON `name` field, and every
-`{group_folder}/{name}.png` → `image_path` mapping was asserted 1:1 against the manifest's own `name` field at
-copy time, never inferred from filename order alone. The group-picker keyboard (`get_oh_instruments_keyboard()`)
-prefixes a photographed group's button with 📷 (today: all 10). `docs/operative_surgery_instruments_inventory.md`
-is a generated (not hand-maintained) group→instrument→image-path listing for manual spot-checking — regenerate it
-from `operative_surgery.json` rather than hand-editing if the instrument data ever changes.
+**Instrument PHOTOS went through three deliveries and are, deliberately, NOT all from the kafedral album.** The
+first two photo packs (10 groups, 93 positions, real crops from the kafedral exam album, position-by-position
+mapped and verified against each pack's own `manifest.json`) were fully replaced by a third pack the user
+explicitly asked for after being warned about its provenance: that pack's own `README.txt` states 94 of its 97
+photos are generic product photos pulled from commercial listings (Yandex Market, uno-med.ru, cm-instrumente.ru —
+"a typical example of an instrument with this name", not the department's own physical copy); only 3 positions
+(a new group's two items plus one tracheostomy hook) are real crops from the reference album. The user was told
+this in plain terms — including the licensing/attribution risk of redistributing third-party commercial-site
+photos — and chose to proceed anyway, so this is a deliberate, informed tradeoff (full photographic coverage +
+one new instrument group the album packs never covered, at the cost of photo authenticity), not an oversight.
+Each item carries `image_source: "web"|"reference_album"` precisely so this provenance isn't lost — `image_source`
+is metadata only, not read by any handler logic (`oh_group_has_photos()` still keys off `"image" in item`, not
+the source), kept for future traceability if the department ever wants to swap specific positions back to real
+album crops. `get_oh_instruments_text()` carries an explicit disclaimer ("Фото — типовые образцы... могут немного
+отличаться от конкретного экземпляра на кафедре") for exactly this reason — the one place in this whole section
+where a screen text is honest about NOT being 1:1 with the department's own physical instrument.
+
+The new 11th group — "Инструменты для пластинчатых швов" (plate/lead-shot sutures, 4 items: an eye-instrument
+set, two real-album crops of the metal plates and wire/lead beads, and crampon forceps) — didn't exist in either
+of the first two packs; it's the only genuinely new instrument content this delivery added, the other 93
+positions are the same album-sourced list, just with new photos wired to them. Also note the third pack's own
+`group_number` field is a WITHIN-group index (1..N per group), unlike the WHOLE-album `id` (1..97) — don't
+confuse the two when reading `manifest.json` archives kept for reference.
+
+`handlers/operative_surgery.py`'s `oh_group_has_photos(group)` requires EVERY item in a group to have `image`
+before switching that group to photo mode — a group is never shown as a partially-filled album with unexplained
+gaps, it's all-or-nothing, same "honest gap" principle as everywhere else in this section (today: all 11 groups
+qualify). A photographed group (`send_oh_instrument_album`, `oh:instr_group:{idx}:{page}`) is sent as a native
+Telegram album exactly like Anatomy's `send_anatomy_album` (`OH_INSTR_ALBUM_PAGE_SIZE = 10` — `sendMediaGroup`'s
+own cap, a lone-item page falls back to `answer_photo`; captions are the instrument's real name) — including its
+own `file_id` cache (`OH_FILE_ID_CACHE`/`oh_instrument_file_id_cache.json` under `STATS_DIR`, same reasoning and
+shape as `ANATOMY_FILE_ID_CACHE`: skip re-uploading a photo Telegram has already seen). Images live under
+`images/operative_surgery/instruments/{01..11}/{NN}.{jpg|png}` — filenames are the position number, not the
+(Cyrillic, space-containing) name from the source album; the real name lives in the JSON `name` field, and every
+`{group_folder}/{file}` → `image` mapping was asserted 1:1 against the manifest's own `name` field (and its
+declared `sha256`) at copy time, never inferred from filename order alone. The group-picker keyboard
+(`get_oh_instruments_keyboard()`) prefixes a photographed group's button with 📷 (today: all 11).
+`docs/operative_surgery_instruments_inventory.md` is a generated (not hand-maintained) group→instrument→image-path
+listing for manual spot-checking — regenerate it from `operative_surgery.json` rather than hand-editing if the
+instrument data ever changes.
 
 Navigation is `oh:menu` → `oh:volumes` → `oh:volume:{id}:{page}` (paginated, `OH_TOPIC_PAGE_SIZE = 10` — volume
 III alone has 25 topics) → `oh:topic:{id}` (hub screen: intro + "📖 Полный материал"/"⚡ Быстро повторить"/

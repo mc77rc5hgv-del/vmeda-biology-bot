@@ -252,11 +252,13 @@ async def main():
     assert cb_tctrl_missing._answers and cb_tctrl_missing._answers[0][1] is True
     print("8. topic-level control questions: real content where sourced, alert where absent: OK")
 
-    # ---- 9. instruments: group menu -> group contents. Items are {"name", "image"?} dicts —
-    # a group where EVERY item has a real photo renders as a native photo album; a group with no
-    # photos yet would fall back to the honest text list (same "no partial album" principle as
-    # everywhere else in this section — tested against a synthetic group in 9e below, since as of
-    # the second photo-pack delivery ALL 10 real groups now have real photos, all 93 positions). ----
+    # ---- 9. instruments: group menu -> group contents. Items are {"name", "image", "image_source"}
+    # dicts — a group where EVERY item has a real photo renders as a native photo album; a group
+    # with no photos yet would fall back to the honest text list (same "no partial album"
+    # principle as everywhere else in this section — tested against a synthetic group in 9e below,
+    # since after the 3rd (full-replacement) photo pack, all 11 real groups have photos, all 97
+    # positions — though only 3 are genuine kafedral-album crops, the rest are declared
+    # image_source="web" and get_oh_instruments_text() says so explicitly). ----
     cb_instr = FakeCB("oh:instruments", uid=non_admin)
     await tb.cb_oh_instruments(cb_instr)
     instr_text, instr_kb = cb_instr.message.edits[-1]
@@ -266,12 +268,18 @@ async def main():
     assert len(instr_group_buttons) == n_groups
     assert all(d.endswith(":0") for d in instr_group_buttons)
 
-    # every real instrument group must have a photo for every item now (both photo packs applied)
+    # every real instrument group must have a photo for every item now (3rd pack fully replaced 1+2)
     for g in data["instrument_groups"]:
         assert tb.operative_surgery_handlers.oh_group_has_photos(g), g["group"]
     total_items = sum(len(g["items"]) for g in data["instrument_groups"])
-    assert total_items == 93, total_items
+    assert total_items == 97, total_items
+    assert n_groups == 11, n_groups
     assert f"{total_items} инструментов" in instr_text
+    # every item declares its photo provenance; only a few are genuine album crops
+    n_album = sum(1 for g in data["instrument_groups"] for it in g["items"] if it["image_source"] == "reference_album")
+    n_web = sum(1 for g in data["instrument_groups"] for it in g["items"] if it["image_source"] == "web")
+    assert n_album + n_web == total_items
+    assert 0 < n_album < total_items, "test assumes a mix of real-album and web-sourced photos"
 
     # 9a. a small photographed group (<=10 items) sends one media-group album + one nav message
     photo_idx0 = 0
@@ -333,7 +341,7 @@ async def main():
     assert not cb_group_bad.message.edits and not cb_group_bad.message.deleted
     assert cb_group_bad._answers and cb_group_bad._answers[0][1] is True
 
-    # 9g. cross-check: JSON's declared image path for every one of the 93 instruments actually
+    # 9g. cross-check: JSON's declared image path for every one of the 97 instruments actually
     # exists on disk and is unique (never two instruments sharing one photo)
     import os as _os
     seen_paths = {}
@@ -349,7 +357,7 @@ async def main():
     await tb.cb_oh_instrument_group(cb_group_bad)
     assert not cb_group_bad.message.edits and not cb_group_bad.message.deleted
     assert cb_group_bad._answers and cb_group_bad._answers[0][1] is True
-    print("9. instrument groups: all 93 positions photographed, albums paginated, paths verified unique+existing: OK")
+    print("9. instrument groups: all 97 positions photographed (3 real album crops, rest web-sourced typicals), albums paginated, paths verified unique+existing: OK")
 
     # ---- 10. projections: now grouped (6 anatomical areas), not a flat list ----
     cb_proj = FakeCB("oh:projections", uid=non_admin)

@@ -2257,27 +2257,33 @@
       "items": [
         {
           "name": "Скальпель брюшистый",
-          "image": "01/01.png"
+          "image": "01/01.jpg",
+          "image_source": "web"
         },
         {
           "name": "Скальпель остроконечный",
-          "image": "01/02.png"
+          "image": "01/02.jpg",
+          "image_source": "web"
         },
         {
           "name": "Ножницы тупоконечные Купера прямые",
-          "image": "01/03.png"
+          "image": "01/03.jpg",
+          "image_source": "web"
         },
         {
           "name": "Ножницы тупоконечные Купера изогнутые по плоскости",
-          "image": "01/04.png"
+          "image": "01/04.jpg",
+          "image_source": "web"
         },
         {
           "name": "Ножницы изогнутые по ребру Рихтера",
-          "image": "01/05.png"
+          "image": "01/05.jpg",
+          "image_source": "web"
         },
         {
           "name": "Ножницы для рассечения повязок Бергмана",
-          "image": "01/06.png"
+          "image": "01/06.jpg",
+          "image_source": "web"
         }
       ]
     },
@@ -2285,64 +2291,79 @@
       "group": "Вспомогательные инструменты",
       "items": [
         {
-          "name": "Бельевые зажимы Бакгауза",
-          "image": "02/01.png"
+          "name": "Бельевой зажим Бакгауза",
+          "image": "02/01.jpg",
+          "image_source": "web"
         },
         {
           "name": "Языкодержатель",
-          "image": "02/02.png"
+          "image": "02/02.jpg",
+          "image_source": "web"
         },
         {
           "name": "Корнцанг",
-          "image": "02/03.png"
+          "image": "02/03.jpg",
+          "image_source": "web"
         },
         {
           "name": "Пинцет анатомический",
-          "image": "02/04.png"
+          "image": "02/04.jpg",
+          "image_source": "web"
         },
         {
           "name": "Пинцет хирургический",
-          "image": "02/05.png"
+          "image": "02/05.jpg",
+          "image_source": "web"
         },
         {
           "name": "Пинцет лапчатый",
-          "image": "02/06.png"
+          "image": "02/06.jpg",
+          "image_source": "web"
         },
         {
           "name": "Зонд желобоватый",
-          "image": "02/07.png"
+          "image": "02/07.jpg",
+          "image_source": "web"
         },
         {
           "name": "Зонд пуговчатый",
-          "image": "02/08.png"
+          "image": "02/08.jpg",
+          "image_source": "web"
         },
         {
           "name": "Зонд Кохера",
-          "image": "02/09.png"
+          "image": "02/09.jpg",
+          "image_source": "web"
         },
         {
           "name": "Крючок четырехзубый тупой",
-          "image": "02/10.png"
+          "image": "02/10.jpg",
+          "image_source": "web"
         },
         {
           "name": "Крючок пластинчатый Фарабефа",
-          "image": "02/11.png"
+          "image": "02/11.jpg",
+          "image_source": "web"
         },
         {
           "name": "Лопаточка Буяльского",
-          "image": "02/12.png"
+          "image": "02/12.jpg",
+          "image_source": "web"
         },
         {
           "name": "Игла лигатурная Дешана правая",
-          "image": "02/13.png"
+          "image": "02/13.jpg",
+          "image_source": "web"
         },
         {
           "name": "Игла лигатурная Дешана левая",
-          "image": "02/14.png"
+          "image": "02/14.jpg",
+          "image_source": "web"
         },
         {
           "name": "Игла лигатурная Купера",
-          "image": "02/15.png"
+          "image": "02/15.jpg",
+          "image_source": "web"
         }
       ]
     },
@@ -2351,31 +2372,38 @@
       "items": [
         {
           "name": "Иглодержатель Матье",
-          "image": "03/01.png"
+          "image": "03/01.jpg",
+          "image_source": "web"
         },
         {
           "name": "Иглодержатель Троянова",
-          "image": "03/02.png"
+          "image": "03/02.jpg",
+          "image_source": "web"
         },
         {
           "name": "Иглодержатель Гегара",
-          "image": "03/03.png"
+          "image": "03/03.jpg",
+          "image_source": "web"
         },
         {
-          "name": "Иглы хирургические (режущая, колющая, прямая, атравматическая)",
-          "image": "03/04.png"
+          "name": "Иглы хирургические режущая колющая прямая атравматическая",
+          "image": "03/04.jpg",
+          "image_source": "web"
         },
         {
           "name": "Шелк хирургический",
-          "image": "03/05.png"
+          "image": "03/05.jpg",
+          "image_source": "web"
         },
         {
           "name": "Кетгут в ампуле",
-          "image": "03/06.png"
+          "image": "03/06.jpg",
+          "image_source": "web"
         },
         {
-          "name": "Викрил на атравматической игле",
-          "image": "03/07.png"
+          "name": "Vicryl на атравматической игле",
+          "image": "03/07.jpg",
+          "image_source": "web"
         }
       ]
     },
@@ -2384,31 +2412,38 @@
       "items": [
         {
           "name": "Зажим кровоостанавливающий Пеана",
-          "image": "04/01.png"
+          "image": "04/01.jpg",
+          "image_source": "web"
         },
         {
           "name": "Зажим кровоостанавливающий Бильрота",
-          "image": "04/02.png"
+          "image": "04/02.jpg",
+          "image_source": "web"
         },
         {
           "name": "Зажим кровоостанавливающий Кохера",
-          "image": "04/03.png"
+          "image": "04/03.jpg",
+          "image_source": "web"
         },
         {
-          "name": "Зажим кровоостанавливающий типа Москит Холстеда изогнутый",
-          "image": "04/04.png"
+          "name": "Зажим москит Холстеда изогнутый",
+          "image": "04/04.jpg",
+          "image_source": "web"
         },
         {
-          "name": "Зажим кровоостанавливающий типа Москит Холстеда прямой",
-          "image": "04/05.png"
+          "name": "Зажим москит Холстеда прямой",
+          "image": "04/05.jpg",
+          "image_source": "web"
         },
         {
           "name": "Зажим кровоостанавливающий Адсона",
-          "image": "04/06.png"
+          "image": "04/06.jpg",
+          "image_source": "web"
         },
         {
           "name": "Зажим сосудистый Гепфнера",
-          "image": "04/07.png"
+          "image": "04/07.jpg",
+          "image_source": "web"
         }
       ]
     },
@@ -2417,75 +2452,93 @@
       "items": [
         {
           "name": "Нож ампутационный",
-          "image": "05/01.png"
+          "image": "05/01.jpg",
+          "image_source": "web"
         },
         {
           "name": "Нож резекционный Бергмана",
-          "image": "05/02.png"
+          "image": "05/02.jpg",
+          "image_source": "web"
         },
         {
           "name": "Щипцы костные фиксационные Лангенбека",
-          "image": "05/03.png"
+          "image": "05/03.jpg",
+          "image_source": "web"
         },
         {
           "name": "Щипцы костные фиксационные Оллье",
-          "image": "05/04.png"
+          "image": "05/04.jpg",
+          "image_source": "web"
         },
         {
           "name": "Щипцы костные фиксационные Фарабефа",
-          "image": "05/05.png"
+          "image": "05/05.jpg",
+          "image_source": "web"
         },
         {
           "name": "Молоток хирургический",
-          "image": "05/06.png"
+          "image": "05/06.jpg",
+          "image_source": "web"
         },
         {
           "name": "Долото желобоватое",
-          "image": "05/07.png"
+          "image": "05/07.jpg",
+          "image_source": "web"
         },
         {
           "name": "Остеотом Штилле",
-          "image": "05/08.png"
+          "image": "05/08.jpg",
+          "image_source": "web"
         },
         {
           "name": "Ретрактор ампутационный",
-          "image": "05/09.png"
+          "image": "05/09.jpg",
+          "image_source": "web"
         },
         {
-          "name": "Щипцы костные с двойной передачей Люера",
-          "image": "05/10.png"
+          "name": "Кусачки костные с двойной передачей Люэра",
+          "image": "05/10.jpg",
+          "image_source": "web"
         },
         {
-          "name": "Щипцы костные Люера",
-          "image": "05/11.png"
+          "name": "Кусачки костные Люэра",
+          "image": "05/11.jpg",
+          "image_source": "web"
         },
         {
           "name": "Щипцы секвестральные",
-          "image": "05/12.png"
+          "image": "05/12.jpg",
+          "image_source": "web"
         },
         {
           "name": "Распатор прямой Фарабефа",
-          "image": "05/13.png"
+          "image": "05/13.jpg",
+          "image_source": "web"
         },
         {
           "name": "Распатор изогнутый Фарабефа",
-          "image": "05/14.png"
+          "image": "05/14.jpg",
+          "image_source": "web"
         },
         {
           "name": "Ложка костная острая Брунса",
-          "image": "05/15.png"
+          "image": "05/15.jpg",
+          "image_source": "web"
         },
         {
           "name": "Ложка костная острая Фолькмана",
-          "image": "05/16.png"
+          "image": "05/16.jpg",
+          "image_source": "web"
         },
         {
-          "name": "Пила листовая",
-          "image": "05/17.png"
+          "name": "Пила листовая хирургическая",
+          "image": "05/17.jpg",
+          "image_source": "web"
         },
         {
-          "name": "Пила дуговая",
-          "image": "05/18.png"
+          "name": "Пила дуговая хирургическая",
+          "image": "05/18.jpg",
+          "image_source": "web"
         }
       ]
     },
@@ -2494,51 +2547,88 @@
       "items": [
         {
           "name": "Коловорот Хадсона с набором фрез",
-          "image": "06/01.png"
+          "image": "06/01.jpg",
+          "image_source": "web"
         },
         {
           "name": "Универсальная фреза Гребенюка",
-          "image": "06/02.png"
+          "image": "06/02.jpg",
+          "image_source": "web"
         },
         {
-          "name": "Проволочная пила Джигли и ручки к ней",
-          "image": "06/03.png"
+          "name": "Проволочная пила Джигли и ручки",
+          "image": "06/03.jpg",
+          "image_source": "web"
         },
         {
-          "name": "Проводник для проволочной пилы Поленова",
-          "image": "06/04.png"
+          "name": "Проводник для пилы Поленова",
+          "image": "06/04.jpg",
+          "image_source": "web"
         },
         {
-          "name": "Щипцы костные Дальгрена",
-          "image": "06/05.png"
+          "name": "Кусачки костные Дальгрена",
+          "image": "06/05.jpg",
+          "image_source": "web"
         },
         {
-          "name": "Щипцы костные Егорова",
-          "image": "06/06.png"
+          "name": "Кусачки костные Егорова",
+          "image": "06/06.jpg",
+          "image_source": "web"
         },
         {
-          "name": "Щипцы костные Янсена",
-          "image": "06/07.png"
+          "name": "Кусачки костные Янсена",
+          "image": "06/07.jpg",
+          "image_source": "web"
         },
         {
           "name": "Ножницы для вскрытия твердой мозговой оболочки",
-          "image": "06/08.png"
+          "image": "06/08.jpg",
+          "image_source": "web"
         },
         {
           "name": "Зажим для твердой мозговой оболочки Федорова",
-          "image": "06/09.png"
+          "image": "06/09.jpg",
+          "image_source": "web"
         },
         {
           "name": "Долото угловое Дьяконова",
-          "image": "06/10.png"
+          "image": "06/10.jpg",
+          "image_source": "web"
         },
         {
           "name": "Стамеска желобоватая Воячека",
-          "image": "06/11.png"
+          "image": "06/11.jpg",
+          "image_source": "web"
         },
         {
           "name": "Стамеска плоская Воячека",
-          "image": "06/12.png"
+          "image": "06/12.jpg",
+          "image_source": "web"
+        }
+      ]
+    },
+    {
+      "group": "Инструменты для пластинчатых швов",
+      "items": [
+        {
+          "name": "Комплект глазных хирургических инструментов",
+          "image": "07/01.jpg",
+          "image_source": "web"
+        },
+        {
+          "name": "Металлические пластинки для пластинчатых швов",
+          "image": "07/02.jpg",
+          "image_source": "reference_album"
+        },
+        {
+          "name": "Металлическая проволока и свинцовые бусины для пластинчатых швов",
+          "image": "07/03.jpg",
+          "image_source": "reference_album"
+        },
+        {
+          "name": "Крампонные щипцы",
+          "image": "07/04.jpg",
+          "image_source": "web"
         }
       ]
     },
@@ -2546,24 +2636,29 @@
       "group": "Инструменты для трахеостомии",
       "items": [
         {
-          "name": "Крючок однозубый острый для удержания трахеи №1",
-          "image": "07/01.png"
+          "name": "Крючок однозубый острый для удержания трахеи номер 1",
+          "image": "08/01.jpg",
+          "image_source": "web"
         },
         {
-          "name": "Крючок однозубый острый для удержания трахеи №2",
-          "image": "07/02.png"
+          "name": "Крючок однозубый острый для удержания трахеи номер 2",
+          "image": "08/02.jpg",
+          "image_source": "web"
         },
         {
-          "name": "Крючок S-образный Люэра",
-          "image": "07/03.png"
+          "name": "Крючок S-образный Люэра для трахеостомии",
+          "image": "08/03.jpg",
+          "image_source": "reference_album"
         },
         {
           "name": "Расширитель трахеотомический Труссо",
-          "image": "07/04.png"
+          "image": "08/04.jpg",
+          "image_source": "web"
         },
         {
           "name": "Канюля трахеостомическая Люэра",
-          "image": "07/05.png"
+          "image": "08/05.jpg",
+          "image_source": "web"
         }
       ]
     },
@@ -2572,35 +2667,43 @@
       "items": [
         {
           "name": "Распатор изогнутый под углом усиленный",
-          "image": "08/01.png"
+          "image": "09/01.jpg",
+          "image_source": "web"
         },
         {
           "name": "Распатор реберный Дуайена",
-          "image": "08/02.png"
+          "image": "09/02.jpg",
+          "image_source": "web"
         },
         {
-          "name": "Щипцы костные Листона",
-          "image": "08/03.png"
+          "name": "Кусачки костные Листона",
+          "image": "09/03.jpg",
+          "image_source": "web"
         },
         {
           "name": "Ножницы для пересечения ребер Штилле",
-          "image": "08/04.png"
+          "image": "09/04.jpg",
+          "image_source": "web"
         },
         {
           "name": "Ранорасширитель реечный Госсе",
-          "image": "08/05.png"
+          "image": "09/05.jpg",
+          "image_source": "web"
         },
         {
           "name": "Зажим окончатый Дюваля",
-          "image": "08/06.png"
+          "image": "09/06.jpg",
+          "image_source": "web"
         },
         {
           "name": "Зажим окончатый геморроидальный Люэра",
-          "image": "08/07.png"
+          "image": "09/07.jpg",
+          "image_source": "web"
         },
         {
-          "name": "Диссектор",
-          "image": "08/08.png"
+          "name": "Диссектор хирургический",
+          "image": "09/08.jpg",
+          "image_source": "web"
         }
       ]
     },
@@ -2609,51 +2712,63 @@
       "items": [
         {
           "name": "Шпатель Ревердена",
-          "image": "09/01.png"
+          "image": "10/01.jpg",
+          "image_source": "web"
         },
         {
           "name": "Ранорасширитель кремальерный Микулича",
-          "image": "09/02.png"
+          "image": "10/02.jpg",
+          "image_source": "web"
         },
         {
-          "name": "Зеркало печеночное",
-          "image": "09/03.png"
+          "name": "Зеркало печеночное хирургическое",
+          "image": "10/03.jpg",
+          "image_source": "web"
         },
         {
-          "name": "Крючок зеркало Фритша",
-          "image": "09/04.png"
+          "name": "Крючок-зеркало Фритша",
+          "image": "10/04.jpg",
+          "image_source": "web"
         },
         {
           "name": "Зажим Микулича",
-          "image": "09/05.png"
+          "image": "10/05.jpg",
+          "image_source": "web"
         },
         {
           "name": "Жом раздавливающий Пайра",
-          "image": "09/06.png"
+          "image": "10/06.jpg",
+          "image_source": "web"
         },
         {
           "name": "Жом эластический кишечный Кохера изогнутый",
-          "image": "09/07.png"
+          "image": "10/07.jpg",
+          "image_source": "web"
         },
         {
           "name": "Жом эластический кишечный Кохера прямой",
-          "image": "09/08.png"
+          "image": "10/08.jpg",
+          "image_source": "web"
         },
         {
           "name": "Жом эластический кишечный Дуайена изогнутый",
-          "image": "09/09.png"
+          "image": "10/09.jpg",
+          "image_source": "web"
         },
         {
           "name": "Жом эластический кишечный Дуайена прямой",
-          "image": "09/10.png"
+          "image": "10/10.jpg",
+          "image_source": "web"
         },
         {
           "name": "Зажим окончатый геморроидальный Люэра",
-          "image": "09/11.png"
+          "image": "10/11.jpg",
+          "image_source": "web"
         },
         {
-          "name": "Троакар",
-          "image": "09/12.png"
+          "name": "Троакар хирургический",
+          "image": "10/12.jpg",
+          "image_source": "web"
         }
       ]
     },
@@ -2661,16 +2776,19 @@
       "group": "Инструменты для операций на почке",
       "items": [
         {
-          "name": "Крючок зеркало почечный",
-          "image": "10/01.png"
+          "name": "Крючок-зеркало почечный",
+          "image": "11/01.jpg",
+          "image_source": "web"
         },
         {
           "name": "Зажим для почечной ножки Федорова",
-          "image": "10/02.png"
+          "image": "11/02.jpg",
+          "image_source": "web"
         },
         {
           "name": "Зажим для почечной ножки Израэля",
-          "image": "10/03.png"
+          "image": "11/03.jpg",
+          "image_source": "web"
         }
       ]
     }
