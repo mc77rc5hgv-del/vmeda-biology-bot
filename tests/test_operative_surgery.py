@@ -294,6 +294,10 @@ async def main():
     nav_text, nav_kb = cb_group_photo.message.edits[-1]
     check_html(nav_text)
     assert "oh:instruments" in kb_data(nav_kb)
+    # the nav message also lists every name in this page in the same order the photos were sent —
+    # so the student can match photo position -> name without relying on per-photo captions alone
+    for i, item in enumerate(group0["items"], start=1):
+        assert f"{i}. {item['name']}" in nav_text
 
     # 9b. a large photographed group (>10 items) paginates the album across two pages
     big_photo_group = max(data["instrument_groups"], key=lambda g: len(g["items"]))
@@ -302,14 +306,20 @@ async def main():
     cb_big_p0 = FakeCB(f"oh:instr_group:{big_idx}:0", uid=non_admin)
     await tb.cb_oh_instrument_group(cb_big_p0)
     assert len(cb_big_p0.message.media_group_sends[0]) == 10
-    p0_kb_data = kb_data(cb_big_p0.message.edits[-1][1])
+    p0_text, p0_kb = cb_big_p0.message.edits[-1]
+    p0_kb_data = kb_data(p0_kb)
     assert f"oh:instr_group:{big_idx}:1" in p0_kb_data
+    for i, item in enumerate(big_photo_group["items"][:10], start=1):
+        assert f"{i}. {item['name']}" in p0_text
 
     cb_big_p1 = FakeCB(f"oh:instr_group:{big_idx}:1", uid=non_admin)
     await tb.cb_oh_instrument_group(cb_big_p1)
     assert len(cb_big_p1.message.media_group_sends[0]) == len(big_photo_group["items"]) - 10
-    p1_kb_data = kb_data(cb_big_p1.message.edits[-1][1])
+    p1_text, p1_kb = cb_big_p1.message.edits[-1]
+    p1_kb_data = kb_data(p1_kb)
     assert not any(d == f"oh:instr_group:{big_idx}:2" for d in p1_kb_data)
+    for i, item in enumerate(big_photo_group["items"][10:], start=1):
+        assert f"{i}. {item['name']}" in p1_text
 
     # 9c. out-of-range page on a photographed group is rejected, not silently clamped
     cb_bad_page = FakeCB(f"oh:instr_group:{photo_idx0}:5", uid=non_admin)

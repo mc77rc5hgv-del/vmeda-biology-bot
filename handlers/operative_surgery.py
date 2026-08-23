@@ -139,8 +139,11 @@ async def send_oh_instrument_album(callback: CallbackQuery, group: dict, idx: in
     if nav:
         builder.row(*nav)
     builder.row(InlineKeyboardButton(text="🔙 К группам", callback_data="oh:instruments"))
+    names = "\n".join(f"{i}. {item['name']}" for i, item in enumerate(chunk, start=1))
     await callback.message.answer(
-        f"🛠 <b>{group['group']}</b> ({page + 1}/{total_pages})", parse_mode="HTML", reply_markup=builder.as_markup()
+        f"🛠 <b>{group['group']}</b> ({page + 1}/{total_pages})\n\n"
+        f"Фото выше идут в этом порядке:\n{names}",
+        parse_mode="HTML", reply_markup=builder.as_markup()
     )
 
 
