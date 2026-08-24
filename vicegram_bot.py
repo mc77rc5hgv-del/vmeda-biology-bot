@@ -1245,18 +1245,41 @@ async def edit_dm_screen(
     """Переключает "экран" онбординга на новый текст/фото через edit_media
     (так можно менять и подпись, и саму картинку за один вызов). Если
     предыдущее сообщение почему-то было текстовым (старые чаты до
-    добавления фото) — просто пересоздаёт сообщение с фото."""
+    добавления фото) — просто пересоздаёт сообщение с фото.
+
+    Раньше ловился только TelegramBadRequest, и если падало по любой другой
+    причине (сетевая ошибка, что-то ещё неучтённое) — исключение улетало
+    выше, глобальный обработчик его молча логировал, а пользователь просто
+    не видел никакого экрана вообще (жаловались именно на это: "нажимаю —
+    и всё пропадает"). Теперь при любом сбое пробуем всё более простые
+    варианты подряд, вплоть до обычного текста без фото и картинки."""
     from aiogram.types import InputMediaPhoto
 
     try:
         media = InputMediaPhoto(media=FSInputFile(photo_path), caption=caption, parse_mode="HTML")
         await callback.message.edit_media(media=media, reply_markup=reply_markup)
-    except TelegramBadRequest:
-        try:
-            await callback.message.delete()
-        except TelegramBadRequest:
-            pass
+        return
+    except Exception:
+        logger.exception("edit_dm_screen: не удалось edit_media, пробую пересоздать")
+
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
+    try:
         await send_dm_screen(callback.message, caption, reply_markup, photo_path)
+        return
+    except Exception:
+        logger.exception("edit_dm_screen: не удалось переслать экран заново фото+подписью")
+
+    try:
+        await bot.send_message(callback.from_user.id, caption, parse_mode="HTML", reply_markup=reply_markup)
+    except Exception:
+        logger.exception("edit_dm_screen: не удалось показать экран даже обычным текстом")
+        try:
+            await callback.answer("⚠️ Не получилось открыть экран, попробуй ещё раз", show_alert=True)
+        except Exception:
+            pass
 
 
 def build_setup_instructions(username: str) -> str:
@@ -2438,7 +2461,16 @@ async def process_pending_note_input(message: Message, pending: dict) -> bool:
         PENDING_NOTE_INPUT.pop(owner_id, None)
         await message.answer(f"✅ Заметка «{html.escape(trigger)}» сохранена.", parse_mode="HTML")
         notes = list_active_notes(owner_id)
-        await send_dm_screen(message, build_notes_text(notes), get_notes_keyboard(notes))
+        try:
+            await send_dm_screen(message, build_notes_text(notes), get_notes_keyboard(notes))
+        except Exception:
+            # заметка уже сохранена (см. выше) — если не получилось только
+            # перерисовать список, не теряем это молча, шлём хоть текстом
+            logger.exception("Не удалось показать обновлённый список заметок после добавления")
+            try:
+                await message.answer(build_notes_text(notes), parse_mode="HTML", reply_markup=get_notes_keyboard(notes))
+            except Exception:
+                logger.exception("Не удалось показать список заметок даже обычным текстом")
         return True
 
     return False
