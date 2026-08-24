@@ -297,12 +297,15 @@ async def main():
     assert all_numbers == set(range(1, 64)) - {36, 38}
     print("full official perechen (items 1-63, minus no-slide 36/38) fully covered: OK")
 
-    # 10. Main menu button: always visible, labeled per access level while HISTOLOGY_PUBLIC=False
-    admin_menu = tb.get_main_menu(user_id=ADMIN_ID)
-    assert "🔬 Гистология (админ)" in kb_texts(admin_menu)
-    non_admin_menu = tb.get_main_menu(user_id=non_admin)
-    assert "🔬 Гистология (рефералы/подписка)" in kb_texts(non_admin_menu)
-    print("main menu gating: OK")
+    # 10. Course-menu button (Histology appears in both 1st and 2nd course submenus): always
+    # visible, labeled per access level while HISTOLOGY_PUBLIC=False
+    assert tb._histology_menu_label(ADMIN_ID) == "🔬 Гистология (админ)"
+    assert tb._histology_menu_label(non_admin) == "🔬 Гистология (рефералы/подписка)"
+    admin_course1 = tb.get_course_menu_keyboard(1, user_id=ADMIN_ID)
+    assert "🔬 Гистология (админ)" in kb_texts(admin_course1)
+    non_admin_course2 = tb.get_course_menu_keyboard(2, user_id=non_admin)
+    assert "🔬 Гистология (рефералы/подписка)" in kb_texts(non_admin_course2)
+    print("course menu gating: OK")
 
     # 11. is_gated_callback exempts histology (should behave like anatomy: never gated)
     assert not tb.is_gated_callback("histology_menu")

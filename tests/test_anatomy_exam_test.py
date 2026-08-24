@@ -85,12 +85,13 @@ async def main():
     assert "anatomy_menu" in data and "anatomy_exam_menu" in data and "back_to_main" in data
     print("anatomy_root renders the course/exam split: OK")
 
-    # 2. main-menu and admin-announcement entry points now point at anatomy_root, not anatomy_menu
-    main_menu_data = kb_data(tb.get_main_menu(user_id=NON_ADMIN))
-    assert "anatomy_root" in main_menu_data and "anatomy_menu" not in main_menu_data
+    # 2. course-menu (reached from the main menu's "1️⃣ Первый курс"/"2️⃣ Второй курс") and
+    # admin-announcement entry points both point at anatomy_root, not anatomy_menu
+    course1_data = kb_data(tb.get_course_menu_keyboard(1, user_id=NON_ADMIN))
+    assert "anatomy_root" in course1_data and "anatomy_menu" not in course1_data
     ann_data = kb_data(tb.get_anatomy_announcement_keyboard())
     assert "anatomy_root" in ann_data
-    print("main menu + admin announcement point at anatomy_root: OK")
+    print("course menu + admin announcement point at anatomy_root: OK")
 
     # 3. anatomy_menu (ВЕСЬ КУРС АНАТОМИИ) still renders the module list, now one level
     # deeper — its own back button returns to anatomy_root, not back_to_main

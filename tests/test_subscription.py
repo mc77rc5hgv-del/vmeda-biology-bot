@@ -961,22 +961,20 @@ async def main():
     try:
         menu_no_sub = tb.get_main_menu(user_id=non_admin)
         assert "💎 Подписка без рефералов" in kb_texts(menu_no_sub)
-        assert "🔥🦴 Анатомия" in kb_texts(menu_no_sub)
-        assert "🔬 Гистология (рефералы/подписка)" in kb_texts(menu_no_sub)
+        assert tb._anatomy_menu_label(non_admin) == "🔥🦴 Анатомия"
+        assert tb._histology_menu_label(non_admin) == "🔬 Гистология (рефералы/подписка)"
 
         tb.grant_subscription(non_admin, 21, "stars", 129)  # no histology, no anatomy
         menu_tier21 = tb.get_main_menu(user_id=non_admin)
         tier21_texts = kb_texts(menu_tier21)
         assert "💎 Моя подписка" in tier21_texts
-        assert "🔬 Гистология (рефералы/подписка)" in tier21_texts, "tier 21 has no histology"
-        assert "🔥🦴 Анатомия" in tier21_texts, "tier 21 has no anatomy — button stays plain (not the 💎 variant)"
+        assert tb._histology_menu_label(non_admin) == "🔬 Гистология (рефералы/подписка)", "tier 21 has no histology"
+        assert tb._anatomy_menu_label(non_admin) == "🔥🦴 Анатомия", "tier 21 has no anatomy — button stays plain (not the 💎 variant)"
         tb.stats["subscriptions"].pop(str(non_admin), None)
 
         tb.grant_subscription(non_admin, 24, "stars", 599)  # anatomy + histology yes (Зимняя сессия)
-        menu_tier24 = tb.get_main_menu(user_id=non_admin)
-        tier24_texts = kb_texts(menu_tier24)
-        assert "🔥🦴 Анатомия 💎" in tier24_texts
-        assert "🔬 Гистология 💎" in tier24_texts
+        assert tb._anatomy_menu_label(non_admin) == "🔥🦴 Анатомия 💎"
+        assert tb._histology_menu_label(non_admin) == "🔬 Гистология 💎"
         tb.stats["subscriptions"].pop(str(non_admin), None)
     finally:
         tb.anatomy_handlers.ANATOMY_MAINTENANCE_MODE = orig_maintenance_mode

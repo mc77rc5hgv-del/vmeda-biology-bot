@@ -63,13 +63,16 @@ async def main():
     assert "anatomy_menu" in data_a and "anatomy_exam_menu" in data_a
     print("2. maintenance ON still lets admin in: OK")
 
-    # ---- 3. main menu label reflects maintenance for non-admin, not for admin ----
-    menu_non_admin = tb.get_main_menu(user_id=NON_ADMIN)
-    assert any("техобслуживание" in t for t in kb_texts(menu_non_admin))
-    menu_admin = tb.get_main_menu(user_id=ADMIN_ID)
-    assert any("(админ)" in t for t in kb_texts(menu_admin))
-    assert not any("техобслуживание" in t for t in kb_texts(menu_admin))
-    print("3. main menu label: non-admin sees maintenance, admin sees normal (админ) label: OK")
+    # ---- 3. course-menu (1st and 2nd course both carry Anatomy) reflects maintenance for
+    # non-admin, not for admin ----
+    assert "техобслуживание" in tb._anatomy_menu_label(NON_ADMIN)
+    assert "(админ)" in tb._anatomy_menu_label(ADMIN_ID)
+    assert "техобслуживание" not in tb._anatomy_menu_label(ADMIN_ID)
+    course1_non_admin = tb.get_course_menu_keyboard(1, user_id=NON_ADMIN)
+    assert any("техобслуживание" in t for t in kb_texts(course1_non_admin))
+    course2_admin = tb.get_course_menu_keyboard(2, user_id=ADMIN_ID)
+    assert any("(админ)" in t for t in kb_texts(course2_admin))
+    print("3. course menu label: non-admin sees maintenance, admin sees normal (админ) label: OK")
 
     # ---- 4. maintenance OFF: behaves exactly as before for non-admin too ----
     tb.anatomy_handlers.ANATOMY_MAINTENANCE_MODE = False
@@ -78,8 +81,7 @@ async def main():
     text2, kb2 = cb2.message.edits[-1]
     data2 = kb_data(kb2)
     assert "anatomy_menu" in data2 and "anatomy_exam_menu" in data2
-    menu_non_admin_off = tb.get_main_menu(user_id=NON_ADMIN)
-    assert not any("техобслуживание" in t for t in kb_texts(menu_non_admin_off))
+    assert "техобслуживание" not in tb._anatomy_menu_label(NON_ADMIN)
     print("4. maintenance OFF restores normal behavior: OK")
 
     tb.anatomy_handlers.ANATOMY_MAINTENANCE_MODE = orig_mode

@@ -81,6 +81,23 @@ hidden tickets, keyword search, keyboards, Biology flashcard mode, Physics, Chem
 handlers, admin panel, main menu, subscription UI/payment, Chemistry theory/tasks/labs, Biology tickets/questions,
 Physics tasks, Anatomy, Histology. There is no router/blueprint split — everything registers on one global `dp`.
 
+### Main menu: course grouping
+
+`get_main_menu()` no longer lists every subject as a flat button — it exposes two entry points, "1️⃣ Первый курс"
+and "2️⃣ Второй курс" (`course_menu:1`/`course_menu:2`, handled by `cb_course_menu`), each opening
+`get_course_menu_keyboard(course, user_id)`. `COURSE_SUBJECTS` is the single source of truth for which subjects
+belong to which course and in what order: course 1 is Физика/Химия/Биология/Анатомия/Гистология, course 2 is
+Анатомия/Гистология/Нормальная физиология/Оперативная хирургия — Anatomy and Histology deliberately appear in
+both. The callback_data each subject button carries (`menu_biology`, `anatomy_root`, `histology_menu`, `oh:menu`,
+`phys:menu`, ...) is unchanged from when these buttons lived directly on the main menu, so every existing
+gate/handler keeps working untouched — only the screen a student taps through to reach them changed.
+Anatomy/Histology's dynamic, access-dependent labels (admin/subscription/promo/referral/maintenance-mode
+variants) are factored into `_anatomy_menu_label(user_id)`/`_histology_menu_label(user_id)` specifically so both
+course screens render the identical label for the same user without duplicating that branching logic — per the
+"per-topic keyboard labels hardcoded to one place" pitfall below, any future subject that appears in more than
+one menu should follow this same shared-label-function pattern rather than recomputing its label inline at each
+call site.
+
 ### Content data model
 
 Each subject has its own top-level JSON loaded once at import (`TICKETS`, `QUESTIONS`, `PHYSICS_QUESTIONS`,

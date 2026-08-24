@@ -120,11 +120,11 @@ async def main():
     assert vol_by_id["IV"]["control_questions"] == []
     print("1. JSON structure: 61 topics/4 volumes, real text everywhere, honest control-question gaps: OK")
 
-    # ---- 2. main menu exposes the section, ungated (no referral/subscription gate) ----
+    # ---- 2. 2nd-course menu exposes the section, ungated (no referral/subscription gate) ----
     non_admin = fresh_uid()
-    main_menu = tb.get_main_menu(user_id=non_admin)
-    assert "oh:menu" in kb_data(main_menu)
-    assert any("Оперативная хирургия" in t for t in kb_texts(main_menu))
+    course2_menu = tb.get_course_menu_keyboard(2, user_id=non_admin)
+    assert "oh:menu" in kb_data(course2_menu)
+    assert any("Оперативная хирургия" in t for t in kb_texts(course2_menu))
     assert not tb.is_gated_callback("oh:menu")
     assert not tb.is_gated_callback("oh:volume:I:0")
     assert not tb.is_gated_callback("oh:topic:01")

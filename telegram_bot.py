@@ -1844,40 +1844,41 @@ def build_chemistry_tasks_file() -> BufferedInputFile:
     return build_docx_file("Химия — все задачи", fill)
 
 # ==================== КЛАВИАТУРЫ ====================
+def _anatomy_menu_label(user_id: int = None) -> str:
+    sub_anatomy = user_id is not None and has_subscription_anatomy_access(user_id)
+    if user_id is not None and is_admin(user_id):
+        return "🔥🦴 Анатомия (админ)"
+    elif anatomy_handlers.ANATOMY_MAINTENANCE_MODE:
+        return "🦴 Анатомия (техобслуживание)"
+    elif sub_anatomy:
+        return "🔥🦴 Анатомия 💎"
+    else:
+        return "🔥🦴 Анатомия"
+
+
+def _histology_menu_label(user_id: int = None) -> str:
+    sub_histology = user_id is not None and has_subscription_histology_access(user_id)
+    if HISTOLOGY_PUBLIC:
+        return "🔬 Гистология"
+    elif user_id is not None and is_admin(user_id):
+        return "🔬 Гистология (админ)"
+    elif is_section_promo_active("histology"):
+        return "🔬 Гистология 🎉"
+    elif user_id is not None and get_referral_count_this_month(user_id) >= REFERRAL_FULL_ACCESS_THRESHOLD:
+        return "🔬 Гистология"
+    elif sub_histology:
+        return "🔬 Гистология 💎"
+    elif user_id is not None and has_histology_temp_access(user_id):
+        return "🔬 Гистология (пробный период)"
+    else:
+        return "🔬 Гистология (рефералы/подписка)"
+
+
 def get_main_menu(user_id: int = None):
     builder = InlineKeyboardBuilder()
     builder.button(text="🤖 VMedA AI (бета)", callback_data="ai_menu")
-    sub_anatomy = user_id is not None and has_subscription_anatomy_access(user_id)
-    sub_histology = user_id is not None and has_subscription_histology_access(user_id)
-    if user_id is not None and is_admin(user_id):
-        anatomy_label = "🔥🦴 Анатомия (админ)"
-    elif anatomy_handlers.ANATOMY_MAINTENANCE_MODE:
-        anatomy_label = "🦴 Анатомия (техобслуживание)"
-    elif sub_anatomy:
-        anatomy_label = "🔥🦴 Анатомия 💎"
-    else:
-        anatomy_label = "🔥🦴 Анатомия"
-    builder.button(text=anatomy_label, callback_data="anatomy_root")
-    builder.button(text="🧬 Биология", callback_data="menu_biology")
-    builder.button(text="⚛️ Физика", callback_data="menu_physics")
-    builder.button(text="🧪 Химия", callback_data="menu_chemistry")
-    if HISTOLOGY_PUBLIC:
-        histology_label = "🔬 Гистология"
-    elif user_id is not None and is_admin(user_id):
-        histology_label = "🔬 Гистология (админ)"
-    elif is_section_promo_active("histology"):
-        histology_label = "🔬 Гистология 🎉"
-    elif user_id is not None and get_referral_count_this_month(user_id) >= REFERRAL_FULL_ACCESS_THRESHOLD:
-        histology_label = "🔬 Гистология"
-    elif sub_histology:
-        histology_label = "🔬 Гистология 💎"
-    elif user_id is not None and has_histology_temp_access(user_id):
-        histology_label = "🔬 Гистология (пробный период)"
-    else:
-        histology_label = "🔬 Гистология (рефералы/подписка)"
-    builder.button(text=histology_label, callback_data="histology_menu")
-    builder.button(text="🔪 Оперативная хирургия", callback_data="oh:menu")
-    builder.button(text="🧠 Нормальная физиология", callback_data="phys:menu")
+    builder.button(text="1️⃣ Первый курс", callback_data="course_menu:1")
+    builder.button(text="2️⃣ Второй курс", callback_data="course_menu:2")
     builder.button(text="👥 Пригласить друзей", callback_data="referral_info")
     builder.button(text="🏆 Рейтинг", callback_data="referral_leaderboard")
     rollcall_confirmed_count = len(stats["rollcall_confirmed"])
@@ -1894,6 +1895,46 @@ def get_main_menu(user_id: int = None):
     builder.button(text=sub_label, callback_data="subscription_menu")
     builder.button(text="😇 Поддержать автора 💰", callback_data="support_menu")
     builder.adjust(1)
+    return builder.as_markup()
+
+
+# «1️⃣ Первый курс» / «2️⃣ Второй курс» — группировка предметов по году обучения на главном экране
+# (см. запрос пользователя). Анатомия и Гистология входят в оба курса — их динамические
+# (зависящие от подписки/рефералов/техобслуживания) подписи вынесены в _anatomy_menu_label()/
+# _histology_menu_label() выше, чтобы не дублировать логику между этой клавиатурой и (в будущем)
+# любым другим местом, где эти кнопки понадобятся. Сами callback_data кнопок (menu_biology,
+# anatomy_root, histology_menu, oh:menu, phys:menu, ...) не меняются — гейтинг/маршрутизация
+# работают ровно как раньше, меняется только то, с какого экрана до них можно добраться.
+COURSE_SUBJECTS = {
+    1: [
+        ("⚛️ Физика", "menu_physics"),
+        ("🧪 Химия", "menu_chemistry"),
+        ("🧬 Биология", "menu_biology"),
+        (None, "anatomy_root"),      # label resolved dynamically, see below
+        (None, "histology_menu"),
+    ],
+    2: [
+        (None, "anatomy_root"),
+        (None, "histology_menu"),
+        ("🧠 Нормальная физиология", "phys:menu"),
+        ("🔪 Оперативная хирургия", "oh:menu"),
+    ],
+}
+
+
+def get_course_menu_text(course: int) -> str:
+    title = "1️⃣ ПЕРВЫЙ КУРС" if course == 1 else "2️⃣ ВТОРОЙ КУРС"
+    return f"{title}\n{DIVIDER}\n\nВыбери предмет:"
+
+
+def get_course_menu_keyboard(course: int, user_id: int = None):
+    builder = InlineKeyboardBuilder()
+    for label, callback_data in COURSE_SUBJECTS[course]:
+        if label is None:
+            label = _anatomy_menu_label(user_id) if callback_data == "anatomy_root" else _histology_menu_label(user_id)
+        builder.button(text=label, callback_data=callback_data)
+    builder.adjust(1)
+    builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
     return builder.as_markup()
 
 def get_referral_back_keyboard():
@@ -3032,6 +3073,17 @@ async def cb_back_to_main(callback: CallbackQuery):
         "🏠 <b>Главное меню</b>\n\nВыбери предмет для подготовки:",
         parse_mode="HTML",
         reply_markup=get_main_menu(callback.from_user.id)
+    )
+
+@dp.callback_query(F.data.startswith("course_menu:"))
+async def cb_course_menu(callback: CallbackQuery):
+    course = int(callback.data.split(":")[1])
+    await callback.answer()
+    await safe_edit_text(
+        callback.message,
+        get_course_menu_text(course),
+        parse_mode="HTML",
+        reply_markup=get_course_menu_keyboard(course, callback.from_user.id)
     )
 
 @dp.callback_query(F.data == "referral_info")

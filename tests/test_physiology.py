@@ -120,14 +120,14 @@ async def main():
     assert "06" not in topics_with_quiz and "07" not in topics_with_quiz
     print(f"2. quiz bank: {len(quiz)} grounded questions, honest zero-question gap for topics 06/07: OK")
 
-    # ---- 3. main menu exposes the section, ungated (no referral/subscription gate) ----
+    # ---- 3. 2nd-course menu exposes the section, ungated (no referral/subscription gate) ----
     non_admin = fresh_uid()
-    main_menu = tb.get_main_menu(user_id=non_admin)
-    assert "phys:menu" in kb_data(main_menu)
-    assert any("Нормальная физиология" in t for t in kb_texts(main_menu))
+    course2_menu = tb.get_course_menu_keyboard(2, user_id=non_admin)
+    assert "phys:menu" in kb_data(course2_menu)
+    assert any("Нормальная физиология" in t for t in kb_texts(course2_menu))
     assert not tb.is_gated_callback("phys:menu")
     assert not tb.is_gated_callback("phys:topic:01")
-    print("3. main menu exposes the section, ungated: OK")
+    print("3. course menu exposes the section, ungated: OK")
 
     # ---- 4. menu screen renders with progress counters + all mode buttons ----
     cb_menu = FakeCB("phys:menu", uid=non_admin)
