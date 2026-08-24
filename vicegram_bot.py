@@ -2354,6 +2354,15 @@ NOTES_INTRO_LINES = [
 NOTES_CAPTION_SAFE_LIMIT = 1000
 
 
+def tg_len(text: str) -> int:
+    """Telegram считает длину текста в UTF-16 code units, а не в символах
+    Python (len() на обычной str — это codepoints). Для большинства текста
+    разницы нет, но эмодзи вне Basic Multilingual Plane (например 📝, 🧾)
+    занимают 2 UTF-16-юнита при одном Python-символе — без этого разрыва
+    можно посчитать текст "укладывающимся" в лимит, а Telegram его отклонит."""
+    return len(text.encode("utf-16-le")) // 2
+
+
 def build_notes_text(notes: list) -> str:
     lines = list(NOTES_INTRO_LINES)
     if not notes:
@@ -2364,19 +2373,35 @@ def build_notes_text(notes: list) -> str:
             trigger_label = n["trigger"] if len(n["trigger"]) <= 40 else n["trigger"][:39] + "…"
             lines.append(f"• <code>{html.escape(trigger_label)}</code> → {kind}")
     text = "\n".join(lines)
-    if len(text) <= NOTES_CAPTION_SAFE_LIMIT:
+    if tg_len(text) <= NOTES_CAPTION_SAFE_LIMIT:
         return text
 
-    # Слишком много/длинных заметок для одного экрана — сжимаем до одних триггеров.
+    # Слишком много/длинных заметок для одного экрана — сжимаем до одних
+    # триггеров, добавляя по одной ЦЕЛОЙ строке за раз и останавливаясь ДО
+    # того, как строка не влезет. Резать уже собранный текст по количеству
+    # символов нельзя — можно отрезать ровно посередине одного из <code>
+    # тегов, получить битый HTML, и Telegram откажется парсить подпись
+    # вообще (именно так и ломался этот экран даже после более устойчивого
+    # edit_dm_screen — там просто нечего было слать, текст был невалиден).
+    marker = "… (остальные не поместились, удали часть заметок)"
     lines = list(NOTES_INTRO_LINES)
     lines.append(f"Заметок: {len(notes)} (список длинный — показаны только триггеры)")
+    running_len = tg_len("\n".join(lines))
+    truncated = False
     for n in notes:
         trigger_label = n["trigger"] if len(n["trigger"]) <= 40 else n["trigger"][:39] + "…"
-        lines.append(f"• <code>{html.escape(trigger_label)}</code>")
-    text = "\n".join(lines)
-    if len(text) > NOTES_CAPTION_SAFE_LIMIT:
-        text = text[:NOTES_CAPTION_SAFE_LIMIT - 1] + "…"
-    return text
+        line = f"• <code>{html.escape(trigger_label)}</code>"
+        # резервируем место под marker — он может понадобиться сразу после
+        # этой строки, и если не заложить его бюджет заранее, добавление
+        # marker'а уже ПОСЛЕ прохождения проверки само может перевалить лимит
+        if running_len + 1 + tg_len(line) + 1 + tg_len(marker) > NOTES_CAPTION_SAFE_LIMIT:
+            truncated = True
+            break
+        lines.append(line)
+        running_len += 1 + tg_len(line)
+    if truncated:
+        lines.append(marker)
+    return "\n".join(lines)
 
 
 def get_notes_keyboard(notes: list):
