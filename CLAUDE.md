@@ -293,14 +293,18 @@ already defined" reason). **Free for everyone** — no referral gate, no subscri
 prefix `phys:*` never appears in `GATED_CALLBACKS_*`/`GATED_PREFIXES_*`, same choice as Operative Surgery.
 
 **Content is entirely and only from the user's own source pack** — 23 topics parsed out of a pasted Markdown
-course whose own citations name exactly three sources: «Том 1 1.pdf», «Том 2 1.pdf», «Физа учебник.pdf» — no
-volume-3 topics were ever generated. Built by a one-time ETL pass (scratchpad-only, not committed to the repo —
+course whose own citations name exactly three working files («Том 1 1.pdf», «Том 2 1.pdf», «Физа учебник.pdf») —
+no volume-3 topics were ever generated. Built by a one-time ETL pass (scratchpad-only, not committed to the repo —
 same "ETL script stays out of the repo" convention as Operative Surgery's v2 parser): `parse.py` walks the
 source's own `##`/`###` heading structure per topic into the schema below, `build_quiz.py` then appends a
 question bank mined only from already-parsed structured fields. `physiology.json`'s top level is `meta`
-(`section_id, title, institution, source_files[], scope_note, provenance_note` — surfaced verbatim on the
-"ℹ️ Об источниках" screen) and `topics[]` (23 entries) and `quiz_questions[]` (149 entries: `definition:9,
-next_step:82, cause_effect:28, comparison:30`).
+(`section_id, title, institution, source_files[], scope_note, provenance_note`) and `topics[]` (23 entries) and
+`quiz_questions[]` (149 entries: `definition:9, next_step:82, cause_effect:28, comparison:30`).
+`meta.source_files` holds the real academic citations shown on the "ℹ️ Об источниках" screen (Шмидт/Тевс 1996 and
+Покровский/Коротько 1997 — the two textbooks the working PDF files above were themselves excerpts of), not the
+internal working filenames; `meta.scope_note` (chapters 1-23, no volume-3 reconstruction) documents the same
+honest-incompleteness fact but isn't rendered on that screen — only `source_files` + `provenance_note` are
+(`get_phys_sources_text()` in `handlers/physiology.py`).
 
 Each topic is `{topic_id, order, title, short_title, source_file, source_pages, source_text, what_to_know[],
 definitions[{term,text}], mechanisms[{name,intro,steps[]}], cause_effect[], regulation[], comparisons[{caption,

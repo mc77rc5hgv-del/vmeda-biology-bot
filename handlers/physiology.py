@@ -695,11 +695,11 @@ def get_phys_progress_keyboard():
 
 def get_phys_sources_text() -> str:
     meta = tb.PHYSIOLOGY["meta"]
-    files = "\n".join(f"• «{esc(f)}»" for f in meta["source_files"])
+    files = "\n\n".join(f"• {esc(f)}" for f in meta["source_files"])
     return (
         f"📚 <b>Об источниках</b>\n{tb.DIVIDER}\n\n"
-        f"Материал переработан и сокращён по:\n{files}\n\n"
-        f"{esc(meta['scope_note'])}\n\n{esc(meta['provenance_note'])}"
+        f"Материал подготовлен и переработан по учебным руководствам:\n\n{files}\n\n"
+        f"{esc(meta['provenance_note'])}"
     )
 
 
