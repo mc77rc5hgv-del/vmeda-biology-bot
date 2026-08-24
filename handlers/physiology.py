@@ -396,11 +396,9 @@ def get_phys_topic_text(topic: dict, user_id: int) -> str:
         bullets = "\n".join(f"• {esc(x)}" for x in topic["what_to_know"][:6])
     else:
         bullets = "\n".join(f"• {esc(s['heading'])}" for s in topic["sections"][:6] if s["heading"])
-    src = esc(topic["source_text"] or f"{topic['source_file'] or '—'}")
     return (
         f"🧠 ТЕМА {topic['order']}\n<b>{esc(topic['title']).upper()}</b>\n{tb.DIVIDER}\n\n"
         f"📌 Что изучим:\n{bullets}\n\n"
-        f"📖 Источник:\n{src}\n\n"
         f"{PHYS_STATUS_ICONS[status]} Статус: {status_label}"
     )
 
