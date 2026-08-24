@@ -284,6 +284,99 @@ side (see `tests/test_ai_mvp.py`'s check 25c) — that's real cross-subject grou
 `SYSTEM_PROMPT` and the AI section's own menu copy (`get_ai_menu_text()`/`get_ai_announcement_text()`) mention
 "оперативной хирургии" alongside the other four subjects for the same reason anatomy was added there earlier.
 
+### Normal Physiology (Нормальная физиология)
+
+A top-level subject (`physiology.json`, loaded via `repositories/knowledge.py` like every other content bank,
+handlers in `handlers/physiology.py` — own `Router`, imported at the very end of `telegram_bot.py` next to
+`handlers/histology.py`/`handlers/operative_surgery.py`, same "needs `tb.PHYSIOLOGY`/`DIVIDER`/`safe_edit_text`
+already defined" reason). **Free for everyone** — no referral gate, no subscription tier references it, callback
+prefix `phys:*` never appears in `GATED_CALLBACKS_*`/`GATED_PREFIXES_*`, same choice as Operative Surgery.
+
+**Content is entirely and only from the user's own source pack** — 23 topics parsed out of a pasted Markdown
+course whose own citations name exactly three sources: «Том 1 1.pdf», «Том 2 1.pdf», «Физа учебник.pdf» — no
+volume-3 topics were ever generated. Built by a one-time ETL pass (scratchpad-only, not committed to the repo —
+same "ETL script stays out of the repo" convention as Operative Surgery's v2 parser): `parse.py` walks the
+source's own `##`/`###` heading structure per topic into the schema below, `build_quiz.py` then appends a
+question bank mined only from already-parsed structured fields. `physiology.json`'s top level is `meta`
+(`section_id, title, institution, source_files[], scope_note, provenance_note` — surfaced verbatim on the
+"ℹ️ Об источниках" screen) and `topics[]` (23 entries) and `quiz_questions[]` (149 entries: `definition:9,
+next_step:82, cause_effect:28, comparison:30`).
+
+Each topic is `{topic_id, order, title, short_title, source_file, source_pages, source_text, what_to_know[],
+definitions[{term,text}], mechanisms[{name,intro,steps[]}], cause_effect[], regulation[], comparisons[{caption,
+headers[],rows[{aspect,values[]}]}], remember[], confusions[], quick_review[], control_questions[],
+sections[{heading,text}], deepening[{heading,text}]}`. `sections` is the one field beyond what the schema was
+originally scoped to — a full-fidelity, nothing-lost expansion of the topic along its own `###` subheadings,
+needed because topics 11-23 don't follow the canonical "что нужно знать/определения/механизм/..." shape at all,
+they just launch into ad-hoc domain subheadings ("Оптическая система", "Сетчатка", ...); without `sections` that
+content would be silently dropped. "📖 Читать конспект" always renders from `sections` (completeness guarantee);
+"🧠 Учить по шагам" uses the specialized fields wherever the source actually populated them — an empty list
+simply contributes no card of that kind, never a fabricated placeholder (`build_phys_learn_cards()` in
+`handlers/physiology.py`).
+
+**Quiz bank honesty**: every question is mechanically derived from an already-parsed structured field
+(`definitions`/`mechanisms`' next-step pairs/`cause_effect`/`comparisons`) — never invented — and every distractor
+is a real fact about a DIFFERENT term/step/topic (plausible, never fabricated). Topics `"06"`/`"07"` have zero
+structured content in the source and therefore honestly have **zero** quiz questions — their only self-check is
+the source's own ungraded `control_questions` list (no answer key exists for them, same reasoning as Operative
+Surgery's own ungraded control-questions screens). Of the 8 question types named in the original spec, only 4
+(`definition`/`next_step`/`cause_effect`/`comparison`) are auto-generated as graded questions — `find_error`/
+`sequence`/`missing_step`/`free_recall` were deliberately not built, since grading them safely would either need
+another model call (defeating "zero fabrication, zero runtime generation") or risk inventing a plausible-but-wrong
+"correct" answer never actually stated in the source.
+
+**Progress/mastery/SRS** (`stats["physiology_progress"][uid][topic_id]`): `opened_at, completed_cards,
+total_cards, correct_answers, total_answers, mechanism_correct, mechanism_total, last_score, best_score, mastery,
+last_studied_at, next_review_at, review_stage`. Mastery is `round(100 * (0.4 * completed_cards/total_cards + 0.4 *
+correct_answers/total_answers + 0.2 * mechanism_correct/mechanism_total))` (`_phys_recalc_mastery()`) —
+`mechanism_*` tracks only `next_step`/`cause_effect` answers specifically (the "successful mechanism reproduction"
+leg of the formula), a subset of `total_answers`. A card only ever counts as studied on an explicit "Понятно ✅"
+tap (`cb_phys_learn_ok`) or an answered mini-check — never merely on being opened/viewed (`cb_phys_learn` alone
+never touches `completed_cards`). `phys_topic_status()` derives one of `not_started/learning/studied/needs_review/
+mastered` from these counters at read time — **never stored**, so it can't drift out of sync. The SRS is a
+deliberately simple, transparent, hand-tunable stage scheduler (`PHYS_SRS_STAGE_DAYS = [1, 3, 7, 14, 30]`, NOT
+claimed to be an "optimal"/evidence-based spaced-repetition algorithm) — only a **fully completed** quiz session
+(not aborted via "🛑 Закончить") calls `phys_record_quiz_session_complete()`, which advances one stage on a ≥60%
+score or resets to stage 0 on a worse one, and sets `next_review_at = now + PHYS_SRS_STAGE_DAYS[stage] * 86400`.
+
+**Favorites** (`stats["physiology_favorites"][uid] = {"topics": [topic_id, ...]}`) are topic-level only — a
+simplification versus the originally-specified three-way split (favorite topics / saved individual cards /
+missed-question review), disclosed here as a deliberate scope cut, not an oversight. Missed questions aren't
+tracked as a separate bookmark list either; `get_phys_progress_text()`'s "🔁 Пора повторить" section (topics whose
+`next_review_at` has passed) is the closest equivalent, driven by the SRS schedule instead of a per-question list.
+
+Navigation: `phys:menu` → `phys:topics:{page}` (`PHYS_TOPIC_PAGE_SIZE = 8`) → `phys:topic:{id}` (topic-card hub:
+intro + status + mode buttons) → `phys:learn:{id}:{idx}` (step-by-step cards, `phys:learn_ok:{id}:{idx}` marks
+studied and advances) / `phys:read:{id}:{idx}` (sequential `sections[]` reading, prev/next, a defensive
+>3800-char truncate-at-paragraph-boundary fallback for the rare oversized section — the dataset's real max is 889
+chars, well under Telegram's cap, so this is a safety net, not a load-bearing splitter) / `phys:quick:{id}`
+(condensed ~2-5-minute review: 🎯 Суть / 🔗 Главная цепочка / 📌 Обязательно назвать / ⚠️ Не перепутать / ❓
+Проверь себя) / `phys:quiz_start:{id}` (graded quiz session, `PHYS_QUIZ_SESSIONS[user_id]` in-memory dict, same
+shape as `ANATOMY_LATIN_SESSIONS`/`HISTOLOGY_GUESS_SESSIONS` — popped on completion/abort, `phys:quiz_stop`
+reuses the same summary renderer with an `aborted` flag) / `phys:chains:{id}:{idx}` (vertical arrow-chain display
+of `cause_effect`/`mechanisms` steps, only offered when a topic actually has that content) / `phys:cmp:{id}:{idx}`
+(two-sided mobile comparison cards via `render_phys_comparison_body()` — shared by both the dedicated screen and
+the "Учить по шагам" comparison card, NEVER rendered as a raw Markdown table). `phys:mini:{id}:{back_idx}` fires
+a single random question from the topic's quiz pool (from a learn card or the quick-review screen); its answer
+handler (`cb_phys_mini_answer`) re-derives the question by `question_id` looked up fresh in
+`PHYSIOLOGY["quiz_questions"]` rather than trusting a pool index to stay stable across the two separate callback
+round-trips — a correctness safeguard, not an optimization.
+
+Search (`search_physiology()`, plain case-insensitive substring match across title/`what_to_know`/definitions/
+`sections`headings+text — not a 4th independent copy of the tiny stemmer already duplicated in `telegram_bot.py`/
+`ai/rag.py`/`ai/reference_bank.py`, a deliberate scope decision given four flat-ish text fields per topic) is
+defined directly in `telegram_bot.py` as `PHYS_SEARCH_PENDING` (a plain `set[user_id]`) +
+`handle_phys_search_query`, positioned BEFORE `handle_keyword_search` — same load-bearing ordering reason as
+`handle_oh_search_query` (see Operative Surgery above): a handler registered via `dp.include_router()` at the end
+of the file would land after the Biology keyword-search catch-all in the dispatch chain and never see a
+Physiology search query at all.
+
+`ai.rag.build_index()`/`configure()` take a `physiology: dict = None` parameter (default `None` keeps every
+existing caller working unchanged) and index one entry per topic (its `sections[]` concatenated into one blob)
+plus one entry per `definitions[]` term (short, precisely-quotable — useful to find independently of the
+surrounding topic text). `ai/prompts.py`'s `SYSTEM_PROMPT` mentions "нормальной физиологии" alongside the other
+subjects for the same reason Anatomy/Operative Surgery were added there.
+
 ### Access control (two independent gates)
 
 1. **Referral gate** (`referral_gate_middleware`, an `@dp.update.outer_middleware()`): gates only Biology/Physics/

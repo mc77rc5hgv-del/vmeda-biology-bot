@@ -137,11 +137,12 @@ ANATOMY_EXAM_THEORY_SECTIONS = knowledge.ANATOMY_EXAM_THEORY_SECTIONS
 ANATOMY_EXAM_PRACTICE_SECTIONS = knowledge.ANATOMY_EXAM_PRACTICE_SECTIONS
 HISTOLOGY = knowledge.HISTOLOGY
 OPERATIVE_SURGERY = knowledge.OPERATIVE_SURGERY
+PHYSIOLOGY = knowledge.PHYSIOLOGY
 
 ai_rag.configure(
     questions=QUESTIONS, physics_questions=PHYSICS_QUESTIONS, chemistry_theory=CHEMISTRY_THEORY,
     chemistry_theory_tickets=CHEMISTRY_THEORY_TICKETS, chemistry_practice_tickets=CHEMISTRY_PRACTICE_TICKETS,
-    anatomy=ANATOMY, operative_surgery=OPERATIVE_SURGERY,
+    anatomy=ANATOMY, operative_surgery=OPERATIVE_SURGERY, physiology=PHYSIOLOGY,
 )
 ai_reference_bank.configure(ANATOMY_EXAM_TEST_PARTS)
 
@@ -195,6 +196,8 @@ def load_stats() -> dict:
             })
             data.setdefault("ai_raw_text_aliases", {})
             data.setdefault("processed_payment_charge_ids", {})
+            data.setdefault("physiology_progress", {})
+            data.setdefault("physiology_favorites", {})
             return data
         except (json.JSONDecodeError, OSError):
             logger.exception("Не удалось прочитать %s, статистика будет создана заново", STATS_FILE)
@@ -242,6 +245,8 @@ def load_stats() -> dict:
         },
         "ai_raw_text_aliases": {},
         "processed_payment_charge_ids": {},
+        "physiology_progress": {},
+        "physiology_favorites": {},
     }
 
 # Один воркер сериализует записи на диск и не даёт им блокировать event loop бота.
@@ -1612,6 +1617,10 @@ OH_SEARCH_PENDING: set = set()  # user_id, ждущих следующее те�
 # и handle_oh_search_query ниже) — тот же паттерн, что ADMIN_PENDING/ASSISTANT_PENDING, только без
 # многошагового действия, просто факт "этот юзер сейчас ищет".
 
+PHYS_SEARCH_PENDING: set = set()  # тот же паттерн, что OH_SEARCH_PENDING выше, для раздела
+# «Нормальная физиология» (см. cb_phys_search_prompt в handlers/physiology.py и
+# handle_phys_search_query ниже).
+
 # AI RAG-lite (индекс/поиск/подмес материалов ВМедА) перенесён в ai/rag.py — см. ai_rag.configure()
 # (вызывается один раз при старте, см. конец файла) и ai_rag.search_snippets_multi()/format_context()
 # (используются в обработчиках AI-режима).
@@ -1868,6 +1877,7 @@ def get_main_menu(user_id: int = None):
         histology_label = "🔬 Гистология (рефералы/подписка)"
     builder.button(text=histology_label, callback_data="histology_menu")
     builder.button(text="🔪 Оперативная хирургия", callback_data="oh:menu")
+    builder.button(text="🧠 Нормальная физиология", callback_data="phys:menu")
     builder.button(text="👥 Пригласить друзей", callback_data="referral_info")
     builder.button(text="🏆 Рейтинг", callback_data="referral_leaderboard")
     rollcall_confirmed_count = len(stats["rollcall_confirmed"])
@@ -4992,6 +5002,37 @@ async def handle_oh_search_query(message: Message):
     builder.row(InlineKeyboardButton(text="🔙 К разделу", callback_data="oh:menu"))
     await message.answer("\n".join(lines), parse_mode="HTML", reply_markup=builder.as_markup())
 
+# ==================== ПОИСК ПО НОРМАЛЬНОЙ ФИЗИОЛОГИИ (обработчик) ====================
+# Та же причина, что у handle_oh_search_query выше — должен стоять РАНЬШЕ handle_keyword_search,
+# не может жить внутри handlers/physiology.py (dp.include_router() регистрируется в самом конце
+# файла и попал бы в цепочку диспетчеризации ПОСЛЕ handle_keyword_search).
+@dp.message(F.text)
+async def handle_phys_search_query(message: Message):
+    user_id = message.from_user.id
+    if user_id not in PHYS_SEARCH_PENDING:
+        raise SkipHandler
+    if message.text.startswith("/"):
+        raise SkipHandler
+    PHYS_SEARCH_PENDING.discard(user_id)
+    query = message.text.strip()
+    safe_query = html.escape(query)
+    results = physiology_handlers.search_physiology(query)
+    builder = InlineKeyboardBuilder()
+    if not results:
+        builder.row(InlineKeyboardButton(text="🔙 К разделу", callback_data="phys:menu"))
+        await message.answer(
+            f"🔍 По запросу «{safe_query}» в разделе «Нормальная физиология» ничего не найдено.",
+            reply_markup=builder.as_markup()
+        )
+        return
+    lines = [f"🔍 <b>Нормальная физиология — результаты поиска:</b> «{safe_query}»\n{DIVIDER}\n"]
+    for t in results:
+        lines.append(f"• {t['order']}. {t['title']}")
+        builder.button(text=f"{t['order']}. {t['short_title'][:40]}", callback_data=f"phys:topic:{t['topic_id']}")
+    builder.adjust(1)
+    builder.row(InlineKeyboardButton(text="🔙 К разделу", callback_data="phys:menu"))
+    await message.answer("\n".join(lines), parse_mode="HTML", reply_markup=builder.as_markup())
+
 # ==================== ПОИСК ПО КЛЮЧЕВЫМ СЛОВАМ (обработчик) ====================
 @dp.message(F.text)
 async def handle_keyword_search(message: Message):
@@ -5336,6 +5377,84 @@ cb_oh_projection_group = operative_surgery_handlers.cb_oh_projection_group
 cb_oh_stations = operative_surgery_handlers.cb_oh_stations
 cb_oh_station_group = operative_surgery_handlers.cb_oh_station_group
 cb_oh_search_prompt = operative_surgery_handlers.cb_oh_search_prompt
+
+# ==================== НОРМАЛЬНАЯ ФИЗИОЛОГИЯ ====================
+# Тот же паттерн, что ОПЕРАТИВНАЯ ХИРУРГИЯ выше — свой Router, импортируется в самом конце файла,
+# когда все нужные оттуда имена (PHYSIOLOGY, DIVIDER, safe_edit_text, stats, save_stats,
+# PHYS_SEARCH_PENDING) уже определены здесь. Раздел свободен для всех — своего гейта нет.
+from handlers import physiology as physiology_handlers  # noqa: E402 — deliberately late, see above
+
+dp.include_router(physiology_handlers.router)
+
+get_phys_topic = physiology_handlers.get_phys_topic
+phys_topic_ids_in_order = physiology_handlers.phys_topic_ids_in_order
+get_phys_topic_quiz_pool = physiology_handlers.get_phys_topic_quiz_pool
+get_phys_progress = physiology_handlers.get_phys_progress
+phys_mark_opened = physiology_handlers.phys_mark_opened
+phys_mark_card_done = physiology_handlers.phys_mark_card_done
+phys_record_quiz_answer = physiology_handlers.phys_record_quiz_answer
+phys_record_quiz_session_complete = physiology_handlers.phys_record_quiz_session_complete
+phys_topic_status = physiology_handlers.phys_topic_status
+phys_favorites = physiology_handlers.phys_favorites
+phys_is_favorite = physiology_handlers.phys_is_favorite
+phys_toggle_favorite = physiology_handlers.phys_toggle_favorite
+build_phys_learn_cards = physiology_handlers.build_phys_learn_cards
+render_phys_learn_card = physiology_handlers.render_phys_learn_card
+get_phys_learn_keyboard = physiology_handlers.get_phys_learn_keyboard
+render_phys_comparison_body = physiology_handlers.render_phys_comparison_body
+get_phys_menu_text = physiology_handlers.get_phys_menu_text
+get_phys_menu_keyboard = physiology_handlers.get_phys_menu_keyboard
+phys_next_topic_for_continue = physiology_handlers.phys_next_topic_for_continue
+get_phys_topics_text = physiology_handlers.get_phys_topics_text
+get_phys_topics_keyboard = physiology_handlers.get_phys_topics_keyboard
+get_phys_topic_text = physiology_handlers.get_phys_topic_text
+get_phys_topic_keyboard = physiology_handlers.get_phys_topic_keyboard
+get_phys_read_text = physiology_handlers.get_phys_read_text
+get_phys_read_keyboard = physiology_handlers.get_phys_read_keyboard
+get_phys_quick_text = physiology_handlers.get_phys_quick_text
+get_phys_quick_keyboard = physiology_handlers.get_phys_quick_keyboard
+build_phys_chains = physiology_handlers.build_phys_chains
+get_phys_chain_text = physiology_handlers.get_phys_chain_text
+get_phys_chain_keyboard = physiology_handlers.get_phys_chain_keyboard
+get_phys_cmp_text = physiology_handlers.get_phys_cmp_text
+get_phys_cmp_keyboard = physiology_handlers.get_phys_cmp_keyboard
+start_phys_quiz_session = physiology_handlers.start_phys_quiz_session
+render_phys_quiz_question = physiology_handlers.render_phys_quiz_question
+get_phys_quiz_question_keyboard = physiology_handlers.get_phys_quiz_question_keyboard
+render_phys_quiz_answer = physiology_handlers.render_phys_quiz_answer
+get_phys_quiz_answer_keyboard = physiology_handlers.get_phys_quiz_answer_keyboard
+get_phys_quiz_summary_text = physiology_handlers.get_phys_quiz_summary_text
+get_phys_quiz_summary_keyboard = physiology_handlers.get_phys_quiz_summary_keyboard
+get_phys_favorites_text = physiology_handlers.get_phys_favorites_text
+get_phys_favorites_keyboard = physiology_handlers.get_phys_favorites_keyboard
+get_phys_progress_text = physiology_handlers.get_phys_progress_text
+get_phys_progress_keyboard = physiology_handlers.get_phys_progress_keyboard
+get_phys_sources_text = physiology_handlers.get_phys_sources_text
+get_phys_sources_keyboard = physiology_handlers.get_phys_sources_keyboard
+search_physiology = physiology_handlers.search_physiology
+cb_phys_menu = physiology_handlers.cb_phys_menu
+cb_phys_continue = physiology_handlers.cb_phys_continue
+cb_phys_topics = physiology_handlers.cb_phys_topics
+cb_phys_qpick = physiology_handlers.cb_phys_qpick
+cb_phys_zpick = physiology_handlers.cb_phys_zpick
+cb_phys_topic = physiology_handlers.cb_phys_topic
+cb_phys_fav_toggle = physiology_handlers.cb_phys_fav_toggle
+cb_phys_learn = physiology_handlers.cb_phys_learn
+cb_phys_learn_ok = physiology_handlers.cb_phys_learn_ok
+cb_phys_read = physiology_handlers.cb_phys_read
+cb_phys_quick = physiology_handlers.cb_phys_quick
+cb_phys_chains = physiology_handlers.cb_phys_chains
+cb_phys_cmp = physiology_handlers.cb_phys_cmp
+cb_phys_quiz_start = physiology_handlers.cb_phys_quiz_start
+cb_phys_quiz_answer = physiology_handlers.cb_phys_quiz_answer
+cb_phys_quiz_next = physiology_handlers.cb_phys_quiz_next
+cb_phys_quiz_stop = physiology_handlers.cb_phys_quiz_stop
+cb_phys_mini = physiology_handlers.cb_phys_mini
+cb_phys_mini_answer = physiology_handlers.cb_phys_mini_answer
+cb_phys_favorites = physiology_handlers.cb_phys_favorites
+cb_phys_progress = physiology_handlers.cb_phys_progress
+cb_phys_sources = physiology_handlers.cb_phys_sources
+cb_phys_search_prompt = physiology_handlers.cb_phys_search_prompt
 
 # ==================== ЗАПУСК ====================
 async def setup_bot_commands() -> None:

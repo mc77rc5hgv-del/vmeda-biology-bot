@@ -81,7 +81,7 @@ def _entry_key(subject: str, title: str, text: str) -> str:
 def build_index(
     *, questions: dict, physics_questions: dict, chemistry_theory: dict,
     chemistry_theory_tickets: dict, chemistry_practice_tickets: dict, anatomy: dict,
-    operative_surgery: dict = None,
+    operative_surgery: dict = None, physiology: dict = None,
 ) -> list:
     """Собирает единый список {subject, title, text, stems, key} из банков вопросов/ответов бота:
     биология/физика/химия (основная заявленная область AI-помощника) и анатомия (вопросы по
@@ -90,7 +90,10 @@ def build_index(
     полнотекстовый материал по 61 теме, не сводка-заглушка, см. CLAUDE.md) индексируется целиком
     (текст всех подтем темы склеен в одну запись), плюс каждая проекция из справочника —
     инструменты/практические станции не индексируются (это голые списки названий без
-    объяснительного текста, отвечать по ним нечем)."""
+    объяснительного текста, отвечать по ним нечем). physiology — по одной записи на тему,
+    склеенной из sections[] (полнотекстовое содержимое темы), плюс отдельные записи на каждое
+    ключевое определение — definitions дают точные, короткие, легко цитируемые формулировки
+    терминов, которые полезно находить отдельно от общего текста темы."""
     raw_entries = []
     for q in questions.values():
         raw_entries.append(("биология", q.get("title", ""), q.get("answer", "")))
@@ -114,6 +117,12 @@ def build_index(
     for group in (operative_surgery or {}).get("projections", []):
         for item in group.get("items", []):
             raw_entries.append(("оперативная хирургия", item["structure"], item["projection"]))
+    for topic in (physiology or {}).get("topics", []):
+        full_text = "\n".join(s.get("text", "") for s in topic.get("sections", []))
+        if full_text.strip():
+            raw_entries.append(("нормальная физиология", topic["title"], full_text))
+        for d in topic.get("definitions", []):
+            raw_entries.append(("нормальная физиология", d["term"], d["text"]))
     return [
         {
             "subject": subject, "title": title, "text": text, "stems": _entry_stems(title, text),
@@ -145,7 +154,7 @@ _idf = None
 def configure(
     *, questions: dict, physics_questions: dict, chemistry_theory: dict,
     chemistry_theory_tickets: dict, chemistry_practice_tickets: dict, anatomy: dict,
-    operative_surgery: dict = None,
+    operative_surgery: dict = None, physiology: dict = None,
 ) -> None:
     """Вызывается один раз при старте бота, после загрузки JSON-файлов — строит индекс и IDF-веса
     сразу (не лениво), чтобы разовая задержка (~0.1с на текущем объёме) не попала на первый живой
@@ -155,7 +164,7 @@ def configure(
         questions=questions, physics_questions=physics_questions, chemistry_theory=chemistry_theory,
         chemistry_theory_tickets=chemistry_theory_tickets,
         chemistry_practice_tickets=chemistry_practice_tickets, anatomy=anatomy,
-        operative_surgery=operative_surgery,
+        operative_surgery=operative_surgery, physiology=physiology,
     )
     _idf = build_stem_idf(_index)
 
