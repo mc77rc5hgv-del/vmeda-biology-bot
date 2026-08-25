@@ -317,11 +317,13 @@ source's own `##`/`###` heading structure per topic into the schema below, `buil
 question bank mined only from already-parsed structured fields. `physiology.json`'s top level is `meta`
 (`section_id, title, institution, source_files[], scope_note, provenance_note`) and `topics[]` (23 entries) and
 `quiz_questions[]` (149 entries: `definition:9, next_step:82, cause_effect:28, comparison:30`).
-`meta.source_files` holds the real academic citations shown on the "ℹ️ Об источниках" screen (Шмидт/Тевс 1996 and
-Покровский/Коротько 1997 — the two textbooks the working PDF files above were themselves excerpts of), not the
-internal working filenames; `meta.scope_note` (chapters 1-23, no volume-3 reconstruction) documents the same
-honest-incompleteness fact but isn't rendered on that screen — only `source_files` + `provenance_note` are
-(`get_phys_sources_text()` in `handlers/physiology.py`).
+`meta.source_files`/`scope_note`/`provenance_note` and every per-topic `source_file`/`source_pages` and
+per-question `source_file`/`source_pages` field are still populated in the dataset (real citations: Шмидт/Тевс
+1996 and Покровский/Коротько 1997, the two textbooks the working PDF files above were themselves excerpts of) —
+but, per explicit user request, none of it is rendered anywhere in the UI: no dedicated "Об источниках" screen/
+menu button, no per-topic "Источник" line on the topic card, no per-question citation on quiz answers. The
+fields stay in the JSON purely as documentation/provenance metadata for future reference, not because any
+screen reads them.
 
 Each topic is `{topic_id, order, title, short_title, source_file, source_pages, source_text, what_to_know[],
 definitions[{term,text}], mechanisms[{name,intro,steps[]}], cause_effect[], regulation[], comparisons[{caption,

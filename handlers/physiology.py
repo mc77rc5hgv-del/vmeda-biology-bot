@@ -333,7 +333,6 @@ def get_phys_menu_keyboard(user_id: int):
     builder.button(text="🔎 Поиск", callback_data="phys:search_prompt")
     builder.button(text="⭐ Избранное", callback_data="phys:favorites")
     builder.button(text="📊 Мой прогресс", callback_data="phys:progress")
-    builder.button(text="ℹ️ Об источниках", callback_data="phys:sources")
     builder.adjust(1)
     builder.row(InlineKeyboardButton(text="🏠 Главное меню", callback_data="back_to_main"))
     return builder.as_markup()
@@ -683,22 +682,6 @@ def get_phys_progress_text(user_id: int) -> str:
 
 
 def get_phys_progress_keyboard():
-    builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="🏠 Меню физиологии", callback_data="phys:menu"))
-    return builder.as_markup()
-
-
-def get_phys_sources_text() -> str:
-    meta = tb.PHYSIOLOGY["meta"]
-    files = "\n\n".join(f"• {esc(f)}" for f in meta["source_files"])
-    return (
-        f"📚 <b>Об источниках</b>\n{tb.DIVIDER}\n\n"
-        f"Материал подготовлен и переработан по учебным руководствам:\n\n{files}\n\n"
-        f"{esc(meta['provenance_note'])}"
-    )
-
-
-def get_phys_sources_keyboard():
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text="🏠 Меню физиологии", callback_data="phys:menu"))
     return builder.as_markup()
@@ -1062,15 +1045,6 @@ async def cb_phys_progress(callback: CallbackQuery):
     await tb.safe_edit_text(
         callback.message, get_phys_progress_text(user_id), parse_mode="HTML",
         reply_markup=get_phys_progress_keyboard()
-    )
-
-
-@router.callback_query(F.data == "phys:sources")
-async def cb_phys_sources(callback: CallbackQuery):
-    await callback.answer()
-    await tb.safe_edit_text(
-        callback.message, get_phys_sources_text(), parse_mode="HTML",
-        reply_markup=get_phys_sources_keyboard()
     )
 
 

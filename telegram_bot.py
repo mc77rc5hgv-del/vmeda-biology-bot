@@ -5481,8 +5481,6 @@ get_phys_favorites_text = physiology_handlers.get_phys_favorites_text
 get_phys_favorites_keyboard = physiology_handlers.get_phys_favorites_keyboard
 get_phys_progress_text = physiology_handlers.get_phys_progress_text
 get_phys_progress_keyboard = physiology_handlers.get_phys_progress_keyboard
-get_phys_sources_text = physiology_handlers.get_phys_sources_text
-get_phys_sources_keyboard = physiology_handlers.get_phys_sources_keyboard
 search_physiology = physiology_handlers.search_physiology
 cb_phys_menu = physiology_handlers.cb_phys_menu
 cb_phys_continue = physiology_handlers.cb_phys_continue
@@ -5505,7 +5503,6 @@ cb_phys_mini = physiology_handlers.cb_phys_mini
 cb_phys_mini_answer = physiology_handlers.cb_phys_mini_answer
 cb_phys_favorites = physiology_handlers.cb_phys_favorites
 cb_phys_progress = physiology_handlers.cb_phys_progress
-cb_phys_sources = physiology_handlers.cb_phys_sources
 cb_phys_search_prompt = physiology_handlers.cb_phys_search_prompt
 
 # ==================== ЗАПУСК ====================

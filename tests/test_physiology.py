@@ -137,10 +137,11 @@ async def main():
     menu_data = kb_data(menu_kb)
     for expected in (
         "phys:topics:0", "phys:continue", "phys:qpick:0", "phys:zpick:0",
-        "phys:search_prompt", "phys:favorites", "phys:progress", "phys:sources", "back_to_main",
+        "phys:search_prompt", "phys:favorites", "phys:progress", "back_to_main",
     ):
         assert expected in menu_data, expected
-    print("4. cb_phys_menu renders all mode entries: OK")
+    assert "phys:sources" not in menu_data, "no dedicated sources screen — never surfaced as UI text"
+    print("4. cb_phys_menu renders all mode entries, no sources screen: OK")
 
     # ---- 5. topics list: pagination (8/page), status icons, correct target routing ----
     cb_topics0 = FakeCB("phys:topics:0", uid=non_admin)
@@ -442,15 +443,21 @@ async def main():
     assert "Мой прогресс" in prog_text
     print("18. progress screen renders cleanly: OK")
 
-    # ---- 19. sources screen discloses real source files + provenance/scope note, never a
-    # fabrication claim ----
-    cb_sources = FakeCB("phys:sources", uid=non_admin)
-    await tb.cb_phys_sources(cb_sources)
-    src_text = cb_sources.message.edits[-1][0]
-    check_html(src_text)
-    for f in meta["source_files"]:
-        assert f in src_text
-    print("19. sources screen discloses real provenance: OK")
+    # ---- 19. no "Источник"/source-citation captions anywhere in the section (menu, topic card,
+    # learn cards, reading mode, quick review, quiz answers) — the dedicated sources screen and
+    # every per-topic/per-question citation were removed per explicit user request ----
+    assert not hasattr(tb, "cb_phys_sources")
+    assert not hasattr(tb, "get_phys_sources_text")
+    for t in topics:
+        assert "Источник" not in tb.get_phys_topic_text(t, non_admin)
+        for card in tb.build_phys_learn_cards(t):
+            assert "Источник" not in tb.render_phys_learn_card(t, card)
+        for i in range(len(t["sections"])):
+            assert "Источник" not in tb.get_phys_read_text(t, i)
+        assert "Источник" not in tb.get_phys_quick_text(t)
+    for q in quiz:
+        assert "Источник" not in tb.render_phys_quiz_answer(q, 0)
+    print("19. no source-citation captions anywhere in the section: OK")
 
     # ---- 20. search: prompt sets pending state, a real hit resolves it and clears pending,
     # idle user falls through via SkipHandler, empty result handled cleanly, back-to-menu clears
