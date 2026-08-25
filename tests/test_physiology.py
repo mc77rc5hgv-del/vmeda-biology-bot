@@ -512,14 +512,19 @@ async def main():
     assert "нормальная физиология" in subjects
     phys_entries = [e for e in ai_rag._index if e["subject"] == "нормальная физиология"]
     n_defs = sum(len(t["definitions"]) for t in topics)
-    assert len(phys_entries) == len(topics) + n_defs, (len(phys_entries), len(topics), n_defs)
+    n_rk_chunks = sum(
+        len(ai_rag._chunk_rk_blocks(c["blocks"])) for c in tb.PHYSIOLOGY.get("boundary_controls", [])
+    )
+    assert len(phys_entries) == len(topics) + n_defs + n_rk_chunks, (
+        len(phys_entries), len(topics), n_defs, n_rk_chunks
+    )
     # restore the real config other tests expect
     ai_rag.configure(
         questions=tb.QUESTIONS, physics_questions=tb.PHYSICS_QUESTIONS, chemistry_theory=tb.CHEMISTRY_THEORY,
         chemistry_theory_tickets=tb.CHEMISTRY_THEORY_TICKETS, chemistry_practice_tickets=tb.CHEMISTRY_PRACTICE_TICKETS,
         anatomy=tb.ANATOMY, operative_surgery=tb.OPERATIVE_SURGERY, physiology=tb.PHYSIOLOGY,
     )
-    print("21. RAG index includes every topic's full text + every definition: OK")
+    print("21. RAG index includes every topic's full text + every definition + boundary-control chunks: OK")
 
     # ---- 22. "Продолжить обучение": routes to a needs_review topic first, else the first
     # not_started/learning topic, never crashes when nothing has been started yet ----

@@ -78,6 +78,51 @@ def _entry_key(subject: str, title: str, text: str) -> str:
     return hashlib.sha256(f"{subject}\n{title}\n{text}".encode("utf-8")).hexdigest()[:24]
 
 
+RK_CHUNK_CHAR_BUDGET = 500  # заметно меньше SNIPPET_MAX_CHARS (600, см. format_context) —
+# каждый рубежный контроль это ~250-450 мелких text/table узлов (реальные вопрос-ответ пары
+# кафедрального экзамена), а format_context показывает модели только ПЕРВЫЕ SNIPPET_MAX_CHARS
+# символов совпавшей записи: индексировать целый контроль ОДНОЙ записью означало бы, что любой
+# факт за пределами первых ~600 символов огромного блоба физически никогда не попадёт в ответ,
+# даже если именно он совпал по запросу. Чанки размером ~500 символов почти всегда укладываются
+# в лимит показа целиком (вопрос + короткий ответ), не обрезаясь на середине.
+
+
+def _render_rk_table_for_rag(block: dict) -> str:
+    lines = [block["caption"]]
+    for row in block["rows"]:
+        lines.append(" | ".join(row))
+    return "\n".join(lines)
+
+
+def _chunk_rk_blocks(blocks: list) -> list:
+    """Жадно группирует подряд идущие text/table узлы рубежного контроля в чанки ~500 символов
+    для RAG-индекса — та же идея, что build_rk_pages() в handlers/physiology.py (никогда не
+    разрезает один узел, картинки пропускаются — это готовые фото-изображения без текста,
+    индексировать нечего), только с существенно меньшим бюджетом под RAG-сниппет, а не под
+    целое Telegram-сообщение."""
+    chunks = []
+    current: list = []
+    current_len = 0
+
+    def flush():
+        nonlocal current_len
+        if current:
+            chunks.append("\n\n".join(current))
+            current.clear()
+            current_len = 0
+
+    for block in blocks:
+        if block["type"] == "image":
+            continue
+        piece = block["text"] if block["type"] == "text" else _render_rk_table_for_rag(block)
+        if current and current_len + 2 + len(piece) > RK_CHUNK_CHAR_BUDGET:
+            flush()
+        current.append(piece)
+        current_len += len(piece) + 2
+    flush()
+    return chunks
+
+
 def build_index(
     *, questions: dict, physics_questions: dict, chemistry_theory: dict,
     chemistry_theory_tickets: dict, chemistry_practice_tickets: dict, anatomy: dict,
@@ -93,7 +138,13 @@ def build_index(
     объяснительного текста, отвечать по ним нечем). physiology — по одной записи на тему,
     склеенной из sections[] (полнотекстовое содержимое темы), плюс отдельные записи на каждое
     ключевое определение — definitions дают точные, короткие, легко цитируемые формулировки
-    терминов, которые полезно находить отдельно от общего текста темы."""
+    терминов, которые полезно находить отдельно от общего текста темы. physiology тем же путём
+    даёт boundary_controls (11 реальных рубежных контролей кафедры, см. CLAUDE.md) — каждый
+    контроль режется на чанки ~500 символов (_chunk_rk_blocks, картинки без текста пропускаются),
+    не индексируется одной огромной записью на контроль: format_context() показывает модели
+    только первые SNIPPET_MAX_CHARS символов совпавшей записи, так что мелкие точные чанки —
+    единственный способ, которым реальный факт из середины/конца контроля вообще может попасть
+    в ответ модели."""
     raw_entries = []
     for q in questions.values():
         raw_entries.append(("биология", q.get("title", ""), q.get("answer", "")))
@@ -123,6 +174,9 @@ def build_index(
             raw_entries.append(("нормальная физиология", topic["title"], full_text))
         for d in topic.get("definitions", []):
             raw_entries.append(("нормальная физиология", d["term"], d["text"]))
+    for control in (physiology or {}).get("boundary_controls", []):
+        for i, chunk_text in enumerate(_chunk_rk_blocks(control["blocks"]), start=1):
+            raw_entries.append(("нормальная физиология", f"{control['title']}, ч. {i}", chunk_text))
     return [
         {
             "subject": subject, "title": title, "text": text, "stems": _entry_stems(title, text),

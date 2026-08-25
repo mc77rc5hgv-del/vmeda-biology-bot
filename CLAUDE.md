@@ -397,8 +397,14 @@ Physiology search query at all.
 `ai.rag.build_index()`/`configure()` take a `physiology: dict = None` parameter (default `None` keeps every
 existing caller working unchanged) and index one entry per topic (its `sections[]` concatenated into one blob)
 plus one entry per `definitions[]` term (short, precisely-quotable — useful to find independently of the
-surrounding topic text). `ai/prompts.py`'s `SYSTEM_PROMPT` mentions "нормальной физиологии" alongside the other
-subjects for the same reason Anatomy/Operative Surgery were added there.
+surrounding topic text), plus — since `boundary_controls` was added — every rubezh control's real Q&A content,
+chunked to ~500 chars per entry via `_chunk_rk_blocks()` (`RK_CHUNK_CHAR_BUDGET`, deliberately smaller than the
+Telegram-page budget in `handlers/physiology.py`'s own `build_rk_pages()`): `format_context()` only ever shows
+the model the first `SNIPPET_MAX_CHARS` (600) characters of whatever entry matched, so indexing a whole ~20K-char
+control as one blob would silently make any fact past the first ~600 characters unreachable even on a perfect
+keyword match — small chunks are what actually makes the 11 controls' ~2800 real exam Q&A pairs usable grounding
+material, not just present in the index. `ai/prompts.py`'s `SYSTEM_PROMPT` mentions "нормальной физиологии"
+alongside the other subjects for the same reason Anatomy/Operative Surgery were added there.
 
 **Рубежные контроли** (`physiology.json["boundary_controls"]`, a separate top-level key from `topics`/
 `quiz_questions`) — 11 real kafedral rubezh (boundary/checkpoint) controls, imported from a user-supplied archive

@@ -240,6 +240,42 @@ async def main():
     assert any("Рубежные контроли" in t for t in kb_texts(menu_kb2))
     print("12. main Physiology menu links to Рубежные контроли: OK")
 
+    # ---- 13. boundary-control content is actually indexed for VMedA AI (ai/rag.py) and a real
+    # exam fact from it is genuinely retrievable by keyword search, not just present in the raw
+    # index — never one giant per-control blob (format_context() only shows the first
+    # SNIPPET_MAX_CHARS of a matched entry, so a huge blob would silently hide anything past that) ----
+    from ai import rag as ai_rag
+    ai_rag.configure(
+        questions=tb.QUESTIONS, physics_questions=tb.PHYSICS_QUESTIONS, chemistry_theory=tb.CHEMISTRY_THEORY,
+        chemistry_theory_tickets=tb.CHEMISTRY_THEORY_TICKETS, chemistry_practice_tickets=tb.CHEMISTRY_PRACTICE_TICKETS,
+        anatomy=tb.ANATOMY, operative_surgery=tb.OPERATIVE_SURGERY, physiology=tb.PHYSIOLOGY,
+    )
+    rk_entries = [e for e in ai_rag._index if e["subject"] == "нормальная физиология" and "Рубежный контроль" in e["title"]]
+    n_expected_chunks = sum(len(ai_rag._chunk_rk_blocks(c["blocks"])) for c in controls)
+    assert len(rk_entries) == n_expected_chunks, (len(rk_entries), n_expected_chunks)
+    # a chunk never exceeds the budget by more than one oversized single block (never split) —
+    # 2000 is a generous ceiling given the real max single source paragraph is 1532 chars
+    assert all(len(e["text"]) <= 2000 for e in rk_entries), max(len(e["text"]) for e in rk_entries)
+
+    scored = ai_rag._score_entries(
+        "В норме величина основного обмена у человека весом 70 кг", ai_rag._index, ai_rag._idf
+    )
+    scored.sort(key=lambda x: -x[0])
+    assert scored, "expected at least one keyword match"
+    top_entry = scored[0][1]
+    assert top_entry["subject"] == "нормальная физиология"
+    assert "1700 ккал" in top_entry["text"], top_entry["text"][:200]
+    ctx = ai_rag.format_context([top_entry])
+    assert "1700 ккал" in ctx, "the real fact must survive format_context's SNIPPET_MAX_CHARS truncation"
+
+    # restore the config other tests expect
+    ai_rag.configure(
+        questions=tb.QUESTIONS, physics_questions=tb.PHYSICS_QUESTIONS, chemistry_theory=tb.CHEMISTRY_THEORY,
+        chemistry_theory_tickets=tb.CHEMISTRY_THEORY_TICKETS, chemistry_practice_tickets=tb.CHEMISTRY_PRACTICE_TICKETS,
+        anatomy=tb.ANATOMY, operative_surgery=tb.OPERATIVE_SURGERY, physiology=tb.PHYSIOLOGY,
+    )
+    print("13. boundary-control content indexed in small chunks, a real fact is genuinely retrievable: OK")
+
     print("\nALL PHYSIOLOGY BOUNDARY-CONTROL TESTS PASSED")
 
 
