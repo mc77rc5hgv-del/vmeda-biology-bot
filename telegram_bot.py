@@ -2011,7 +2011,7 @@ def get_ticket_questions_keyboard(ticket_num: str):
     builder.row(InlineKeyboardButton(text="🔙 Назад к билетам", callback_data="menu_tickets"))
     return builder.as_markup()
 
-# ==================== ФИЗИКА ====================
+# ==================== ФИЗИКА (клавиатуры) ====================
 def get_physics_menu():
     builder = InlineKeyboardBuilder()
     builder.button(text="📝 Тестовая часть (186 вопросов)", callback_data="physics_test")
@@ -2268,7 +2268,7 @@ def get_physics_extra_answer_keyboard(q_num: str):
     builder.row(InlineKeyboardButton(text="🔙 К списку вопросов", callback_data="physics_extra"))
     return builder.as_markup()
 
-# ==================== ХИМИЯ ====================
+# ==================== ХИМИЯ (клавиатуры) ====================
 def get_chemistry_menu():
     builder = InlineKeyboardBuilder()
     builder.button(text="📚 Теория", callback_data="chemistry_theory")
@@ -4005,7 +4005,7 @@ async def handle_donation_pending_amount(message: Message):
 # Главное меню Химии и скачивание файлов перенесены в handlers/chemistry.py — см.
 # dp.include_router(chemistry_handlers.router) и реэкспорт дальше по файлу.
 
-# ==================== ХИМИЯ ====================
+# ==================== ХИМИЯ (роутер/реэкспорт) ====================
 # Хендлеры (теория с навигацией, билеты, задачи, лабораторные работы — все с уникальными
 # callback_data-фильтрами, безопасно для порядка dp) вынесены в handlers/chemistry.py (свой
 # Router) — здесь только регистрация роутера и реэкспорт имён. Клавиатурные билдеры и
@@ -5106,7 +5106,7 @@ async def handle_keyword_search(message: Message):
     )
     await message.answer(text, parse_mode="HTML", reply_markup=get_search_results_keyboard(results))
 
-# ==================== ФИЗИКА ====================
+# ==================== ФИЗИКА (роутер/реэкспорт) ====================
 # Хендлеры (тестовая часть, билеты, задачи — все с уникальными callback_data-фильтрами, безопасно
 # для порядка dp) вынесены в handlers/physics.py (свой Router) — здесь только регистрация роутера
 # и реэкспорт имён. Клавиатурные билдеры остаются здесь (используются и cb_menu_physics/
