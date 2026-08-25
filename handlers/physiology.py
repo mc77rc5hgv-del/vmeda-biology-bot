@@ -582,10 +582,7 @@ def render_phys_quiz_answer(q: dict, chosen_idx: int) -> str:
     verdict = "✅ Верно" if correct else "❌ Неверно"
     lines = [f"{verdict}\n{tb.DIVIDER}\n", f"Правильно:\n{esc(q['correct_answer'])}\n"]
     if q.get("explanation"):
-        lines.append(f"Почему:\n{esc(q['explanation'])}\n")
-    src = q.get("source_file") or "—"
-    pages = f", с. {q['source_pages']}" if q.get("source_pages") else ""
-    lines.append(f"📚 Источник:\n{esc(src)}{esc(pages)}")
+        lines.append(f"Почему:\n{esc(q['explanation'])}")
     return "\n".join(lines)
 
 
