@@ -5504,6 +5504,14 @@ cb_phys_mini_answer = physiology_handlers.cb_phys_mini_answer
 cb_phys_favorites = physiology_handlers.cb_phys_favorites
 cb_phys_progress = physiology_handlers.cb_phys_progress
 cb_phys_search_prompt = physiology_handlers.cb_phys_search_prompt
+get_rk_control = physiology_handlers.get_rk_control
+rk_control_ids_in_order = physiology_handlers.rk_control_ids_in_order
+build_rk_pages = physiology_handlers.build_rk_pages
+get_rk_menu_text = physiology_handlers.get_rk_menu_text
+get_rk_menu_keyboard = physiology_handlers.get_rk_menu_keyboard
+get_rk_page_keyboard = physiology_handlers.get_rk_page_keyboard
+cb_phys_rk_menu = physiology_handlers.cb_phys_rk_menu
+cb_phys_rk_page = physiology_handlers.cb_phys_rk_page
 
 # ==================== ЗАПУСК ====================
 async def setup_bot_commands() -> None:

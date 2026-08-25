@@ -28,14 +28,47 @@ mechanisms/cause_effect/comparisons — и НИКОГДА не изобрета�
 проверкой — тот же принцип, что и "Контрольные вопросы" в Operative Surgery).
 
 Импортирует telegram_bot как tb по той же причине, что и остальные поздно подключаемые модули —
-см. handlers/operative_surgery.py, тот же паттерн один в один."""
+см. handlers/operative_surgery.py, тот же паттерн один в один.
+
+**Рубежные контроли** (`physiology.json["boundary_controls"]`, top-level ключ отдельно от `topics`)
+— 11 реальных рубежных контролей кафедры, импортированных из присланного пользователем архива
+(DOCX -> markdown, извлечение "direct_docx_xml_no_ocr_no_paraphrase", т.е. текст скопирован из
+XML документа напрямую, без OCR и без парафраза). Каждый control — `{control_id, order, title,
+blocks[]}`, где `blocks` — упорядоченный поток узлов `{type: "text"|"image"|"table", ...,
+provenance}` строго в порядке исходного документа (`ordering: "document_body_order"` в
+manifest.json источника) — ни один узел не объединяется и не переставляется вручную: граница
+"абзаца" в blocks 1:1 совпадает с границей исходного DOCX-параграфа (подтверждено сверкой:
+100% текстовое совпадение содержимого blocks с content.md построчно на этапе импорта). `image`
+узлы резолвятся из `{{IMAGE:NNN}}`-плейсхолдеров через `manifest.json` конкретного control_id —
+никогда не переиспользуются между темами и не схлопываются при повторении. `table` узлы — редкий
+кастомный формат источника ("### Таблица N" + "**Строка N**" + "- **Ячейка N:** значение",
+только в rk_04, 4 таблицы) распарсен в `{caption, rows: [[cell, ...], ...]}`; редкий артефакт
+экстракции, где к последней строке таблицы приклеена следующая фраза без пустой строки-разделителя,
+не отбрасывается, а выносится отдельным text-узлом сразу после таблицы — весь текст источника
+сохранён, просто не притворяется ячейкой. Каждый узел несёт `provenance` (`control_id,
+source_docx, source_sha256, location`, для image ещё и `sha256` самого файла) — используется
+только как внутренние метаданные для трассируемости, НИКОГДА не рендерится пользователю (ни как
+"Источник:", ни как имя файла) — тот же принцип, что и убранные по прямому запросу пользователя
+цитаты в остальной части раздела. Заголовок/источник-цитата DOCX (`# Рубежный контроль N` и
+`> Исходный файл: ...`) отброшены при парсинге как структурный boilerplate, не как контент.
+Картинки лежат в `images/physiology/boundary_controls/rk_NN/media/...` (repo-конвенция
+`images/<subject>/...`, а не `bot_path` из manifest.json источника, который предполагал другую,
+несуществующую в этом репо раскладку `content/physiology/...`) — каждый файл сверен по SHA-256
+с manifest.json перед копированием. `build_rk_pages(blocks)` жадно группирует подряд идущие
+text/table-узлы в одну Telegram-страницу (до ~3500 символов, разбивка только по границам узлов,
+никогда не разрывая один узел) — image-узел всегда открывает свою отдельную страницу, поэтому
+картинка остаётся ровно между теми же соседними текстовыми блоками, что и в исходнике.
+`PHYS_RK_FILE_ID_CACHE` — тот же паттерн, что `ANATOMY_FILE_ID_CACHE`/`OH_FILE_ID_CACHE`: кэширует
+Telegram `file_id` после первой загрузки, повторные показы не перезаливают файл с диска."""
 import html
+import json
 import math
+import os
 import random
 import time
 
 from aiogram import F, Router
-from aiogram.types import CallbackQuery, InlineKeyboardButton
+from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 import telegram_bot as tb
@@ -330,6 +363,7 @@ def get_phys_menu_keyboard(user_id: int):
     builder.button(text=continue_label, callback_data="phys:continue")
     builder.button(text="⚡ Быстрый повтор", callback_data="phys:qpick:0")
     builder.button(text="🎯 Проверить себя", callback_data="phys:zpick:0")
+    builder.button(text="📋 Рубежные контроли", callback_data="phys:rk_menu")
     builder.button(text="🔎 Поиск", callback_data="phys:search_prompt")
     builder.button(text="⭐ Избранное", callback_data="phys:favorites")
     builder.button(text="📊 Мой прогресс", callback_data="phys:progress")
@@ -707,6 +741,183 @@ def search_physiology(query: str, limit: int = 8):
         if any(q in s["heading"].lower() or q in s["text"].lower() for s in t["sections"]):
             hits.append(t)
     return hits[:limit]
+
+
+# ==================== рубежные контроли ====================
+# Чисто просмотровый раздел (не quiz/SRS/mastery — за пределами того, что реально запрошено):
+# 11 реальных рубежных контролей кафедры, каждый — упорядоченный поток text/image/table узлов
+# (см. docstring модуля выше про импорт/provenance/раскладку картинок). "Читать" здесь означает
+# буквально то же самое, что "Читать конспект" у обычных тем — постранично, без вываливания
+# всего материала одним сообщением.
+
+PHYS_RK_PAGE_CHAR_BUDGET = 3500
+PHYS_RK_IMAGES_DIR = os.path.join(tb.IMAGES_DIR, "physiology", "boundary_controls")
+
+
+def get_rk_control(control_id: str):
+    for c in tb.PHYSIOLOGY.get("boundary_controls", []):
+        if c["control_id"] == control_id:
+            return c
+    return None
+
+
+def rk_control_ids_in_order():
+    return [c["control_id"] for c in tb.PHYSIOLOGY.get("boundary_controls", [])]
+
+
+def render_rk_table_block(block: dict) -> str:
+    lines = [f"<b>{block['caption']}</b>"]
+    for row in block["rows"]:
+        lines.append(" | ".join(row))
+    return "\n".join(lines)
+
+
+def build_rk_pages(blocks: list) -> list:
+    """Жадно группирует подряд идущие text/table-узлы в одну страницу (до
+    PHYS_RK_PAGE_CHAR_BUDGET символов) — разбивка только по границе узла (= границе исходного
+    DOCX-абзаца), один узел никогда не разрезается. image-узел всегда открывает свою отдельную
+    страницу (Telegram не может прикрепить фото к уже отправленному текстовому сообщению), так
+    что картинка остаётся ровно между теми же соседними текстовыми блоками, что и в исходнике."""
+    pages = []
+    current_parts: list = []
+    current_len = 0
+
+    def flush():
+        nonlocal current_len
+        if current_parts:
+            pages.append({"kind": "text", "text": "\n\n".join(current_parts)})
+            current_parts.clear()
+            current_len = 0
+
+    for block in blocks:
+        if block["type"] == "image":
+            flush()
+            pages.append({"kind": "image", "path": block["path"]})
+            continue
+        piece = block["text"] if block["type"] == "text" else render_rk_table_block(block)
+        if current_parts and current_len + 2 + len(piece) > PHYS_RK_PAGE_CHAR_BUDGET:
+            flush()
+        current_parts.append(piece)
+        current_len += len(piece) + 2
+    flush()
+    return pages
+
+
+# Кэш Telegram file_id для картинок рубежных контролей — тот же паттерн, что
+# ANATOMY_FILE_ID_CACHE/OH_FILE_ID_CACHE (см. CLAUDE.md): без него каждый повторный показ той же
+# картинки заново читает файл с диска и заливает в Telegram.
+PHYS_RK_FILE_ID_CACHE_PATH = os.path.join(tb.STATS_DIR, "physiology_rk_file_id_cache.json")
+
+
+def _load_phys_rk_file_id_cache() -> dict:
+    try:
+        with open(PHYS_RK_FILE_ID_CACHE_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+
+
+PHYS_RK_FILE_ID_CACHE: dict = _load_phys_rk_file_id_cache()
+
+
+def _write_phys_rk_file_id_cache(data: dict) -> None:
+    tmp_path = f"{PHYS_RK_FILE_ID_CACHE_PATH}.tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp_path, PHYS_RK_FILE_ID_CACHE_PATH)
+
+
+def save_phys_rk_file_id_cache() -> None:
+    data = dict(PHYS_RK_FILE_ID_CACHE)
+    future = tb._stats_executor.submit(_write_phys_rk_file_id_cache, data)
+    future.add_done_callback(tb._log_stats_write_result)
+
+
+def _phys_rk_image_media(path: str):
+    cached = PHYS_RK_FILE_ID_CACHE.get(path)
+    if cached:
+        return cached
+    return FSInputFile(os.path.join(PHYS_RK_IMAGES_DIR, path))
+
+
+def _cache_phys_rk_file_id(path: str, sent_message) -> bool:
+    if path in PHYS_RK_FILE_ID_CACHE:
+        return False
+    photo_sizes = getattr(sent_message, "photo", None)
+    if not photo_sizes:
+        return False
+    PHYS_RK_FILE_ID_CACHE[path] = photo_sizes[-1].file_id
+    save_phys_rk_file_id_cache()
+    return True
+
+
+def get_rk_menu_text() -> str:
+    n = len(tb.PHYSIOLOGY.get("boundary_controls", []))
+    return f"📋 <b>РУБЕЖНЫЕ КОНТРОЛИ</b>\n{tb.DIVIDER}\n\n{n} рубежных контролей кафедры. Выбери номер:"
+
+
+def get_rk_menu_keyboard():
+    builder = InlineKeyboardBuilder()
+    for c in tb.PHYSIOLOGY.get("boundary_controls", []):
+        builder.button(text=f"📋 {c['title']}", callback_data=f"phys:rk:{c['control_id']}:0")
+    builder.adjust(1)
+    builder.row(InlineKeyboardButton(text="🏠 Меню физиологии", callback_data="phys:menu"))
+    return builder.as_markup()
+
+
+def get_rk_page_keyboard(control_id: str, idx: int, total: int):
+    builder = InlineKeyboardBuilder()
+    nav = []
+    if idx > 0:
+        nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"phys:rk:{control_id}:{idx - 1}"))
+    if idx + 1 < total:
+        nav.append(InlineKeyboardButton(text="➡️", callback_data=f"phys:rk:{control_id}:{idx + 1}"))
+    if nav:
+        builder.row(*nav)
+    builder.row(InlineKeyboardButton(text="🔙 К рубежам", callback_data="phys:rk_menu"))
+    return builder.as_markup()
+
+
+async def send_rk_page(callback: CallbackQuery, control: dict, idx: int, pages: list):
+    """Рендерит страницу idx (0-based) — текстовую (edit/answer) или фото (delete+answer_photo,
+    тот же приём, что и другие фото-карусели раздела — см. CLAUDE.md, "hand-roll delete-and-
+    resend on ⬅️/➡️"; edit_text не умеет превратить текстовое сообщение в фото и обратно)."""
+    page = pages[idx]
+    keyboard = get_rk_page_keyboard(control["control_id"], idx, len(pages))
+    await callback.message.delete()
+    if page["kind"] == "image":
+        sent = await callback.message.answer_photo(
+            _phys_rk_image_media(page["path"]), reply_markup=keyboard
+        )
+        _cache_phys_rk_file_id(page["path"], sent)
+        return
+    header = f"📋 <b>{esc(control['title'])}</b> ({idx + 1}/{len(pages)})\n{tb.DIVIDER}\n\n"
+    await callback.message.answer(header + page["text"], parse_mode="HTML", reply_markup=keyboard)
+
+
+@router.callback_query(F.data == "phys:rk_menu")
+async def cb_phys_rk_menu(callback: CallbackQuery):
+    await callback.answer()
+    await tb.safe_edit_text(
+        callback.message, get_rk_menu_text(), parse_mode="HTML",
+        reply_markup=get_rk_menu_keyboard()
+    )
+
+
+@router.callback_query(F.data.startswith("phys:rk:"))
+async def cb_phys_rk_page(callback: CallbackQuery):
+    parts = callback.data.split(":")
+    control_id, idx = parts[2], int(parts[3])
+    control = get_rk_control(control_id)
+    if control is None:
+        await callback.answer("Рубежный контроль не найден", show_alert=True)
+        return
+    pages = build_rk_pages(control["blocks"])
+    if not (0 <= idx < len(pages)):
+        await callback.answer("Страница не найдена", show_alert=True)
+        return
+    await callback.answer()
+    await send_rk_page(callback, control, idx, pages)
 
 
 # ==================== handlers ====================

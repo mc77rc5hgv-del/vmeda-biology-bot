@@ -400,6 +400,43 @@ plus one entry per `definitions[]` term (short, precisely-quotable — useful to
 surrounding topic text). `ai/prompts.py`'s `SYSTEM_PROMPT` mentions "нормальной физиологии" alongside the other
 subjects for the same reason Anatomy/Operative Surgery were added there.
 
+**Рубежные контроли** (`physiology.json["boundary_controls"]`, a separate top-level key from `topics`/
+`quiz_questions`) — 11 real kafedral rubezh (boundary/checkpoint) controls, imported from a user-supplied archive
+containing 11 DOCX files, a `manifest.json`, and per-control `content.md` extracted with policy
+`"direct_docx_xml_no_ocr_no_paraphrase"` + `"ordering": "document_body_order"` — i.e. every blank-line-delimited
+block in `content.md` is a real DOCX paragraph, 1:1, in original document order. Each control is
+`{control_id, order, title, blocks[]}` where `blocks` is an ordered stream of `{type: "text"|"image"|"table", ...,
+provenance}` nodes — never merged, reordered, or edited by hand; verified at import time via a byte-level
+`difflib` similarity check (ratio 1.0 on all 11 controls) that the reconstructed block stream matches the source
+`content.md` exactly, modulo whitespace collapsing. `image` nodes resolve `{{IMAGE:NNN}}` placeholders through
+the source `manifest.json` per `control_id` (never cross-control); `table` nodes are a rare custom source format
+(`"### Таблица N"` + `"**Строка N**"` + `"- **Ячейка N:** value"`, only in `rk_04`, 4 tables total) parsed into
+`{caption, rows: [[cell, ...], ...]}` — a source artifact where a trailing sentence is glued onto the last row's
+paragraph with no blank-line separator is never dropped or force-fit into a fake cell, it's split off into its
+own following `text` node instead. The DOCX title heading and its `> Исходный файл: ...` blockquote are dropped
+at parse time as structural front-matter, not content — doubly so since, per explicit user request, this whole
+section (like the rest of Physiology) never renders a source-file citation anywhere in the UI; every node still
+carries `provenance` (`control_id, source_docx, source_sha256, location` — a `content.md` line number, plus the
+image's own `sha256`) purely as internal traceability metadata, never displayed. Images live under
+`images/physiology/boundary_controls/rk_NN/media/...` (this repo's own `images/<subject>/...` convention — NOT
+the `bot_path` the source archive's own manifest assumed, which pointed at a `content/physiology/...` layout this
+codebase doesn't use); every one of the 46 images was SHA-256-verified against the source manifest before being
+committed, and the same hash is stored per-node in `physiology.json` so `tests/test_physiology_rk.py` can re-verify
+file integrity from the dataset alone, with no dependency on the original archive.
+
+`build_rk_pages(blocks)` (`handlers/physiology.py`) greedily groups consecutive `text`/`table` nodes into one
+Telegram-safe page (~3500 chars, never splitting a single node — the real max single-node length across all 11
+controls is 1532 chars, well under the budget) — an `image` node always starts its own page, since
+`sendPhoto`/`answer_photo` can't be merged into an existing text message, so the picture stays positioned between
+exactly the same neighboring text nodes it had in the source. Navigation is `phys:rk_menu` (list of 11, in order)
+→ `phys:rk:{control_id}:{page_idx}`, rendered via `send_rk_page()` — delete-and-resend on every ⬅️/➡️ tap (same
+"hand-roll delete-and-resend" carousel style as Biology/Physics/Histology photo carousels, necessary here because
+a single control's pages alternate between text and photo messages, which `edit_text` can't convert between).
+`PHYS_RK_FILE_ID_CACHE` (`physiology_rk_file_id_cache.json` under `STATS_DIR`) is the same file_id-caching pattern
+as `ANATOMY_FILE_ID_CACHE`/`OH_FILE_ID_CACHE` — repeat views of the same image skip re-reading/re-uploading it.
+This is deliberately a pure content-viewing feature — no quiz/SRS/mastery/favorites layer, since none was
+requested for it and the acceptance criteria only ever describe browsing/reading.
+
 ### Access control (two independent gates)
 
 1. **Referral gate** (`referral_gate_middleware`, an `@dp.update.outer_middleware()`): gates only Biology/Physics/
