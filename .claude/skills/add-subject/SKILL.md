@@ -285,15 +285,63 @@ navigable sequence, use delete-and-resend on every ⬅️/➡️ tap (same as Bi
 Histology carousels and the Рубежные контроли reader) — `edit_text` can't turn a text
 message into a photo message or back.
 
-## Step 10: Wire the menu entry point
+## Step 10: Wire the menu entry point — and actually verify the access/subscription logic
 
 Check `COURSE_SUBJECTS` in `telegram_bot.py` (the "1️⃣ Первый курс" / "2️⃣ Второй курс"
 grouping) — decide which course(s) the new subject belongs in, or whether it needs its
 own top-level main-menu button instead. Default to **free for everyone, no referral gate,
 no subscription check** — this has been the choice for every subject added recently
-(Operative Surgery, Physiology) unless the user explicitly asks for gating. If gating is
-wanted, `services/access.py` has the referral-gate and subscription-tier machinery; ask
-before wiring a new subject into either, since it changes real user access and revenue.
+(Operative Surgery, Physiology) unless the user explicitly asks for gating.
+
+Whichever you pick, don't just assume it works — access control is exactly the kind of
+thing that's silently wrong until someone checks, and getting it wrong either locks
+paying-adjacent content nobody can reach or leaks something that was supposed to cost
+money. Actually verify, don't just wire and move on:
+
+- **Free-for-everyone** (the default): confirm the new subject's callback-data prefixes
+  are genuinely absent from `GATED_CALLBACKS_*`/`GATED_PREFIXES_*` in `services/access.py`
+  — `referral_gate_middleware` only gates what's on that explicit allowlist, so "absent"
+  already means "ungated", but write an actual test asserting
+  `tb.is_gated_callback("<subject>:menu")` (and any other top-level entry callback) is
+  `False`, so a future accidental addition to the allowlist gets caught instead of
+  silently locking a subject that's supposed to stay open.
+- **Gated** (only if the user explicitly asks): first figure out *which* of the two
+  existing gating shapes this matches, rather than inventing a third — Biology/Physics/
+  Chemistry use the shared `referral_gate_middleware` allowlist (subject-aware, checks
+  `has_subject_access`); Anatomy/Histology instead use their own dedicated
+  `*_access_ok()` boolean predicate plus per-tier flags snapshotted onto
+  `SUBSCRIPTION_TIERS` entries. Picking the wrong shape means re-deriving edge cases
+  (subject-restricted tiers, admin bypass, temp-access grants, monthly-recurring referral
+  thresholds) that the existing shape already handles correctly.
+- If the new subject needs its own `SUBSCRIPTION_TIERS` flag (the way `anatomy`/
+  `histology_until_rule` work), **never reuse or repurpose an existing tier's numeric
+  key** — `stats["subscriptions"]` stores only the tier id, so reusing one would silently
+  reinterpret what an existing payer already bought. Add a new key above the current
+  highest, and snapshot the grant onto the subscription record at `grant_subscription()`
+  time, not derived live from a global constant later (see CLAUDE.md's Subscriptions
+  section for exactly why — a later constant change must never retroactively shrink a
+  promise already sold).
+- Either way, write tests that actually exercise the boundary: admin always gets in;
+  a non-admin with no qualifying access is blocked (and — if gated — sees a real path to
+  get access, not a dead end); a non-admin who does qualify (real referral count, real
+  granted subscription) gets in; if there's a promo/global-override mechanism in play,
+  check explicitly whether the new subject is meant to respond to it or deliberately
+  stays excluded the way Anatomy excludes itself from the global promo. Don't infer
+  "it probably works" from the gate function's code — actually call it both ways in a
+  test with a real fake user id.
+- Check the main menu / course menu against the "hide vs. relabel" pitfall in CLAUDE.md:
+  if access depends on a subscription/referral state, the entry point should always be
+  visible with a state-dependent label (locked vs. unlocked), never conditionally hidden
+  — a hidden entry point is easy to ship without noticing, since the admin/test account
+  usually already has access and never exercises the hidden state.
+- If the new subject (or its assessment subsection from Step 3) is meant to be paid-only,
+  keep in mind VMedA AI's RAG grounding (Step 11) is a **separate, already-decoupled axis**
+  in this codebase — indexing paid content for AI grounding doesn't currently check
+  per-subject access at all (documented in CLAUDE.md: "content-access rights and AI-
+  request rights are deliberately independent axes"). That's an existing, intentional
+  product decision, not something this skill should silently override — but flag it to
+  the user if the new subject is paid, so the tradeoff (AI can ground answers in paid
+  content for free-tier AI users) is a conscious choice, not a surprise.
 
 ## Step 11: Wire into VMedA AI's RAG grounding (ask first if unclear whether this is wanted)
 
