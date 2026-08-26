@@ -507,8 +507,8 @@ requested for it and the acceptance criteria only ever describe browsing/reading
    "🦴 Анатомия" button in the main menu and in the admin Anatomy-announcement broadcast — `anatomy_menu` itself is
    no longer a direct entry point) shows two options — "📚 Весь курс анатомии" (`anatomy_menu`, unchanged: the
    10-section module list described above) and "🎓 Экзамен" (`anatomy_exam_menu`, three entries: "🖐 Вопросы
-   практики"/"📖 Вопросы теории" are stubs pending content, "✅ ТЕСТ" is live). ТЕСТ is the official 1040-question
-   test bank of the ВМедА normal-anatomy department (Гайворонский и др., 2021, `anatomy_exam_test.json`,
+   практики", "📖 Вопросы теории", "✅ ТЕСТ" — all three fully populated and free for everyone, no stubs left).
+   ТЕСТ is the official 1040-question test bank of the ВМедА normal-anatomy department (Гайворонский и др., 2021, `anatomy_exam_test.json`,
    `ANATOMY_EXAM_TEST_PARTS`), split into 10 fixed parts of ~102-106 questions each (5 parts "Базовая часть", 5
    "Лечебное дело" — mirrors the two answer-key sections of the source document) — **always free for everyone**,
    with no gate check at all, independent of `ANATOMY_FREE_SECTIONS`/subscriptions, same reasoning as the global
@@ -519,6 +519,20 @@ requested for it and the acceptance criteria only ever describe browsing/reading
    wrong. `anatomy.json`'s bone/topic gate machinery (`anatomy_section_access_ok`, `get_topic_section_key`, etc.)
    is untouched by any of this — ТЕСТ questions aren't tied to `ANATOMY` topics/sections at all, just to their own
    flat `anatomy_exam_test.json` part list.
+
+   **Вопросы практики / Вопросы теории** (`anatomy_exam_practice.json`/`anatomy_exam_theory.json`, own
+   top-level `{sections: [{id, title, questions: [{num, question, answer, ...}]}]}` shape, loaded via
+   `knowledge.py` next to `anatomy_exam_test.json`) are the other two official ВМедА question banks, both
+   free for everyone — 4 sections each (practice: 168 questions across Опора и движение/Спланхнология/
+   Сосудистая система/Нервная система; theory: 180 questions across the same four systems, 45 each),
+   navigated section → question list → question detail with prev/next, same shape as the rest of this menu.
+   Practice questions ship with real images (`images` list, `{path, caption, credit}` — Неттер/Гайворонский
+   atlas or an open-source captioned fallback, same `_anatomy_image_media()`/`ANATOMY_FILE_ID_CACHE`
+   machinery as the main course, resolved under `images/anatomy/...`); a single-image question is sent via
+   `answer_photo` with the answer as caption when it fits Telegram's `CAPTION_LIMIT` (1024 chars), or a short
+   caption + the full answer as a separate text message otherwise, and a multi-image question goes out as a
+   native album (mirrors `send_anatomy_album`). Theory questions are text-only (`{num, question, answer}`,
+   answers written from Гайворонский's textbook), no images.
 
    **ТЕСТ has a per-user normal/rating mode toggle** (`get_anatomy_exam_test_mode`/`set_anatomy_exam_test_mode`,
    `stats["anatomy_exam_test_mode"][uid]`, default `"normal"`) — a button on the part-list menu flips it
