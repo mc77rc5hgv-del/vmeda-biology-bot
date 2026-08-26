@@ -90,6 +90,11 @@ def get_admin_menu():
     )
     builder.button(text="📣 Анонсы", callback_data="admin_announcements_menu")
     builder.button(text="📤 Опубликовать пост в канал", callback_data="admin_channel_post_prompt")
+    builder.button(
+        text="🦴🔧 Техрежим Анатомии: ВКЛ (закрыта)" if tb.anatomy_maintenance_mode_enabled()
+        else "🦴🔧 Техрежим Анатомии: ВЫКЛ (открыта)",
+        callback_data="admin_anatomy_maintenance_toggle",
+    )
     builder.button(text="🔬 Открыть Гистологию всем на 24ч", callback_data="admin_histology_promo_confirm")
     builder.button(text="🎉 Снять все ограничения всем на 24ч", callback_data="admin_global_promo_confirm")
     builder.button(text="🎉 Снять все ограничения всем на 12ч", callback_data="admin_global_promo_12h_confirm")
@@ -511,6 +516,31 @@ async def cb_admin_battle_start_go(callback: CallbackQuery):
         get_admin_battle_text(),
         parse_mode="HTML",
         reply_markup=get_admin_battle_keyboard()
+    )
+
+@router.callback_query(F.data == "admin_anatomy_maintenance_toggle")
+async def cb_admin_anatomy_maintenance_toggle(callback: CallbackQuery):
+    """Раньше единственный способ снять/включить техрежим Анатомии (ANATOMY_MAINTENANCE_MODE) —
+    редеплой с изменённой константой в handlers/anatomy.py. Тумблер здесь пишет в
+    stats["anatomy_maintenance_override"], которую anatomy_maintenance_mode_enabled() читает
+    вместо захардкоженного значения — см. её докстринг. Без экрана подтверждения (как сброс
+    AI-автовыключателя) — действие мгновенно обратимо повторным тапом, в отличие от рассылок."""
+    if not tb.is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    new_value = not tb.anatomy_maintenance_mode_enabled()
+    tb.stats["anatomy_maintenance_override"] = new_value
+    tb.save_stats()
+    await callback.answer(
+        "🔧 Анатомия закрыта для всех, кроме админов (технический режим)." if new_value
+        else "✅ Технический режим снят — Анатомия снова доступна как обычно.",
+        show_alert=True,
+    )
+    await tb.safe_edit_text(
+        callback.message,
+        f"🛠 <b>Админ-панель</b>\n{tb.DIVIDER}\n\nВыбери действие:",
+        parse_mode="HTML",
+        reply_markup=get_admin_menu()
     )
 
 @router.callback_query(F.data == "admin_histology_promo_confirm")

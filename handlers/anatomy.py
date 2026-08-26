@@ -24,10 +24,20 @@ router = Router()
 
 # ==================== АНАТОМИЯ (В РАЗРАБОТКЕ, ПОКА ДОСТУПНО ТОЛЬКО АДМИНАМ) ====================
 ANATOMY_PUBLIC = False  # когда раздел будет готов для всех — переключить на True
-ANATOMY_MAINTENANCE_MODE = True  # временное технической закрытие всего раздела для всех, кроме админов —
-# переключить обратно на False, когда технические проблемы будут устранены. Гейтится в одном месте
-# (cb_anatomy_root), т.к. это единственная точка входа в раздел — anatomy_menu/anatomy_exam_menu и всё
-# вложенное (темы, кости, ТЕСТ) достижимы только через него, отдельных deep-link'ов в контент нет.
+ANATOMY_MAINTENANCE_MODE = True  # захардкоженное значение ПО УМОЛЧАНИЮ (используется, пока админ ни разу
+# не трогал тумблер в панели) — временное техническое закрытие всего раздела для всех, кроме админов.
+# Гейтится в одном месте (cb_anatomy_root), т.к. это единственная точка входа в раздел —
+# anatomy_menu/anatomy_exam_menu и всё вложенное (темы, кости, ТЕСТ) достижимы только через него,
+# отдельных deep-link'ов в контент нет.
+
+def anatomy_maintenance_mode_enabled() -> bool:
+    """Фактическое состояние тех.режима: stats["anatomy_maintenance_override"] (None/True/False) —
+    если админ хоть раз переключил тумблер в панели ("🛠 Админ-панель" -> тумблер техрежима
+    Анатомии), значение живёт здесь и переживает редеплой без изменения кода; пока override не
+    установлен (None — свежая база или ещё не трогали), используется захардкоженный
+    ANATOMY_MAINTENANCE_MODE выше как значение по умолчанию."""
+    override = tb.stats.get("anatomy_maintenance_override")
+    return ANATOMY_MAINTENANCE_MODE if override is None else override
 
 ANATOMY_FLASH_SESSION_SIZE = 10
 ANATOMY_MATCH_SESSION_SIZE = 10
@@ -783,7 +793,7 @@ def get_anatomy_maintenance_keyboard():
 @router.callback_query(F.data == "anatomy_root")
 async def cb_anatomy_root(callback: CallbackQuery):
     await callback.answer()
-    if ANATOMY_MAINTENANCE_MODE and not tb.is_admin_or_assistant(callback.from_user.id):
+    if anatomy_maintenance_mode_enabled() and not tb.is_admin_or_assistant(callback.from_user.id):
         await tb.safe_edit_text(
             callback.message,
             get_anatomy_maintenance_text(),

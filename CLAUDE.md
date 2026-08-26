@@ -583,6 +583,20 @@ even during a global promo, since the section is still `ANATOMY_PUBLIC = False` 
 gated like the other subjects. Likewise `biology_tickets_download_ok()` never checks any promo/referral state at
 all (subscription or admin only) — biology ticket *downloads* are always paid, independent of any promo.
 
+**Anatomy maintenance mode** (`ANATOMY_MAINTENANCE_MODE` in `handlers/anatomy.py`, gated in the section's sole
+entry point `cb_anatomy_root`) is a separate, unrelated on/off switch from `ANATOMY_PUBLIC`/the promo system above
+— a temporary technical closure of the whole section (course + exam, everything reachable from `anatomy_root`) for
+everyone except admins/assistants, for when something's broken rather than "not ready yet". It used to be a plain
+hardcoded bool that only a code change + redeploy could flip — `anatomy_maintenance_mode_enabled()` now reads
+`stats["anatomy_maintenance_override"]` (`None`/`True`/`False`) first and only falls back to the hardcoded constant
+when no admin has ever touched the toggle, so the admin panel's "🦴🔧 Техрежим Анатомии: ВКЛ/ВЫКЛ" button
+(`admin_anatomy_maintenance_toggle`) can flip it instantly without a deploy — same "state survives a redeploy,
+lives in `stats`" pattern as every other admin-panel toggle in this file. The raw `ANATOMY_MAINTENANCE_MODE`
+constant is still the source of truth for what a *fresh* install defaults to, and is still what tests mutate
+directly to simulate "no override has been set yet" (see the `ANATOMY_MAINTENANCE_MODE` re-export note further
+down for why it's never flat-copied onto `tb`) — only the *effective* read of the flag goes through
+`anatomy_maintenance_mode_enabled()`, both in `cb_anatomy_root` and in `_anatomy_menu_label()`.
+
 ### Subscriptions (`SUBSCRIPTION_TIERS`)
 
 Twenty dict entries. **Tiers 1-11 are the old lineup, ALL retired** (`"retired": True`) — kept in the dict

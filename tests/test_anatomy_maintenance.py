@@ -85,6 +85,55 @@ async def main():
     print("4. maintenance OFF restores normal behavior: OK")
 
     tb.anatomy_handlers.ANATOMY_MAINTENANCE_MODE = orig_mode
+
+    # ---- 5. stats override takes precedence over the hardcoded constant ----
+    orig_override = tb.stats.get("anatomy_maintenance_override")
+    tb.anatomy_handlers.ANATOMY_MAINTENANCE_MODE = False
+    tb.stats["anatomy_maintenance_override"] = True
+    assert tb.anatomy_maintenance_mode_enabled() is True
+    cb5 = FakeCB("anatomy_root", uid=NON_ADMIN)
+    await tb.cb_anatomy_root(cb5)
+    text5, _ = cb5.message.edits[-1]
+    assert "техническ" in text5.lower(), "stats override must close the section even though the hardcoded flag is off"
+
+    tb.stats["anatomy_maintenance_override"] = False
+    assert tb.anatomy_maintenance_mode_enabled() is False
+    tb.anatomy_handlers.ANATOMY_MAINTENANCE_MODE = True
+    cb6 = FakeCB("anatomy_root", uid=NON_ADMIN)
+    await tb.cb_anatomy_root(cb6)
+    data6 = kb_data(cb6.message.edits[-1][1])
+    assert "anatomy_menu" in data6, "stats override=False must open the section even though the hardcoded flag is on"
+
+    tb.anatomy_handlers.ANATOMY_MAINTENANCE_MODE = orig_mode
+    tb.stats["anatomy_maintenance_override"] = None
+    print("5. stats override wins over the hardcoded ANATOMY_MAINTENANCE_MODE constant: OK")
+
+    # ---- 6. admin panel one-tap toggle ----
+    assert tb.anatomy_maintenance_mode_enabled() == orig_mode  # override cleared -> back to hardcoded default
+
+    cb_toggle1 = FakeCB("admin_anatomy_maintenance_toggle", uid=ADMIN_ID)
+    await tb.cb_admin_anatomy_maintenance_toggle(cb_toggle1)
+    assert tb.anatomy_maintenance_mode_enabled() == (not orig_mode)
+    assert cb_toggle1._answers and cb_toggle1._answers[-1][1] is True  # show_alert
+    menu_text1, menu_kb1 = cb_toggle1.message.edits[-1]
+    label1 = next(t for t in kb_texts(menu_kb1) if "Техрежим Анатомии" in t)
+    assert ("ВКЛ" in label1) == (not orig_mode)
+
+    cb_toggle2 = FakeCB("admin_anatomy_maintenance_toggle", uid=ADMIN_ID)
+    await tb.cb_admin_anatomy_maintenance_toggle(cb_toggle2)
+    assert tb.anatomy_maintenance_mode_enabled() == orig_mode  # flipped back
+    _, menu_kb2 = cb_toggle2.message.edits[-1]
+    label2 = next(t for t in kb_texts(menu_kb2) if "Техрежим Анатомии" in t)
+    assert ("ВКЛ" in label2) == orig_mode
+
+    cb_toggle_denied = FakeCB("admin_anatomy_maintenance_toggle", uid=NON_ADMIN)
+    await tb.cb_admin_anatomy_maintenance_toggle(cb_toggle_denied)
+    assert tb.anatomy_maintenance_mode_enabled() == orig_mode, "non-admin must not be able to toggle maintenance mode"
+    assert not cb_toggle_denied.message.edits
+
+    tb.stats["anatomy_maintenance_override"] = orig_override
+    print("6. admin_anatomy_maintenance_toggle flips state one-tap, relabels the button, denies non-admin: OK")
+
     print("\nAll anatomy maintenance-mode tests passed!")
 
 if __name__ == "__main__":

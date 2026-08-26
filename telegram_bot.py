@@ -198,6 +198,7 @@ def load_stats() -> dict:
             data.setdefault("processed_payment_charge_ids", {})
             data.setdefault("physiology_progress", {})
             data.setdefault("physiology_favorites", {})
+            data.setdefault("anatomy_maintenance_override", None)
             return data
         except (json.JSONDecodeError, OSError):
             logger.exception("Не удалось прочитать %s, статистика будет создана заново", STATS_FILE)
@@ -247,6 +248,7 @@ def load_stats() -> dict:
         "processed_payment_charge_ids": {},
         "physiology_progress": {},
         "physiology_favorites": {},
+        "anatomy_maintenance_override": None,
     }
 
 # Один воркер сериализует записи на диск и не даёт им блокировать event loop бота.
@@ -1849,7 +1851,7 @@ def _anatomy_menu_label(user_id: int = None) -> str:
     sub_anatomy = user_id is not None and has_subscription_anatomy_access(user_id)
     if user_id is not None and is_admin(user_id):
         return "🔥🦴 Анатомия (админ)"
-    elif anatomy_handlers.ANATOMY_MAINTENANCE_MODE:
+    elif anatomy_handlers.anatomy_maintenance_mode_enabled():
         return "🦴 Анатомия (техобслуживание)"
     elif sub_anatomy:
         return "🔥🦴 Анатомия 💎"
@@ -2591,6 +2593,7 @@ cb_admin_announcements_menu = admin_handlers.cb_admin_announcements_menu
 cb_admin_battle_last_results = admin_handlers.cb_admin_battle_last_results
 cb_admin_battle_start_confirm = admin_handlers.cb_admin_battle_start_confirm
 cb_admin_battle_start_go = admin_handlers.cb_admin_battle_start_go
+cb_admin_anatomy_maintenance_toggle = admin_handlers.cb_admin_anatomy_maintenance_toggle
 cb_admin_histology_promo_confirm = admin_handlers.cb_admin_histology_promo_confirm
 cb_admin_histology_promo_go = admin_handlers.cb_admin_histology_promo_go
 cb_admin_global_promo_confirm = admin_handlers.cb_admin_global_promo_confirm
@@ -5180,7 +5183,12 @@ ANATOMY_PUBLIC = anatomy_handlers.ANATOMY_PUBLIC
 # value at import time; reassigning the copy (`tb.ANATOMY_MAINTENANCE_MODE = ...`) would silently
 # stop affecting the real flag `cb_anatomy_root` reads in handlers/anatomy.py, and vice versa —
 # always go through `anatomy_handlers.ANATOMY_MAINTENANCE_MODE` (both here and in tests) so
-# there's exactly one source of truth.
+# there's exactly one source of truth. `anatomy_maintenance_mode_enabled` (the effective,
+# override-aware read of that flag — see its docstring in handlers/anatomy.py) IS safe to
+# re-export flatly below, since it's a function, not a mutable scalar copy: it always reads
+# `tb.stats["anatomy_maintenance_override"]` live, regardless of which module namespace the
+# function object itself is called through.
+anatomy_maintenance_mode_enabled = anatomy_handlers.anatomy_maintenance_mode_enabled
 ANATOMY_FLASH_SESSION_SIZE = anatomy_handlers.ANATOMY_FLASH_SESSION_SIZE
 ANATOMY_MATCH_SESSION_SIZE = anatomy_handlers.ANATOMY_MATCH_SESSION_SIZE
 ANATOMY_LATIN_SESSION_SIZE = anatomy_handlers.ANATOMY_LATIN_SESSION_SIZE
