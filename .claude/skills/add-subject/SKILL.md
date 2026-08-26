@@ -44,6 +44,45 @@ questions because the source has no structured content for them; Operative Surge
 volume IV has no control-questions button because the source never had one) — do the
 same for whatever you build.
 
+## The second rule: process every file properly, don't skim it
+
+Treat every file the user hands over as material to actually read end to end, not to
+sample. A PDF/DOCX can bury its most exam-relevant content on page 40; a folder can mix
+real lecture material with a stray unrelated file. Open everything, check page/section
+counts against what you actually extracted, and don't silently stop early because the
+first few pages looked repetitive — one skipped page for a full-length source is a real
+gap in a subject a student is trusting to be complete. If a tool truncates what it hands
+you (a PDF reader capping pages, a huge DOCX), explicitly read the rest in follow-up
+passes rather than treating the truncated view as the whole document.
+
+## Presentation quality: structure it for how a student actually studies
+
+The goal isn't just "the facts are in there somewhere" — it's material a student can
+read at 11pm before an exam and actually retain. Once you've extracted everything, don't
+just dump it as one undifferentiated blob:
+
+- Mirror the source's own structure where it has one (headings, numbered questions,
+  definition/mechanism/example groupings) rather than flattening everything into plain
+  paragraphs — a source that already separates "определение" from "механизм" from
+  "клиническое значение" is telling you how the department itself expects the material
+  to be studied.
+- Use `<b>bold</b>` for key terms and the numbers/names a student needs to actually recall,
+  `<i>italic</i>` for Latin nomenclature (the convention already used throughout Anatomy/
+  Physiology) — this is what turns a wall of text into something scannable.
+- Break content into short paragraphs and real lists (`•`/numbered), not run-on
+  sentences — a numbered list that a naive parser flattened into one paragraph is a bug,
+  not a formatting choice (see Step 5's ETL gotchas).
+- Use `DIVIDER` (`━━━━━━━━━━━━━━`) the way every existing subject does, to mark a visual
+  break between a title and its content, or between sub-sections on the same screen.
+- If the content is naturally chunked (a topic, a numbered question, a control-work
+  variant), give it its own screen/page rather than cramming several units into one long
+  message — see Step 8 on pagination for the mechanics, but the paragraph-boundary
+  splitting there should follow content units, not just character counts.
+- None of this means paraphrasing or "improving" the source's wording — reformatting for
+  readability (line breaks, bold, dividers) is presentation, not content, and stays
+  strictly separate from the zero-fabrication rule above: the *words* stay the source's
+  own, only the *layout* is yours to design.
+
 ## Step 1: Understand the raw material before designing anything
 
 Don't ask the user to pre-summarize the files into a course plan — that's exactly the
@@ -58,14 +97,80 @@ unzip the archive, read the manifest if there is one. Figure out:
   field for how literally the text was pulled from the original document — that tells you
   whether blank-line-separated blocks are real source paragraphs 1:1, which matters for
   how conservative you can be about restructuring vs. preserving order exactly.
-- Are there images? What format, how many, do they have real captions/attribution?
+- Are there images or diagrams? What format, how many, do they have real captions/
+  attribution — see Step 2 below for what to do with them.
+- Does the material include контрольные работы / рубежные работы / зачёты / экзамены
+  (as opposed to plain study material)? See Step 3 below — these get their own treatment,
+  not just another topic.
 - Is there a citation/source-file/page-number field per item? Keep it as data even if
   (per the current pattern in this repo — Physiology explicitly does this on user
   request) it never gets rendered in the UI. Provenance stays in the JSON as metadata for
   traceability; whether to *display* it is a separate, explicit product decision — don't
   assume either way, ask if it's not obvious from how similar content is already handled.
 
-## Step 2: Design the JSON schema
+## Step 2: Images and diagrams — include the good ones, extract text from the readable ones
+
+Source material for a medical subject often comes with photos and schematic diagrams that
+are genuinely part of what a student needs to learn (an anatomical illustration, a
+labeled diagram of a mechanism, a graph) — don't discard these as an afterthought, they
+carry real teaching content plain text can't.
+
+- **Judge quality before including an image.** A clear, legible, well-cropped image
+  belongs in the bot. A blurry phone photo, a heavily-compressed scan where labels are
+  unreadable, or a duplicate/near-duplicate of an image already included isn't worth
+  shipping — it wastes the student's time squinting at something they can't actually
+  read. When in doubt on a borderline case, err toward including it (the same "honest
+  gap" principle that already applies to text: Operative Surgery's third instrument photo
+  pack shipped web-sourced photos with disclosed provenance rather than nothing at all)
+  but flag the quality tradeoff to the user in your final report rather than silently
+  deciding for them.
+- **If an image's content is really text** (a scanned page, a table rendered as an image,
+  a slide full of labels) and the text is legibly extractable, extract it and fold it
+  into the course material as real text — don't leave genuinely readable information
+  trapped in an image a student can't search or that a small phone screen renders
+  unreadably small. This still falls under zero-fabrication: transcribe what the image
+  actually says, verify it against the image again before trusting it (the same
+  "don't just eyeball it" standard as Step 6's losslessness check), and if a word or
+  number is genuinely illegible, mark it as such rather than guessing a plausible value.
+- **If an image is primarily a diagram/illustration** (not text-as-image), keep it as an
+  image node/field rather than trying to describe it in prose — a description is a lossy,
+  editorialized stand-in for the real thing when the original is perfectly usable as a
+  photo. Follow Step 6 below for how images are stored and delivered.
+
+## Step 3: Контрольные работы / рубежные работы / зачёты / экзамены — always their own subsection
+
+If the material includes graded assessments — control works, rubezh (checkpoint) exams,
+credit tests, final exams — these are not just more study topics to fold into the regular
+topic list. Give them their own clearly-labeled subsection within the subject (the way
+"📋 Рубежные контроли" sits alongside Physiology's regular topic list, reachable from the
+subject's own menu, not buried inside a topic) — that mirrors how a student actually
+thinks about their coursework: "material to learn from" and "the specific graded work I
+need to pass" are different mental categories, and burying the second inside the first
+makes it hard to find right before it matters.
+
+Structure the assessment content the way the source itself organizes it, and make it easy
+to navigate at the point of use:
+
+- If the source is split into **variants** (билет/вариант N, several parallel versions of
+  the same assessment), keep that structure — list variants, let the student pick one,
+  then browse that variant's own questions. Don't merge variants into one undifferentiated
+  pile; a student preparing for a specific variant needs to find exactly that one.
+- If the source is one continuous **numbered list of questions** (as most of the Рубежные
+  контроли controls were), browse by question — a paginated reading flow (see Step 8) is
+  the right shape, not a variant picker that doesn't exist in the source.
+- Preserve whatever the source itself provides — a real answer key, worked answers, or
+  (honestly, per the zero-fabrication rule) just the questions with no key if that's all
+  the source has. Rendering a bare self-check list instead of inventing a tap-to-reveal
+  quiz for content with no verified answer key is the established pattern (Operative
+  Surgery's control questions, Рубежные контроли's own ungraded self-check) — don't build
+  a graded quiz UI on top of an answer you're not sure is right.
+- Keep this content-viewing feature scoped to what's actually there — a full quiz/SRS/
+  mastery layer is a separate, bigger feature decision (Physiology's own regular quiz
+  bank has one, Рубежные контроли deliberately doesn't) and shouldn't be assumed by
+  default; ask if it's unclear whether the user wants graded self-testing on top of the
+  assessment content or just convenient browsing.
+
+## Step 4: Design the JSON schema
 
 There are two canonical shapes already in use — pick whichever actually matches the
 source instead of forcing a mismatch:
@@ -90,12 +195,14 @@ loads it, `telegram_bot.py` re-exports the name) *or* as a new top-level key ins
 existing subject's JSON if it's naturally a sub-section of something already there (this
 is what Рубежные контроли did — `physiology.json["boundary_controls"]`, sibling to
 `topics`/`quiz_questions`). Ask yourself: is this a new subject a student picks from the
-main menu, or a new mode inside an existing subject? That decides which.
+main menu, or a new mode inside an existing subject? That decides which. An assessment
+subsection from Step 3 usually gets its own top-level key too, sibling to the regular
+topic bank, for the same reason.
 
-## Step 3: Write the one-time ETL script — in the scratchpad, not the repo
+## Step 5: Write the one-time ETL script — in the scratchpad, not the repo
 
 Write a Python parser in your scratchpad directory that turns the raw source into the
-JSON schema from Step 2. This script is **never committed** — every subject built so far
+JSON schema from Step 4. This script is **never committed** — every subject built so far
 followed this convention, the parser is single-use tooling for this one import, not
 maintained code. Don't try to build a generic reusable parser; write the smallest thing
 that correctly handles *this* source's actual shape.
@@ -114,7 +221,7 @@ Watch for real gotchas that have bitten this before:
   where a later paste answers a completely different question than the one titled — this
   has happened in this exact repo before (see git history around `questions.json` fixes).
 
-## Step 4: Verify losslessness before trusting the output
+## Step 6: Verify losslessness before trusting the output
 
 Don't just eyeball the parser output. Reconstruct the text from your parsed
 nodes/fields and diff it against the raw source with `difflib.SequenceMatcher`, expecting
@@ -124,7 +231,7 @@ If a manifest gives you SHA-256 hashes for source files and images, verify every
 one after copying, both against the manifest and again after the file lands in its final
 repo location — catches truncation/corruption during copy, not just parsing bugs.
 
-## Step 5: Images — this repo's own convention, not the source's assumed one
+## Step 7: Images — this repo's own convention, not the source's assumed one
 
 Images go under `images/<subject>/...` (e.g. `images/physiology/boundary_controls/rk_01/media/...`),
 resolved relative to `IMAGES_DIR` in `telegram_bot.py`. A source archive's own manifest
@@ -139,7 +246,7 @@ JSON cache under `STATS_DIR`, keyed by image path, populated from `sent_message.
 first send. Without it, every repeat view re-reads the file from disk and re-uploads it to
 Telegram.
 
-## Step 6: Build `handlers/<subject>.py`
+## Step 8: Build `handlers/<subject>.py`
 
 Own `aiogram.Router`, imported late at the very end of `telegram_bot.py` (after
 `PHYSIOLOGY`/`DIVIDER`/`safe_edit_text`/etc. it needs are already defined) —
@@ -165,7 +272,7 @@ message handler directly in `telegram_bot.py`, positioned before
 `handle_keyword_search` — see `handle_oh_search_query`/`handle_phys_search_query` for
 the exact placement and the comment explaining why.
 
-## Step 7: Message-length safety
+## Step 9: Message-length safety
 
 Telegram's hard cap is 4096 chars per text message, 1024 for a photo caption
 (`CAPTION_LIMIT`). Never truncate content to fit — paginate instead, and only split at
@@ -178,7 +285,7 @@ navigable sequence, use delete-and-resend on every ⬅️/➡️ tap (same as Bi
 Histology carousels and the Рубежные контроли reader) — `edit_text` can't turn a text
 message into a photo message or back.
 
-## Step 8: Wire the menu entry point
+## Step 10: Wire the menu entry point
 
 Check `COURSE_SUBJECTS` in `telegram_bot.py` (the "1️⃣ Первый курс" / "2️⃣ Второй курс"
 grouping) — decide which course(s) the new subject belongs in, or whether it needs its
@@ -188,7 +295,7 @@ no subscription check** — this has been the choice for every subject added rec
 wanted, `services/access.py` has the referral-gate and subscription-tier machinery; ask
 before wiring a new subject into either, since it changes real user access and revenue.
 
-## Step 9: Wire into VMedA AI's RAG grounding (ask first if unclear whether this is wanted)
+## Step 11: Wire into VMedA AI's RAG grounding (ask first if unclear whether this is wanted)
 
 `ai/rag.py`'s `build_index()`/`configure()` take the new subject's data as a parameter
 and add entries to the shared index other students' AI questions can retrieve from.
@@ -201,7 +308,7 @@ pattern) — small enough that a matched chunk almost always survives the trunca
 Skip indexing bare name lists with no explanatory prose (instrument lists, station
 names) — there's nothing in them to ground an answer with.
 
-## Step 10: Tests — `tests/test_<subject>.py`
+## Step 12: Tests — `tests/test_<subject>.py`
 
 Every existing test file in this repo is a standalone script (no pytest) that imports
 `from _bootstrap import tb` and drives real handler functions with hand-rolled
@@ -219,12 +326,13 @@ Every existing test file in this repo is a standalone script (no pytest) that im
   last has no "forward"), unknown ID / out-of-range page rejected with an alert and no
   crash.
 - Whatever's specific to this subject's UI modes (quiz engine, image delivery, table
-  rendering, search) — see existing test files for the pattern per feature type.
+  rendering, search, variant picker for assessments) — see existing test files for the
+  pattern per feature type.
 
 **Check for an existing test file covering the area you're touching before writing a new
 one** if this is an addition to an existing subject rather than a brand-new one.
 
-## Step 11: Document it in CLAUDE.md
+## Step 13: Document it in CLAUDE.md
 
 Add a subsection matching the depth and style of the existing subject sections — what the
 data model is, why any non-obvious design choices were made (the "why", not just the
@@ -233,7 +341,7 @@ data model is, why any non-obvious design choices were made (the "why", not just
 way the Anatomy exam "Вопросы практики/теории are stubs" line did after those sections
 were actually finished.
 
-## Step 12: Verify before shipping
+## Step 14: Verify before shipping
 
 ```
 python3 -m py_compile telegram_bot.py handlers/<subject>.py
@@ -245,7 +353,7 @@ All three must be clean. `tests/run_all.py` is the only regression safety net fo
 whole bot — a change that breaks an unrelated subject's tests is a real regression, not
 noise to explain away.
 
-## Step 13: Ship it
+## Step 15: Ship it
 
 ```
 rm -f stats.json stats.json.tmp   # never commit real runtime stats
@@ -259,12 +367,13 @@ dev branch is where work lands by default. If asked to merge, follow the exact s
 in CLAUDE.md's "Deploy" section (fetch, fast-forward main onto both, push, switch back to
 dev).
 
-## Step 14: Report back
+## Step 16: Report back
 
 Summarize plainly: which files were created/changed, where the new dataset lives and how
 to regenerate it (the scratchpad ETL script's location, even though it's not committed —
 so the user could ask for it again if needed), exact content counts (topics/questions/
-images — whatever's countable), test results, and any honestly-disclosed scope
-limitations or gaps in the source material. This mirrors how every subject built so far
-has been reported — it's what lets the user trust the "no fabrication" claim instead of
-just taking it on faith.
+images — whatever's countable), which images were included vs. left out and why, whether
+any image text was OCR'd into the material, test results, and any honestly-disclosed
+scope limitations or gaps in the source material. This mirrors how every subject built so
+far has been reported — it's what lets the user trust the "no fabrication" claim instead
+of just taking it on faith.
