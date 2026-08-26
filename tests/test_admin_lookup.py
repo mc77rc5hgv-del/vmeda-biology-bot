@@ -15,9 +15,26 @@ class FakeMsg:
         self.from_user = from_user
         self.text = None
         self.html_text = None
+    async def edit_text(self, text, **kwargs):
+        self.edits.append((text, kwargs.get("reply_markup")))
+        return self
+    async def delete(self):
+        pass
     async def answer(self, text, **kwargs):
         self.answers.append(text)
         return self
+
+class FakeCB:
+    def __init__(self, data, uid):
+        self.data = data
+        self.from_user = FakeUser(uid)
+        self.message = FakeMsg()
+        self._answers = []
+    async def answer(self, text=None, show_alert=False):
+        self._answers.append((text, show_alert))
+
+def kb_data(markup):
+    return [b.callback_data for row in markup.inline_keyboard for b in row]
 
 def fresh_uid():
     return random.randint(10_000_000, 99_999_999)
@@ -156,6 +173,125 @@ async def main():
     assert m4.answers and "@totally_unknown_handle_xyz" in m4.answers[0]
     del tb.ADMIN_PENDING[ADMIN_ID]
     print("not-found error message adapts to ID vs username input: OK")
+
+    # ==================== user card: prompt entry point ====================
+    cb_prompt = FakeCB("admin_lookup_prompt", ADMIN_ID)
+    await tb.cb_admin_lookup_prompt(cb_prompt)
+    assert tb.ADMIN_PENDING[ADMIN_ID] == {"action": "lookup_username"}
+    assert cb_prompt.message.edits
+    del tb.ADMIN_PENDING[ADMIN_ID]
+
+    non_admin_id = fresh_uid()
+    cb_prompt_denied = FakeCB("admin_lookup_prompt", non_admin_id)
+    await tb.cb_admin_lookup_prompt(cb_prompt_denied)
+    assert non_admin_id not in tb.ADMIN_PENDING, "non-admin must not be able to start a lookup"
+    print("admin_lookup_prompt: sets pending state, denies non-admin: OK")
+
+    # ==================== user card: content reflects real state ====================
+    card_uid = fresh_uid()
+    tb.stats["total_users"].add(card_uid)
+    tb.stats["user_username"][str(card_uid)] = "cardtest"
+    tb.stats["usernames"]["cardtest"] = card_uid
+    tb.stats["user_names"][str(card_uid)] = "Тестовый Студент"
+    tb.stats["referrals"][str(card_uid)] = ["a", "b", "c"]
+    tb.stats["referral_monthly"][str(card_uid)] = {"month": tb._current_referral_month_key(), "count": 1}
+    tb.stats["manual_access_granted"] = [x for x in tb.stats["manual_access_granted"] if x != card_uid]
+    tb.stats["manual_anatomy_demo_granted"] = [x for x in tb.stats["manual_anatomy_demo_granted"] if x != card_uid]
+    tb.stats["subscriptions"].pop(str(card_uid), None)
+
+    text = tb.get_admin_user_card_text(card_uid)
+    assert "@cardtest" in text and str(card_uid) in text
+    assert "Тестовый Студент" in text
+    assert "Рефералов всего: <b>3</b>" in text
+    assert "в этом месяце: <b>1</b>" in text
+    assert "Ручной доступ: ❌" in text
+    assert "Демо-доступ Анатомия: ❌" in text
+    assert "Подписка: нет" in text
+
+    kb = tb.get_admin_user_card_keyboard(card_uid)
+    data = kb_data(kb)
+    assert f"admin_card_access:{card_uid}:grant" in data
+    assert f"admin_card_anatomy_demo:{card_uid}:grant" in data
+    assert f"admin_card_dm:{card_uid}" in data
+    assert f"admin_card_sub:{card_uid}" in data
+    assert "admin_panel" in data
+    print("get_admin_user_card_text/_keyboard reflect real user state: OK")
+
+    # a subscription shows up on the card
+    tb.grant_subscription(card_uid, 20, "rubles_manual", 99, "biology")
+    text2 = tb.get_admin_user_card_text(card_uid)
+    assert "Подписка: нет" not in text2
+    assert tb.SUBSCRIPTION_TIERS[20]["title"] in text2
+    tb.stats["subscriptions"].pop(str(card_uid), None)
+    print("active subscription is reflected on the card: OK")
+
+    # ==================== user card: lookup_username end-to-end via text flow ====================
+    tb.ADMIN_PENDING[ADMIN_ID] = {"action": "lookup_username"}
+    m_lookup = FakeMsg(from_user=FakeUser(ADMIN_ID))
+    m_lookup.text = "cardtest"
+    await tb.handle_admin_pending_action(m_lookup)
+    assert ADMIN_ID not in tb.ADMIN_PENDING
+    assert m_lookup.answers and "@cardtest" in m_lookup.answers[0]
+    print("lookup_username end-to-end by username resolves to the card: OK")
+
+    # ==================== user card: one-tap access toggle ====================
+    assert card_uid not in tb.stats["manual_access_granted"]
+    orig_send = tb.bot.send_message
+    sent_toggle = []
+    async def fake_send_toggle(chat_id, text, **kwargs):
+        sent_toggle.append(chat_id)
+    tb.bot.send_message = fake_send_toggle
+
+    cb_grant = FakeCB(f"admin_card_access:{card_uid}:grant", ADMIN_ID)
+    await tb.cb_admin_card_access(cb_grant)
+    assert card_uid in tb.stats["manual_access_granted"]
+    assert sent_toggle == [card_uid]
+    _, kb_after_grant = cb_grant.message.edits[-1]
+    assert f"admin_card_access:{card_uid}:revoke" in kb_data(kb_after_grant), "keyboard must flip to revoke after grant"
+
+    cb_revoke = FakeCB(f"admin_card_access:{card_uid}:revoke", ADMIN_ID)
+    await tb.cb_admin_card_access(cb_revoke)
+    assert card_uid not in tb.stats["manual_access_granted"]
+    _, kb_after_revoke = cb_revoke.message.edits[-1]
+    assert f"admin_card_access:{card_uid}:grant" in kb_data(kb_after_revoke), "keyboard must flip back to grant after revoke"
+
+    cb_grant_denied = FakeCB(f"admin_card_access:{card_uid}:grant", non_admin_id)
+    await tb.cb_admin_card_access(cb_grant_denied)
+    assert card_uid not in tb.stats["manual_access_granted"], "non-admin must not be able to toggle access"
+
+    tb.bot.send_message = orig_send
+    print("admin_card_access one-tap toggle grants/revokes and denies non-admin: OK")
+
+    # ==================== user card: one-tap Anatomy demo toggle ====================
+    assert card_uid not in tb.stats["manual_anatomy_demo_granted"]
+    tb.bot.send_message = fake_send_toggle
+    cb_demo_grant = FakeCB(f"admin_card_anatomy_demo:{card_uid}:grant", ADMIN_ID)
+    await tb.cb_admin_card_anatomy_demo(cb_demo_grant)
+    assert card_uid in tb.stats["manual_anatomy_demo_granted"]
+    assert tb.anatomy_access_ok(card_uid)
+
+    cb_demo_revoke = FakeCB(f"admin_card_anatomy_demo:{card_uid}:revoke", ADMIN_ID)
+    await tb.cb_admin_card_anatomy_demo(cb_demo_revoke)
+    assert card_uid not in tb.stats["manual_anatomy_demo_granted"]
+    assert not tb.anatomy_access_ok(card_uid)
+    tb.bot.send_message = orig_send
+    print("admin_card_anatomy_demo one-tap toggle grants/revokes: OK")
+
+    # ==================== user card: DM / subscription buttons hand off to existing flows ====================
+    cb_dm = FakeCB(f"admin_card_dm:{card_uid}", ADMIN_ID)
+    await tb.cb_admin_card_dm(cb_dm)
+    assert tb.ADMIN_PENDING[ADMIN_ID] == {
+        "action": "dm_message", "target_id": card_uid, "target_label": "@cardtest (ID %d)" % card_uid,
+    }
+    del tb.ADMIN_PENDING[ADMIN_ID]
+
+    cb_sub = FakeCB(f"admin_card_sub:{card_uid}", ADMIN_ID)
+    await tb.cb_admin_card_sub(cb_sub)
+    assert tb.ADMIN_PENDING[ADMIN_ID]["action"] == "record_subscription_tier"
+    assert tb.ADMIN_PENDING[ADMIN_ID]["target_id"] == card_uid
+    assert cb_sub.message.answers, "tier picker must be sent as a new message (ReplyKeyboardMarkup)"
+    del tb.ADMIN_PENDING[ADMIN_ID]
+    print("admin_card_dm/admin_card_sub prime the existing DM/subscription pending flows: OK")
 
     print("ALL ADMIN LOOKUP TESTS PASSED")
 

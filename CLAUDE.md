@@ -772,6 +772,20 @@ access, DM a user, record a manual donation, grant a subscription, restore acces
 still run. `resolve_user_by_username(raw)` accepts either a `@username` or a raw numeric Telegram ID (looked up in
 `stats["total_users"]`) — always prefer it over writing a new username-only lookup.
 
+**User card** (`"🔎 Найти пользователя"`, `admin_lookup_prompt` → the `"lookup_username"` action above →
+`get_admin_user_card_text(target_id)`/`get_admin_user_card_keyboard(target_id)`) replaced the old pattern of three
+separate blind username/ID prompts (grant, subscription, DM) with one screen showing everything about a
+resolved user at once — roles, lifetime/this-month referral counts, manual access + Anatomy demo flags, temp
+access expiry, active subscription (tier/expiry), today's AI usage, and live `anatomy_access_ok`/
+`histology_access_ok`. Its keyboard exposes one-tap toggles wired directly to `admin_card_access:{id}:grant|revoke`
+and `admin_card_anatomy_demo:{id}:grant|revoke` (`cb_admin_card_access`/`cb_admin_card_anatomy_demo` — same
+grant/revoke logic as the old text-prompt flow, just re-rendering the same card afterward instead of returning a
+one-line confirmation) plus `admin_card_dm:{id}`/`admin_card_sub:{id}`, which prime `ADMIN_PENDING` with the
+target already resolved (`"dm_message"`/`"record_subscription_tier"`) and hand off into the EXISTING DM/
+subscription-grant flows rather than duplicating their logic — so a subscription grant from the card still goes
+through the same `record_subscription_tier` → (`record_subscription_subject` if needed) →
+`grant_subscription_and_notify_buyer()` path as the original `admin_subscription_prompt` entry point.
+
 ### Stats persistence
 
 `stats` is a module-level dict populated by `load_stats()` at import and mutated in place everywhere; every write

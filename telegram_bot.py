@@ -2578,6 +2578,13 @@ resolve_user_by_username = admin_handlers.resolve_user_by_username
 format_admin_target_label = admin_handlers.format_admin_target_label
 format_user_line = admin_handlers.format_user_line
 get_admin_userlist_page = admin_handlers.get_admin_userlist_page
+get_admin_user_card_text = admin_handlers.get_admin_user_card_text
+get_admin_user_card_keyboard = admin_handlers.get_admin_user_card_keyboard
+cb_admin_lookup_prompt = admin_handlers.cb_admin_lookup_prompt
+cb_admin_card_access = admin_handlers.cb_admin_card_access
+cb_admin_card_anatomy_demo = admin_handlers.cb_admin_card_anatomy_demo
+cb_admin_card_dm = admin_handlers.cb_admin_card_dm
+cb_admin_card_sub = admin_handlers.cb_admin_card_sub
 cb_admin_panel = admin_handlers.cb_admin_panel
 cb_admin_battle_menu = admin_handlers.cb_admin_battle_menu
 cb_admin_announcements_menu = admin_handlers.cb_admin_announcements_menu
@@ -2697,6 +2704,7 @@ async def handle_admin_pending_action(message: Message):
         "grant_assistant_admin", "revoke_assistant_admin",
         "grant_payment_admin", "revoke_payment_admin",
         "dm_username", "record_donation_username", "record_subscription_username",
+        "lookup_username",
     ):
         raw_input = message.text.strip()
         username, target_id = resolve_user_by_username(raw_input)
@@ -2834,6 +2842,14 @@ async def handle_admin_pending_action(message: Message):
                 f"✅ Нашёл {label}. Выбери тариф кнопкой ниже или пришли номер:\n\n{tier_lines}",
                 parse_mode="HTML",
                 reply_markup=get_admin_tier_reply_keyboard()
+            )
+
+        elif action == "lookup_username":
+            del ADMIN_PENDING[admin_id]
+            await message.answer(
+                get_admin_user_card_text(target_id),
+                parse_mode="HTML",
+                reply_markup=get_admin_user_card_keyboard(target_id),
             )
         return
 

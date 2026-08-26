@@ -66,6 +66,7 @@ def get_admin_menu():
     builder.button(text="📊 Статистика", callback_data="admin_stats")
     builder.button(text="📥 Экспорт stats.json", callback_data="admin_export_stats")
     builder.button(text="👥 Список пользователей", callback_data="admin_userlist:0")
+    builder.button(text="🔎 Найти пользователя", callback_data="admin_lookup_prompt")
     builder.button(text="🔓 Дать доступ по username/ID", callback_data="admin_grant_prompt")
     builder.button(text="🚫 Отозвать доступ по username/ID", callback_data="admin_revoke_prompt")
     builder.button(text="🦴 Дать демо-доступ к Анатомии", callback_data="admin_grant_anatomy_demo_prompt")
@@ -224,6 +225,192 @@ def get_admin_userlist_page(page: int):
         builder.row(*nav)
     builder.row(InlineKeyboardButton(text="🔙 В админ-панель", callback_data="admin_panel"))
     return text, builder.as_markup()
+
+def get_admin_user_card_text(target_id: int) -> str:
+    """Единая карточка одного пользователя — вся информация, разбросанная раньше по трём
+    слепым username/ID-промптам (выдача доступа, выдача подписки, DM), в одном экране, чтобы
+    админ видел текущее состояние ПЕРЕД тем, как что-то менять."""
+    uid_str = str(target_id)
+    username = tb.stats["user_username"].get(uid_str)
+    name = tb.stats["user_names"].get(uid_str, "—")
+    label = format_admin_target_label(username, target_id)
+
+    roles = []
+    if tb.is_admin(target_id):
+        roles.append("👑 админ")
+    if tb.is_assistant_admin(target_id):
+        roles.append("🧑‍💼 помощник")
+    if tb.is_payment_admin(target_id):
+        roles.append("💳 админ платежей")
+    roles_line = ", ".join(roles) if roles else "—"
+
+    refs_total = tb.get_referral_count(target_id)
+    refs_month = tb.get_referral_count_this_month(target_id)
+    manual = "✅" if target_id in tb.stats["manual_access_granted"] else "❌"
+    anatomy_demo = "✅" if target_id in tb.stats["manual_anatomy_demo_granted"] else "❌"
+
+    if tb.has_temp_access(target_id):
+        expiry = tb.get_temp_access_expiry(target_id)
+        temp_line = f"до {tb.datetime.fromtimestamp(expiry, tb.APP_TIMEZONE).strftime('%d.%m.%Y %H:%M')}"
+    else:
+        temp_line = "нет"
+
+    sub = tb.get_subscription(target_id)
+    if sub and tb.has_active_subscription(target_id):
+        tier_cfg = tb.SUBSCRIPTION_TIERS.get(sub.get("tier"), {})
+        title = tier_cfg.get("title", f"тариф {sub.get('tier')}")
+        emoji = tier_cfg.get("emoji", "💎")
+        sub_line = f"{emoji} {title} ({tb.format_subscription_expiry(sub.get('expires'))})"
+    elif sub:
+        sub_line = "истекла"
+    else:
+        sub_line = "нет"
+
+    ai_used = tb.get_ai_usage_today(target_id)
+
+    return (
+        f"🔎 <b>Карточка пользователя</b>\n{tb.DIVIDER}\n\n"
+        f"{label}\n"
+        f"Имя: {name}\n"
+        f"Роли: {roles_line}\n\n"
+        f"🔗 Рефералов всего: <b>{refs_total}</b>, в этом месяце: <b>{refs_month}</b> "
+        f"(порог {tb.REFERRAL_FULL_ACCESS_THRESHOLD})\n"
+        f"🔓 Ручной доступ: {manual}\n"
+        f"🦴 Демо-доступ Анатомия: {anatomy_demo}\n"
+        f"⏳ Временный доступ (реф./перекличка): {temp_line}\n"
+        f"💎 Подписка: {sub_line}\n"
+        f"🤖 AI сегодня: <b>{ai_used}</b>\n"
+        f"🦴 Анатомия доступна сейчас: {'✅' if tb.anatomy_access_ok(target_id) else '❌'}\n"
+        f"🔬 Гистология доступна сейчас: {'✅' if tb.histology_access_ok(target_id) else '❌'}"
+    )
+
+def get_admin_user_card_keyboard(target_id: int):
+    builder = InlineKeyboardBuilder()
+    if target_id in tb.stats["manual_access_granted"]:
+        builder.button(text="🚫 Отозвать доступ", callback_data=f"admin_card_access:{target_id}:revoke")
+    else:
+        builder.button(text="🔓 Выдать доступ", callback_data=f"admin_card_access:{target_id}:grant")
+    if target_id in tb.stats["manual_anatomy_demo_granted"]:
+        builder.button(text="🦴🚫 Забрать демо Анатомии", callback_data=f"admin_card_anatomy_demo:{target_id}:revoke")
+    else:
+        builder.button(text="🦴 Дать демо Анатомии", callback_data=f"admin_card_anatomy_demo:{target_id}:grant")
+    builder.button(text="✉️ Написать", callback_data=f"admin_card_dm:{target_id}")
+    builder.button(text="💎 Выдать подписку", callback_data=f"admin_card_sub:{target_id}")
+    builder.button(text="🔙 В админ-панель", callback_data="admin_panel")
+    builder.adjust(1)
+    return builder.as_markup()
+
+@router.callback_query(F.data == "admin_lookup_prompt")
+async def cb_admin_lookup_prompt(callback: CallbackQuery):
+    if not tb.is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer()
+    tb.ADMIN_PENDING[callback.from_user.id] = {"action": "lookup_username"}
+    await tb.safe_edit_text(
+        callback.message,
+        "🔎 <b>Найти пользователя</b>\n\nОтправь username пользователя (с @ или без, например "
+        "<code>@ivanov</code>) или его числовой ID — откроется карточка со всей информацией "
+        "о нём и быстрые кнопки действий.",
+        parse_mode="HTML",
+        reply_markup=get_admin_back_keyboard()
+    )
+
+@router.callback_query(F.data.startswith("admin_card_access:"))
+async def cb_admin_card_access(callback: CallbackQuery):
+    if not tb.is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    _, target_id_raw, op = callback.data.split(":")
+    target_id = int(target_id_raw)
+    if op == "grant":
+        if target_id not in tb.stats["manual_access_granted"]:
+            tb.stats["manual_access_granted"].append(target_id)
+            tb.save_stats()
+        await callback.answer("✅ Доступ выдан")
+        try:
+            await tb.bot.send_message(
+                target_id,
+                "🎉 Администратор открыл тебе полный доступ к боту без необходимости приглашать друзей!",
+                parse_mode="HTML"
+            )
+        except Exception:
+            tb.logger.exception("Не удалось уведомить пользователя %s о выдаче доступа", target_id)
+    else:
+        if target_id in tb.stats["manual_access_granted"]:
+            tb.stats["manual_access_granted"].remove(target_id)
+            tb.save_stats()
+        await callback.answer("✅ Доступ отозван")
+    await tb.safe_edit_text(
+        callback.message, get_admin_user_card_text(target_id),
+        parse_mode="HTML", reply_markup=get_admin_user_card_keyboard(target_id),
+    )
+
+@router.callback_query(F.data.startswith("admin_card_anatomy_demo:"))
+async def cb_admin_card_anatomy_demo(callback: CallbackQuery):
+    if not tb.is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    _, target_id_raw, op = callback.data.split(":")
+    target_id = int(target_id_raw)
+    if op == "grant":
+        if target_id not in tb.stats["manual_anatomy_demo_granted"]:
+            tb.stats["manual_anatomy_demo_granted"].append(target_id)
+            tb.save_stats()
+        await callback.answer("✅ Демо-доступ выдан")
+        try:
+            await tb.bot.send_message(
+                target_id,
+                "🦴 Администратор открыл тебе демо-доступ к разделу «Анатомия»!",
+                parse_mode="HTML"
+            )
+        except Exception:
+            tb.logger.exception("Не удалось уведомить пользователя %s о выдаче демо-доступа к анатомии", target_id)
+    else:
+        if target_id in tb.stats["manual_anatomy_demo_granted"]:
+            tb.stats["manual_anatomy_demo_granted"].remove(target_id)
+            tb.save_stats()
+        await callback.answer("✅ Демо-доступ отозван")
+    await tb.safe_edit_text(
+        callback.message, get_admin_user_card_text(target_id),
+        parse_mode="HTML", reply_markup=get_admin_user_card_keyboard(target_id),
+    )
+
+@router.callback_query(F.data.startswith("admin_card_dm:"))
+async def cb_admin_card_dm(callback: CallbackQuery):
+    if not tb.is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    target_id = int(callback.data.split(":")[1])
+    await callback.answer()
+    label = format_admin_target_label(tb.stats["user_username"].get(str(target_id)), target_id)
+    tb.ADMIN_PENDING[callback.from_user.id] = {"action": "dm_message", "target_id": target_id, "target_label": label}
+    await tb.safe_edit_text(
+        callback.message,
+        f"✉️ <b>Личное сообщение для {label}</b>\n\nОтправь текст сообщения.",
+        parse_mode="HTML",
+        reply_markup=get_admin_back_keyboard()
+    )
+
+@router.callback_query(F.data.startswith("admin_card_sub:"))
+async def cb_admin_card_sub(callback: CallbackQuery):
+    if not tb.is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    target_id = int(callback.data.split(":")[1])
+    label = format_admin_target_label(tb.stats["user_username"].get(str(target_id)), target_id)
+    tb.ADMIN_PENDING[callback.from_user.id] = {
+        "action": "record_subscription_tier", "target_id": target_id, "target_label": label,
+    }
+    tier_lines = "\n".join(
+        f"{t} — {cfg['title']} ({cfg['price_rub']}₽)" for t, cfg in tb.ACTIVE_SUBSCRIPTION_TIERS.items()
+    )
+    await callback.answer()
+    await callback.message.answer(
+        f"💎 Выбери тариф для {label} кнопкой ниже или пришли номер:\n\n{tier_lines}",
+        parse_mode="HTML",
+        reply_markup=tb.get_admin_tier_reply_keyboard()
+    )
 
 @router.callback_query(F.data == "admin_panel")
 async def cb_admin_panel(callback: CallbackQuery):
