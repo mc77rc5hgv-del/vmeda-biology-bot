@@ -27,7 +27,7 @@ _WORD_RE = re.compile(r"[a-zа-яё0-9]+", re.IGNORECASE)
 
 @dataclass
 class TaskRepresentation:
-    subject: str | None = None       # "biology" / "physics" / "chemistry" / "anatomy" / None
+    subject: str | None = None       # "biology" / "physics" / "chemistry" / "anatomy" / "latin" / None
     type: str = "unknown"            # один из TASK_TYPES
     complexity: str | None = None    # один из COMPLEXITY_LEVELS, только для type in (mcq, theory)
     question: str = ""               # текст задания как его понял парсер (может быть переформулирован из OCR)
