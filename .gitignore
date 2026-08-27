@@ -1,4 +1,11 @@
 __pycache__/
+/.venv/
+/.venv-mcp/
+/.course-automation/
+/.secrets/
+*.session
+*.session-journal
+course-automation.json
 *.pyc
 stats.json
 stats.json.tmp

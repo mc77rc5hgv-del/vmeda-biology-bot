@@ -23,6 +23,7 @@ import json
 import logging
 import math
 import re
+import unicodedata
 
 from ai.providers import openai as openai_provider
 
@@ -49,7 +50,9 @@ _HTML_TAG_RE = re.compile(r"<[^>]+>")  # локальная лёгкая вер�
 
 
 def _extract_words(text: str) -> list:
-    return re.findall(r"[a-zа-яё]+", (text or "").lower().replace("ё", "е"))
+    normalized = unicodedata.normalize("NFKD", (text or "").lower().replace("ё", "е"))
+    normalized = "".join(char for char in normalized if not unicodedata.combining(char))
+    return re.findall(r"[a-zа-я]+", normalized)
 
 
 def _word_stem(word: str) -> str:
@@ -126,7 +129,7 @@ def _chunk_rk_blocks(blocks: list) -> list:
 def build_index(
     *, questions: dict, physics_questions: dict, chemistry_theory: dict,
     chemistry_theory_tickets: dict, chemistry_practice_tickets: dict, anatomy: dict,
-    operative_surgery: dict = None, physiology: dict = None,
+    operative_surgery: dict = None, physiology: dict = None, extra_entries: list = None,
 ) -> list:
     """Собирает единый список {subject, title, text, stems, key} из банков вопросов/ответов бота:
     биология/физика/химия (основная заявленная область AI-помощника) и анатомия (вопросы по
@@ -177,6 +180,8 @@ def build_index(
     for control in (physiology or {}).get("boundary_controls", []):
         for i, chunk_text in enumerate(_chunk_rk_blocks(control["blocks"]), start=1):
             raw_entries.append(("нормальная физиология", f"{control['title']}, ч. {i}", chunk_text))
+    for entry in extra_entries or []:
+        raw_entries.append((entry.get("subject", ""), entry.get("title", ""), entry.get("text", "")))
     return [
         {
             "subject": subject, "title": title, "text": text, "stems": _entry_stems(title, text),
@@ -208,7 +213,7 @@ _idf = None
 def configure(
     *, questions: dict, physics_questions: dict, chemistry_theory: dict,
     chemistry_theory_tickets: dict, chemistry_practice_tickets: dict, anatomy: dict,
-    operative_surgery: dict = None, physiology: dict = None,
+    operative_surgery: dict = None, physiology: dict = None, extra_entries: list = None,
 ) -> None:
     """Вызывается один раз при старте бота, после загрузки JSON-файлов — строит индекс и IDF-веса
     сразу (не лениво), чтобы разовая задержка (~0.1с на текущем объёме) не попала на первый живой
@@ -218,12 +223,12 @@ def configure(
         questions=questions, physics_questions=physics_questions, chemistry_theory=chemistry_theory,
         chemistry_theory_tickets=chemistry_theory_tickets,
         chemistry_practice_tickets=chemistry_practice_tickets, anatomy=anatomy,
-        operative_surgery=operative_surgery, physiology=physiology,
+        operative_surgery=operative_surgery, physiology=physiology, extra_entries=extra_entries,
     )
     _idf = build_stem_idf(_index)
 
 
-def _score_entries(query_text: str, index: list, idf: dict) -> list:
+def _score_entries(query_text: str, index: list, idf: dict, min_common_stems: int = MIN_COMMON_STEMS) -> list:
     """Возвращает [(score, entry), ...], не отсортировано и без обрезки по limit — общая часть
     для search_snippets (один запрос целиком) и search_snippets_multi (по отдельным пунктам
     списка). score — НОРМАЛИЗОВАННЫЙ IDF-балл (сумма весов общих слов / число стеммов в запросе,
@@ -234,7 +239,7 @@ def _score_entries(query_text: str, index: list, idf: dict) -> list:
     scored = []
     for entry in index:
         common = query_stems & entry["stems"]
-        if len(common) < MIN_COMMON_STEMS:
+        if len(common) < min_common_stems:
             continue
         score = sum(idf.get(stem, 0.0) for stem in common) / len(query_stems)
         if score >= MIN_SCORE:
@@ -406,13 +411,16 @@ def _cosine(a: list, b: list) -> float:
     return dot / (norm_a * norm_b)
 
 
-def _hybrid_score_entries(query_text: str, query_embedding, index: list, idf: dict) -> list:
+def _hybrid_score_entries(
+    query_text: str, query_embedding, index: list, idf: dict,
+    min_common_stems: int = MIN_COMMON_STEMS,
+) -> list:
     """Объединяет keyword/IDF-скор (_score_entries) и семантический скор (косинус с эмбеддингом
     запроса, если он передан) — запись проходит, если пройден ХОТЯ БЫ ОДИН порог (keyword
     MIN_SCORE или семантический MIN_COSINE), итоговый скор — сумма обеих компонент (0, если
     соответствующий сигнал не сработал/недоступен)."""
     combined: dict[str, list] = {}
-    for score, entry in _score_entries(query_text, index, idf):
+    for score, entry in _score_entries(query_text, index, idf, min_common_stems=min_common_stems):
         combined[entry["key"]] = [score, entry]
     if query_embedding:
         for entry in index:
@@ -431,7 +439,7 @@ def _hybrid_score_entries(query_text: str, query_embedding, index: list, idf: di
     return [(score, entry) for score, entry in combined.values()]
 
 
-async def search_for_task(task, limit: int = TOP_K) -> tuple:
+async def search_for_task(task, limit: int = TOP_K, subject_filter: str | None = None) -> tuple:
     """Гибридный поиск (keyword+эмбеддинги, см. модульный docstring) по УЖЕ РАЗОБРАННОМУ заданию
     (ai.task.TaskRepresentation) — точка входа для нового конвейера: вызывается ДО первого ответа
     модели, и на quick, и на detailed (в отличие от старого search_snippets/search_snippets_multi,
@@ -450,7 +458,14 @@ async def search_for_task(task, limit: int = TOP_K) -> tuple:
     embedding-запросам этого вызова (нулевой, если семантический слой не участвовал вообще — нет
     ключа, все запросы деградировали, или запросов не было), чтобы вызывающий код мог учесть
     реальную стоимость (см. telegram_bot.record_ai_cost)."""
-    index, idf = _index or [], _idf or {}
+    index = _index or []
+    if subject_filter:
+        index = [entry for entry in index if entry["subject"] == subject_filter]
+        idf = build_stem_idf(index)
+    else:
+        # Private subject corpora are only available through their explicit subject mode.
+        index = [entry for entry in index if entry["subject"] != "латинский язык"]
+        idf = build_stem_idf(index)
     queries = task.subquestions if (task.type == "list" and task.subquestions) else [task.question_text()]
     queries = [q for q in queries if q and q.strip()][:MAX_RAG_QUERIES]
     if not queries:
@@ -460,7 +475,10 @@ async def search_for_task(task, limit: int = TOP_K) -> tuple:
 
     best_by_key = {}
     for query, query_embedding in zip(queries, query_embeddings):
-        for score, entry in _hybrid_score_entries(query, query_embedding, index, idf):
+        min_common = 1 if subject_filter else MIN_COMMON_STEMS
+        for score, entry in _hybrid_score_entries(
+            query, query_embedding, index, idf, min_common_stems=min_common,
+        ):
             key = (entry["subject"], entry["title"])
             if key not in best_by_key or score > best_by_key[key][0]:
                 best_by_key[key] = (score, entry)

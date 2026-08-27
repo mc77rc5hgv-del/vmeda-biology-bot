@@ -139,10 +139,45 @@ HISTOLOGY = knowledge.HISTOLOGY
 OPERATIVE_SURGERY = knowledge.OPERATIVE_SURGERY
 PHYSIOLOGY = knowledge.PHYSIOLOGY
 
+DYNAMIC_COURSES_DIR = "generated_courses"
+
+
+def load_dynamic_courses() -> list[dict]:
+    """Load validated, generated subjects without editing the bot for every new course."""
+    courses: list[dict] = []
+    if not os.path.isdir(DYNAMIC_COURSES_DIR):
+        return courses
+    for filename in sorted(os.listdir(DYNAMIC_COURSES_DIR)):
+        if not filename.endswith(".json"):
+            continue
+        path = os.path.join(DYNAMIC_COURSES_DIR, filename)
+        try:
+            with open(path, "r", encoding="utf-8") as stream:
+                course = json.load(stream)
+            if not isinstance(course, dict) or not course.get("title") or not course.get("sections"):
+                raise ValueError("missing title or sections")
+            courses.append(course)
+        except Exception as exc:
+            logger.error("Cannot load generated course %s: %s", path, exc)
+    return courses
+
+
+DYNAMIC_COURSES = load_dynamic_courses()
+
+LATIN_AI_ENTRIES = []
+try:
+    with open(os.path.join("generated_knowledge", "latin_ai.json"), "r", encoding="utf-8") as stream:
+        LATIN_AI_ENTRIES = json.load(stream).get("entries", [])
+except FileNotFoundError:
+    pass
+except Exception as exc:
+    logger.error("Cannot load Latin AI knowledge: %s", exc)
+
 ai_rag.configure(
     questions=QUESTIONS, physics_questions=PHYSICS_QUESTIONS, chemistry_theory=CHEMISTRY_THEORY,
     chemistry_theory_tickets=CHEMISTRY_THEORY_TICKETS, chemistry_practice_tickets=CHEMISTRY_PRACTICE_TICKETS,
     anatomy=ANATOMY, operative_surgery=OPERATIVE_SURGERY, physiology=PHYSIOLOGY,
+    extra_entries=LATIN_AI_ENTRIES,
 )
 ai_reference_bank.configure(ANATOMY_EXAM_TEST_PARTS)
 
@@ -1303,7 +1338,8 @@ def get_ai_announcement_text() -> str:
         f"🤖 <b>Новое в боте — VMedA AI!</b>\n{DIVIDER}\n\n"
         "AI-помощник, который разбирает задание по фото или тексту и сразу выдаёт решение: "
         "чёткий ответ и объяснение по шагам. Работает по биологии, физике, химии, анатомии и оперативной хирургии — "
-        "тесты, билеты, контрольные, летучки. Просто присылаешь фото — получаешь разбор.\n\n"
+        "тесты, билеты, контрольные, летучки. Для латинского языка доступен отдельный режим "
+        "в разделе предмета. Просто присылаешь фото — получаешь разбор.\n\n"
         f"Бесплатно — до {AI_FREE_DAILY_LIMIT} запросов в день. Любая подписка добавляет к этому "
         "лимиту дополнительные запросы VMedA AI поверх обычного доступа к разделам бота.\n\n"
         "Жми на кнопку ниже, чтобы попробовать 👇"
@@ -1933,6 +1969,12 @@ def get_course_menu_keyboard(course: int, user_id: int = None):
         if label is None:
             label = _anatomy_menu_label(user_id) if callback_data == "anatomy_root" else _histology_menu_label(user_id)
         builder.button(text=label, callback_data=callback_data)
+    for course_index, dynamic_course in enumerate(DYNAMIC_COURSES):
+        if dynamic_course.get("course", 2) == course:
+            builder.button(
+                text=f"{dynamic_course.get('emoji', '📚')} {dynamic_course['title']}",
+                callback_data=f"dyn_c:{course_index}",
+            )
     builder.adjust(1)
     builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
     return builder.as_markup()
@@ -4393,10 +4435,10 @@ def is_ai_session_active(user_id: int) -> bool:
     session = AI_SESSIONS.get(user_id)
     return bool(session) and time.time() - session["last_active"] < AI_SESSION_TIMEOUT_SECONDS
 
-def start_ai_session(user_id: int) -> None:
+def start_ai_session(user_id: int, mode: str | None = None) -> None:
     AI_SESSIONS[user_id] = {
         "task": None, "messages": [], "rag_context": None, "bucket": None,
-        "quick_answer": None, "last_active": time.time(), "processing": False,
+        "quick_answer": None, "last_active": time.time(), "processing": False, "mode": mode,
     }
 
 def end_ai_session(user_id: int) -> None:
@@ -4558,10 +4600,23 @@ async def ensure_rag_context(session: dict) -> str:
         return session["rag_context"]
     if session.get("task") is None:
         return ""
-    snippets, rag_usage = await ai_rag.search_for_task(session["task"])
+    subject_filter = "латинский язык" if session.get("mode") == "latin" else None
+    if subject_filter:
+        snippets, rag_usage = await ai_rag.search_for_task(session["task"], subject_filter=subject_filter)
+    else:
+        # Keep the ordinary call signature stable for existing integrations and test doubles.
+        snippets, rag_usage = await ai_rag.search_for_task(session["task"])
     if rag_usage.get("input_tokens"):
         record_ai_cost({**rag_usage, "provider": "openai-embeddings"})
     session["rag_context"] = ai_rag.format_context(snippets)
+    if session.get("mode") == "latin":
+        session["rag_context"] = (
+            "Ты работаешь в специализированном режиме латинского языка ВМедА. Точно распознай "
+            "латинские и греческие элементы, сохрани окончания, долготы и словарную форму, если они "
+            "видны. Для клинической, анатомической и фармацевтической терминологии опирайся прежде "
+            "всего на закрытые материалы курса ниже. Если фото неразборчиво или материала недостаточно, "
+            "честно попроси более чёткое фото вместо догадки.\n\n" + session["rag_context"]
+        )
     return session["rag_context"]
 
 async def get_first_message_ai_answer(user_id: int, session: dict, task) -> tuple:
@@ -4705,6 +4760,10 @@ async def cb_ai_menu(callback: CallbackQuery):
 
 @dp.callback_query(F.data == "ai_solve_start")
 async def cb_ai_solve_start(callback: CallbackQuery):
+    await begin_ai_session(callback)
+
+
+async def begin_ai_session(callback: CallbackQuery, mode: str | None = None):
     user_id = callback.from_user.id
     if not ai_provider_available():
         await callback.answer("AI сейчас на техническом обслуживании, загляни позже.", show_alert=True)
@@ -4719,11 +4778,22 @@ async def cb_ai_solve_start(callback: CallbackQuery):
         await callback.answer("На сегодня бесплатные AI-запросы закончились, попробуй завтра.", show_alert=True)
         return
     await callback.answer()
-    start_ai_session(user_id)
+    start_ai_session(user_id, mode=mode)
+    if mode == "latin":
+        waiting_text = (
+            f"🏛️ <b>VMedA AI — Латинский язык</b>\n{DIVIDER}\n\n"
+            "Пришли чёткое фото задания или его текст одним сообщением. AI распознает задание и "
+            "ответит по загруженным материалам курса ВМедА: клинической, фармацевтической и общей "
+            "латинской терминологии."
+        )
+    else:
+        waiting_text = (
+            f"📷 <b>Жду задание</b>\n{DIVIDER}\n\nПришли фото задания или напиши его текстом одним сообщением. "
+            "Дальше можно будет уточнять вопросы по теме — контекст диалога сохранится."
+        )
     await safe_edit_text(
         callback.message,
-        f"📷 <b>Жду задание</b>\n{DIVIDER}\n\nПришли фото задания или напиши его текстом одним сообщением. "
-        "Дальше можно будет уточнять вопросы по теме — контекст диалога сохранится.",
+        waiting_text,
         parse_mode="HTML",
         reply_markup=get_ai_waiting_keyboard()
     )
@@ -5437,6 +5507,18 @@ cb_oh_search_prompt = operative_surgery_handlers.cb_oh_search_prompt
 from handlers import physiology as physiology_handlers  # noqa: E402 — deliberately late, see above
 
 dp.include_router(physiology_handlers.router)
+
+from handlers import dynamic_courses as dynamic_course_handlers  # noqa: E402 — deliberately late
+
+dp.include_router(dynamic_course_handlers.router)
+get_dynamic_course_keyboard = dynamic_course_handlers.get_dynamic_course_keyboard
+get_dynamic_section_keyboard = dynamic_course_handlers.get_dynamic_section_keyboard
+get_dynamic_lesson_keyboard = dynamic_course_handlers.get_dynamic_lesson_keyboard
+get_dynamic_item = dynamic_course_handlers.get_dynamic_item
+cb_dynamic_course = dynamic_course_handlers.cb_dynamic_course
+cb_dynamic_section = dynamic_course_handlers.cb_dynamic_section
+cb_dynamic_lesson = dynamic_course_handlers.cb_dynamic_lesson
+cb_dynamic_ai = dynamic_course_handlers.cb_dynamic_ai
 
 get_phys_topic = physiology_handlers.get_phys_topic
 phys_topic_ids_in_order = physiology_handlers.phys_topic_ids_in_order

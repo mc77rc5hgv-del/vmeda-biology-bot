@@ -62,14 +62,16 @@ async def main():
     # ---- 2. 1st course: Физика, Химия, Биология, Анатомия, Гистология, in that order ----
     course1 = tb.get_course_menu_keyboard(1, user_id=non_admin)
     c1_data = [d for d in kb_data(course1) if d != "back_to_main"]
-    assert c1_data == ["menu_physics", "menu_chemistry", "menu_biology", "anatomy_root", "histology_menu"]
-    print("2. 1st course lists Физика/Химия/Биология/Анатомия/Гистология in order: OK")
+    assert c1_data[:5] == ["menu_physics", "menu_chemistry", "menu_biology", "anatomy_root", "histology_menu"]
+    assert all(value.startswith("dyn_c:") for value in c1_data[5:])
+    print("2. 1st course keeps core subjects in order and appends generated subjects: OK")
 
     # ---- 3. 2nd course: Анатомия, Гистология, Нормальная физиология, Оперативная хирургия ----
     course2 = tb.get_course_menu_keyboard(2, user_id=non_admin)
     c2_data = [d for d in kb_data(course2) if d != "back_to_main"]
-    assert c2_data == ["anatomy_root", "histology_menu", "phys:menu", "oh:menu"]
-    print("3. 2nd course lists Анатомия/Гистология/Физиология/Оперативную хирургию in order: OK")
+    assert c2_data[:4] == ["anatomy_root", "histology_menu", "phys:menu", "oh:menu"]
+    assert all(value.startswith("dyn_c:") for value in c2_data[4:])
+    print("3. 2nd course keeps core subjects in order and appends generated subjects: OK")
 
     # ---- 4. Anatomy/Histology carry their dynamic label in BOTH courses, not just one ----
     course1_admin = tb.get_course_menu_keyboard(1, user_id=ADMIN_ID)

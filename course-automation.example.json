@@ -1,0 +1,26 @@
+{
+  "slug": "operative_surgery",
+  "title": "Оперативная хирургия",
+  "course": 2,
+  "workspace_root": ".course-automation",
+  "codex_command": ["codex", "exec", "--skip-git-repo-check", "-"],
+  "telegram": {
+    "chat": "https://t.me/+liG6A6rDCPMzYjcy",
+    "topic_id": 123,
+    "existing_subjects": [
+      "Биология",
+      "Физика",
+      "Химия",
+      "Анатомия",
+      "Гистология",
+      "Физиология",
+      "Нормальная физиология",
+      "ОперХир",
+      "Оперативная хирургия"
+    ],
+    "api_id_env": "TELEGRAM_API_ID",
+    "api_hash_env": "TELEGRAM_API_HASH",
+    "session_path": ".secrets/vmeda_course_sync",
+    "extensions": [".pdf", ".docx", ".pptx", ".txt", ".md"]
+  }
+}
