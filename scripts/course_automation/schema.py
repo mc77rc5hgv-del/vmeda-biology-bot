@@ -51,7 +51,7 @@ def validate_course(course: dict) -> list[str]:
             errors.append(f"{key} must be a non-empty string")
     if course.get("course", 2) not in (1, 2):
         errors.append("course must be 1 or 2")
-    if course.get("ai_mode") is not None and course.get("ai_mode") not in {"latin"}:
+    if course.get("ai_mode") is not None and course.get("ai_mode") not in {"latin", "pharmacology"}:
         errors.append("ai_mode is unsupported")
     sections = course.get("sections")
     if not isinstance(sections, list) or not sections:
@@ -73,7 +73,28 @@ def validate_course(course: dict) -> list[str]:
             section_ids.add(section_id)
         if not isinstance(section.get("title"), str) or not section["title"].strip():
             errors.append(f"{prefix}.title must be non-empty")
-        lessons = section.get("lessons")
+        groups = section.get("groups")
+        if groups is not None:
+            if not isinstance(groups, list) or not groups:
+                errors.append(f"{prefix}.groups must be a non-empty array")
+                continue
+            lessons = []
+            for group_index, group in enumerate(groups):
+                gp = f"{prefix}.groups[{group_index}]"
+                if not isinstance(group, dict):
+                    errors.append(f"{gp} must be an object")
+                    continue
+                if not isinstance(group.get("id"), str) or not SLUG_RE.fullmatch(group["id"]):
+                    errors.append(f"{gp}.id is invalid")
+                if not isinstance(group.get("title"), str) or not group["title"].strip():
+                    errors.append(f"{gp}.title must be non-empty")
+                group_lessons = group.get("lessons")
+                if not isinstance(group_lessons, list) or not group_lessons:
+                    errors.append(f"{gp}.lessons must be a non-empty array")
+                else:
+                    lessons.extend(group_lessons)
+        else:
+            lessons = section.get("lessons")
         if not isinstance(lessons, list) or not lessons:
             errors.append(f"{prefix}.lessons must be a non-empty array")
             continue

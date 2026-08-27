@@ -4656,7 +4656,7 @@ async def ensure_rag_context(session: dict) -> str:
         return session["rag_context"]
     if session.get("task") is None:
         return ""
-    subject_filter = "латинский язык" if session.get("mode") == "latin" else None
+    subject_filter = {"latin": "латинский язык", "pharmacology": "фармакология"}.get(session.get("mode"))
     if subject_filter:
         snippets, rag_usage = await ai_rag.search_for_task(session["task"], subject_filter=subject_filter)
     else:
@@ -4672,6 +4672,13 @@ async def ensure_rag_context(session: dict) -> str:
             "видны. Для клинической, анатомической и фармацевтической терминологии опирайся прежде "
             "всего на закрытые материалы курса ниже. Если фото неразборчиво или материала недостаточно, "
             "честно попроси более чёткое фото вместо догадки.\n\n" + session["rag_context"]
+        )
+    elif session.get("mode") == "pharmacology":
+        session["rag_context"] = (
+            "Ты работаешь в специализированном режиме фармакологии ВМедА. Опирайся на закрытые "
+            "материалы курса ниже, чётко различай фармакологическую группу, механизм, эффекты, "
+            "показания, противопоказания и побочные действия. Не придумывай дозировки и не выдавай "
+            "учебный ответ за индивидуальное назначение.\n\n" + session["rag_context"]
         )
     return session["rag_context"]
 
@@ -4842,6 +4849,12 @@ async def begin_ai_session(callback: CallbackQuery, mode: str | None = None):
             "Пришли чёткое фото задания или его текст одним сообщением. AI распознает задание и "
             "ответит по загруженным материалам курса ВМедА: клинической, фармацевтической и общей "
             "латинской терминологии."
+        )
+    elif mode == "pharmacology":
+        waiting_text = (
+            f"💊 <b>VMedA AI — Фармакология</b>\n{DIVIDER}\n\n"
+            "Пришли текст или чёткое фото задания. Ответ будет основан на материалах курса ВМедА. "
+            "Дозировки и назначения обязательно сверяй с актуальной инструкцией и преподавателем."
         )
     else:
         waiting_text = (

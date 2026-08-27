@@ -89,7 +89,38 @@ def main(repo: Path) -> None:
         reference_lessons += page_lessons(f"ref{idx}", pages[:10], filename, f"Навигация: {Path(filename).stem}")
     sections.append({"id": "references", "title": "Учебники и дополнительные материалы", "lessons": reference_lessons})
 
-    course = {"id": "pharmacology", "course": 2, "title": "Фармакология", "emoji": "💊", "description": "Полный курс ВМедА: теория, таблицы препаратов, практикум, рецептура, контрольные работы, тесты, зачёт и билеты. Дозировки и клинические рекомендации сверяйте с актуальными официальными инструкциями.", "sections": sections}
+    # Keep the detailed extraction privately for AI/coverage, but expose a compact student hierarchy.
+    (workspace / "knowledge_sections.json").write_text(json.dumps(sections, ensure_ascii=False, indent=2), encoding="utf-8")
+    by_id = {section["id"]: section for section in sections}
+    def group(group_id: str, title: str, source_ids: list[str]) -> dict:
+        return {"id": group_id, "title": title, "lessons": [item for sid in source_ids for item in by_id[sid]["lessons"]]}
+    student_sections = [
+        {"id": "course", "title": "📚 КУРС", "groups": [
+            group("foundations", "Общая фармакология", ["general", "lesson_14"]),
+            group("course_theory", "Основы и механизмы действия", ["theory"]),
+            group("drug_groups", "Лекарственные средства по группам", ["theory_answers"]),
+            group("drug_comparison", "Сравнение лекарственных средств", ["tables"]),
+            group("course_practice", "Практические задания", ["practicum"]),
+            group("prescription", "Рецептура", ["recipes"]),
+        ]},
+        {"id": "controls", "title": "📝 КОНТРОЛЬНЫЕ", "groups": [
+            group("control_one", "Контрольная работа №1", ["control_1"]),
+            group("control_three", "Контрольная работа №3", ["control_3", "control_3_extra"]),
+            group("control_four", "Контрольная работа №4", ["control_4"]),
+            group("control_five", "Контрольная работа №5", ["control_5", "control_5_tests"]),
+            group("control_six", "Контрольная работа №6", ["control_6"]),
+        ]},
+        {"id": "credit", "title": "✅ ЗАЧЁТ", "groups": [
+            group("credit_questions", "Зачётные билеты", ["credit_tickets"]),
+            group("credit_testing", "Зачётные тесты", ["credit_tests"]),
+        ]},
+        {"id": "exam", "title": "🎓 ЭКЗАМЕН", "groups": [
+            group("exam_theory", "Теоретические билеты", ["tickets"]),
+            group("exam_practice", "Практическая часть", ["ticket_practice"]),
+            group("exam_tests", "Экзаменационные тесты", ["all_tests", "fl_tests", "ticket_tests", "tests_answers"]),
+        ]},
+    ]
+    course = {"id": "pharmacology", "course": 2, "title": "Фармакология", "emoji": "💊", "ai_mode": "pharmacology", "show_sources": False, "description": "Структурированный курс ВМедА: обучение, контрольные работы, зачёт, экзамен и специализированный VMedA AI. Дозировки и клинические рекомендации сверяйте с актуальными официальными инструкциями.", "sections": student_sections}
     (repo / "generated_courses" / "pharmacology.json").write_text(json.dumps(course, ensure_ascii=False, indent=2), encoding="utf-8")
 
     originals = [p for p in sources.iterdir() if p.suffix.lower() in {".pdf", ".doc", ".docx"} and not (p.suffix.lower() == ".docx" and (sources / f"{p.stem}.doc").exists())]
@@ -105,7 +136,7 @@ def main(repo: Path) -> None:
         derived_name = f"{p.stem}.docx" if p.suffix.lower() == ".doc" else None
         is_used = p.name in used or (derived_name in used if derived_name else False)
         files.append({"file": p.name, "sha256": hashes[p.name], "status": "duplicate" if duplicate else "processed", "same_as": canonical if duplicate else None, "coverage": "duplicate" if duplicate else ("course" if is_used else "reference")})
-    report = {"subject": "Фармакология", "source_count": len(originals), "section_count": len(sections), "lesson_count": sum(len(s["lessons"]) for s in sections), "media_count": sum(len(l.get("media", [])) for s in sections for l in s["lessons"]), "files": files}
+    report = {"subject": "Фармакология", "source_count": len(originals), "section_count": len(student_sections), "internal_section_count": len(sections), "lesson_count": sum(len(g["lessons"]) for s in student_sections for g in s["groups"]), "media_count": sum(len(l.get("media", [])) for s in student_sections for g in s["groups"] for l in g["lessons"]), "files": files}
     (workspace / "coverage_report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps({k: report[k] for k in ("source_count", "section_count", "lesson_count", "media_count")}, ensure_ascii=False))
 

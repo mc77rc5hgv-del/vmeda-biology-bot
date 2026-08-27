@@ -9,6 +9,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 import telegram_bot as tb
 
 router = Router()
+LESSONS_PER_PAGE = 12
 
 
 def get_dynamic_course_keyboard(course_index: int):
@@ -41,10 +42,50 @@ async def cb_dynamic_ai(callback: CallbackQuery):
 def get_dynamic_section_keyboard(course_index: int, section_index: int):
     builder = InlineKeyboardBuilder()
     section = tb.DYNAMIC_COURSES[course_index]["sections"][section_index]
+    if section.get("groups"):
+        for group_index, group in enumerate(section["groups"]):
+            builder.button(text=group["title"], callback_data=f"dyn_g:{course_index}:{section_index}:{group_index}:0")
+        builder.button(text="🔙 К разделам", callback_data=f"dyn_c:{course_index}")
+        builder.adjust(1)
+        return builder.as_markup()
     for lesson_index, lesson in enumerate(section["lessons"]):
         builder.button(text=lesson["title"], callback_data=f"dyn_l:{course_index}:{section_index}:{lesson_index}")
     builder.button(text="🔙 К разделам", callback_data=f"dyn_c:{course_index}")
     builder.adjust(1)
+    return builder.as_markup()
+
+
+def get_dynamic_group_keyboard(course_index: int, section_index: int, group_index: int, page: int):
+    builder = InlineKeyboardBuilder()
+    lessons = tb.DYNAMIC_COURSES[course_index]["sections"][section_index]["groups"][group_index]["lessons"]
+    page_count = max(1, (len(lessons) + LESSONS_PER_PAGE - 1) // LESSONS_PER_PAGE)
+    page = min(max(page, 0), page_count - 1)
+    start = page * LESSONS_PER_PAGE
+    for lesson_index in range(start, min(start + LESSONS_PER_PAGE, len(lessons))):
+        builder.button(text=lessons[lesson_index]["title"], callback_data=f"dyn_gl:{course_index}:{section_index}:{group_index}:{lesson_index}")
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"dyn_g:{course_index}:{section_index}:{group_index}:{page - 1}"))
+    nav.append(InlineKeyboardButton(text=f"{page + 1}/{page_count}", callback_data="noop"))
+    if page + 1 < page_count:
+        nav.append(InlineKeyboardButton(text="➡️", callback_data=f"dyn_g:{course_index}:{section_index}:{group_index}:{page + 1}"))
+    builder.row(*nav)
+    builder.row(InlineKeyboardButton(text="🔙 К подразделам", callback_data=f"dyn_s:{course_index}:{section_index}"))
+    return builder.as_markup()
+
+
+def get_dynamic_group_lesson_keyboard(course_index: int, section_index: int, group_index: int, lesson_index: int):
+    lessons = tb.DYNAMIC_COURSES[course_index]["sections"][section_index]["groups"][group_index]["lessons"]
+    builder = InlineKeyboardBuilder()
+    nav = []
+    if lesson_index > 0:
+        nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"dyn_gl:{course_index}:{section_index}:{group_index}:{lesson_index - 1}"))
+    if lesson_index + 1 < len(lessons):
+        nav.append(InlineKeyboardButton(text="➡️", callback_data=f"dyn_gl:{course_index}:{section_index}:{group_index}:{lesson_index + 1}"))
+    if nav:
+        builder.row(*nav)
+    page = lesson_index // LESSONS_PER_PAGE
+    builder.row(InlineKeyboardButton(text="🔙 К темам", callback_data=f"dyn_g:{course_index}:{section_index}:{group_index}:{page}"))
     return builder.as_markup()
 
 
@@ -121,6 +162,43 @@ async def cb_dynamic_section(callback: CallbackQuery):
     )
 
 
+@router.callback_query(F.data.startswith("dyn_g:"))
+async def cb_dynamic_group(callback: CallbackQuery):
+    try:
+        _, c, s, g, p = callback.data.split(":")
+        course_index, section_index, group_index, page = map(int, (c, s, g, p))
+        group = tb.DYNAMIC_COURSES[course_index]["sections"][section_index]["groups"][group_index]
+    except (ValueError, IndexError, KeyError, TypeError):
+        await callback.answer("Подраздел не найден", show_alert=True)
+        return
+    page_count = max(1, (len(group["lessons"]) + LESSONS_PER_PAGE - 1) // LESSONS_PER_PAGE)
+    if page < 0 or page >= page_count:
+        await callback.answer("Страница не найдена", show_alert=True)
+        return
+    await callback.answer()
+    await tb.safe_edit_text(callback.message, f"📚 <b>{html.escape(group['title'])}</b>\n{tb.DIVIDER}\n\nВыберите тему:", parse_mode="HTML", reply_markup=get_dynamic_group_keyboard(course_index, section_index, group_index, page))
+
+
+@router.callback_query(F.data.startswith("dyn_gl:"))
+async def cb_dynamic_group_lesson(callback: CallbackQuery):
+    try:
+        _, c, s, g, l = callback.data.split(":")
+        course_index, section_index, group_index, lesson_index = map(int, (c, s, g, l))
+        course = tb.DYNAMIC_COURSES[course_index]
+        lesson = course["sections"][section_index]["groups"][group_index]["lessons"][lesson_index]
+    except (ValueError, IndexError, KeyError, TypeError):
+        await callback.answer("Тема не найдена", show_alert=True)
+        return
+    await callback.answer()
+    await tb.safe_edit_text(callback.message, f"📖 <b>{html.escape(lesson['title'])}</b>\n{tb.DIVIDER}\n\n{lesson['content']}", parse_mode="HTML", reply_markup=get_dynamic_group_lesson_keyboard(course_index, section_index, group_index, lesson_index))
+    for media in lesson.get("media", []):
+        media_path = Path(media["path"])
+        if not media_path.is_absolute():
+            media_path = Path(__file__).resolve().parents[1] / media_path
+        if media_path.is_file():
+            await callback.message.answer_photo(FSInputFile(media_path), caption=html.escape(media.get("caption", "")), parse_mode="HTML")
+
+
 @router.callback_query(F.data.startswith("dyn_l:"))
 async def cb_dynamic_lesson(callback: CallbackQuery):
     try:
@@ -134,7 +212,8 @@ async def cb_dynamic_lesson(callback: CallbackQuery):
         await callback.answer("Тема не найдена", show_alert=True)
         return
     await callback.answer()
-    sources = lesson.get("sources", [])
+    course = get_dynamic_item(course_index)
+    sources = lesson.get("sources", []) if course.get("show_sources", True) else []
     source_text = ""
     if sources:
         source_text = "\n\n📎 <b>Источники:</b> " + ", ".join(html.escape(item) for item in sources)
