@@ -1098,6 +1098,22 @@ Pipeline, in call order, for the **first** message of a session (photo or text):
    raw-text pre-cache, which never parses and so never learns a real type) falls back to the
    original generic wording rather than guessing.
 
+   **`SYSTEM_PROMPT` explicitly forbids drawing chemical/molecular/anatomical structures as a text
+   diagram** — another real observed failure: asked to explain a nucleotide's structure, a model
+   answered with each atom/group on its own line (`"O CH2"`, `"H"`, `"H"`, `"OH"`, ...), an attempt
+   at an ASCII skeletal formula that renders as an unreadable wall of one-word lines in a Telegram
+   chat (no monospace alignment survives on mobile). The prompt now tells the model to always
+   describe structure in prose or a simple `"- "` list instead (e.g. "C-1′ рибозы связан с
+   азотистым основанием, C-5′ — с фосфатной группой"), the same rule for every subject, not just
+   Chemistry — Anatomy/Physiology structural questions are equally at risk of the same failure
+   mode. This is a system-prompt fix, not a content-bank fix: an audit of `physiology.json` and
+   `operative_surgery.json` (grepped for replacement characters, leftover `{{IMAGE`/`{{TABLE`
+   placeholders, stray markdown headings, and runs of short one-token lines/space-separated tokens
+   that would indicate the same kind of diagram dump) found nothing — the static content banks were
+   already clean; this was purely a live-generation formatting failure with no safe mechanical
+   cleanup possible (unlike LaTeX markup, there's no reliable way to reconstruct correct prose from
+   scattered structure tokens after the fact), so prevention via the prompt is the only fix.
+
 **`ai/router.py`** (`route_bucket`/`pick_provider`/`build_attempts`/`try_providers`) — `quick=True`
 always uses OpenAI; `quick=False` routes by `bucket` (`"problem"` — calculation/list, stays on OpenAI
 for self-consistency with the quick step; `"theory_simple"` — Gemini if configured; `"theory_complex"`

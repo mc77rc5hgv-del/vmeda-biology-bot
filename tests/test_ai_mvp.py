@@ -508,6 +508,13 @@ async def main():
     assert "моль/кг" in cleaned and "°C" in cleaned  # \text{} unwrapped
     print("16. LaTeX cleanup strips backslash markup and produces readable text: OK")
 
+    # ---- 16b. SYSTEM_PROMPT explicitly forbids ASCII/text molecular structure diagrams — a real
+    # observed failure: the model drew a nucleotide's structure as scattered one-token-per-line
+    # "O CH2 / H / H / OH / ..." output, unreadable in a chat UI ----
+    assert "не пытайся нарисовать" in tb.ai_prompts.SYSTEM_PROMPT
+    assert "структуру текстом" in tb.ai_prompts.SYSTEM_PROMPT
+    print("16b. SYSTEM_PROMPT forbids drawing chemical/anatomical structures as text diagrams: OK")
+
     # ---- 17. lightweight markdown -> real Telegram HTML tags, always well-balanced ----
     from html.parser import HTMLParser
 
