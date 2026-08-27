@@ -614,7 +614,9 @@ async def main():
     answer19, _, usage19, attempts19 = await orig_solve(text="краткий вопрос", quick=True)
     assert captured19["model"] == tb.ai_openai.MODEL
     assert usage19["provider"] == "openai"
-    assert attempts19 == [{"provider": "openai", "status": "success", "usage": {"input_tokens": 42, "output_tokens": 7}}]
+    assert attempts19 == [
+        {"provider": "openai", "status": "success", "usage": {"input_tokens": 42, "output_tokens": 7}, "error": None},
+    ]
     print("19. quick=True always stays on OpenAI, even with Grok configured: OK")
 
     # ---- 19a. bucket=None (unclassified) stays on OpenAI even with Grok configured and
@@ -681,7 +683,9 @@ async def main():
     )
     assert captured_grok["model"] == tb.ai_xai.MODEL
     assert usage_g == {"input_tokens": 300, "output_tokens": 120, "provider": "grok"}
-    assert attempts_g == [{"provider": "grok", "status": "success", "usage": {"input_tokens": 300, "output_tokens": 120}}]
+    assert attempts_g == [
+        {"provider": "grok", "status": "success", "usage": {"input_tokens": 300, "output_tokens": 120}, "error": None},
+    ]
     tb.record_ai_attempts_cost(attempts_g)
     grok_totals = tb.stats["ai_cost_totals"]["by_provider"]["grok"]
     expected_cost = (
@@ -927,7 +931,10 @@ async def main():
     except tb.AIRefusalError as exc:
         raised = True
         assert exc.ai_attempts_log == [
-            {"provider": "openai", "status": "refused", "usage": {"input_tokens": 50, "output_tokens": 10}},
+            {
+                "provider": "openai", "status": "refused", "usage": {"input_tokens": 50, "output_tokens": 10},
+                "error": "похоже на срабатывание контент-фильтра",
+            },
         ]
     assert raised, "a refusal from OpenAI (no further fallback) must raise AIRefusalError with attempts attached"
     print("24. OpenAI refusal (no further fallback) raises AIRefusalError with attempts_log: OK")

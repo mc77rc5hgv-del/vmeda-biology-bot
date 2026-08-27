@@ -1104,12 +1104,23 @@ for self-consistency with the quick step; `"theory_simple"` — Gemini if config
 — Grok if `USE_GROK_FOR_DETAILED` and configured). `try_providers()` returns a full `attempts_log`
 (`[{"provider", "status": "success"|"refused"|"failed", "usage"}, ...]`) — a `"refused"` attempt (the
 model answered, just with a content-filter refusal) DID spend real tokens and must be billed;
-`"failed"` (network/API error) never reaches a response, so its usage is always zero. On total
-failure the raised exception (usually `AIRefusalError`) carries this log as `.ai_attempts_log`, so
-even a fully-failed request's partial cost can still be recovered.
+`"failed"` (network/API error) never reaches a response, so its usage is always zero. Each attempt
+also carries an `"error"` field — `None` on `"success"`, otherwise a short (≤200 char) description
+(`f"{type(exc).__name__}: {exc}"` for `"failed"`, a fixed content-filter message for `"refused"`) —
+purely informational, the router itself never reads it back. On total failure the raised exception
+(usually `AIRefusalError`) carries this log as `.ai_attempts_log`, so even a fully-failed request's
+partial cost can still be recovered.
 `telegram_bot.record_ai_attempts_cost(attempts_log)` is the one function that should ever record AI
 cost from a `solve()`/`get_first_message_ai_answer()` call — it iterates every attempt (not just the
-final one) and skips only zero-usage `"failed"` entries.
+final one) and skips only zero-usage `"failed"` entries. It ALSO appends every `"failed"`/`"refused"`
+attempt to `stats["ai_error_log"]` (a ring buffer capped at `AI_ERROR_LOG_MAX`, 30) — before this, a
+provider outage was only visible in server logs (`logger.exception` in `ai/router.py`), unreachable
+from inside the bot. The admin panel's "🩺 Ошибки AI-провайдеров" button (live count on the label,
+`cb_admin_ai_error_log`/`get_ai_error_log_text` in `handlers/admin.py`) renders the buffer newest-first,
+HTML-escaping provider/error text (an exception message is arbitrary runtime text, not authored
+content, so it can't be trusted the way content-bank titles are) and truncating by a character
+budget (`AI_ERROR_LOG_MSG_BUDGET`) rather than assuming 30 short entries always fit Telegram's
+4096-char cap.
 
 `AI_SESSIONS[user_id]` caches `task`/`bucket`/`rag_context` computed once at first-message time —
 `is_first = session["task"] is None` gates both handlers (`handle_ai_photo_input`/

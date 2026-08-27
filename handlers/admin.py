@@ -105,6 +105,11 @@ def get_admin_menu():
         text=f"🤖 Модерация AI-кэша ({pending_ai_cache})" if pending_ai_cache else "🤖 Модерация AI-кэша",
         callback_data="admin_ai_cache_queue",
     )
+    error_log_count = len(tb.stats.get("ai_error_log", []))
+    builder.button(
+        text=f"🩺 Ошибки AI-провайдеров ({error_log_count})" if error_log_count else "🩺 Ошибки AI-провайдеров",
+        callback_data="admin_ai_error_log",
+    )
     builder.adjust(1)
     return builder.as_markup()
 
@@ -1192,6 +1197,59 @@ async def cb_admin_ai_cache_reject(callback: CallbackQuery):
     tb.moderate_ai_cache_entry(fingerprint, approve=False)
     await callback.answer("Отклонено")
     await cb_admin_ai_cache_queue(callback)
+
+_AI_ERROR_LOG_STATUS_ICON = {"failed": "❌", "refused": "🚫"}
+_AI_ERROR_LOG_STATUS_LABEL = {"failed": "сбой (сеть/API)", "refused": "отказ (контент-фильтр)"}
+AI_ERROR_LOG_MSG_BUDGET = 3800  # запас от лимита Telegram в 4096 симв. — AI_ERROR_LOG_MAX (30)
+# записей с error до 200 симв. каждая теоретически превышают лимит, поэтому режем по бюджету,
+# а не просто выводим все — тот же принцип, что у ANATOMY_LATIN_LEADERBOARD_MSG_LIMIT.
+
+def get_ai_error_log_text() -> str:
+    """Последние сбои/отказы AI-провайдеров (stats["ai_error_log"], кольцевой буфер —
+    см. record_ai_attempts_cost в telegram_bot.py) — до этого единственный способ узнать, что
+    провайдер недоступен, были server-логи, которые админ не может открыть прямо из бота."""
+    log = tb.stats.get("ai_error_log", [])
+    header = f"🩺 <b>Ошибки AI-провайдеров</b>\n{tb.DIVIDER}\n\n"
+    if not log:
+        return header + "Пока ни одного сбоя или отказа не зафиксировано."
+    lines = [header.rstrip(), f"Последние {len(log)} (хранится до {tb.AI_ERROR_LOG_MAX}), новые сверху:\n"]
+    shown = 0
+    running_len = sum(len(x) for x in lines)
+    for entry in reversed(log):
+        ts_str = tb.datetime.fromtimestamp(entry["ts"], tb.APP_TIMEZONE).strftime("%d.%m %H:%M")
+        icon = _AI_ERROR_LOG_STATUS_ICON.get(entry["status"], "•")
+        label = _AI_ERROR_LOG_STATUS_LABEL.get(entry["status"], entry["status"])
+        provider = tb.html.escape(str(entry.get("provider", "?")))
+        error = tb.html.escape(entry.get("error") or "—")
+        block = f"{icon} {ts_str} · <b>{provider}</b> · {label}\n   {error}"
+        if running_len + len(block) > AI_ERROR_LOG_MSG_BUDGET:
+            break
+        lines.append(block)
+        running_len += len(block)
+        shown += 1
+    if shown < len(log):
+        lines.append(f"\n… показаны только {shown} новейших из {len(log)}, остальные обрезаны по месту.")
+    return "\n".join(lines)
+
+def get_ai_error_log_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔄 Обновить", callback_data="admin_ai_error_log")
+    builder.button(text="🔙 В админ-панель", callback_data="admin_panel")
+    builder.adjust(1)
+    return builder.as_markup()
+
+@router.callback_query(F.data == "admin_ai_error_log")
+async def cb_admin_ai_error_log(callback: CallbackQuery):
+    if not tb.is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer()
+    await tb.safe_edit_text(
+        callback.message,
+        get_ai_error_log_text(),
+        parse_mode="HTML",
+        reply_markup=get_ai_error_log_keyboard()
+    )
 
 @router.callback_query(F.data == "admin_export_stats")
 async def cb_admin_export_stats(callback: CallbackQuery):

@@ -105,14 +105,17 @@ async def try_providers(attempts: list, messages: list, max_tokens: int) -> tupl
     — не ретрай в цикле, максимум len(attempts) попыток, каждая на другом провайдере/ключе.
 
     Возвращает (provider, answer_raw, usage, attempts_log) первой удавшейся попытки. attempts_log
-    — [{"provider", "status": "success"/"refused"/"failed", "usage"}, ...] по КАЖДОЙ попытке,
-    включая неудачные — сетевой/API-сбой ("failed") не потребляет токены (запрос не дошёл до
-    ответа, usage нулевой), а отказ контент-фильтра ("refused") ТОКЕНЫ ТРАТИТ (модель реально
-    ответила, просто отказом) и должен учитываться в реальной себестоимости (см. CLAUDE.md,
-    архитектурные недостатки AI-режима — пункт 9: раньше стоимость сорвавшихся попыток нигде не
-    учитывалась). Если ВСЕ попытки исчерпаны — поднимает исключение последней (обычно
-    AIRefusalError, если дело было в контент-фильтре, а не в сбое сети), с прикреплённым
-    `.ai_attempts_log` атрибутом, чтобы вызывающий код мог всё равно учесть стоимость попыток."""
+    — [{"provider", "status": "success"/"refused"/"failed", "usage", "error"}, ...] по КАЖДОЙ
+    попытке, включая неудачные — сетевой/API-сбой ("failed") не потребляет токены (запрос не
+    дошёл до ответа, usage нулевой), а отказ контент-фильтра ("refused") ТОКЕНЫ ТРАТИТ (модель
+    реально ответила, просто отказом) и должен учитываться в реальной себестоимости (см.
+    CLAUDE.md, архитектурные недостатки AI-режима — пункт 9: раньше стоимость сорвавшихся попыток
+    нигде не учитывалась). "error" — короткое (≤200 симв.) текстовое описание причины, только на
+    "failed"/"refused" записях (`None` на "success") — служебное поле для админ-панели
+    (`get_ai_error_log_text` в handlers/admin.py), сам роутер его никак не использует. Если ВСЕ
+    попытки исчерпаны — поднимает исключение последней (обычно AIRefusalError, если дело было в
+    контент-фильтре, а не в сбое сети), с прикреплённым `.ai_attempts_log` атрибутом, чтобы
+    вызывающий код мог всё равно учесть стоимость попыток."""
     attempts_log = []
     last_exc = None
     for provider in attempts:
@@ -122,16 +125,23 @@ async def try_providers(attempts: list, messages: list, max_tokens: int) -> tupl
             # стабильный, воспроизводимый ход решения: без этого один и тот же вопрос давал
             # разный метод и разный ответ при каждом новом запросе
         except Exception as exc:
-            attempts_log.append({"provider": provider, "status": "failed", "usage": {"input_tokens": 0, "output_tokens": 0}})
+            attempts_log.append({
+                "provider": provider, "status": "failed",
+                "usage": {"input_tokens": 0, "output_tokens": 0},
+                "error": f"{type(exc).__name__}: {exc}"[:200],
+            })
             logger.exception("%s недоступен, пробую следующий вариант, если есть", provider)
             last_exc = exc
             continue
         if looks_like_refusal(answer_raw):
-            attempts_log.append({"provider": provider, "status": "refused", "usage": dict(usage)})
+            attempts_log.append({
+                "provider": provider, "status": "refused", "usage": dict(usage),
+                "error": "похоже на срабатывание контент-фильтра",
+            })
             logger.warning("%s отказал (похоже на срабатывание контент-фильтра), пробую следующий вариант, если есть", provider)
             last_exc = AIRefusalError(f"{provider} отказался отвечать (похоже на срабатывание контент-фильтра)")
             continue
-        attempts_log.append({"provider": provider, "status": "success", "usage": dict(usage)})
+        attempts_log.append({"provider": provider, "status": "success", "usage": dict(usage), "error": None})
         return provider, answer_raw, usage, attempts_log
     last_exc.ai_attempts_log = attempts_log
     raise last_exc

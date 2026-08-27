@@ -199,6 +199,7 @@ def load_stats() -> dict:
             data.setdefault("physiology_progress", {})
             data.setdefault("physiology_favorites", {})
             data.setdefault("anatomy_maintenance_override", None)
+            data.setdefault("ai_error_log", [])
             return data
         except (json.JSONDecodeError, OSError):
             logger.exception("Не удалось прочитать %s, статистика будет создана заново", STATS_FILE)
@@ -249,6 +250,7 @@ def load_stats() -> dict:
         "physiology_progress": {},
         "physiology_favorites": {},
         "anatomy_maintenance_override": None,
+        "ai_error_log": [],
     }
 
 # Один воркер сериализует записи на диск и не даёт им блокировать event loop бота.
@@ -2622,6 +2624,9 @@ get_ai_cache_queue_keyboard = admin_handlers.get_ai_cache_queue_keyboard
 cb_admin_ai_cache_queue = admin_handlers.cb_admin_ai_cache_queue
 cb_admin_ai_cache_approve = admin_handlers.cb_admin_ai_cache_approve
 cb_admin_ai_cache_reject = admin_handlers.cb_admin_ai_cache_reject
+get_ai_error_log_text = admin_handlers.get_ai_error_log_text
+get_ai_error_log_keyboard = admin_handlers.get_ai_error_log_keyboard
+cb_admin_ai_error_log = admin_handlers.cb_admin_ai_error_log
 cb_admin_export_stats = admin_handlers.cb_admin_export_stats
 cb_admin_userlist = admin_handlers.cb_admin_userlist
 cb_admin_grant_prompt = admin_handlers.cb_admin_grant_prompt
@@ -4442,18 +4447,39 @@ def end_ai_session(user_id: int) -> None:
     if lock is not None and not lock.locked():
         AI_USER_LOCKS.pop(user_id, None)
 
+AI_ERROR_LOG_MAX = 30  # сколько последних неудачных/отказавших попыток хранить для админ-панели —
+# кольцевой буфер, а не полная история: цель — "что сейчас происходит с провайдерами", а не аудит.
+
 def record_ai_attempts_cost(attempts_log: list) -> None:
     """Учитывает стоимость КАЖДОЙ попытки провайдера из attempts_log (см. ai.router.try_providers)
     — не только финально успешной. "refused" (контент-фильтр) реально тратит токены и должен
     попадать в себестоимость; "failed" (сетевая/API-ошибка) всегда несёт нулевой usage, так что
     его учёт — безопасный no-op. Вызывать вместо record_ai_cost(usage) на одну финальную попытку —
     иначе стоимость отказавших/сорвавшихся попыток при переключении на резервного провайдера
-    нигде не фиксировалась (см. CLAUDE.md/архитектурный разбор AI-режима, пункт 9)."""
+    нигде не фиксировалась (см. CLAUDE.md/архитектурный разбор AI-режима, пункт 9).
+
+    Заодно копит "failed"/"refused" попытки в stats["ai_error_log"] (кольцевой буфер, последние
+    AI_ERROR_LOG_MAX) — до этого единственным способом узнать, что провайдер сейчас недоступен,
+    были server-логи (logger.exception в ai/router.py), недоступные админу из самого бота. Раньше
+    ошибки нигде не переживали рестарт процесса и не были видны без доступа к хостингу — см.
+    get_ai_error_log_text в handlers/admin.py."""
+    logged_error = False
     for attempt in attempts_log:
         if attempt["status"] in ("success", "refused"):
             usage = dict(attempt["usage"])
             usage["provider"] = attempt["provider"]
             record_ai_cost(usage)
+        if attempt["status"] in ("failed", "refused"):
+            stats["ai_error_log"].append({
+                "ts": time.time(),
+                "provider": attempt["provider"],
+                "status": attempt["status"],
+                "error": attempt.get("error"),
+            })
+            logged_error = True
+    if logged_error:
+        stats["ai_error_log"] = stats["ai_error_log"][-AI_ERROR_LOG_MAX:]
+        save_stats()
 
 # ---- Кэш точных совпадений с модерацией (см. CLAUDE.md/архитектурный разбор AI-режима, пункт 6)
 # ----
