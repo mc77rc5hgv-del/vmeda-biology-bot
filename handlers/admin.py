@@ -67,6 +67,7 @@ def get_admin_menu():
     builder.button(text="📥 Экспорт stats.json", callback_data="admin_export_stats")
     builder.button(text="👥 Список пользователей", callback_data="admin_userlist:0")
     builder.button(text="🔎 Найти пользователя", callback_data="admin_lookup_prompt")
+    builder.button(text="🔍 Поиск по контенту", callback_data="admin_content_search_prompt")
     builder.button(text="🔓 Дать доступ по username/ID", callback_data="admin_grant_prompt")
     builder.button(text="🚫 Отозвать доступ по username/ID", callback_data="admin_revoke_prompt")
     builder.button(text="🦴 Дать демо-доступ к Анатомии", callback_data="admin_grant_anatomy_demo_prompt")
@@ -415,6 +416,128 @@ async def cb_admin_card_sub(callback: CallbackQuery):
         f"💎 Выбери тариф для {label} кнопкой ниже или пришли номер:\n\n{tier_lines}",
         parse_mode="HTML",
         reply_markup=tb.get_admin_tier_reply_keyboard()
+    )
+
+CONTENT_SEARCH_PER_SUBJECT_LIMIT = 5
+
+def _content_search_flat_bank(bank: dict, q: str, limit: int = CONTENT_SEARCH_PER_SUBJECT_LIMIT):
+    """Общий поиск по банкам вида {номер: {"title":..., "answer":...}} — этой формы Биология
+    (QUESTIONS) и Физика (PHYSICS_QUESTIONS)."""
+    matches = []
+    for num, item in bank.items():
+        title = item.get("title") or ""
+        answer = item.get("answer") or ""
+        if q in title.lower() or q in answer.lower():
+            matches.append((f"№{num}", title))
+            if len(matches) >= limit:
+                break
+    return matches
+
+def _content_search_chemistry_theory(q: str, limit: int = CONTENT_SEARCH_PER_SUBJECT_LIMIT):
+    matches = []
+    for num, ticket in tb.CHEMISTRY_THEORY_TICKETS.items():
+        for idx, qd in enumerate(ticket.get("questions", [])):
+            title = qd.get("title") or ""
+            answer = qd.get("answer") or ""
+            if q in title.lower() or q in answer.lower():
+                matches.append((f"билет {num}, вопрос {idx + 1}", title))
+                if len(matches) >= limit:
+                    return matches
+    return matches
+
+def _content_search_chemistry_practice(q: str, limit: int = CONTENT_SEARCH_PER_SUBJECT_LIMIT):
+    matches = []
+    for num, ticket in tb.CHEMISTRY_PRACTICE_TICKETS.items():
+        title = ticket.get("title") or ""
+        content = ticket.get("content") or ""
+        if q in title.lower() or q in content.lower():
+            matches.append((f"билет {num}", title))
+            if len(matches) >= limit:
+                break
+    return matches
+
+def _content_search_anatomy_exam_test(q: str, limit: int = CONTENT_SEARCH_PER_SUBJECT_LIMIT):
+    matches = []
+    for part in tb.ANATOMY_EXAM_TEST_PARTS:
+        for qd in part.get("questions", []):
+            haystacks = [qd.get("question") or ""] + list(qd.get("options", {}).values())
+            if any(q in h.lower() for h in haystacks if h):
+                matches.append((f"{part['title']}, №{qd['num']}", qd["question"]))
+                if len(matches) >= limit:
+                    return matches
+    return matches
+
+def get_admin_content_search_text(query: str) -> str:
+    """Ищет подстроку (регистронезависимо) по нескольким банкам контента сразу — Биология,
+    Физика, Химия (билеты теории/практики), Анатомия-ТЕСТ, плюс переиспользует уже готовые
+    search_physiology()/search_operative_surgery() (те же функции, что стоят за пользовательским
+    поиском в этих двух разделах). Цель — быстро найти конкретный вопрос по жалобе пользователя
+    ("вопрос про X неправильный"), не листая раздел вручную в поисках нужной формулировки.
+    Только для чтения — сама правка контента делается как обычно, прямым редактированием JSON.
+    НЕ покрывает Химию (теория/задачи/лабы вне билетов) и Анатомию/Гистологию вне ТЕСТа — те
+    либо не имеют плоской текстовой формы, либо не были приоритетом для этого инструмента."""
+    q = query.strip()
+    if not q:
+        return "⚠️ Пустой запрос — пришли слово или фразу для поиска."
+    q_lower = q.lower()
+    safe_q = tb.html.escape(q)
+
+    sections = [
+        ("🧬 Биология", _content_search_flat_bank(tb.QUESTIONS, q_lower)),
+        ("⚛️ Физика", _content_search_flat_bank(tb.PHYSICS_QUESTIONS, q_lower)),
+        ("🧪 Химия — билеты теории", _content_search_chemistry_theory(q_lower)),
+        ("🧪 Химия — билеты практики", _content_search_chemistry_practice(q_lower)),
+        ("🦴 Анатомия — ТЕСТ", _content_search_anatomy_exam_test(q_lower)),
+    ]
+
+    physiology_hits = tb.search_physiology(q)
+    if physiology_hits:
+        sections.append((
+            "🫀 Нормальная физиология",
+            [(t["topic_id"], t["title"]) for t in physiology_hits[:CONTENT_SEARCH_PER_SUBJECT_LIMIT]],
+        ))
+
+    oh_topics, _oh_instruments, _oh_projections, _oh_stations = tb.search_operative_surgery(q)
+    if oh_topics:
+        sections.append((
+            "🔪 Оперативная хирургия",
+            [(t["number"], t["title"]) for t in oh_topics[:CONTENT_SEARCH_PER_SUBJECT_LIMIT]],
+        ))
+
+    lines = [f"🔍 <b>Поиск по контенту</b>: «{safe_q}»\n{tb.DIVIDER}"]
+    total = 0
+    for label, hits in sections:
+        if not hits:
+            continue
+        total += len(hits)
+        lines.append(f"\n{label}:")
+        for ref, title in hits:
+            title_short = title if len(title) <= 90 else title[:87] + "..."
+            lines.append(f"  • {ref} — {title_short}")
+
+    if total == 0:
+        lines.append("\nНичего не найдено ни в одном разделе.")
+    else:
+        lines.append(
+            f"\n{tb.DIVIDER}\nВсего найдено: {total} (до {CONTENT_SEARCH_PER_SUBJECT_LIMIT} на раздел). "
+            "Открой нужный вопрос как обычно в боте, чтобы посмотреть его целиком."
+        )
+    return "\n".join(lines)
+
+@router.callback_query(F.data == "admin_content_search_prompt")
+async def cb_admin_content_search_prompt(callback: CallbackQuery):
+    if not tb.is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer()
+    tb.ADMIN_PENDING[callback.from_user.id] = {"action": "content_search"}
+    await tb.safe_edit_text(
+        callback.message,
+        "🔍 <b>Поиск по контенту</b>\n\nПришли слово или фразу — поищу по вопросам Биологии, "
+        "Физики, билетам Химии, тестовому банку Анатомии, Физиологии и Оперативной хирургии. "
+        "Можно искать сколько угодно раз подряд, не возвращаясь в меню.",
+        parse_mode="HTML",
+        reply_markup=get_admin_back_keyboard()
     )
 
 @router.callback_query(F.data == "admin_panel")

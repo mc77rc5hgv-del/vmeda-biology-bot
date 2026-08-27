@@ -2587,6 +2587,8 @@ cb_admin_card_access = admin_handlers.cb_admin_card_access
 cb_admin_card_anatomy_demo = admin_handlers.cb_admin_card_anatomy_demo
 cb_admin_card_dm = admin_handlers.cb_admin_card_dm
 cb_admin_card_sub = admin_handlers.cb_admin_card_sub
+get_admin_content_search_text = admin_handlers.get_admin_content_search_text
+cb_admin_content_search_prompt = admin_handlers.cb_admin_content_search_prompt
 cb_admin_panel = admin_handlers.cb_admin_panel
 cb_admin_battle_menu = admin_handlers.cb_admin_battle_menu
 cb_admin_announcements_menu = admin_handlers.cb_admin_announcements_menu
@@ -2701,6 +2703,13 @@ async def handle_admin_pending_action(message: Message):
 
     pending = ADMIN_PENDING[admin_id]
     action = pending["action"]
+
+    if action == "content_search":
+        await message.answer(get_admin_content_search_text(message.text), parse_mode="HTML")
+        # Остаётся в ADMIN_PENDING (не удаляется) — можно искать снова следующим сообщением
+        # без повторного захода в меню; выходит только через "🔙 В админ-панель" (cb_admin_panel
+        # чистит ADMIN_PENDING) или другое админ-действие, которое перезапишет pending само.
+        return
 
     if action in (
         "grant", "revoke", "grant_anatomy_demo", "revoke_anatomy_demo",

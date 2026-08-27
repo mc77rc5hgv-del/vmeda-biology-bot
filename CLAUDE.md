@@ -800,6 +800,21 @@ subscription-grant flows rather than duplicating their logic — so a subscripti
 through the same `record_subscription_tier` → (`record_subscription_subject` if needed) →
 `grant_subscription_and_notify_buyer()` path as the original `admin_subscription_prompt` entry point.
 
+**Content search** (`"🔍 Поиск по контенту"`, `admin_content_search_prompt` → the `"content_search"` action →
+`get_admin_content_search_text(query)`) is a read-only, cross-subject substring search so an admin can find the
+exact question behind a complaint ("вопрос про X неправильный") without paging through a subject's normal
+browsing UI by hand. Searches Biology (`QUESTIONS`) and Physics (`PHYSICS_QUESTIONS`, same `{num: {title,
+answer}}` shape) via `_content_search_flat_bank()`, Chemistry theory/practice tickets via their own two helpers
+(different nesting — theory tickets hold a `questions` list, practice tickets are flat `title`+`content`), the
+Anatomy exam ТЕСТ bank (question + all MCQ option texts, not just the question stem), and reuses the section's
+own existing `search_physiology()`/`search_operative_surgery()` rather than reimplementing search for those two.
+**Deliberately does not cover** Chemistry's theory/tasks/labs material outside the ticket banks, or Anatomy/
+Histology outside ТЕСТ — those don't have a flat title+text shape worth the added complexity for this tool, so
+they're left out rather than half-supported. Unlike every other `ADMIN_PENDING` action, `"content_search"` is
+never deleted after answering — it stays armed so the admin can fire off several queries in a row without
+re-opening the menu each time; it's cleared only by navigating elsewhere (`cb_admin_panel` clears
+`ADMIN_PENDING` on entry, same as every other screen) or by starting a different pending action.
+
 ### Stats persistence
 
 `stats` is a module-level dict populated by `load_stats()` at import and mutated in place everywhere; every write
