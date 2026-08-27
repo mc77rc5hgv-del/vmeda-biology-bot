@@ -164,20 +164,21 @@ def load_dynamic_courses() -> list[dict]:
 
 DYNAMIC_COURSES = load_dynamic_courses()
 
-LATIN_AI_ENTRIES = []
-try:
-    with open(os.path.join("generated_knowledge", "latin_ai.json"), "r", encoding="utf-8") as stream:
-        LATIN_AI_ENTRIES = json.load(stream).get("entries", [])
-except FileNotFoundError:
-    pass
-except Exception as exc:
-    logger.error("Cannot load Latin AI knowledge: %s", exc)
+EXTRA_AI_ENTRIES = []
+for knowledge_filename in ("latin_ai.json", "biochemistry_ai.json"):
+    try:
+        with open(os.path.join("generated_knowledge", knowledge_filename), "r", encoding="utf-8") as stream:
+            EXTRA_AI_ENTRIES.extend(json.load(stream).get("entries", []))
+    except FileNotFoundError:
+        pass
+    except Exception as exc:
+        logger.error("Cannot load AI knowledge %s: %s", knowledge_filename, exc)
 
 ai_rag.configure(
     questions=QUESTIONS, physics_questions=PHYSICS_QUESTIONS, chemistry_theory=CHEMISTRY_THEORY,
     chemistry_theory_tickets=CHEMISTRY_THEORY_TICKETS, chemistry_practice_tickets=CHEMISTRY_PRACTICE_TICKETS,
     anatomy=ANATOMY, operative_surgery=OPERATIVE_SURGERY, physiology=PHYSIOLOGY,
-    extra_entries=LATIN_AI_ENTRIES,
+    extra_entries=EXTRA_AI_ENTRIES,
 )
 ai_reference_bank.configure(ANATOMY_EXAM_TEST_PARTS)
 

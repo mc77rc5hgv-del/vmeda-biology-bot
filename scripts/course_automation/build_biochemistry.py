@@ -115,6 +115,51 @@ def numbered_lessons(prefix: str, text: str, source_name: str, label: str) -> li
     return result
 
 
+def ranged_question_lessons(prefix: str, text: str, source_name: str, label: str, numbers: range, marker: str = r"[)!]") -> list[dict]:
+    wanted = set(numbers)
+    matches = [match for match in re.finditer(rf"(?m)^(\d{{1,3}}){marker}\s*(?=\S)", text)
+               if int(match.group(1)) in wanted]
+    # A number can recur inside an answer; the first ordered occurrence is the question heading.
+    selected, last = [], -1
+    for number in numbers:
+        match = next((item for item in matches if int(item.group(1)) == number and item.start() > last), None)
+        if match:
+            selected.append(match)
+            last = match.start()
+    result = []
+    for index, match in enumerate(selected):
+        end = selected[index + 1].start() if index + 1 < len(selected) else len(text)
+        block = norm(text[match.start():end])
+        parts = chunks(block)
+        for part, body in enumerate(parts, 1):
+            suffix = f", часть {part}" if len(parts) > 1 else ""
+            result.append(lesson(f"{prefix}_{match.group(1)}_{part}", f"{label} {match.group(1)}{suffix}: {block.splitlines()[0][:130]}", body, source_name))
+    return result
+
+
+def multiple_choice_lessons(prefix: str, path: Path, label: str) -> list[dict]:
+    values = docx_paragraphs(path)
+    option = re.compile(r"^[а-яёa-z][).]\s*", re.I)
+    groups, current = [], []
+    for value in values:
+        if option.match(value):
+            if current:
+                current.append(value)
+            continue
+        if current:
+            groups.append(current)
+        current = [value]
+    if current:
+        groups.append(current)
+    result = []
+    for number, group in enumerate(groups, 1):
+        body = "\n".join(group)
+        if len(body) < 20:
+            continue
+        result.append(lesson(f"{prefix}_{number}", f"{label} {number}: {group[0][:135]}", body, path.name))
+    return result
+
+
 def ticket_lessons(path: Path) -> list[dict]:
     text = docx_text(path)
     matches = list(re.finditer(r"(?mi)^Билет\s+(\d+)\s*$", text))
@@ -155,7 +200,7 @@ def practical_exam_lessons(path: Path) -> list[dict]:
 
 def ppt_lessons(path: Path, assets: Path) -> list[dict]:
     prs = Presentation(path)
-    result = []
+    slide_records = []
     for slide_no, slide in enumerate(prs.slides, 1):
         texts, media = [], []
         for shape_no, shape in enumerate(slide.shapes, 1):
@@ -169,9 +214,16 @@ def ppt_lessons(path: Path, assets: Path) -> list[dict]:
                     media.append({"path": f"generated_assets/biochemistry/{target.name}", "caption": f"Иллюстрация из вводной лекции, слайд {slide_no}"})
         body = norm("\n".join(texts))
         if body:
-            title = texts[0].split("\n", 1)[0][:120]
-            for part, value in enumerate(chunks(body), 1):
-                result.append(lesson(f"intro_s{slide_no}_{part}", f"Вводная лекция: слайд {slide_no} — {title}", value, f"Л.1 - Вводная лекция.ppt, слайд {slide_no}", media if part == 1 else None))
+            slide_records.append((slide_no, body, media))
+    result = []
+    for group_no, start in enumerate(range(0, len(slide_records), 5), 1):
+        group = slide_records[start:start + 5]
+        first_slide, last_slide = group[0][0], group[-1][0]
+        body = "\n\n".join(f"Слайд {number}. {text}" for number, text, _ in group)
+        media = [item for _, _, items in group for item in items]
+        for part, value in enumerate(chunks(body), 1):
+            suffix = f", часть {part}" if len(chunks(body)) > 1 else ""
+            result.append(lesson(f"intro_g{group_no}_{part}", f"Вводная лекция: слайды {first_slide}–{last_slide}{suffix}", value, f"Л.1 - Вводная лекция.ppt, слайды {first_slide}–{last_slide}", media if part == 1 else None))
     return result
 
 
@@ -187,19 +239,22 @@ def main(repo: Path) -> None:
     sections = []
     sections.append({"id": "introduction", "title": "Введение в биохимию", "lessons": ppt_lessons(sources / "Л.1 - Вводная лекция.pptx", assets)})
     sections.append({"id": "core_course", "title": "Основной курс", "lessons": page_lessons("core", pdf_pages(sources / "учебное пособие.pdf"), "учебное пособие.pdf", "Основы биохимии")})
-    sections.append({"id": "complete_notes", "title": "Полный конспект", "lessons": page_lessons("notes", pdf_pages(sources / "ВСЯ БИОХИМИЯ.pdf"), "ВСЯ БИОХИМИЯ.pdf", "Полный курс")})
+    note_lessons = page_lessons("notes", pdf_pages(sources / "ВСЯ БИОХИМИЯ.pdf"), "ВСЯ БИОХИМИЯ.pdf", "Полный курс")
+    seen_note_texts = set()
+    note_lessons = [item for item in note_lessons if not (item["content"] in seen_note_texts or seen_note_texts.add(item["content"]))]
+    sections.append({"id": "complete_notes", "title": "Полный конспект", "lessons": note_lessons})
     sections.append({"id": "practicum", "title": "Практические и лабораторные занятия", "lessons": page_lessons("practice", pdf_pages(sources / "ПРАКТИКУМ-АЛЕКС.pdf"), "ПРАКТИКУМ-АЛЕКС.pdf", "Практикум")})
 
     control_sources = [
-        ("control_1", "Контрольная работа №1", "бх кр1.docx"),
-        ("control_1_alt", "Контрольная работа №1 — дополнительный материал", "Первая кр по бх.docx"),
         ("control_2", "Контрольная работа №2", "БХ КР2.docx"),
         ("control_2_boundary", "Второй рубеж: вопросы 15–21", "БХ 2 рубеж 15-21.docx"),
-        ("control_3", "Контрольная работа №3: вопросы 23–30", "БХ(3)23-30.docx"),
     ]
+    sections.append({"id": "control_1", "title": "Контрольная работа №1", "lessons": ranged_question_lessons("control_1", docx_text(sources / "бх кр1.docx"), "бх кр1.docx", "Вопрос", range(1, 9), marker=r"!")})
+    sections.append({"id": "control_1_alt", "title": "Контрольная работа №1 — тестовый вариант", "lessons": multiple_choice_lessons("control_1_alt", sources / "Первая кр по бх.docx", "Задание")})
     for section_id, title, filename in control_sources:
         sections.append({"id": section_id, "title": title, "lessons": numbered_lessons(section_id, docx_text(sources / filename), filename, "Вопрос")})
-    sections.append({"id": "tests", "title": "Все тесты по биохимии", "lessons": numbered_lessons("test", docx_text(sources / "тут все тесты по бх.docx"), "тут все тесты по бх.docx", "Тест")})
+    sections.append({"id": "control_3", "title": "Контрольная работа №3: вопросы 23–30", "lessons": ranged_question_lessons("control_3", docx_text(sources / "БХ(3)23-30.docx"), "БХ(3)23-30.docx", "Вопрос", range(23, 31))})
+    sections.append({"id": "tests", "title": "Все тесты по биохимии", "lessons": multiple_choice_lessons("test", sources / "тут все тесты по бх.docx", "Тест")})
     sections.append({"id": "credit", "title": "Зачёт", "lessons": page_lessons("credit", pdf_pages(sources / "c_биохимия зачет все вопросы.pdf"), "c_биохимия зачет все вопросы.pdf", "Зачёт")})
     sections.append({"id": "exam_tickets", "title": "Экзамен — билеты с ответами", "lessons": ticket_lessons(sources / "BKh_EKZ_BILETY.docx")})
     sections.append({"id": "exam_questions", "title": "Экзамен — перечень теоретических вопросов", "lessons": exam_question_lessons(sources / "экзаменационные_вопросы_БХ_ЛД_7c9f668527fe7e2b57547f1efd175d19.docx")})
