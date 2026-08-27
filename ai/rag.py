@@ -236,6 +236,11 @@ def _score_entries(query_text: str, index: list, idf: dict, min_common_stems: in
     query_stems = {_word_stem(w) for w in _extract_words(query_text) if len(w) >= 4}
     if not query_stems:
         return []
+    # A long pasted list is not one semantic query: with large subject corpora it can overlap a
+    # random long lesson on enough generic medical terms to produce false grounding. Structured
+    # list tasks are searched item-by-item by search_for_task(), so reject only the diffuse blob.
+    if len(query_stems) > 60:
+        return []
     scored = []
     for entry in index:
         common = query_stems & entry["stems"]

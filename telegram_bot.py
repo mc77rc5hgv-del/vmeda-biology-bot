@@ -165,7 +165,7 @@ def load_dynamic_courses() -> list[dict]:
 DYNAMIC_COURSES = load_dynamic_courses()
 
 EXTRA_AI_ENTRIES = []
-for knowledge_filename in ("latin_ai.json", "biochemistry_ai.json"):
+for knowledge_filename in ("latin_ai.json", "biochemistry_ai.json", "pharmacology_ai.json"):
     try:
         with open(os.path.join("generated_knowledge", knowledge_filename), "r", encoding="utf-8") as stream:
             EXTRA_AI_ENTRIES.extend(json.load(stream).get("entries", []))
