@@ -621,6 +621,19 @@ below); their `menu_number` (10 and 9 respectively) keeps 29 listed just ahead o
 screen even though 29 was added to the dict after 28. Add a new tier with a fresh unused key above 29, never
 reuse 1-11 or a retired id.
 
+**Tier 30 ("Приз розыгрыша — год") is `admin_only`** — a fourth tier flag alongside `retired`, for a tier that was
+never sold at all rather than one retired from sale. It exists solely because the active lineup has no tier at
+exactly 365 days, needed to grant a "1 year" prize in a giveaway without misusing an unrelated tier's duration.
+`ACTIVE_SUBSCRIPTION_TIERS` excludes both `retired` and `admin_only` tiers (so it never reaches any shop
+screen/purchase flow/announcement), while a separate `ADMIN_GRANTABLE_TIERS` (`retired` excluded, `admin_only`
+included) is used specifically by the manual admin-grant surfaces — the reply-keyboard tier picker, the
+`record_subscription_tier` validation, and the "🔎 Найти пользователя" card's "💎 Выдать подписку" button — so an
+admin can still grant it by hand. `price_rub`/`price_stars` are `0` (never sold, so a real price would mislead);
+revenue accounting doesn't need special-casing since a manual grant already uses `"rubles_manual"`, which
+`cb_admin_stats` excludes from `sub_revenue_rubles` regardless of tier. `_next_upsell_tier_id()` returns `None`
+for any `admin_only` tier — pitching a paid upgrade right after "you just won this for free" would be tone-deaf,
+so prize grants never carry the usual "💡 Выгоднее" upsell line/button.
+
 **Migrating pricing/lineups**: when retiring a whole generation of tiers in favor of a new one (as happened going
 from 1-11 to 20-28), never rewrite existing `stats["subscriptions"]` records to point at new tier ids, and never
 touch a retired tier's stored fields — the whole point of the retire-and-add-new pattern is that old grants keep
@@ -728,6 +741,23 @@ Two independent paths grant a rubles subscription, and both must keep working:
    `record_subscription_tier` → `record_subscription_subject` if the chosen tier requires one), for cases where
    the admin wants to grant a subscription without the buyer having gone through the purchase flow at all — in
    practice this has become the "comp a subscription to a friend for free" path, not a paid one.
+
+**Bulk manual flow** (`"💎👥 Выдать подписку нескольким сразу"`, `admin_bulk_subscription_prompt` →
+`record_bulk_subscription_usernames` → `record_bulk_subscription_tier`) — the same manual-comp idea as above, but
+for many people at once (e.g. giveaway winners). `resolve_bulk_usernames(raw)` (`handlers/admin.py`) splits the
+admin's pasted list on any whitespace/comma/semicolon, resolves each token through the same
+`resolve_user_by_username()` the single-target flow uses, and dedupes by the resolved `target_id` (not the raw
+token) — the same person listed once by `@username` and once by numeric ID must not be granted/notified twice.
+Unresolved tokens (nobody's `/start`ed the bot under that username/ID yet) are reported back to the admin rather
+than silently dropped, so a typo doesn't quietly skip a winner. Capped at `BULK_SUBSCRIPTION_MAX_TARGETS` (100)
+to catch an accidental paste of an entire user list. **Deliberately excludes tiers with
+`subject_choice_required`** (`bulk_grantable_tiers()` filters `ADMIN_GRANTABLE_TIERS`) — a bulk grant has one tier
+decision for the whole list, and a tier needing a per-person subject answer has no sane batch UI for that; those
+stay reachable only through the single-target flow, where the subject question already has exactly one target.
+Grants loop over `grant_subscription_and_notify_buyer()` per target — same function, same "🎉 активирована"
+message and `"rubles_manual"` accounting as every other manual grant, so nothing about revenue/upsell handling
+had to be duplicated for the bulk case (see the `admin_only`-tier upsell suppression above, which already covers
+prize tiers regardless of whether they're granted one at a time or in bulk).
 
 Both paths funnel into the same `grant_subscription_and_notify_buyer()` — the single place that calls
 `grant_subscription()` and sends the buyer their "🎉 активирована" message + tier upsell, so the confirmation

@@ -842,6 +842,88 @@ async def main():
     tb.stats["subscriptions"].pop(str(non_admin), None)
     print("tier 30 (giveaway prize, admin_only) hidden from shop but grantable + no upsell pitch: OK")
 
+    # 19e. Bulk subscription grant — the "several giveaway winners at once" flow.
+    bulk_ids = [random.randint(10_000_000, 99_999_999) for _ in range(3)]
+    bulk_names = ["bulkw1", "bulkw2", "bulkw3"]
+    for uid, name in zip(bulk_ids, bulk_names):
+        tb.stats["subscriptions"].pop(str(uid), None)
+        tb.stats["user_username"][str(uid)] = name
+        tb.stats["usernames"][name] = uid
+
+    cb_bulk_denied = FakeCB("admin_bulk_subscription_prompt", uid=non_admin)
+    await tb.cb_admin_bulk_subscription_prompt(cb_bulk_denied)
+    assert non_admin not in tb.ADMIN_PENDING, "non-admin must not reach the bulk-grant flow"
+
+    cb_bulk = FakeCB("admin_bulk_subscription_prompt")
+    await tb.cb_admin_bulk_subscription_prompt(cb_bulk)
+    assert tb.ADMIN_PENDING[ADMIN_ID]["action"] == "record_bulk_subscription_usernames"
+
+    sent_bulk = []
+    async def fake_send_message_bulk(chat_id, text, **kwargs):
+        sent_bulk.append((chat_id, text))
+    tb.bot.send_message = fake_send_message_bulk
+
+    m_bulk1 = FakeMsg(from_user=FakeUser(ADMIN_ID))
+    m_bulk1.text = f"@{bulk_names[0]}, @{bulk_names[1]}\n@{bulk_names[2]} @nosuchuser999"
+    await tb.handle_admin_pending_action(m_bulk1)
+    assert tb.ADMIN_PENDING[ADMIN_ID]["action"] == "record_bulk_subscription_tier"
+    targets = tb.ADMIN_PENDING[ADMIN_ID]["targets"]
+    assert {t for _, t in targets} == set(bulk_ids), "must resolve exactly the 3 real users"
+    preview_text = m_bulk1.answers[-1][0]
+    check_html(preview_text)
+    assert "nosuchuser999" in preview_text, "unresolved token must be reported, not silently dropped"
+    assert "20 —" not in preview_text, "subject-choice tier must not be offered on the bulk picker"
+    assert isinstance(m_bulk1.answers[-1][1], tb.ReplyKeyboardMarkup)
+
+    # a subject-choice tier number must be rejected at the tier-picking step too, not just hidden
+    m_bulk_bad_tier = FakeMsg(from_user=FakeUser(ADMIN_ID))
+    m_bulk_bad_tier.text = "20"
+    await tb.handle_admin_pending_action(m_bulk_bad_tier)
+    assert tb.ADMIN_PENDING[ADMIN_ID]["action"] == "record_bulk_subscription_tier", (
+        "subject-choice tier must not clear pending state"
+    )
+    assert not any(tb.has_active_subscription(uid) for uid in bulk_ids)
+
+    m_bulk2 = FakeMsg(from_user=FakeUser(ADMIN_ID))
+    m_bulk2.text = "21"
+    await tb.handle_admin_pending_action(m_bulk2)
+    assert ADMIN_ID not in tb.ADMIN_PENDING
+    for uid in bulk_ids:
+        sub = tb.get_subscription(uid)
+        assert sub["tier"] == 21 and sub["method"] == "rubles_manual"
+    summary_text = m_bulk2.answers[-1][0]
+    check_html(summary_text)
+    assert all(f"@{name}" in summary_text for name in bulk_names)
+    buyer_notified = {c for c, t in sent_bulk if "активирована" in t}
+    assert set(bulk_ids) <= buyer_notified, "every granted winner must get their own activation DM"
+    for uid in bulk_ids:
+        tb.stats["subscriptions"].pop(str(uid), None)
+    print("bulk subscription grant: resolves list, reports misses, rejects subject-choice tiers, grants all: OK")
+
+    # 19f. Cancel mid-flow via the reply-keyboard's "Отмена" button
+    cb_bulk2 = FakeCB("admin_bulk_subscription_prompt")
+    await tb.cb_admin_bulk_subscription_prompt(cb_bulk2)
+    m_bulk3 = FakeMsg(from_user=FakeUser(ADMIN_ID))
+    m_bulk3.text = f"@{bulk_names[0]}"
+    await tb.handle_admin_pending_action(m_bulk3)
+    m_bulk4 = FakeMsg(from_user=FakeUser(ADMIN_ID))
+    m_bulk4.text = "❌ Отмена"
+    await tb.handle_admin_pending_action(m_bulk4)
+    assert ADMIN_ID not in tb.ADMIN_PENDING
+    assert not tb.has_active_subscription(bulk_ids[0])
+    print("bulk subscription grant: cancel via reply-keyboard clears pending, grants nothing: OK")
+
+    # 19g. Oversized list is rejected outright (safety cap), pending state untouched
+    cb_bulk3 = FakeCB("admin_bulk_subscription_prompt")
+    await tb.cb_admin_bulk_subscription_prompt(cb_bulk3)
+    m_bulk5 = FakeMsg(from_user=FakeUser(ADMIN_ID))
+    m_bulk5.text = " ".join(f"user{i}" for i in range(tb.BULK_SUBSCRIPTION_MAX_TARGETS + 1))
+    await tb.handle_admin_pending_action(m_bulk5)
+    assert tb.ADMIN_PENDING[ADMIN_ID]["action"] == "record_bulk_subscription_usernames"
+    assert m_bulk5.answers and "максимум" in m_bulk5.answers[-1][0]
+    del tb.ADMIN_PENDING[ADMIN_ID]
+    print("bulk subscription grant: oversized list rejected with the safety cap: OK")
+
     tb.bot.send_message = orig_send_message
 
     # 20. Upsell shown after purchase (stars + admin rubles paths) for a non-top-tier purchase

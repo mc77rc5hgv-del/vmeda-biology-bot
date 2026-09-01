@@ -444,6 +444,19 @@ def get_admin_tier_reply_keyboard() -> ReplyKeyboardMarkup:
     rows.append([KeyboardButton(text="❌ Отмена")])
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, one_time_keyboard=True)
 
+def bulk_grantable_tiers() -> dict:
+    """ADMIN_GRANTABLE_TIERS minus tiers that require picking a subject per person
+    (subject_choice_required) — a bulk grant has one tier decision for the whole list, so a tier
+    that needs a per-person subject answer would be ambiguous (which of N people gets which
+    subject?); those stay reachable only through the single-target admin_subscription_prompt
+    flow, where the subject question already has exactly one target to ask about."""
+    return {t: cfg for t, cfg in ADMIN_GRANTABLE_TIERS.items() if not cfg.get("subject_choice_required")}
+
+def get_admin_bulk_tier_reply_keyboard() -> ReplyKeyboardMarkup:
+    rows = [[KeyboardButton(text=f"{t} — {cfg['short']} — {cfg['price_rub']}₽")] for t, cfg in bulk_grantable_tiers().items()]
+    rows.append([KeyboardButton(text="❌ Отмена")])
+    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, one_time_keyboard=True)
+
 def get_admin_subject_reply_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
@@ -2624,6 +2637,7 @@ get_admin_announcements_keyboard = admin_handlers.get_admin_announcements_keyboa
 get_admin_back_keyboard = admin_handlers.get_admin_back_keyboard
 resolve_user_by_username = admin_handlers.resolve_user_by_username
 format_admin_target_label = admin_handlers.format_admin_target_label
+resolve_bulk_usernames = admin_handlers.resolve_bulk_usernames
 format_user_line = admin_handlers.format_user_line
 get_admin_userlist_page = admin_handlers.get_admin_userlist_page
 get_admin_user_card_text = admin_handlers.get_admin_user_card_text
@@ -2684,6 +2698,8 @@ cb_admin_revoke_payment_admin_prompt = admin_handlers.cb_admin_revoke_payment_ad
 cb_admin_dm_prompt = admin_handlers.cb_admin_dm_prompt
 cb_admin_donation_prompt = admin_handlers.cb_admin_donation_prompt
 cb_admin_subscription_prompt = admin_handlers.cb_admin_subscription_prompt
+cb_admin_bulk_subscription_prompt = admin_handlers.cb_admin_bulk_subscription_prompt
+BULK_SUBSCRIPTION_MAX_TARGETS = admin_handlers.BULK_SUBSCRIPTION_MAX_TARGETS
 cb_admin_announce_support_confirm = admin_handlers.cb_admin_announce_support_confirm
 cb_admin_announce_support_go = admin_handlers.cb_admin_announce_support_go
 cb_admin_announce_subscription_confirm = admin_handlers.cb_admin_announce_subscription_confirm
@@ -2758,6 +2774,64 @@ async def handle_admin_pending_action(message: Message):
         # Остаётся в ADMIN_PENDING (не удаляется) — можно искать снова следующим сообщением
         # без повторного захода в меню; выходит только через "🔙 В админ-панель" (cb_admin_panel
         # чистит ADMIN_PENDING) или другое админ-действие, которое перезапишет pending само.
+        return
+
+    if action == "record_bulk_subscription_usernames":
+        tokens_count = len([t for t in re.split(r"[\s,;]+", message.text.strip()) if t])
+        if tokens_count > BULK_SUBSCRIPTION_MAX_TARGETS:
+            await message.answer(
+                f"⚠️ Слишком длинный список ({tokens_count}) — максимум "
+                f"{BULK_SUBSCRIPTION_MAX_TARGETS} за раз. Пришли список покороче."
+            )
+            return
+        resolved, not_found = resolve_bulk_usernames(message.text)
+        if not resolved:
+            await message.answer(
+                "⚠️ Никого не нашёл — ни один из присланных username/ID ещё не писал боту. "
+                "Проверь список и пришли ещё раз, или вернись в /admin."
+            )
+            return
+        ADMIN_PENDING[admin_id] = {"action": "record_bulk_subscription_tier", "targets": resolved}
+        lines = [f"✅ Нашёл {len(resolved)} из {tokens_count}:"]
+        lines.extend(f"  {label}" for label, _ in resolved)
+        if not_found:
+            escaped_missing = ", ".join(html.escape(t) for t in not_found)
+            lines.append(f"\n⚠️ Не нашёл ({len(not_found)}) — ещё не писали боту: {escaped_missing}")
+        tier_lines = "\n".join(f"{t} — {cfg['title']} ({cfg['price_rub']}₽)" for t, cfg in bulk_grantable_tiers().items())
+        lines.append(f"\nВыбери тариф кнопкой ниже или пришли номер:\n\n{tier_lines}")
+        await message.answer(
+            "\n".join(lines), parse_mode="HTML", reply_markup=get_admin_bulk_tier_reply_keyboard()
+        )
+        return
+
+    if action == "record_bulk_subscription_tier":
+        targets = pending["targets"]
+        raw = message.text.strip()
+        if raw in ("❌ Отмена", "Отмена"):
+            del ADMIN_PENDING[admin_id]
+            await message.answer("Отменено.", reply_markup=ReplyKeyboardRemove())
+            return
+        tier_match = re.match(r"\d+", raw)
+        tier_id = int(tier_match.group()) if tier_match else None
+        valid_tiers = bulk_grantable_tiers()
+        if tier_id not in valid_tiers:
+            tier_lines = "\n".join(f"{t} — {cfg['title']}" for t, cfg in valid_tiers.items())
+            await message.answer(
+                f"⚠️ Введи номер тарифа из списка (тарифы с обязательным выбором предмета здесь "
+                f"недоступны):\n\n{tier_lines}",
+                reply_markup=get_admin_bulk_tier_reply_keyboard()
+            )
+            return
+        cfg = valid_tiers[tier_id]
+        del ADMIN_PENDING[admin_id]
+        for _, target_id in targets:
+            await grant_subscription_and_notify_buyer(target_id, tier_id, "rubles_manual", cfg["price_rub"])
+        granted_lines = "\n".join(f"  {label}" for label, _ in targets)
+        await message.answer(
+            f"✅ Подписка «{cfg['title']}» выдана {len(targets)} чел.:\n{granted_lines}",
+            parse_mode="HTML",
+            reply_markup=ReplyKeyboardRemove()
+        )
         return
 
     if action in (

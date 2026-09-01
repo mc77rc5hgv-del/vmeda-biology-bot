@@ -20,6 +20,7 @@ ADMIN_PENDING/ADMIN_CHANNEL_POST_PREVIEW/ASSISTANT_PENDING/ASSISTANT_DM_REQUESTS
 так как эти словари остаются определены в telegram_bot.py."""
 import asyncio
 import os
+import re
 import time
 
 from aiogram import F, Router
@@ -80,6 +81,7 @@ def get_admin_menu():
     builder.button(text="⚔️ Битва рефералов", callback_data="admin_battle_menu")
     builder.button(text="💰 Записать донат рублями", callback_data="admin_donation_prompt")
     builder.button(text="💎 Выдать подписку по username/ID", callback_data="admin_subscription_prompt")
+    builder.button(text="💎👥 Выдать подписку нескольким сразу", callback_data="admin_bulk_subscription_prompt")
     builder.button(text="🎁 Восстановить доступ исчерпавшим (7 дней)", callback_data="admin_restore_access_confirm")
     builder.button(
         text=f"📣 Напомнить о реферале/подписке (<{tb.REFERRAL_FULL_ACCESS_THRESHOLD} реф.)",
@@ -204,6 +206,29 @@ def resolve_user_by_username(raw: str):
 
 def format_admin_target_label(username, target_id: int) -> str:
     return f"@{username} (ID {target_id})" if username else f"ID {target_id}"
+
+def resolve_bulk_usernames(raw: str) -> tuple:
+    """Разбирает многострочный/через-запятую/через-пробел список username'ов или ID (см.
+    admin_bulk_subscription_prompt) через тот же resolve_user_by_username, что и одиночная выдача
+    — ни username-с-@, ни числовой ID не приобретают тут новой семантики. Дедуплицирует по
+    ИТОГОВОМУ target_id, а не по сырому токену — один и тот же человек мог быть указан и по
+    @username, и по ID в одном списке, и не должен получить/оплатить подписку дважды. Возвращает
+    (resolved, not_found): resolved — [(label, target_id), ...] в порядке первого упоминания;
+    not_found — сырые токены, которые не удалось резолвить (человек ещё не писал боту)."""
+    tokens = [t for t in re.split(r"[\s,;]+", raw.strip()) if t]
+    resolved = []
+    seen_ids = set()
+    not_found = []
+    for token in tokens:
+        username, target_id = resolve_user_by_username(token)
+        if not target_id:
+            not_found.append(token)
+            continue
+        if target_id in seen_ids:
+            continue
+        seen_ids.add(target_id)
+        resolved.append((format_admin_target_label(username, target_id), target_id))
+    return resolved, not_found
 
 def format_user_line(user_id: int) -> str:
     uid_str = str(user_id)
@@ -1443,6 +1468,27 @@ async def cb_admin_subscription_prompt(callback: CallbackQuery):
         "Для оплат рублями (перевод в чате с @vmeda_helper) подписку нужно включить вручную "
         "после подтверждения оплаты.\n\n"
         "Отправь username пользователя (с @ или без) или его числовой ID",
+        parse_mode="HTML",
+        reply_markup=get_admin_back_keyboard()
+    )
+
+BULK_SUBSCRIPTION_MAX_TARGETS = 100  # safety cap against an accidental paste of a whole user list
+
+@router.callback_query(F.data == "admin_bulk_subscription_prompt")
+async def cb_admin_bulk_subscription_prompt(callback: CallbackQuery):
+    if not tb.is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer()
+    tb.ADMIN_PENDING[callback.from_user.id] = {"action": "record_bulk_subscription_usernames"}
+    await tb.safe_edit_text(
+        callback.message,
+        "💎👥 <b>Выдать подписку нескольким сразу</b>\n\n"
+        "Пришли список пользователей — по одному @username или ID на строку (можно и через "
+        "запятую или пробел). Например, для победителей розыгрыша — просто вставь список.\n\n"
+        f"До {BULK_SUBSCRIPTION_MAX_TARGETS} человек за раз. Тарифы с обязательным выбором "
+        "предмета (например «7 дней, 1 предмет») здесь недоступны — для них используй одиночную "
+        "выдачу («💎 Выдать подписку по username/ID»), там выбор предмета не задан заранее.",
         parse_mode="HTML",
         reply_markup=get_admin_back_keyboard()
     )
