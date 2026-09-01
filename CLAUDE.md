@@ -770,6 +770,28 @@ This distinction only applies going forward — historical `"rubles"`-tagged sub
 manual flow before this split existed aren't retroactively reclassified, since nothing in the stored data
 distinguishes which of them were actually paid off-platform vs. free comps.
 
+**Monthly payment stats** (`"📅 Оплаты по месяцам"` on the stats screen, `admin_monthly_payments` →
+`cb_admin_monthly_payments`/`get_admin_monthly_payments_text()` in `handlers/admin.py`) breaks confirmed
+subscription revenue down by calendar month (MSK) — rubles total, stars total, and a per-tier purchase count for
+that specific month, chronological oldest-first. This needed a data source `stats["subscriptions"]` can't provide
+on its own: that dict is keyed by `user_id` and stores only each user's single CURRENT subscription, overwritten on
+every new grant, so an upgrade/renewal silently erases the record of what that user bought in an earlier month.
+`grant_subscription()` (`services/access.py`) now also appends every single grant — including `"rubles_manual"`
+ones, for a complete audit trail — to a new append-only `stats["subscription_purchase_log"]`
+(`{user_id, tier, method, price, ts}`), so from this point on no purchase is ever lost to a later overwrite.
+`get_monthly_payment_stats()` builds each month's numbers from this log wherever the log actually has an entry for
+that month (`source: "log"`, exact); for any earlier month that predates this feature, it falls back to a
+best-effort scan of the `stats["subscriptions"]` snapshot (`source: "snapshot"`) — approximate, since a user's
+purchase from that historical month is only visible if it's still their CURRENT subscription (an upgrade since
+then hides it). `get_admin_monthly_payments_text()` marks every `"snapshot"` month with a "⚠️ приблизительно" note
+plus a trailing explainer, so the admin is never misled into treating an approximate historical number as exact.
+Only confirmed payments count (`method in ("stars", "rubles")` — same convention `sub_revenue_rubles`/
+`sub_revenue_stars` in `cb_admin_stats` already use, so `"rubles_manual"` comps/prize grants never inflate it).
+Per-tier counts always list every currently-sold tier (`ACTIVE_SUBSCRIPTION_TIERS`) explicitly, even at zero —
+per the user's own spec ("Подписок на 6 лет: 0" for a month with no purchases of that tier) — plus any retired
+tier that genuinely had a purchase logged/snapshotted in that specific month, so an old month's real history isn't
+silently dropped just because that tier isn't for sale today.
+
 The tier-selection step of the manual flow sends a `ReplyKeyboardMarkup` (`get_admin_tier_reply_keyboard()`, one
 button per active tier, digit-prefixed so the parser can `re.match(r"\d+", raw)` out of either a tapped button or
 hand-typed text) instead of making the admin memorize/type a bare number — remember `ReplyKeyboardMarkup` can

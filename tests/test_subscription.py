@@ -1587,6 +1587,82 @@ async def main():
     assert all_ids == {str(t) for t in ACTIVE_TIERS}
     print("'all tiers' screen (reached from course flow) still lists every active tier: OK")
 
+    # ==================== MONTHLY PAYMENT STATS (admin panel) ====================
+
+    # 21. Monthly payment stats: log-backed months aggregate rubles/stars/tier counts correctly,
+    # "rubles_manual" grants never count, and a snapshot-only historical month is flagged approximate.
+    from datetime import datetime as _dt
+    orig_log = list(tb.stats.get("subscription_purchase_log", []))
+    orig_subs_snapshot = dict(tb.stats["subscriptions"])
+    tb.stats["subscription_purchase_log"] = []
+    tb.stats["subscriptions"] = {}
+
+    def _msk_ts(year, month, day):
+        return _dt(year, month, day, 12, 0, tzinfo=tb.APP_TIMEZONE).timestamp()
+
+    aug_ts = _msk_ts(2026, 8, 15)
+    sep_ts = _msk_ts(2026, 9, 5)
+    jun_ts = _msk_ts(2026, 6, 10)  # predates any log entry -> must fall back to snapshot
+
+    t20 = tb.SUBSCRIPTION_TIERS[20]
+    t21 = tb.SUBSCRIPTION_TIERS[21]
+    tb.stats["subscription_purchase_log"] = [
+        {"user_id": 1, "tier": 20, "method": "rubles", "price": t20["price_rub"], "ts": aug_ts},
+        {"user_id": 2, "tier": 21, "method": "stars", "price": t21["price_stars"], "ts": aug_ts},
+        {"user_id": 3, "tier": 20, "method": "rubles_manual", "price": 0, "ts": aug_ts},  # must not count
+        {"user_id": 4, "tier": 20, "method": "rubles", "price": t20["price_rub"], "ts": sep_ts},
+    ]
+    # A historical (pre-log) subscription snapshot - only source for June's numbers.
+    tb.stats["subscriptions"]["999999"] = {
+        "tier": 21, "method": "rubles", "price": t21["price_rub"], "purchased_at": jun_ts,
+        "expires": jun_ts + 30 * 86400, "restricted_subject": None, "histology_access": False,
+        "histology_until": None, "anatomy": False, "biology_download": False, "cheat_sheets": False,
+        "subscription_version": 2, "ai_used_period": 0,
+    }
+
+    monthly = tb.get_monthly_payment_stats()
+    assert monthly["2026-08"]["rubles_total"] == t20["price_rub"]
+    assert monthly["2026-08"]["stars_total"] == t21["price_stars"]
+    assert monthly["2026-08"]["tier_counts"] == {20: 1, 21: 1}
+    assert monthly["2026-08"]["source"] == "log"
+    assert monthly["2026-09"]["rubles_total"] == t20["price_rub"]
+    assert monthly["2026-09"]["tier_counts"] == {20: 1}
+    assert monthly["2026-09"]["source"] == "log"
+    assert monthly["2026-06"]["rubles_total"] == t21["price_rub"]
+    assert monthly["2026-06"]["tier_counts"] == {21: 1}
+    assert monthly["2026-06"]["source"] == "snapshot"
+    assert list(monthly.keys()) == sorted(monthly.keys()), "months must come back chronologically"
+    print("get_monthly_payment_stats: log totals, rubles_manual excluded, snapshot fallback for pre-log months: OK")
+
+    # 22. Admin panel renders the same data, listing every currently-sold tier explicitly even at
+    # zero (per the user's own "Подписок на 6 лет: 0" example) and flags the approximate month.
+    monthly_text = tb.get_admin_monthly_payments_text()
+    check_html(monthly_text)
+    assert "Август 2026" in monthly_text and "Сентябрь 2026" in monthly_text and "Июнь 2026" in monthly_text
+    assert monthly_text.index("Август 2026") < monthly_text.index("Сентябрь 2026"), "chronological order"
+    for tid, cfg in tb.ACTIVE_SUBSCRIPTION_TIERS.items():
+        assert f"{cfg['short']}: <b>" in monthly_text, f"active tier {tid} must always be listed"
+    assert "⚠️ приблизительно" in monthly_text
+    sep_block = monthly_text[monthly_text.index("Сентябрь 2026"):]
+    assert f"{t21['short']}: <b>0</b>" in sep_block, "a tier with zero purchases this month must still show 0"
+    print("get_admin_monthly_payments_text: lists zero-count tiers, flags approximate months: OK")
+
+    cb_monthly = FakeCB("admin_monthly_payments")
+    await tb.cb_admin_monthly_payments(cb_monthly)
+    assert cb_monthly.message.edits
+    edited_text, edited_kb = cb_monthly.message.edits[-1]
+    assert "Статистика оплат по месяцам" in edited_text
+    assert "admin_panel" in kb_data(edited_kb)
+    print("cb_admin_monthly_payments: renders and offers a way back to the admin panel: OK")
+
+    cb_monthly_nonadmin = FakeCB("admin_monthly_payments", uid=random.randint(10_000_000, 99_999_999))
+    await tb.cb_admin_monthly_payments(cb_monthly_nonadmin)
+    assert not cb_monthly_nonadmin.message.edits, "non-admin must not see monthly payment stats"
+    print("cb_admin_monthly_payments: non-admin blocked: OK")
+
+    tb.stats["subscription_purchase_log"] = orig_log
+    tb.stats["subscriptions"] = orig_subs_snapshot
+
     print("ALL SUBSCRIPTION TESTS PASSED")
 
 asyncio.run(main())

@@ -236,6 +236,7 @@ def load_stats() -> dict:
             data.setdefault("physiology_favorites", {})
             data.setdefault("anatomy_maintenance_override", None)
             data.setdefault("ai_error_log", [])
+            data.setdefault("subscription_purchase_log", [])
             return data
         except (json.JSONDecodeError, OSError):
             logger.exception("Не удалось прочитать %s, статистика будет создана заново", STATS_FILE)
@@ -287,6 +288,7 @@ def load_stats() -> dict:
         "physiology_favorites": {},
         "anatomy_maintenance_override": None,
         "ai_error_log": [],
+        "subscription_purchase_log": [],
     }
 
 # Один воркер сериализует записи на диск и не даёт им блокировать event loop бота.
@@ -374,6 +376,7 @@ has_subscription_histology_access = access.has_subscription_histology_access
 has_subscription_anatomy_access = access.has_subscription_anatomy_access
 biology_tickets_download_ok = access.biology_tickets_download_ok
 grant_subscription = access.grant_subscription
+get_monthly_payment_stats = access.get_monthly_payment_stats
 has_free_access = access.has_free_access
 get_exhausted_users = access.get_exhausted_users
 get_below_threshold_users = access.get_below_threshold_users
@@ -2676,6 +2679,8 @@ cb_admin_discount_promo_confirm = admin_handlers.cb_admin_discount_promo_confirm
 cb_admin_discount_promo_go = admin_handlers.cb_admin_discount_promo_go
 cb_admin_stats = admin_handlers.cb_admin_stats
 get_admin_stats_keyboard = admin_handlers.get_admin_stats_keyboard
+get_admin_monthly_payments_text = admin_handlers.get_admin_monthly_payments_text
+cb_admin_monthly_payments = admin_handlers.cb_admin_monthly_payments
 cb_admin_ai_breaker_reset = admin_handlers.cb_admin_ai_breaker_reset
 get_ai_cache_queue_text = admin_handlers.get_ai_cache_queue_text
 get_ai_cache_queue_keyboard = admin_handlers.get_ai_cache_queue_keyboard
