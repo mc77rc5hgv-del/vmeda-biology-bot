@@ -73,6 +73,9 @@ class FakeSuccessfulPayment:
 # резолвиться ровно как раньше. Тарифы 20-28 — новая линейка (см. services/access.py).
 RETIRED_TIERS = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}
 ACTIVE_TIERS = {20, 21, 22, 23, 24, 25, 26, 27, 28, 29}
+# 30 — "Приз розыгрыша — год": never sold (admin_only), exists only so the manual admin-grant
+# flow has an exactly-365-day option for giveaway prizes; see services/access.py's comment on it.
+ADMIN_ONLY_TIERS = {30}
 
 async def main():
     non_admin = random.randint(10_000_000, 99_999_999)
@@ -86,17 +89,24 @@ async def main():
         pass
     tb.bot.send_message = _noop_send_message
 
-    # 1. Tier data integrity: 11 legacy tiers (all retired), 9 new tiers (all active/on sale)
-    assert set(tb.SUBSCRIPTION_TIERS.keys()) == RETIRED_TIERS | ACTIVE_TIERS
+    # 1. Tier data integrity: 11 legacy tiers (all retired), 9 new tiers (all active/on sale),
+    # plus 1 admin_only tier (never sold, manual-grant only — see ADMIN_ONLY_TIERS above)
+    assert set(tb.SUBSCRIPTION_TIERS.keys()) == RETIRED_TIERS | ACTIVE_TIERS | ADMIN_ONLY_TIERS
     assert set(tb.ACTIVE_SUBSCRIPTION_TIERS.keys()) == ACTIVE_TIERS
+    assert set(tb.ADMIN_GRANTABLE_TIERS.keys()) == ACTIVE_TIERS | ADMIN_ONLY_TIERS
     for t in RETIRED_TIERS:
         assert tb.SUBSCRIPTION_TIERS[t].get("retired") is True
     for t in ACTIVE_TIERS:
         assert not tb.SUBSCRIPTION_TIERS[t].get("retired")
-    for cfg in tb.SUBSCRIPTION_TIERS.values():
+    for t in ADMIN_ONLY_TIERS:
+        assert tb.SUBSCRIPTION_TIERS[t].get("admin_only") is True
+        assert not tb.SUBSCRIPTION_TIERS[t].get("retired")
+    for t, cfg in tb.SUBSCRIPTION_TIERS.items():
+        if t in ADMIN_ONLY_TIERS:
+            continue  # never sold — a real price would be misleading, not just unnecessary
         assert cfg["price_rub"] > 0 and cfg["price_stars"] > 0
         assert len(cfg["benefits"]) >= 2
-    print("tier data integrity (retired/active split): OK")
+    print("tier data integrity (retired/active/admin_only split): OK")
 
     # 1b. Legacy tier configs (1-11) are byte-for-byte unchanged from before the new lineup —
     # this is the single most important regression guard in this file: nothing here may drift.
@@ -794,6 +804,43 @@ async def main():
     assert granted20["tier"] == 20 and granted20["restricted_subject"] == "chemistry"
     tb.stats["subscriptions"].pop(str(non_admin), None)
     print("admin grant flow for a subject-choice new tier (20) end-to-end: OK")
+
+    # 19d. Tier 30 ("Приз розыгрыша — год") is admin_only: never sold, so it must be invisible to
+    # every shop-facing surface, but still grantable through the manual admin flow — that flow is
+    # the ONLY reason it exists (there is no sellable tier at exactly 365 days for giveaway prizes).
+    assert 30 not in tb.ACTIVE_SUBSCRIPTION_TIERS, "admin_only tiers must never appear in the shop"
+    assert 30 in tb.ADMIN_GRANTABLE_TIERS, "admin_only tiers must still be manually grantable"
+    assert "sub_tier:30" not in kb_data(tb.get_subscription_menu_keyboard())
+
+    tb.stats["subscriptions"].pop(str(non_admin), None)
+    cb_prompt30 = FakeCB("admin_subscription_prompt")
+    await tb.cb_admin_subscription_prompt(cb_prompt30)
+    m30a = FakeMsg(from_user=FakeUser(ADMIN_ID))
+    m30a.text = "testbuyer"
+    await tb.handle_admin_pending_action(m30a)
+    tier_kb_texts30 = [b.text for row in m30a.answers[-1][1].keyboard for b in row]
+    assert any(t.startswith("30 —") for t in tier_kb_texts30), "tier 30 must be offered on the manual-grant picker"
+
+    sent_30 = []
+    async def fake_send_message30(chat_id, text, **kwargs):
+        sent_30.append((chat_id, text, kwargs.get("reply_markup")))
+    tb.bot.send_message = fake_send_message30
+
+    m30b = FakeMsg(from_user=FakeUser(ADMIN_ID))
+    m30b.text = "30"
+    await tb.handle_admin_pending_action(m30b)
+    assert ADMIN_ID not in tb.ADMIN_PENDING
+    granted30 = tb.get_subscription(non_admin)
+    assert granted30["tier"] == 30
+    assert granted30["method"] == "rubles_manual"
+    assert abs(granted30["expires"] - (time.time() + 365 * 86400)) < 60, "must grant exactly 365 days"
+    assert granted30["anatomy"] is True and granted30["histology_access"] is True, "prize tier is full-scope"
+    buyer_msg_30 = next(t for c, t, _ in sent_30 if c == non_admin)
+    check_html(buyer_msg_30)
+    assert "активирована" in buyer_msg_30
+    assert "Выгоднее" not in buyer_msg_30, "a free prize grant must never pitch a paid upgrade"
+    tb.stats["subscriptions"].pop(str(non_admin), None)
+    print("tier 30 (giveaway prize, admin_only) hidden from shop but grantable + no upsell pitch: OK")
 
     tb.bot.send_message = orig_send_message
 

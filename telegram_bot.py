@@ -351,6 +351,7 @@ FIRST_YEAR_END_2027 = access.FIRST_YEAR_END_2027
 LEGACY_PAID_AI_MONTHLY_BONUS = access.LEGACY_PAID_AI_MONTHLY_BONUS
 SUBSCRIPTION_TIERS = access.SUBSCRIPTION_TIERS
 ACTIVE_SUBSCRIPTION_TIERS = access.ACTIVE_SUBSCRIPTION_TIERS
+ADMIN_GRANTABLE_TIERS = access.ADMIN_GRANTABLE_TIERS
 SEPTEMBER_PRICE_INCREASE = access.SEPTEMBER_PRICE_INCREASE
 september_price = access.september_price
 DISCOUNT_RATE = access.DISCOUNT_RATE
@@ -439,7 +440,7 @@ SUBJECT_TITLES = {"biology": "Биологии", "physics": "Физике", "che
 ADMIN_SUBJECT_LABELS_RU = {"Биология": "biology", "Физика": "physics", "Химия": "chemistry"}
 
 def get_admin_tier_reply_keyboard() -> ReplyKeyboardMarkup:
-    rows = [[KeyboardButton(text=f"{t} — {cfg['short']} — {cfg['price_rub']}₽")] for t, cfg in ACTIVE_SUBSCRIPTION_TIERS.items()]
+    rows = [[KeyboardButton(text=f"{t} — {cfg['short']} — {cfg['price_rub']}₽")] for t, cfg in ADMIN_GRANTABLE_TIERS.items()]
     rows.append([KeyboardButton(text="❌ Отмена")])
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, one_time_keyboard=True)
 
@@ -2896,7 +2897,7 @@ async def handle_admin_pending_action(message: Message):
         elif action == "record_subscription_username":
             ADMIN_PENDING[admin_id] = {"action": "record_subscription_tier", "target_id": target_id, "target_label": label}
             tier_lines = "\n".join(
-                f"{t} — {cfg['title']} ({cfg['price_rub']}₽)" for t, cfg in ACTIVE_SUBSCRIPTION_TIERS.items()
+                f"{t} — {cfg['title']} ({cfg['price_rub']}₽)" for t, cfg in ADMIN_GRANTABLE_TIERS.items()
             )
             await message.answer(
                 f"✅ Нашёл {label}. Выбери тариф кнопкой ниже или пришли номер:\n\n{tier_lines}",
@@ -2938,13 +2939,13 @@ async def handle_admin_pending_action(message: Message):
             return
         tier_match = re.match(r"\d+", raw)
         tier_id = int(tier_match.group()) if tier_match else None
-        if tier_id not in ACTIVE_SUBSCRIPTION_TIERS:
+        if tier_id not in ADMIN_GRANTABLE_TIERS:
             tier_lines = "\n".join(
-                f"{t} — {cfg['title']}" for t, cfg in ACTIVE_SUBSCRIPTION_TIERS.items()
+                f"{t} — {cfg['title']}" for t, cfg in ADMIN_GRANTABLE_TIERS.items()
             )
             await message.answer(f"⚠️ Введи номер тарифа из списка:\n\n{tier_lines}", reply_markup=get_admin_tier_reply_keyboard())
             return
-        cfg = ACTIVE_SUBSCRIPTION_TIERS[tier_id]
+        cfg = ADMIN_GRANTABLE_TIERS[tier_id]
         if cfg.get("subject_choice_required"):
             ADMIN_PENDING[admin_id] = {
                 "action": "record_subscription_subject",
@@ -3390,6 +3391,10 @@ def get_my_subscription_status_block(user_id: int) -> str:
 
 def _next_upsell_tier_id(tier_id: int) -> int | None:
     cfg = SUBSCRIPTION_TIERS[tier_id]
+    if cfg.get("admin_only"):
+        # A prize/comp grant (e.g. giveaway winners) — pitching a paid upgrade right after
+        # "you just won this for free" would read as tone-deaf, so admin_only tiers never upsell.
+        return None
     candidates = sorted(
         (t for t, c in ACTIVE_SUBSCRIPTION_TIERS.items() if c["price_rub"] > cfg["price_rub"]),
         key=lambda t: ACTIVE_SUBSCRIPTION_TIERS[t]["price_rub"]

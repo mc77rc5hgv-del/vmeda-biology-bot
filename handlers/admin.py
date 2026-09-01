@@ -414,7 +414,7 @@ async def cb_admin_card_sub(callback: CallbackQuery):
         "action": "record_subscription_tier", "target_id": target_id, "target_label": label,
     }
     tier_lines = "\n".join(
-        f"{t} — {cfg['title']} ({cfg['price_rub']}₽)" for t, cfg in tb.ACTIVE_SUBSCRIPTION_TIERS.items()
+        f"{t} — {cfg['title']} ({cfg['price_rub']}₽)" for t, cfg in tb.ADMIN_GRANTABLE_TIERS.items()
     )
     await callback.answer()
     await callback.message.answer(

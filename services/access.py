@@ -632,8 +632,49 @@ SUBSCRIPTION_TIERS = {
             "VMedA AI (решение заданий по фото) — 375 запросов в месяц (fair use)",
         ],
     },
+    # 30 — не тариф магазина: "admin_only" держит его вне ACTIVE_SUBSCRIPTION_TIERS (ни одна
+    # витрина/оплата его никогда не покажет и не продаст), но он всё равно доступен для ручной
+    # выдачи через ADMIN_GRANTABLE_TIERS ниже — единственное текущее применение: приз "подписка на
+    # год" в розыгрышах, когда среди продаваемых тарифов нет ни одного с ровно 365-дневной
+    # длительностью. price_rub/price_stars = 0, т.к. это не платный тариф ни в каком смысле — это
+    # не противоречит "деньги = 0" нигде в коде: выдача всё равно идёт методом "rubles_manual",
+    # который и так исключён из выручки независимо от значения price (см. cb_admin_confirm_sub /
+    # get_admin_content_search_text и комментарий про revenue в разделе Subscriptions CLAUDE.md).
+    30: {
+        "title": "Приз розыгрыша — год",
+        "short": "приз: год",
+        "emoji": "🎁",
+        "price_rub": 0,
+        "price_stars": 0,
+        "duration_days": 365,
+        "expires_at": None,
+        "subject_choice_required": False,
+        "histology_until_rule": "expiry",
+        "anatomy": True,
+        "biology_download": True,
+        "cheat_sheets": True,
+        "ai_limit_type": "monthly",
+        "ai_limit": 375,
+        "subscription_version": 2,
+        "future_second_year_sections": True,
+        "admin_only": True,
+        "benefits": [
+            "Полный доступ ко всем существующим и будущим разделам бота на 1 год",
+            "Все экзамены, зачёты, контрольные и диагностики — на весь срок действия подписки",
+            "Скачивание всех файлов с ответами и шпаргалок для распечатки",
+            "VMedA AI (решение заданий по фото) — 375 запросов в месяц (fair use)",
+        ],
+    },
 }
-ACTIVE_SUBSCRIPTION_TIERS = {t: cfg for t, cfg in SUBSCRIPTION_TIERS.items() if not cfg.get("retired")}
+# Витрина/оплата/анонсы: только то, что реально продаётся (без retired и без admin_only).
+ACTIVE_SUBSCRIPTION_TIERS = {
+    t: cfg for t, cfg in SUBSCRIPTION_TIERS.items() if not cfg.get("retired") and not cfg.get("admin_only")
+}
+# Ручная выдача подписки админом (по username/ID) — единственное место, которому НУЖНЫ
+# admin_only-тарифы (призы розыгрышей и т.п.) в дополнение к обычным активным; retired всё равно
+# исключены — прошлые тарифы не переиспользуются даже вручную, см. правило в SUBSCRIPTION_TIERS
+# выше про "никогда не переиспользовать id снятого с продажи тарифа".
+ADMIN_GRANTABLE_TIERS = {t: cfg for t, cfg in SUBSCRIPTION_TIERS.items() if not cfg.get("retired")}
 
 SEPTEMBER_PRICE_INCREASE = 1.4  # с сентября цены на все тарифы вырастут на 40%
 
