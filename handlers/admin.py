@@ -65,6 +65,7 @@ def build_channel_post_keyboard(buttons: list):
 def get_admin_menu():
     builder = InlineKeyboardBuilder()
     builder.button(text="📊 Статистика", callback_data="admin_stats")
+    builder.button(text="📅 Статистика оплат по месяцам", callback_data="admin_monthly_payments")
     builder.button(text="📥 Экспорт stats.json", callback_data="admin_export_stats")
     builder.button(text="👥 Список пользователей", callback_data="admin_userlist:0")
     builder.button(text="🔎 Найти пользователя", callback_data="admin_lookup_prompt")
@@ -187,6 +188,7 @@ def get_admin_stats_keyboard(breaker_tripped: bool):
     builder = InlineKeyboardBuilder()
     if breaker_tripped:
         builder.row(InlineKeyboardButton(text="🔓 Сбросить AI-автовыключатель", callback_data="admin_ai_breaker_reset"))
+    builder.row(InlineKeyboardButton(text="📅 Оплаты по месяцам", callback_data="admin_monthly_payments"))
     builder.row(InlineKeyboardButton(text="🔙 В админ-панель", callback_data="admin_panel"))
     return builder.as_markup()
 
@@ -1140,6 +1142,56 @@ async def cb_admin_stats(callback: CallbackQuery):
     await tb.safe_edit_text(
         callback.message, text, parse_mode="HTML",
         reply_markup=get_admin_stats_keyboard(breaker_tripped),
+    )
+
+_MONTH_NAMES_RU = [
+    "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
+    "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь",
+]
+
+def _format_month_header(month_key: str) -> str:
+    year, month = month_key.split("-")
+    return f"{_MONTH_NAMES_RU[int(month) - 1]} {year}"
+
+def get_admin_monthly_payments_text() -> str:
+    monthly = tb.get_monthly_payment_stats()
+    lines = [f"📅 <b>Статистика оплат по месяцам</b>\n{tb.DIVIDER}"]
+    if not monthly:
+        lines.append("\nПока нет ни одной подтверждённой оплаты.")
+        return "\n".join(lines)
+    for month_key, bucket in monthly.items():
+        approx_note = " ⚠️ приблизительно" if bucket["source"] == "snapshot" else ""
+        lines.append(f"\n<b>{_format_month_header(month_key)}</b>{approx_note}")
+        lines.append(f"💵 Подтверждённые подписки рублями: <b>{bucket['rubles_total']}</b>₽")
+        lines.append(f"⭐ Подписки звёздами: <b>{bucket['stars_total']}</b>")
+        tier_counts = bucket["tier_counts"]
+        # Текущие тарифы витрины показываем всегда, даже с нулём (как в примере тарифного задания);
+        # тарифы, снятые с продажи, добавляем только если в этом месяце по ним реально была покупка
+        # (иначе список рос бы на 20 строк в каждом месяце, включая будущие).
+        shown_tier_ids = set(tb.ACTIVE_SUBSCRIPTION_TIERS) | set(tier_counts)
+        for tier_id in sorted(shown_tier_ids):
+            cfg = tb.SUBSCRIPTION_TIERS[tier_id]
+            count = tier_counts.get(tier_id, 0)
+            lines.append(f"  {cfg['emoji']} {cfg['short']}: <b>{count}</b>")
+    lines.append(
+        f"\n{tb.DIVIDER}\n⚠️ Приблизительно — месяцы до появления журнала покупок: "
+        "учтена только последняя известная на сегодня подписка каждого пользователя за тот "
+        "месяц (более ранняя покупка, перекрытая апгрейдом/новой покупкой, не учитывается). "
+        "Все месяцы без пометки посчитаны точно по полному журналу покупок."
+    )
+    return "\n".join(lines)
+
+@router.callback_query(F.data == "admin_monthly_payments")
+async def cb_admin_monthly_payments(callback: CallbackQuery):
+    if not tb.is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer()
+    await tb.safe_edit_text(
+        callback.message,
+        get_admin_monthly_payments_text(),
+        parse_mode="HTML",
+        reply_markup=get_admin_back_keyboard(),
     )
 
 @router.callback_query(F.data == "admin_ai_breaker_reset")

@@ -824,7 +824,71 @@ def grant_subscription(user_id: int, tier: int, method: str, price: int, subject
         "method": method,
         "price": price,
     }
+    # Append-only — в отличие от stats["subscriptions"] (одна запись на пользователя, апгрейд/
+    # повторная покупка ЗАТИРАЕТ предыдущую), этот журнал не теряет более ранние покупки того же
+    # человека. Заведён специально ради get_monthly_payment_stats() ниже: без него посчитать
+    # "сколько тарифов X купили в августе" для пользователя, который в сентябре купил другой
+    # тариф, было бы невозможно — его августовская покупка иначе просто исчезла бы из
+    # stats["subscriptions"]. Пишет ВСЕ методы (включая "rubles_manual") для полноты как общий
+    # аудит-лог выдач — фильтрация только на подтверждённые оплаты (stars/rubles) происходит уже
+    # в get_monthly_payment_stats(), а не здесь.
+    tb.stats.setdefault("subscription_purchase_log", []).append({
+        "user_id": user_id, "tier": tier, "method": method, "price": price, "ts": now,
+    })
     tb.save_stats()
+
+def _month_key_msk(ts: float) -> str:
+    return datetime.fromtimestamp(ts, tb.APP_TIMEZONE).strftime("%Y-%m")
+
+def get_monthly_payment_stats() -> dict:
+    """Статистика ПОДТВЕРЖДЁННЫХ оплат (method in stars/rubles — ручные/призовые выдачи
+    "rubles_manual" сюда не считаются, тот же принцип, что у sub_revenue_rubles в cb_admin_stats)
+    по календарным месяцам МСК. Возвращает {"YYYY-MM": {"rubles_total", "stars_total",
+    "tier_counts": {tier_id: count}, "source": "log"|"snapshot"}, ...} в хронологическом порядке.
+
+    Источник данных для месяца, за который в stats["subscription_purchase_log"] (append-only,
+    ведётся с момента появления этой функции — см. grant_subscription() выше) уже есть хотя бы
+    одна запись, — сам этот журнал: он не теряет более ранние покупки при апгрейде/повторной
+    покупке. Для более ранних месяцев (до того, как журнал начал вестись) — оценка по текущему
+    снимку stats["subscriptions"]: там хранится только ПОСЛЕДНЯЯ известная покупка каждого
+    пользователя, так что если человек с тех пор купил другой тариф, более ранняя покупка того
+    месяца потеряна и не может быть учтена — это ограничение модели данных ДО этой функции, а не
+    баг подсчёта. Чтобы админ не спутал точные месяцы с приблизительными, у каждого месяца есть
+    "source"."""
+    months: dict = {}
+
+    log_months_covered = set()
+    for entry in tb.stats.get("subscription_purchase_log", []):
+        if entry["method"] not in ("stars", "rubles"):
+            continue
+        mk = _month_key_msk(entry["ts"])
+        log_months_covered.add(mk)
+        bucket = months.setdefault(mk, {"rubles_total": 0, "stars_total": 0, "tier_counts": {}, "source": "log"})
+        if entry["method"] == "rubles":
+            bucket["rubles_total"] += entry["price"]
+        else:
+            bucket["stars_total"] += entry["price"]
+        bucket["tier_counts"][entry["tier"]] = bucket["tier_counts"].get(entry["tier"], 0) + 1
+
+    for sub in tb.stats["subscriptions"].values():
+        method = sub.get("method")
+        if method not in ("stars", "rubles"):
+            continue
+        purchased_at = sub.get("purchased_at")
+        if not purchased_at:
+            continue
+        mk = _month_key_msk(purchased_at)
+        if mk in log_months_covered:
+            continue  # этот месяц уже точно посчитан по журналу — снимок тут не нужен
+        bucket = months.setdefault(mk, {"rubles_total": 0, "stars_total": 0, "tier_counts": {}, "source": "snapshot"})
+        if method == "rubles":
+            bucket["rubles_total"] += sub["price"]
+        else:
+            bucket["stars_total"] += sub["price"]
+        tier = sub["tier"]
+        bucket["tier_counts"][tier] = bucket["tier_counts"].get(tier, 0) + 1
+
+    return dict(sorted(months.items()))
 
 def has_free_access(user_id: int) -> bool:
     return (
