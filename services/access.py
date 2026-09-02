@@ -95,6 +95,20 @@ def get_referral_count_this_month(user_id: int) -> int:
         return 0
     return entry.get("count", 0)
 
+def get_referral_free_access_user_count() -> int:
+    """Сколько пользователей ПРЯМО СЕЙЧАС пользуются ботом благодаря рефералам — т.е. привели
+    REFERRAL_FULL_ACCESS_THRESHOLD (2) новых друзей ИМЕННО В ЭТОМ календарном месяце (тот же
+    помесячный счётчик, что и в has_free_access/has_subject_access — см. get_referral_count_this_month
+    выше). Это НЕ то же самое, что "Меньше N рефералов" в cb_admin_stats — та метрика лифтайм-based
+    и отвечает на другой вопрос ("у скольких пользователей когда-либо было меньше N рефералов
+    суммарно"); эта — сколько сейчас реально открыто по этому конкретному пути (не по подписке/
+    ручному гранту/промо), в текущем месяце."""
+    month = _current_referral_month_key()
+    return sum(
+        1 for entry in tb.stats["referral_monthly"].values()
+        if entry.get("month") == month and entry.get("count", 0) >= REFERRAL_FULL_ACCESS_THRESHOLD
+    )
+
 def _increment_referral_month_count(user_id: int) -> None:
     month = _current_referral_month_key()
     entry = tb.stats["referral_monthly"].get(str(user_id))

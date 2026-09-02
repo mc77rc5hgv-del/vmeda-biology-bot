@@ -377,6 +377,7 @@ has_subscription_anatomy_access = access.has_subscription_anatomy_access
 biology_tickets_download_ok = access.biology_tickets_download_ok
 grant_subscription = access.grant_subscription
 get_monthly_payment_stats = access.get_monthly_payment_stats
+get_referral_free_access_user_count = access.get_referral_free_access_user_count
 has_free_access = access.has_free_access
 get_exhausted_users = access.get_exhausted_users
 get_below_threshold_users = access.get_below_threshold_users

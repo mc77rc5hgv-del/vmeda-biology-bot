@@ -475,6 +475,14 @@ requested for it and the acceptance criteria only ever describe browsing/reading
    lifetime count — a monthly version of that particular metric would read as "nearly everyone" at the start
    of every month and stop being a useful trend line, so it intentionally answers a different question
    ("how many users have historically referred fewer than N people ever") than the live access gate does.
+   A separate metric, "🎁 Доступ по N рефералам в этом месяце" (`get_referral_free_access_user_count()`,
+   `services/access.py`, shown right below the lifetime "Меньше N" line on both the full and assistant stats
+   screens), answers the question the lifetime metric deliberately doesn't: how many users are unlocked
+   THIS calendar month specifically via the referral gate — i.e. have a `stats["referral_monthly"]` entry
+   whose `month` is the current month key and whose `count >= REFERRAL_FULL_ACCESS_THRESHOLD`. It reads the
+   same monthly-recurring counter `get_referral_count_this_month()`/`has_free_access()` gate on, just
+   aggregated across all users instead of checked per-user — so it naturally resets itself every month along
+   with the gate it's reporting on, with no separate cleanup needed.
 2. **Anatomy/Histology gates** (`anatomy_access_ok` / `histology_access_ok`): separate boolean functions, not part
    of the referral allowlist — public-flag-gated (`ANATOMY_PUBLIC` / `HISTOLOGY_PUBLIC`, both currently `False`)
    until admin flips them, bypassed by admin, by `has_subscription_anatomy_access()`/`has_subscription_histology_access()`

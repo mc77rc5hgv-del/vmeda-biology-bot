@@ -1077,6 +1077,7 @@ async def cb_admin_stats(callback: CallbackQuery):
     below_threshold_count = sum(
         1 for uid in tb.stats["total_users"] if tb.get_referral_count(uid) < tb.REFERRAL_FULL_ACCESS_THRESHOLD
     )
+    referral_free_access_count = tb.get_referral_free_access_user_count()
 
     subs = tb.stats["subscriptions"]
     active_by_tier = {tier_id: 0 for tier_id in tb.SUBSCRIPTION_TIERS}
@@ -1115,6 +1116,7 @@ async def cb_admin_stats(callback: CallbackQuery):
         f"📢 Рассылок отправлено: <b>{tb.stats.get('broadcast_count', 0)}</b>\n"
         f"🔗 Всего рефералов: <b>{total_referrals}</b>\n"
         f"📉 Меньше {tb.REFERRAL_FULL_ACCESS_THRESHOLD} рефералов: <b>{below_threshold_count}</b>\n"
+        f"🎁 Доступ по {tb.REFERRAL_FULL_ACCESS_THRESHOLD} рефералам в этом месяце: <b>{referral_free_access_count}</b>\n"
         f"🔓 Ручных доступов выдано: <b>{len(tb.stats['manual_access_granted'])}</b>\n"
         f"🦴 Демо-доступов к Анатомии выдано: <b>{len(tb.stats['manual_anatomy_demo_granted'])}</b>\n"
         f"🚫 Исчерпали бесплатные заходы без рефералов: <b>{exhausted_free_uses}</b>\n"
@@ -1854,6 +1856,7 @@ def get_assistant_stats_text() -> str:
     below_threshold_count = sum(
         1 for uid in tb.stats["total_users"] if tb.get_referral_count(uid) < tb.REFERRAL_FULL_ACCESS_THRESHOLD
     )
+    referral_free_access_count = tb.get_referral_free_access_user_count()
     return (
         f"📊 <b>Статистика бота</b>\n{tb.DIVIDER}\n\n"
         f"👥 Уникальных пользователей: <b>{len(tb.stats['total_users'])}</b>\n"
@@ -1864,6 +1867,7 @@ def get_assistant_stats_text() -> str:
         f"📢 Рассылок отправлено: <b>{tb.stats.get('broadcast_count', 0)}</b>\n"
         f"🔗 Всего рефералов: <b>{total_referrals}</b>\n"
         f"📉 Меньше {tb.REFERRAL_FULL_ACCESS_THRESHOLD} рефералов: <b>{below_threshold_count}</b>\n"
+        f"🎁 Доступ по {tb.REFERRAL_FULL_ACCESS_THRESHOLD} рефералам в этом месяце: <b>{referral_free_access_count}</b>\n"
         f"🔓 Ручных доступов выдано: <b>{len(tb.stats['manual_access_granted'])}</b>\n"
         f"🦴 Демо-доступов к Анатомии выдано: <b>{len(tb.stats['manual_anatomy_demo_granted'])}</b>\n"
         f"🚫 Исчерпали бесплатные заходы без рефералов: <b>{exhausted_free_uses}</b>\n"

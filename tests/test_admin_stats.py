@@ -99,6 +99,40 @@ async def main():
     assert expected_below >= 2, "sanity: our two synthetic 0/1-referral users must be counted"
     print(f"below-threshold metric correct ({expected_below}): OK")
 
+    # "referral free access this month" counter: distinct from the lifetime below-threshold metric —
+    # only counts users who hit the monthly threshold IN THE CURRENT MONTH (stats["referral_monthly"]).
+    current_month = tb.local_today().strftime("%Y-%m")
+    uid_unlocked_now = fresh_uid()
+    uid_unlocked_last_month = fresh_uid()
+    uid_not_enough_this_month = fresh_uid()
+    tb.stats["referral_monthly"][uid_unlocked_now] = {
+        "month": current_month, "count": tb.REFERRAL_FULL_ACCESS_THRESHOLD,
+    }
+    tb.stats["referral_monthly"][uid_unlocked_last_month] = {
+        "month": "2000-01", "count": tb.REFERRAL_FULL_ACCESS_THRESHOLD + 5,
+    }
+    tb.stats["referral_monthly"][uid_not_enough_this_month] = {
+        "month": current_month, "count": tb.REFERRAL_FULL_ACCESS_THRESHOLD - 1,
+    }
+
+    cb3b = FakeCB("admin_stats")
+    await tb.cb_admin_stats(cb3b)
+    text3b = cb3b.message.edits[0]
+    expected_unlocked = sum(
+        1 for e in tb.stats["referral_monthly"].values()
+        if e.get("month") == current_month and e.get("count", 0) >= tb.REFERRAL_FULL_ACCESS_THRESHOLD
+    )
+    m2b = re.search(
+        rf"Доступ по {tb.REFERRAL_FULL_ACCESS_THRESHOLD} рефералам в этом месяце: <b>(\d+)</b>", text3b
+    )
+    assert m2b, "referral-free-access-this-month stat line not found"
+    assert int(m2b.group(1)) == expected_unlocked == tb.get_referral_free_access_user_count()
+    assert uid_unlocked_now in tb.stats["referral_monthly"], "sanity: our synthetic user must still be counted"
+    print(f"referral-free-access-this-month metric correct ({expected_unlocked}), excludes stale months: OK")
+
+    for uid in (uid_unlocked_now, uid_unlocked_last_month, uid_not_enough_this_month):
+        tb.stats["referral_monthly"].pop(uid, None)
+
     # subscriptions + payments block: grant a stars tier-2 and a rubles tier-3, check totals reflected
     uid_sub_stars = fresh_uid()
     uid_sub_rubles = fresh_uid()
