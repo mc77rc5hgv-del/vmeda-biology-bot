@@ -69,10 +69,13 @@ img, svg {
 }
 
 /* Область прокрутки экрана — верхний отступ под системную зону Telegram (шапка клиента),
-   нижний — под safe-area устройства (§18 ТЗ: "отсутствие элементов под системными областями"). */
+   нижний — под safe-area устройства (§18 ТЗ: "отсутствие элементов под системными областями")
+   ПЛЮС высоту BottomNav (components/BottomNav.module.css -- теперь position: fixed, значит
+   всегда перекрывает нижнюю часть вьюпорта, а не отталкивает контент как обычный элемент
+   потока) -- без этого последний блок каждого экрана уезжал бы под панель навигации. */
 .screen {
   padding-top: calc(var(--safe-top) + var(--space-4));
-  padding-bottom: calc(var(--safe-bottom) + var(--space-8));
+  padding-bottom: calc(var(--safe-bottom) + var(--bottom-nav-height) + var(--space-4));
   padding-left: var(--space-4);
   padding-right: var(--space-4);
   max-width: 560px;
