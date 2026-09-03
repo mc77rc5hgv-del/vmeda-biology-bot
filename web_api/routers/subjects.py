@@ -18,8 +18,8 @@ def _not_found(exc: content.ContentNotFoundError) -> HTTPException:
 
 
 def _get_material_data(tb, subject_id: str, section_id: str, item_id: str) -> dict:
-    if subject_id == static_content.PHYSIOLOGY_ID:
-        return static_content.get_material(tb.PHYSIOLOGY, subject_id, section_id, item_id)
+    if subject_id in static_content.SUPPORTED_SUBJECT_IDS:
+        return static_content.get_material(tb, subject_id, section_id, item_id)
     return content.get_material(tb.DYNAMIC_COURSES, subject_id, section_id, item_id)
 
 
@@ -30,7 +30,7 @@ def list_subjects(
 ) -> list[dict]:
     return [
         *[content.to_subject_summary(course) for course in tb.DYNAMIC_COURSES],
-        *static_content.list_subject_summaries(tb.PHYSIOLOGY),
+        *static_content.list_subject_summaries(tb),
     ]
 
 
@@ -41,8 +41,8 @@ def get_subject(
     tb=Depends(get_fresh_bot_module),
 ) -> dict:
     try:
-        if subject_id == static_content.PHYSIOLOGY_ID:
-            return static_content.get_subject_detail(tb.PHYSIOLOGY, subject_id)
+        if subject_id in static_content.SUPPORTED_SUBJECT_IDS:
+            return static_content.get_subject_detail(tb, subject_id)
         return content.get_subject_detail(tb.DYNAMIC_COURSES, subject_id)
     except content.ContentNotFoundError as exc:
         raise _not_found(exc) from exc
@@ -56,8 +56,8 @@ def get_section(
     tb=Depends(get_fresh_bot_module),
 ) -> dict:
     try:
-        if subject_id == static_content.PHYSIOLOGY_ID:
-            return static_content.get_section_detail(tb.PHYSIOLOGY, subject_id, section_id)
+        if subject_id in static_content.SUPPORTED_SUBJECT_IDS:
+            return static_content.get_section_detail(tb, subject_id, section_id)
         return content.get_section_detail(tb.DYNAMIC_COURSES, subject_id, section_id)
     except content.ContentNotFoundError as exc:
         raise _not_found(exc) from exc
@@ -72,8 +72,8 @@ def get_group(
     tb=Depends(get_fresh_bot_module),
 ) -> dict:
     try:
-        if subject_id == static_content.PHYSIOLOGY_ID:
-            return static_content.get_group_detail(tb.PHYSIOLOGY, subject_id, section_id, group_id)
+        if subject_id in static_content.SUPPORTED_SUBJECT_IDS:
+            return static_content.get_group_detail(tb, subject_id, section_id, group_id)
         return content.get_group_detail(tb.DYNAMIC_COURSES, subject_id, section_id, group_id)
     except content.ContentNotFoundError as exc:
         raise _not_found(exc) from exc

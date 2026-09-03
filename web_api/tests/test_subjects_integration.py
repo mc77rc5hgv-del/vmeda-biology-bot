@@ -48,7 +48,7 @@ def test_list_subjects_includes_real_dynamic_courses():
     resp = client.get("/api/v1/subjects", headers=_auth_headers())
     assert resp.status_code == 200
     ids = {s["id"] for s in resp.json()}
-    assert {"biochemistry", "pharmacology", "latin", "law", "physiology"} <= ids
+    assert {"biochemistry", "pharmacology", "latin", "law", "physiology", "operative_surgery"} <= ids
 
 
 def test_list_subjects_requires_auth():
@@ -171,6 +171,41 @@ def test_physiology_course_and_boundary_control_round_trip():
     )
     assert media.status_code == 200
     assert media.content
+
+
+def test_operative_surgery_volumes_and_material_round_trip():
+    """Реальные operative_surgery.json: 4 тома, 61 тема — проверяем, что раздел "Тома"
+    (сгруппированный, как у Фармакологии) действительно доводит студента до текста конкретной
+    темы, с правильным prev/next внутри тома (см. web_api/static_content.py)."""
+    headers = _auth_headers()
+    detail = client.get("/api/v1/subjects/operative_surgery", headers=headers)
+    assert detail.status_code == 200, detail.text
+    sections = {section["id"]: section for section in detail.json()["sections"]}
+    assert sections["volumes"]["kind"] == "grouped"
+    assert sections["volumes"]["item_count"] == 61  # см. отчёт аудита: 61 тема в 4 томах
+
+    volumes = client.get("/api/v1/subjects/operative_surgery/sections/volumes", headers=headers).json()
+    assert [g["id"] for g in volumes["groups"]] == ["I", "II", "III", "IV"]
+    volume_i = next(g for g in volumes["groups"] if g["id"] == "I")
+    assert volume_i["item_count"] == 10  # см. отчёт аудита: том I — 10 тем
+
+    group = client.get(
+        "/api/v1/subjects/operative_surgery/sections/volumes/groups/I", headers=headers
+    ).json()
+    assert len(group["items"]) == 10
+    first_topic = group["items"][0]
+    assert first_topic["id"] == "01"
+
+    material = client.get(
+        f"/api/v1/materials/operative_surgery/volumes/{first_topic['id']}", headers=headers
+    )
+    assert material.status_code == 200, material.text
+    body = material.json()
+    assert body["title"] == first_topic["title"]
+    assert body["content_html"]  # реальный текст подтем, не заглушка
+    assert body["group_id"] == "I"
+    assert body["prev_id"] is None  # первая тема тома
+    assert body["next_id"] == group["items"][1]["id"]
 
 
 def test_media_endpoint_serves_real_file_when_present():

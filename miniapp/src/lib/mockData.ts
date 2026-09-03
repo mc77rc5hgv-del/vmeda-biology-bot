@@ -57,7 +57,7 @@ export const mockSubjects: SubjectSummary[] = [
   { id: "law", title: "Правоведение", accent: "law", tag: "81 вопрос", course: 1, readiness: 0, locked: false },
   // ---- 2 курс ----
   { id: "physiology", title: "Нормальная физиология", accent: "physiology", tag: "Рубежные", course: 2, readiness: 55, locked: false },
-  { id: "operative-surgery", title: "Оперативная хирургия", accent: "operative-surgery", tag: "31 станция", course: 2, readiness: 18, locked: false },
+  { id: "operative_surgery", title: "Оперативная хирургия", accent: "operative-surgery", tag: "31 станция", course: 2, readiness: 18, locked: false },
   { id: "biochemistry", title: "Биохимия", accent: "biochemistry", tag: "68%", course: 2, readiness: 68, locked: false },
   { id: "pharmacology", title: "Фармакология", accent: "pharmacology", tag: "Контрольные", course: 2, readiness: 8, locked: false },
 ];
@@ -99,7 +99,7 @@ const subjectSections: Record<string, SubjectDetail["sections"]> = {
     { id: "quiz", title: "Тест", itemCount: 149 },
     { id: "boundary-controls", title: "Рубежные контроли", itemCount: 11 },
   ],
-  "operative-surgery": [
+  operative_surgery: [
     { id: "volumes", title: "Тома", itemCount: 4 },
     { id: "instruments", title: "Инструменты", itemCount: 11 },
     { id: "projections", title: "Проекции", itemCount: 6 },

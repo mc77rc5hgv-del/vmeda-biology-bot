@@ -30,7 +30,9 @@ function resolveAfterDelay<T>(value: T): Promise<T> {
 // См. web_api/content.py -- список предметов, у которых есть настоящий контент-адаптер. Держать
 // синхронно с REPO_ROOT/web_api/routers/subjects.py вручную -- backend не отдаёт "список
 // подключённых предметов" отдельным полем, а этот список статичен и меняется редко.
-const REAL_BACKED_SUBJECT_IDS = new Set(["biochemistry", "pharmacology", "latin", "law", "physiology"]);
+const REAL_BACKED_SUBJECT_IDS = new Set([
+  "biochemistry", "pharmacology", "latin", "law", "physiology", "operative_surgery",
+]);
 
 export function isRealBackedSubject(subjectId: string): boolean {
   return REAL_BACKED_SUBJECT_IDS.has(subjectId);

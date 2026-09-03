@@ -1,115 +1,186 @@
 """Адаптер статичных предметов к общему контентному контракту Mini App.
 
-Первым подключён предмет «Нормальная физиология»: 23 структурированные темы и 11 рубежных
-контролей. Большие рубежи режутся на небольшие страницы, а изображения остаются отдельными
-защищёнными media-ресурсами.
-"""
+Подключаются постепенно (см. отчёт аудита Этапа 1 — у каждого статичного предмета своя,
+непохожая на остальные схема, общего адаптера для всех сразу нет и не планируется). Каждый
+подключённый предмет — это НЕ весь объём контента бота по этому предмету, а осознанно
+ограниченный, но честный срез: то же соотношение, что и у Биохимии/Фармакологии/Латыни/
+Правоведения через content.py — реальный текст, ничего не придумано, но не 1:1 копия
+навигации бота (у бота, например, тема Оперативной хирургии режется на постранично пролистываемые
+подтемы под лимит сообщения Telegram — у Mini App лимита сообщения нет, поэтому тема отдаётся
+одной страницей).
+
+Подключены: «Нормальная физиология» (23 темы курса + 11 рубежных контролей) и «Оперативная
+хирургия» (61 тема в 4 томах — БЕЗ инструментов/проекций/станций/контрольных вопросов, это
+отдельная задача на будущее, см. SUPPORTED_SUBJECT_IDS ниже)."""
 from html import escape
 
 from .content import ContentNotFoundError
 
 PHYSIOLOGY_ID = "physiology"
+OPERATIVE_SURGERY_ID = "operative_surgery"
+SUPPORTED_SUBJECT_IDS = {PHYSIOLOGY_ID, OPERATIVE_SURGERY_ID}
+
 PHYSIOLOGY_PAGE_CHAR_BUDGET = 6_000
 
 
-def list_subject_summaries(physiology: dict) -> list[dict]:
-    if not physiology:
-        return []
-    return [
-        {
+def list_subject_summaries(tb) -> list[dict]:
+    summaries = []
+    if tb.PHYSIOLOGY:
+        summaries.append({
             "id": PHYSIOLOGY_ID,
             "title": "Нормальная физиология",
             "emoji": "🫀",
             "description": "Структурированный курс, тесты и рубежные контроли",
             "course": 2,
             "has_ai": True,
-        }
-    ]
+        })
+    if tb.OPERATIVE_SURGERY:
+        summaries.append({
+            "id": OPERATIVE_SURGERY_ID,
+            "title": "Оперативная хирургия",
+            "emoji": "🔪",
+            "description": "61 тема в 4 томах — топографическая анатомия и оперативная техника",
+            "course": 2,
+            "has_ai": True,
+        })
+    return summaries
 
 
-def get_subject_detail(physiology: dict, subject_id: str) -> dict:
-    _require_physiology(subject_id)
-    summary = list_subject_summaries(physiology)[0]
+def _summary_by_id(tb, subject_id: str) -> dict:
+    for summary in list_subject_summaries(tb):
+        if summary["id"] == subject_id:
+            return summary
+    raise ContentNotFoundError(f"статичный предмет {subject_id!r} не найден")
+
+
+def get_subject_detail(tb, subject_id: str) -> dict:
+    summary = _summary_by_id(tb, subject_id)
+    if subject_id == PHYSIOLOGY_ID:
+        physiology = tb.PHYSIOLOGY
+        summary["sections"] = [
+            {
+                "id": "course",
+                "title": "Курс",
+                "item_count": len(physiology.get("topics", [])),
+                "kind": "flat",
+            },
+            {
+                "id": "boundary-controls",
+                "title": "Рубежные контроли",
+                "item_count": sum(
+                    len(_boundary_control_pages(control))
+                    for control in physiology.get("boundary_controls", [])
+                ),
+                "kind": "grouped",
+            },
+        ]
+        return summary
+
+    # operative_surgery
+    oh = tb.OPERATIVE_SURGERY
     summary["sections"] = [
         {
-            "id": "course",
-            "title": "Курс",
-            "item_count": len(physiology.get("topics", [])),
-            "kind": "flat",
-        },
-        {
-            "id": "boundary-controls",
-            "title": "Рубежные контроли",
-            "item_count": sum(
-                len(_boundary_control_pages(control))
-                for control in physiology.get("boundary_controls", [])
-            ),
+            "id": "volumes",
+            "title": "Тома",
+            "item_count": len(oh.get("topics", [])),
             "kind": "grouped",
         },
     ]
     return summary
 
 
-def get_section_detail(physiology: dict, subject_id: str, section_id: str) -> dict:
-    _require_physiology(subject_id)
-    if section_id == "course":
-        topics = physiology.get("topics", [])
-        total = len(topics)
-        return {
-            "id": section_id,
-            "title": "Курс",
-            "kind": "flat",
-            "items": [
-                {
-                    "id": topic["topic_id"],
-                    "title": topic["title"],
-                    "order": index + 1,
-                    "total": total,
-                }
-                for index, topic in enumerate(topics)
-            ],
-        }
-    if section_id == "boundary-controls":
-        return {
-            "id": section_id,
-            "title": "Рубежные контроли",
-            "kind": "grouped",
-            "groups": [
-                {
-                    "id": control["control_id"],
-                    "title": control["title"],
-                    "item_count": len(_boundary_control_pages(control)),
-                }
-                for control in physiology.get("boundary_controls", [])
-            ],
-        }
-    raise ContentNotFoundError(f"раздел {section_id!r} не найден в физиологии")
+def get_section_detail(tb, subject_id: str, section_id: str) -> dict:
+    _summary_by_id(tb, subject_id)  # бросает ContentNotFoundError на неизвестный subject_id
 
-
-def get_group_detail(physiology: dict, subject_id: str, section_id: str, group_id: str) -> dict:
-    _require_physiology(subject_id)
-    if section_id != "boundary-controls":
-        raise ContentNotFoundError(f"в разделе {section_id!r} нет групп")
-    control = _find_control(physiology, group_id)
-    pages = _boundary_control_pages(control)
-    total = len(pages)
-    return {
-        "id": group_id,
-        "title": control["title"],
-        "items": [
-            {
-                "id": page["id"],
-                "title": page["title"],
-                "order": index + 1,
-                "total": total,
+    if subject_id == PHYSIOLOGY_ID:
+        physiology = tb.PHYSIOLOGY
+        if section_id == "course":
+            topics = physiology.get("topics", [])
+            total = len(topics)
+            return {
+                "id": section_id,
+                "title": "Курс",
+                "kind": "flat",
+                "items": [
+                    {"id": topic["topic_id"], "title": topic["title"], "order": index + 1, "total": total}
+                    for index, topic in enumerate(topics)
+                ],
             }
-            for index, page in enumerate(pages)
+        if section_id == "boundary-controls":
+            return {
+                "id": section_id,
+                "title": "Рубежные контроли",
+                "kind": "grouped",
+                "groups": [
+                    {
+                        "id": control["control_id"],
+                        "title": control["title"],
+                        "item_count": len(_boundary_control_pages(control)),
+                    }
+                    for control in physiology.get("boundary_controls", [])
+                ],
+            }
+        raise ContentNotFoundError(f"раздел {section_id!r} не найден в физиологии")
+
+    # operative_surgery
+    if section_id != "volumes":
+        raise ContentNotFoundError(f"раздел {section_id!r} не найден в оперативной хирургии")
+    return {
+        "id": section_id,
+        "title": "Тома",
+        "kind": "grouped",
+        "groups": [
+            {"id": volume["id"], "title": volume["title"], "item_count": len(volume.get("topic_ids", []))}
+            for volume in tb.OPERATIVE_SURGERY.get("volumes", [])
         ],
     }
 
 
-def get_material(physiology: dict, subject_id: str, section_id: str, item_id: str) -> dict:
-    _require_physiology(subject_id)
+def get_group_detail(tb, subject_id: str, section_id: str, group_id: str) -> dict:
+    _summary_by_id(tb, subject_id)
+
+    if subject_id == PHYSIOLOGY_ID:
+        if section_id != "boundary-controls":
+            raise ContentNotFoundError(f"в разделе {section_id!r} нет групп")
+        control = _find_physiology_control(tb.PHYSIOLOGY, group_id)
+        pages = _boundary_control_pages(control)
+        total = len(pages)
+        return {
+            "id": group_id,
+            "title": control["title"],
+            "items": [
+                {"id": page["id"], "title": page["title"], "order": index + 1, "total": total}
+                for index, page in enumerate(pages)
+            ],
+        }
+
+    # operative_surgery
+    if section_id != "volumes":
+        raise ContentNotFoundError(f"в разделе {section_id!r} нет групп")
+    volume = _find_oh_volume(tb.OPERATIVE_SURGERY, group_id)
+    topics = _oh_volume_topics(tb.OPERATIVE_SURGERY, volume)
+    total = len(topics)
+    return {
+        "id": volume["id"],
+        "title": volume["title"],
+        "items": [
+            {"id": topic["id"], "title": f"{topic['number']}. {topic['title']}", "order": index + 1, "total": total}
+            for index, topic in enumerate(topics)
+        ],
+    }
+
+
+def get_material(tb, subject_id: str, section_id: str, item_id: str) -> dict:
+    _summary_by_id(tb, subject_id)
+
+    if subject_id == PHYSIOLOGY_ID:
+        return _physiology_material(tb.PHYSIOLOGY, section_id, item_id)
+    return _operative_surgery_material(tb.OPERATIVE_SURGERY, section_id, item_id)
+
+
+# ==================== Нормальная физиология ====================
+
+def _physiology_material(physiology: dict, section_id: str, item_id: str) -> dict:
     if section_id == "course":
         topics = physiology.get("topics", [])
         for index, topic in enumerate(topics):
@@ -117,7 +188,7 @@ def get_material(physiology: dict, subject_id: str, section_id: str, item_id: st
                 return {
                     "id": item_id,
                     "title": topic["title"],
-                    "content_html": _topic_html(topic),
+                    "content_html": _physiology_topic_html(topic),
                     "sources": [],
                     "order": index + 1,
                     "total": len(topics),
@@ -147,19 +218,14 @@ def get_material(physiology: dict, subject_id: str, section_id: str, item_id: st
     raise ContentNotFoundError(f"раздел {section_id!r} не найден в физиологии")
 
 
-def _require_physiology(subject_id: str) -> None:
-    if subject_id != PHYSIOLOGY_ID:
-        raise ContentNotFoundError(f"статичный предмет {subject_id!r} не найден")
-
-
-def _find_control(physiology: dict, control_id: str) -> dict:
+def _find_physiology_control(physiology: dict, control_id: str) -> dict:
     for control in physiology.get("boundary_controls", []):
         if control.get("control_id") == control_id:
             return control
     raise ContentNotFoundError(f"рубежный контроль {control_id!r} не найден")
 
 
-def _topic_html(topic: dict) -> str:
+def _physiology_topic_html(topic: dict) -> str:
     parts = []
     for section in [*topic.get("sections", []), *topic.get("deepening", [])]:
         heading = escape(str(section.get("heading", "Раздел")))
@@ -217,3 +283,62 @@ def _boundary_control_pages(control: dict) -> list[dict]:
         page["id"] = f"{control['control_id']}_page_{index + 1}"
         page["title"] = f"{control['title']} — часть {index + 1} из {total}"
     return pages
+
+
+# ==================== Оперативная хирургия ====================
+# Подключён только раздел «Тома» (61 тема, реальный текст subtopics). instrument_groups/
+# projections/practical_stations/control_questions НЕ подключены в этом заходе -- честный срез,
+# не весь объём бота по этому предмету (см. docstring модуля).
+
+def _find_oh_volume(oh: dict, volume_id: str) -> dict:
+    for volume in oh.get("volumes", []):
+        if volume.get("id") == volume_id:
+            return volume
+    raise ContentNotFoundError(f"том {volume_id!r} не найден в оперативной хирургии")
+
+
+def _oh_topics_by_id(oh: dict) -> dict[str, dict]:
+    return {topic["id"]: topic for topic in oh.get("topics", [])}
+
+
+def _oh_volume_topics(oh: dict, volume: dict) -> list[dict]:
+    """Порядок берётся из volume["topic_ids"] (собственный порядок источника), а не из фильтрации
+    topics по полю volume -- volumes[].topic_ids это явный, авторский порядок тем внутри тома."""
+    topics_by_id = _oh_topics_by_id(oh)
+    return [topics_by_id[tid] for tid in volume.get("topic_ids", []) if tid in topics_by_id]
+
+
+def _oh_topic_html(topic: dict) -> str:
+    parts = []
+    for subtopic in topic.get("subtopics", []):
+        heading = escape(str(subtopic.get("title", "")))
+        body = str(subtopic.get("text", "")).strip()
+        if body:
+            parts.extend((f"<p><strong>{heading}</strong></p>", f"<p>{body}</p>"))
+    return "\n".join(parts)
+
+
+def _operative_surgery_material(oh: dict, section_id: str, item_id: str) -> dict:
+    if section_id != "volumes":
+        raise ContentNotFoundError(f"раздел {section_id!r} не найден в оперативной хирургии")
+
+    topics_by_id = _oh_topics_by_id(oh)
+    topic = topics_by_id.get(item_id)
+    if topic is None:
+        raise ContentNotFoundError(f"тема {item_id!r} не найдена в оперативной хирургии")
+    volume = _find_oh_volume(oh, topic["volume"])
+    siblings = _oh_volume_topics(oh, volume)
+    index = next(i for i, t in enumerate(siblings) if t["id"] == item_id)
+
+    return {
+        "id": item_id,
+        "title": f"{topic['number']}. {topic['title']}",
+        "content_html": _oh_topic_html(topic),
+        "sources": [topic["source"]] if topic.get("source") else [],
+        "order": index + 1,
+        "total": len(siblings),
+        "group_id": volume["id"],
+        "prev_id": siblings[index - 1]["id"] if index > 0 else None,
+        "next_id": siblings[index + 1]["id"] if index + 1 < len(siblings) else None,
+        "media": [],
+    }

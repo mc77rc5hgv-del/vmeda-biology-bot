@@ -23,7 +23,7 @@ import styles from "./SubjectCard.module.css";
  * SVG/CSS — никаких фотореалистичных изображений). */
 const SUBJECT_ICONS: Record<string, typeof Activity> = {
   physiology: Activity,
-  "operative-surgery": Scissors,
+  operative_surgery: Scissors,
   biochemistry: Atom,
   pharmacology: Pill,
   biology: Dna,
