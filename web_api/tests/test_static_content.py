@@ -7,16 +7,18 @@ from web_api.content import ContentNotFoundError
 class FakeTb:
     """static_content.py принимает "tb-подобный" объект (см. web_api/bot_state.py -- в реальном
     коде это модуль telegram_bot), а не сырые словари напрямую, потому что теперь оно отвечает
-    сразу за несколько статичных предметов (Физиология + Оперативная хирургия + Анатомия) и само
-    решает, какой атрибут прочитать. Тесты собирают минимальную заглушку с ровно этими тремя
-    атрибутами -- гейт доступа Анатомии (модуль бесплатный/платный, тех.режим) сюда НЕ входит,
-    он живёт в web_api/routers/subjects.py (см. test_subjects_integration.py и test_access.py) и
-    требует user_id, которого у чистых функций формы контента здесь нет."""
+    сразу за несколько статичных предметов (Физиология + Оперативная хирургия + Анатомия +
+    Гистология) и само решает, какой атрибут прочитать. Тесты собирают минимальную заглушку с
+    ровно этими четырьмя атрибутами -- гейты доступа (Анатомия: модуль бесплатный/платный,
+    тех.режим; Гистология: пробный период/подписка/рефералы) сюда НЕ входят, они живут в
+    web_api/routers/subjects.py (см. test_subjects_integration.py и test_access.py) и требуют
+    user_id, которого у чистых функций формы контента здесь нет."""
 
-    def __init__(self, physiology=None, operative_surgery=None, anatomy=None):
+    def __init__(self, physiology=None, operative_surgery=None, anatomy=None, histology=None):
         self.PHYSIOLOGY = physiology or {}
         self.OPERATIVE_SURGERY = operative_surgery or {}
         self.ANATOMY = anatomy or {}
+        self.HISTOLOGY = histology or {}
 
 
 @pytest.fixture
@@ -317,3 +319,150 @@ def test_list_subject_summaries_includes_anatomy_when_present(anatomy):
     tb = FakeTb(anatomy=anatomy)
     ids = {s["id"] for s in static_content.list_subject_summaries(tb)}
     assert ids == {"anatomy"}
+
+
+# ==================== Гистология ====================
+# HISTOLOGY -- dict диагностик (не список) -> список specimens (не dict, в отличие от тем
+# Анатомии) -- см. docstring static_content.py и отчёт по данным (5 диагностик, 71 препарат).
+# Гейт доступа (пробный период/подписка/рефералы) сюда намеренно НЕ входит -- эти функции чистые
+# над формой контента, гейт живёт в routers/subjects.py и покрыт test_subjects_integration.py.
+
+@pytest.fixture
+def histology():
+    return {
+        "diagnostika_1": {
+            "number": 1,
+            "title": "Диагностика №1: Цитология",
+            "menu_title": "1️⃣ Цитология",
+            "total_official": 2,
+            "specimens": [
+                {
+                    "id": "d1_01",
+                    "number": 1,
+                    "title": "Жировые включения в клетках печени",
+                    "stain": "Осмиевая кислота и сафранин",
+                    "magnification": "400",
+                    "protocol": "Первый абзац протокола.\n\nВторой абзац протокола.",
+                    "images": ["diagnostika_1/d1_01/1.jpg", "diagnostika_1/d1_01/2.jpg"],
+                    "guess_image": "diagnostika_1/d1_01/1.jpg",
+                },
+                {
+                    "id": "d1_02",
+                    "number": 2,
+                    "title": "Митоз в корешке лука",
+                    "stain": "Железный гематоксилин",
+                    "magnification": "400",
+                    "protocol": "Единственный абзац без картинок.",
+                    "images": [],
+                    "guess_image": None,
+                },
+            ],
+        },
+        "diagnostika_2": {
+            "number": 2,
+            "title": "Диагностика №2: Ткани",
+            "menu_title": "2️⃣ Ткани",
+            "total_official": 1,
+            "specimens": [
+                {
+                    "id": "d2_01",
+                    "number": 1,
+                    "title": "Многослойный эпителий",
+                    "stain": "Гематоксилин-эозин",
+                    "magnification": "100",
+                    "protocol": "Описание эпителия.",
+                    "images": ["diagnostika_2/d2_01/1.jpg"],
+                    "guess_image": "diagnostika_2/d2_01/1.jpg",
+                },
+            ],
+        },
+    }
+
+
+def test_histology_summary_and_sections(histology):
+    tb = FakeTb(histology=histology)
+    detail = static_content.get_subject_detail(tb, "histology")
+    assert detail["title"] == "Гистология"
+    assert detail["sections"] == [
+        {"id": "specimens", "title": "Препараты", "item_count": 3, "kind": "grouped"},
+    ]
+
+
+def test_histology_specimens_section_lists_diagnostics_as_groups(histology):
+    tb = FakeTb(histology=histology)
+    section = static_content.get_section_detail(tb, "histology", "specimens")
+    assert section["kind"] == "grouped"
+    assert [(g["id"], g["title"], g["item_count"]) for g in section["groups"]] == [
+        ("diagnostika_1", "Диагностика №1: Цитология", 2),
+        ("diagnostika_2", "Диагностика №2: Ткани", 1),
+    ]
+
+
+def test_histology_diagnostic_group_lists_specimens_in_source_order(histology):
+    tb = FakeTb(histology=histology)
+    group = static_content.get_group_detail(tb, "histology", "specimens", "diagnostika_1")
+    assert group["title"] == "Диагностика №1: Цитология"
+    assert [item["id"] for item in group["items"]] == ["d1_01", "d1_02"]
+    assert group["items"][0]["title"] == "Жировые включения в клетках печени"
+
+
+def test_histology_material_includes_stain_magnification_and_images(histology):
+    tb = FakeTb(histology=histology)
+    material = static_content.get_material(tb, "histology", "specimens", "d1_01")
+    assert material["title"] == "Жировые включения в клетках печени"
+    assert "<strong>Окраска:</strong> Осмиевая кислота и сафранин" in material["content_html"]
+    assert "<strong>Увеличение:</strong> ×400" in material["content_html"]
+    assert "Первый абзац протокола." in material["content_html"]
+    assert "Второй абзац протокола." in material["content_html"]
+    assert material["sources"] == []
+    assert material["group_id"] == "diagnostika_1"
+    assert material["order"] == 1
+    assert material["total"] == 2
+    assert material["prev_id"] is None
+    assert material["next_id"] == "d1_02"
+    assert material["media"] == [
+        {"path": "images/histology/diagnostika_1/d1_01/1.jpg", "caption": "Жировые включения в клетках печени"},
+        {"path": "images/histology/diagnostika_1/d1_01/2.jpg", "caption": "Жировые включения в клетках печени"},
+    ]
+
+
+def test_histology_specimen_without_images_has_empty_media(histology):
+    tb = FakeTb(histology=histology)
+    material = static_content.get_material(tb, "histology", "specimens", "d1_02")
+    assert material["media"] == []
+    assert material["prev_id"] == "d1_01"
+    assert material["next_id"] is None
+
+
+def test_histology_second_diagnostic_is_independent(histology):
+    tb = FakeTb(histology=histology)
+    material = static_content.get_material(tb, "histology", "specimens", "d2_01")
+    assert material["group_id"] == "diagnostika_2"
+    assert material["order"] == 1
+    assert material["total"] == 1
+    assert material["prev_id"] is None
+    assert material["next_id"] is None
+
+
+def test_histology_unknown_specimen_not_found(histology):
+    tb = FakeTb(histology=histology)
+    with pytest.raises(ContentNotFoundError):
+        static_content.get_material(tb, "histology", "specimens", "nonexistent")
+
+
+def test_histology_unknown_diagnostic_not_found(histology):
+    tb = FakeTb(histology=histology)
+    with pytest.raises(ContentNotFoundError):
+        static_content.get_group_detail(tb, "histology", "specimens", "diagnostika_99")
+
+
+def test_list_subject_summaries_includes_histology_when_present(histology):
+    tb = FakeTb(histology=histology)
+    ids = {s["id"] for s in static_content.list_subject_summaries(tb)}
+    assert ids == {"histology"}
+
+
+def test_list_subject_summaries_includes_all_four_when_all_present(physiology, operative_surgery, anatomy, histology):
+    tb = FakeTb(physiology=physiology, operative_surgery=operative_surgery, anatomy=anatomy, histology=histology)
+    ids = {s["id"] for s in static_content.list_subject_summaries(tb)}
+    assert ids == {"physiology", "operative_surgery", "anatomy", "histology"}

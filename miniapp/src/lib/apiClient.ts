@@ -217,6 +217,7 @@ const ACCENT_BY_SUBJECT_ID: Record<string, string> = {
   physiology: "physiology",
   operative_surgery: "operative-surgery",
   anatomy: "anatomy",
+  histology: "histology",
 };
 
 function toSubjectSummary(wire: SubjectSummaryWire): SubjectSummary {

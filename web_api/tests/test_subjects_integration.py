@@ -30,10 +30,10 @@ from web_api.main import app  # noqa: E402
 client = TestClient(app)
 
 
-def _auth_headers() -> dict:
+def _auth_headers(user_id: int = 900_777_888_999) -> dict:
     bot_token = os.environ["BOT_TOKEN"]
     fields = {
-        "user": json.dumps({"id": 900_777_888_999, "first_name": "Тест Контента"}),
+        "user": json.dumps({"id": user_id, "first_name": "Тест Контента"}),
         "auth_date": str(int(time.time())),
     }
     data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(fields.items()))
@@ -50,6 +50,7 @@ def test_list_subjects_includes_real_dynamic_courses():
     ids = {s["id"] for s in resp.json()}
     assert {
         "biochemistry", "pharmacology", "latin", "law", "physiology", "operative_surgery", "anatomy",
+        "histology",
     } <= ids
 
 
@@ -300,6 +301,71 @@ def test_anatomy_unknown_module_is_not_found_not_locked():
     headers = _auth_headers()
     resp = client.get(
         "/api/v1/subjects/anatomy/sections/course/groups/module99_missing", headers=headers
+    )
+    assert resp.status_code == 404
+
+
+def test_histology_default_locked_for_user_with_no_trial_no_subscription_no_referrals():
+    """Свежий тестовый пользователь никогда не открывал раздел в самом боте -- значит, пробный
+    период (выдаётся только стейтфул-версией гейта, histology_gate_ok, побочным эффектом визита в
+    боте) не выдан, и histology_access_ok(user_id) честно возвращает False. Список диагностик при
+    этом всё равно виден (см. "hide vs relabel" в CLAUDE.md), только помечен locked."""
+    headers = _auth_headers()
+    section = client.get("/api/v1/subjects/histology/sections/specimens", headers=headers).json()
+    assert len(section["groups"]) == 5  # см. отчёт по данным: 5 диагностик
+    assert all(g["locked"] for g in section["groups"])
+    assert all(g["locked_reason"] for g in section["groups"])
+
+    first_group_id = section["groups"][0]["id"]
+    resp = client.get(
+        f"/api/v1/subjects/histology/sections/specimens/groups/{first_group_id}", headers=headers
+    )
+    assert resp.status_code == 403
+
+
+def test_histology_specimen_material_round_trip_once_referral_threshold_is_met():
+    """Гейт Гистологии -- один на весь предмет (не по группам, как у Анатомии) -- см.
+    handlers/histology.py::histology_access_ok. Отдельный user_id (не тот, что использует
+    большинство тестов файла), чтобы не менять состояние доступа для остальных тестов."""
+    import telegram_bot as tb  # уже импортирован предыдущими тестами (лениво, через bot_state)
+
+    unlocked_user_id = 900_444_555_666
+    tb.stats["total_users"].add(unlocked_user_id)
+    current_month = tb.local_today().strftime("%Y-%m")
+    tb.stats["referral_monthly"][str(unlocked_user_id)] = {"month": current_month, "count": 2}
+    tb.save_stats()
+
+    headers = _auth_headers(unlocked_user_id)
+    section = client.get("/api/v1/subjects/histology/sections/specimens", headers=headers).json()
+    assert all(g["locked"] is False for g in section["groups"])
+    assert all(g["locked_reason"] is None for g in section["groups"])
+
+    diagnostika_3 = next(g for g in section["groups"] if g["id"] == "diagnostika_3")
+    assert diagnostika_3["item_count"] == 23  # см. отчёт по данным
+
+    group = client.get(
+        "/api/v1/subjects/histology/sections/specimens/groups/diagnostika_1", headers=headers
+    ).json()
+    assert len(group["items"]) == 10  # см. отчёт по данным
+    first_specimen = group["items"][0]
+
+    material = client.get(
+        f"/api/v1/materials/histology/specimens/{first_specimen['id']}", headers=headers
+    )
+    assert material.status_code == 200, material.text
+    body = material.json()
+    assert body["title"] == first_specimen["title"]
+    assert body["content_html"]  # реальный протокол препарата, не заглушка
+    assert "Окраска" in body["content_html"]
+    assert body["group_id"] == "diagnostika_1"
+    assert body["prev_id"] is None
+    assert body["next_id"] == group["items"][1]["id"]
+
+
+def test_histology_unknown_diagnostic_is_not_found_not_locked():
+    headers = _auth_headers(900_444_555_666)  # уже разблокирован предыдущим тестом
+    resp = client.get(
+        "/api/v1/subjects/histology/sections/specimens/groups/diagnostika_99", headers=headers
     )
     assert resp.status_code == 404
 

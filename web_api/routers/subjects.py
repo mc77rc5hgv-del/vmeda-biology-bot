@@ -78,9 +78,47 @@ def _check_anatomy_material_access(tb, user_id: int, section_id: str, item_id: s
 def _get_material_data(tb, user_id: int, subject_id: str, section_id: str, item_id: str) -> dict:
     if subject_id == static_content.ANATOMY_ID:
         _check_anatomy_material_access(tb, user_id, section_id, item_id)
+    if subject_id == static_content.HISTOLOGY_ID:
+        _check_histology_access(tb, user_id)
     if subject_id in static_content.SUPPORTED_SUBJECT_IDS:
         return static_content.get_material(tb, subject_id, section_id, item_id)
     return content.get_material(tb.DYNAMIC_COURSES, subject_id, section_id, item_id)
+
+
+# ==================== Гейт Гистологии ====================
+# В отличие от Анатомии (гейт ПО МОДУЛЯМ), у Гистологии в самом боте один гейт на ВЕСЬ раздел
+# сразу (см. handlers/histology.py::histology_access_ok -- пробный период 7 дней с момента
+# первого визита, ИЛИ подписка, ИЛИ 2 реферала в этом месяце, ИЛИ активное промо секции/глобальное
+# промо) -- поэтому здесь один флаг на весь предмет, а не по группам-диагностикам, как у Анатомии.
+# Используем ЧИСТЫЙ предикат histology_access_ok(user_id), а не стейтфул histology_gate_ok(callback)
+# -- та же причина, что уже объясняет routers/access.py::_subject_is_open (docstring там): read-only
+# API не должно выдавать пробный доступ как побочный эффект простого GET-запроса.
+
+
+def _histology_locked_reason(tb, user_id: int) -> str | None:
+    if tb.histology_access_ok(user_id):
+        return None
+    cheapest = tb.cheapest_histology_tier()
+    return (
+        "Гистология открывается пробным доступом (при первом визите в разделе бота), подпиской "
+        f"от «{cheapest['short']}» ({cheapest['price_rub']}₽ / {cheapest['price_stars']}⭐) или "
+        "двумя рефералами в этом месяце."
+    )
+
+
+def _check_histology_access(tb, user_id: int) -> None:
+    reason = _histology_locked_reason(tb, user_id)
+    if reason is not None:
+        raise HTTPException(status_code=403, detail=reason)
+
+
+def _annotate_histology_groups(tb, user_id: int, section: dict) -> dict:
+    if section.get("id") == static_content.HISTOLOGY_SECTION_ID:
+        reason = _histology_locked_reason(tb, user_id)
+        for group in section.get("groups", []):
+            group["locked"] = reason is not None
+            group["locked_reason"] = reason
+    return section
 
 
 @router.get("/subjects")
@@ -128,6 +166,10 @@ def get_section(
         # relabel" в CLAUDE.md), только сами темы/материал внутри платного модуля закрыты (see
         # get_group/get_material ниже).
         section = _annotate_anatomy_groups(tb, user_id, section)
+    if subject_id == static_content.HISTOLOGY_ID:
+        # Список диагностик виден всем -- гейт применяется одинаково ко всем группам сразу
+        # (см. _annotate_histology_groups), а не по отдельным группам, как у Анатомии.
+        section = _annotate_histology_groups(tb, user_id, section)
     return section
 
 
@@ -145,6 +187,10 @@ def get_group(
         reason = _anatomy_module_locked_reason(tb, user_id, group_id)
         if reason is not None:
             raise HTTPException(status_code=403, detail=reason)
+    if subject_id == static_content.HISTOLOGY_ID and section_id == static_content.HISTOLOGY_SECTION_ID:
+        if group_id not in tb.HISTOLOGY:
+            raise HTTPException(status_code=404, detail=f"диагностика {group_id!r} не найдена в гистологии")
+        _check_histology_access(tb, user_id)
     try:
         if subject_id in static_content.SUPPORTED_SUBJECT_IDS:
             return static_content.get_group_detail(tb, subject_id, section_id, group_id)

@@ -11,16 +11,17 @@
 
 Подключены: «Нормальная физиология» (23 темы курса + 11 рубежных контролей), «Оперативная
 хирургия» (61 тема в 4 томах — БЕЗ инструментов/проекций/станций/контрольных вопросов, это
-отдельная задача на будущее) и «Анатомия» (107 тем в 10 модулях — только непрерывный текст
+отдельная задача на будущее), «Анатомия» (107 тем в 10 модулях — только непрерывный текст
 material[], БЕЗ флеш-карточек/сопоставления/мнемоник/картиночных тестов/разбора по костям/атласа/
 латинских терминов/экзаменационных банков — те же "честный срез" резоны, что и у Оперативной
-хирургии; см. SUPPORTED_SUBJECT_IDS ниже).
+хирургии) и «Гистология» (71 препарат в 5 диагностиках — реальный протокол описания + реальные
+микрофото, БЕЗ картиночного тренажёра "Найди препарат" — см. SUPPORTED_SUBJECT_IDS ниже).
 
 В отличие от Физиологии/Оперативной хирургии (полностью бесплатные разделы бота — см. CLAUDE.md),
-Анатомия внутри бота гейтится по модулям (ANATOMY_FREE_SECTIONS) и общим тех.режимом
-(anatomy_maintenance_mode_enabled) — этот модуль сам НИЧЕГО не проверяет (остаётся чистой функцией
-формы контента над tb.ANATOMY, как и остальные два предмета), проверка прав живёт в
-web_api/routers/subjects.py (см. _anatomy_module_access_ok там), у которого есть доступ к user_id."""
+у Анатомии и Гистологии есть собственные гейты внутри бота — этот модуль сам НИЧЕГО не проверяет
+(остаётся чистой функцией формы контента над tb.ANATOMY/tb.HISTOLOGY, как и остальные предметы),
+проверка прав живёт в web_api/routers/subjects.py (см. _anatomy_module_access_ok/
+_histology_access_ok там), у которого есть доступ к user_id."""
 from html import escape
 
 from .content import ContentNotFoundError
@@ -28,8 +29,10 @@ from .content import ContentNotFoundError
 PHYSIOLOGY_ID = "physiology"
 OPERATIVE_SURGERY_ID = "operative_surgery"
 ANATOMY_ID = "anatomy"
-SUPPORTED_SUBJECT_IDS = {PHYSIOLOGY_ID, OPERATIVE_SURGERY_ID, ANATOMY_ID}
+HISTOLOGY_ID = "histology"
+SUPPORTED_SUBJECT_IDS = {PHYSIOLOGY_ID, OPERATIVE_SURGERY_ID, ANATOMY_ID, HISTOLOGY_ID}
 ANATOMY_SECTION_ID = "course"
+HISTOLOGY_SECTION_ID = "specimens"
 
 PHYSIOLOGY_PAGE_CHAR_BUDGET = 6_000
 
@@ -60,6 +63,15 @@ def list_subject_summaries(tb) -> list[dict]:
             "title": "Анатомия",
             "emoji": "🦴",
             "description": "107 тем в 10 модулях — часть открыта всем, часть по подписке",
+            "course": 1,
+            "has_ai": True,
+        })
+    if tb.HISTOLOGY:
+        summaries.append({
+            "id": HISTOLOGY_ID,
+            "title": "Гистология",
+            "emoji": "🔬",
+            "description": "71 препарат в 5 диагностиках — протокол описания и реальные микрофото",
             "course": 1,
             "has_ai": True,
         })
@@ -100,6 +112,13 @@ def get_subject_detail(tb, subject_id: str) -> dict:
                 ),
                 "kind": "grouped",
             },
+        ]
+        return summary
+
+    if subject_id == HISTOLOGY_ID:
+        total_specimens = sum(len(group.get("specimens", [])) for group in tb.HISTOLOGY.values())
+        summary["sections"] = [
+            {"id": HISTOLOGY_SECTION_ID, "title": "Препараты", "item_count": total_specimens, "kind": "grouped"},
         ]
         return summary
 
@@ -162,6 +181,19 @@ def get_section_detail(tb, subject_id: str, section_id: str) -> dict:
             }
         raise ContentNotFoundError(f"раздел {section_id!r} не найден в физиологии")
 
+    if subject_id == HISTOLOGY_ID:
+        if section_id != HISTOLOGY_SECTION_ID:
+            raise ContentNotFoundError(f"раздел {section_id!r} не найден в гистологии")
+        return {
+            "id": section_id,
+            "title": "Препараты",
+            "kind": "grouped",
+            "groups": [
+                {"id": group_key, "title": group["title"], "item_count": len(group.get("specimens", []))}
+                for group_key, group in tb.HISTOLOGY.items()
+            ],
+        }
+
     # operative_surgery
     if section_id != "volumes":
         raise ContentNotFoundError(f"раздел {section_id!r} не найден в оперативной хирургии")
@@ -211,6 +243,23 @@ def get_group_detail(tb, subject_id: str, section_id: str, group_id: str) -> dic
             ],
         }
 
+    if subject_id == HISTOLOGY_ID:
+        if section_id != HISTOLOGY_SECTION_ID:
+            raise ContentNotFoundError(f"в разделе {section_id!r} нет групп")
+        group = tb.HISTOLOGY.get(group_id)
+        if group is None:
+            raise ContentNotFoundError(f"диагностика {group_id!r} не найдена в гистологии")
+        specimens = group.get("specimens", [])
+        total = len(specimens)
+        return {
+            "id": group_id,
+            "title": group["title"],
+            "items": [
+                {"id": specimen["id"], "title": specimen["title"], "order": index + 1, "total": total}
+                for index, specimen in enumerate(specimens)
+            ],
+        }
+
     # operative_surgery
     if section_id != "volumes":
         raise ContentNotFoundError(f"в разделе {section_id!r} нет групп")
@@ -232,6 +281,8 @@ def get_material(tb, subject_id: str, section_id: str, item_id: str) -> dict:
 
     if subject_id == ANATOMY_ID:
         return _anatomy_material(tb.ANATOMY, section_id, item_id)
+    if subject_id == HISTOLOGY_ID:
+        return _histology_material(tb.HISTOLOGY, section_id, item_id)
     if subject_id == PHYSIOLOGY_ID:
         return _physiology_material(tb.PHYSIOLOGY, section_id, item_id)
     return _operative_surgery_material(tb.OPERATIVE_SURGERY, section_id, item_id)
@@ -458,4 +509,60 @@ def _anatomy_material(anatomy: dict, section_id: str, item_id: str) -> dict:
         "prev_id": topic_keys[index - 1] if index > 0 else None,
         "next_id": topic_keys[index + 1] if index + 1 < len(topic_keys) else None,
         "media": [],
+    }
+
+
+# ==================== Гистология ====================
+# Подключён только раздел «Препараты» (71 препарат в 5 диагностиках, реальный протокол описания
+# + реальные микрофото). Картиночный тренажёр "Найди препарат" (picture_quiz-подобный режим,
+# guess_image в исходных данных) НЕ подключён в этом заходе — честный срез, не весь объём бота
+# по этому предмету (см. docstring модуля). Права доступа (пробный период/подписка/рефералы в
+# этом месяце/промо) здесь НЕ проверяются — см. docstring модуля.
+
+def _histology_find_specimen(histology: dict, specimen_id: str) -> tuple[str, dict, dict]:
+    for group_key, group in histology.items():
+        for specimen in group.get("specimens", []):
+            if specimen["id"] == specimen_id:
+                return group_key, group, specimen
+    raise ContentNotFoundError(f"препарат {specimen_id!r} не найден в гистологии")
+
+
+def _histology_specimen_html(specimen: dict) -> str:
+    parts = []
+    stain = specimen.get("stain")
+    if stain:
+        parts.append(f"<p><strong>Окраска:</strong> {escape(str(stain))}</p>")
+    magnification = specimen.get("magnification")
+    if magnification:
+        parts.append(f"<p><strong>Увеличение:</strong> ×{escape(str(magnification))}</p>")
+    protocol = str(specimen.get("protocol", "")).strip()
+    for paragraph in protocol.split("\n\n"):
+        paragraph = paragraph.strip()
+        if paragraph:
+            parts.append(f"<p>{escape(paragraph)}</p>")
+    return "\n".join(parts)
+
+
+def _histology_material(histology: dict, section_id: str, item_id: str) -> dict:
+    if section_id != HISTOLOGY_SECTION_ID:
+        raise ContentNotFoundError(f"раздел {section_id!r} не найден в гистологии")
+
+    group_key, group, specimen = _histology_find_specimen(histology, item_id)
+    specimens = group.get("specimens", [])
+    index = next(i for i, s in enumerate(specimens) if s["id"] == item_id)
+
+    return {
+        "id": item_id,
+        "title": specimen["title"],
+        "content_html": _histology_specimen_html(specimen),
+        "sources": [],
+        "order": index + 1,
+        "total": len(specimens),
+        "group_id": group_key,
+        "prev_id": specimens[index - 1]["id"] if index > 0 else None,
+        "next_id": specimens[index + 1]["id"] if index + 1 < len(specimens) else None,
+        "media": [
+            {"path": f"images/histology/{path}", "caption": specimen["title"]}
+            for path in specimen.get("images", [])
+        ],
     }
