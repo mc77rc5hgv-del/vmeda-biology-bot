@@ -17,6 +17,9 @@ ignore = ["S105", "S311"]
 # S101: these test scripts are standalone (no pytest) and use bare `assert` by design as
 # their only check mechanism — see CLAUDE.md "Tests" section.
 "tests/*.py" = ["E401", "E701", "E702", "S101"]
+# web_api/tests/*.py ARE real pytest tests (unlike tests/*.py above) — bare `assert` is the
+# idiomatic pytest pattern (pytest rewrites it for readable failure messages), not a lint issue.
+"web_api/tests/*.py" = ["S101"]
 # tests/run_all.py shells out to `python3 <fixed local test file path>` for each test file it
 # discovers itself — not attacker-controlled input.
 "tests/run_all.py" = ["S603"]

@@ -35,11 +35,6 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(SCRIPT_DIR)
 SCHEMA_PATH = os.path.join(REPO_ROOT, "db", "migrations", "0001_phase1_schema.sql")
 
-# Сентинел "точно не текущий месяц" для рефералов, у которых из JSON нельзя восстановить точную
-# дату (см. migrate_referrals() ниже) -- любая дата достаточно далеко в прошлом, чтобы
-# COUNT(*) WHERE created_at >= <начало текущего месяца> её не подхватил.
-SAFE_PAST_TIMESTAMP = datetime(2000, 1, 1, tzinfo=timezone.utc)
-
 DOMAINS = ("users", "subscriptions", "payments", "manual_grants", "referrals", "ai_usage_daily")
 
 
@@ -120,6 +115,11 @@ def migrate_users(conn, stats: dict) -> int:
 
 
 def migrate_subscriptions(conn, stats: dict) -> int:
+    """В JSON только ПОСЛЕДНЯЯ подписка на юзера -- переносим как ОДНУ строку (первая запись в
+    новой append-only истории), source_legacy_key = 'legacy_subscription_{user_id}'. Живые
+    покупки уже в Postgres добавляют новые строки с source_legacy_key = NULL -- см.
+    db/migrations/0001_phase1_schema.sql за тем, почему ON CONFLICT именно на этой колонке,
+    а не на (user_id, purchased_at) (была реальная дыра при повторном прогоне)."""
     subs = stats.get("subscriptions", {})
     rows = []
     for uid_str, sub in subs.items():
@@ -141,6 +141,7 @@ def migrate_subscriptions(conn, stats: dict) -> int:
             sub.get("ai_used_period", 0),
             ai_monthly.get("month"),
             ai_monthly.get("count", 0),
+            f"legacy_subscription_{uid_str}",
         ))
     if not rows:
         return 0
@@ -150,9 +151,10 @@ def migrate_subscriptions(conn, stats: dict) -> int:
             """INSERT INTO subscriptions
                (user_id, tier, restricted_subject, expires, histology_access, histology_until,
                 anatomy, biology_download, cheat_sheets, subscription_version, purchased_at,
-                method, price, ai_used_period, ai_used_monthly_month, ai_used_monthly_count)
+                method, price, ai_used_period, ai_used_monthly_month, ai_used_monthly_count,
+                source_legacy_key)
                VALUES %s
-               ON CONFLICT (user_id, purchased_at) DO NOTHING""",
+               ON CONFLICT (source_legacy_key) DO NOTHING""",
             rows,
         )
     return len(rows)
@@ -217,54 +219,53 @@ def migrate_manual_grants(conn, stats: dict) -> int:
     return len(rows)
 
 
-def _current_month_key_msk() -> str:
-    # МСК = UTC+3 круглый год (см. telegram_bot.APP_TIMEZONE) -- этот скрипт намеренно не
-    # импортирует telegram_bot (тяжёлый импорт, требует BOT_TOKEN и т.п.), поэтому offset
-    # захардкожен здесь же, тем же способом.
-    from datetime import timedelta
-    now_msk = datetime.now(timezone(timedelta(hours=3)))
-    return now_msk.strftime("%Y-%m")
-
-
 def migrate_referrals(conn, stats: dict) -> int:
-    """stats["referrals"][referrer] -- плоский список referred_id в ХРОНОЛОГИЧЕСКОМ порядке
-    (register_referral() всегда делает refs.append(...), никогда не переупорядочивает), но БЕЗ
-    таймстампов, и накапливается ЗА ВСЕ МЕСЯЦЫ, а не только текущий.
+    """stats["referrals"][referrer] -- плоский список referred_id, БЕЗ таймстампов на каждый
+    отдельный реферал. Backfilled-строки получают created_at = NULL ("дата неизвестна") --
+    round 1 этого скрипта пыталось угадать, какие рефералы "относятся к текущему месяцу" по
+    хвосту списка + stats["referral_monthly"], но это лишний и хрупкий шаг: правильное решение —
+    перенести stats["referral_monthly"][referrer] = {month, count} КАК ЕСТЬ, одним снимком, в
+    отдельную referral_monthly_legacy_credit, и оставить формулу месячного счёта переходной (см.
+    design doc §2 и комментарий над этой таблицей в db/migrations/0001_phase1_schema.sql):
 
-    Наивный backfill с created_at=now() для всех строк был бы багом: после cutover
-    get_referral_count_this_month() = COUNT(*) WHERE created_at >= начало месяца — если
-    ВСЕ исторические рефералы получат "сегодня", любой давний реферер, у которого месячный
-    счётчик сейчас 0, внезапно снова получит доступ в день миграции.
+        legacy_credit.count (если legacy_credit.month = текущий МСК-месяц, иначе 0)
+        + COUNT(*) FROM referrals WHERE referrer_id = ? AND created_at >= <начало текущего месяца>
 
-    Вместо этого используем stats["referral_monthly"][referrer] = {month, count}: если её month
-    совпадает с текущим МСК-месяцем, ровно последние `count` элементов списка (порядок сохранён)
-    действительно относятся к этому месяцу -> им ставим "сейчас"; всё, что раньше -- заведомо
-    прошлый период -> SAFE_PAST_TIMESTAMP, чтобы точно не попасть в текущее окно."""
+    NULL created_at в это сравнение никогда не попадает -- исторические рефералы не задваивают и
+    не обнуляют ничей месячный счёт при cutover, а после смены календарного месяца снимок сам
+    перестаёт что-либо давать (без отдельной миграции/крона)."""
     referrals = stats.get("referrals", {})
     referral_monthly = stats.get("referral_monthly", {})
-    current_month = _current_month_key_msk()
-    now = datetime.now(timezone.utc)
 
     rows = []
     for referrer_str, referred_list in referrals.items():
         referrer_id = int(referrer_str)
-        monthly = referral_monthly.get(referrer_str) or {}
-        n_current_month = 0
-        if monthly.get("month") == current_month:
-            n_current_month = min(monthly.get("count", 0), len(referred_list))
-        cutoff = len(referred_list) - n_current_month
-        for i, referred_id in enumerate(referred_list):
-            created_at = now if i >= cutoff else SAFE_PAST_TIMESTAMP
-            rows.append((int(referred_id), referrer_id, created_at))
-    if not rows:
-        return 0
-    with conn.cursor() as cur:
-        psycopg2.extras.execute_values(
-            cur,
-            """INSERT INTO referrals (referred_id, referrer_id, created_at) VALUES %s
-               ON CONFLICT (referred_id) DO NOTHING""",
-            rows,
-        )
+        for referred_id in referred_list:
+            rows.append((int(referred_id), referrer_id, None))
+    if rows:
+        with conn.cursor() as cur:
+            psycopg2.extras.execute_values(
+                cur,
+                """INSERT INTO referrals (referred_id, referrer_id, created_at) VALUES %s
+                   ON CONFLICT (referred_id) DO NOTHING""",
+                rows,
+            )
+
+    legacy_credit_rows = []
+    for uid_str, entry in referral_monthly.items():
+        month = entry.get("month")
+        if not month:
+            continue
+        legacy_credit_rows.append((int(uid_str), month, entry.get("count", 0)))
+    if legacy_credit_rows:
+        with conn.cursor() as cur:
+            psycopg2.extras.execute_values(
+                cur,
+                """INSERT INTO referral_monthly_legacy_credit (user_id, month, count) VALUES %s
+                   ON CONFLICT (user_id) DO UPDATE
+                   SET month = EXCLUDED.month, count = EXCLUDED.count""",
+                legacy_credit_rows,
+            )
 
     warning_rows = []
     for uid_str, entry in stats.get("referral_warnings", {}).items():
