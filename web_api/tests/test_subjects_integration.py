@@ -48,7 +48,7 @@ def test_list_subjects_includes_real_dynamic_courses():
     resp = client.get("/api/v1/subjects", headers=_auth_headers())
     assert resp.status_code == 200
     ids = {s["id"] for s in resp.json()}
-    assert {"biochemistry", "pharmacology", "latin", "law"} <= ids
+    assert {"biochemistry", "pharmacology", "latin", "law", "physiology"} <= ids
 
 
 def test_list_subjects_requires_auth():
@@ -125,6 +125,52 @@ def test_unknown_material_returns_404():
         "/api/v1/materials/biochemistry/core_course/does-not-exist", headers=_auth_headers()
     )
     assert resp.status_code == 404
+
+
+def test_physiology_course_and_boundary_control_round_trip():
+    headers = _auth_headers()
+    detail = client.get("/api/v1/subjects/physiology", headers=headers)
+    assert detail.status_code == 200, detail.text
+    sections = {section["id"]: section for section in detail.json()["sections"]}
+    assert sections["course"]["item_count"] == 23
+    assert sections["boundary-controls"]["kind"] == "grouped"
+
+    course = client.get("/api/v1/subjects/physiology/sections/course", headers=headers).json()
+    first_topic = course["items"][0]
+    material = client.get(
+        f"/api/v1/materials/physiology/course/{first_topic['id']}", headers=headers
+    )
+    assert material.status_code == 200, material.text
+    assert material.json()["title"] == first_topic["title"]
+    assert material.json()["content_html"]
+    assert material.json()["sources"] == []
+
+    controls = client.get(
+        "/api/v1/subjects/physiology/sections/boundary-controls", headers=headers
+    ).json()
+    assert len(controls["groups"]) == 11
+    first_control_id = controls["groups"][0]["id"]
+    group = client.get(
+        f"/api/v1/subjects/physiology/sections/boundary-controls/groups/{first_control_id}",
+        headers=headers,
+    ).json()
+    assert group["items"]
+
+    media_material = None
+    for item in group["items"]:
+        candidate = client.get(
+            f"/api/v1/materials/physiology/boundary-controls/{item['id']}", headers=headers
+        ).json()
+        if candidate["media"]:
+            media_material = candidate
+            break
+    assert media_material is not None
+    media = client.get(
+        f"/api/v1/materials/physiology/boundary-controls/{media_material['id']}/media/0",
+        headers=headers,
+    )
+    assert media.status_code == 200
+    assert media.content
 
 
 def test_media_endpoint_serves_real_file_when_present():

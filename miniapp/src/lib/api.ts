@@ -1,7 +1,7 @@
 // Диспетчер: каждая функция здесь пробует НАСТОЯЩИЙ web_api, если он реально что-то знает про
-// запрошенное (см. REAL_BACKED_SUBJECT_IDS ниже), и молча падает обратно на mockData.ts, если
+// запрошенное (см. REAL_BACKED_SUBJECT_IDS ниже), и использует mockData.ts, если
 // нет — либо потому что backend не подключён вообще (нет сессии), либо потому что конкретный
-// предмет ещё не имеет контент-адаптера на бэкенде (7 из 11 предметов, см. web_api/README.md).
+// предмет ещё не имеет контент-адаптера на бэкенде (6 из 11 предметов, см. web_api/README.md).
 // Компоненты про это ветвление не знают — они видят только эти функции.
 import * as apiClient from "./apiClient";
 import * as mock from "./mockData";
@@ -29,8 +29,8 @@ function resolveAfterDelay<T>(value: T): Promise<T> {
 
 // См. web_api/content.py -- список предметов, у которых есть настоящий контент-адаптер. Держать
 // синхронно с REPO_ROOT/web_api/routers/subjects.py вручную -- backend не отдаёт "список
-// подключённых предметов" отдельным полем, а список из четырёх статичен и меняется редко.
-const REAL_BACKED_SUBJECT_IDS = new Set(["biochemistry", "pharmacology", "latin", "law"]);
+// подключённых предметов" отдельным полем, а этот список статичен и меняется редко.
+const REAL_BACKED_SUBJECT_IDS = new Set(["biochemistry", "pharmacology", "latin", "law", "physiology"]);
 
 export function isRealBackedSubject(subjectId: string): boolean {
   return REAL_BACKED_SUBJECT_IDS.has(subjectId);
@@ -66,7 +66,7 @@ export async function fetchSubjects(): Promise<SubjectSummary[]> {
   try {
     const real = await apiClient.fetchRealSubjects();
     // Реальные карточки заменяют собой mock-версии тех же самых предметов (не дублируют) --
-    // остальные 7 статичных предметов по-прежнему идут из mockData.ts, пока не появится их
+    // остальные 6 предметов по-прежнему идут из mockData.ts, пока не появится их
     // собственный контент-адаптер.
     return [...real, ...mockSubjects];
   } catch (err) {

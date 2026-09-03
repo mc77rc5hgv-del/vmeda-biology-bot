@@ -95,19 +95,21 @@ export function SubjectPage() {
             ))}
           </div>
 
-          <PressableCard
-            className={styles.sectionRow}
-            onClick={() => {
-              hapticSelection();
-              navigate(`/tests/${subject.id}`);
-            }}
-          >
-            <div>
-              <div className={styles.sectionTitle}>Тест по предмету</div>
-              <div className={styles.sectionCount}>Проверить себя</div>
-            </div>
-            <Icon icon={SquareCheckBig} size={18} color="var(--ink-secondary)" />
-          </PressableCard>
+          {!isRealBackedSubject(subject.id) && (
+            <PressableCard
+              className={styles.sectionRow}
+              onClick={() => {
+                hapticSelection();
+                navigate(`/tests/${subject.id}`);
+              }}
+            >
+              <div>
+                <div className={styles.sectionTitle}>Тест по предмету</div>
+                <div className={styles.sectionCount}>Проверить себя</div>
+              </div>
+              <Icon icon={SquareCheckBig} size={18} color="var(--ink-secondary)" />
+            </PressableCard>
+          )}
         </>
       )}
     </div>

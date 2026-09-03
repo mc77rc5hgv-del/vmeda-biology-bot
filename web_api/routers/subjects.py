@@ -3,13 +3,13 @@ import os
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 
-from .. import content
+from .. import content, static_content
 from ..deps import get_current_user_id, get_fresh_bot_module
 
 router = APIRouter(prefix="/api/v1", tags=["subjects"])
 
-# Скоуп этого первого прохода адаптера -- см. docstring web_api/content.py: только "динамические"
-# предметы (generated_courses/*.json), не статичные (Физика/Химия/Биология/...).
+# Динамические предметы идут через content.py; постепенно подключаемые статичные — через
+# static_content.py. Маршруты остаются едиными для клиента.
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
@@ -17,12 +17,21 @@ def _not_found(exc: content.ContentNotFoundError) -> HTTPException:
     return HTTPException(status_code=404, detail=str(exc))
 
 
+def _get_material_data(tb, subject_id: str, section_id: str, item_id: str) -> dict:
+    if subject_id == static_content.PHYSIOLOGY_ID:
+        return static_content.get_material(tb.PHYSIOLOGY, subject_id, section_id, item_id)
+    return content.get_material(tb.DYNAMIC_COURSES, subject_id, section_id, item_id)
+
+
 @router.get("/subjects")
 def list_subjects(
     _user_id: int = Depends(get_current_user_id),
     tb=Depends(get_fresh_bot_module),
 ) -> list[dict]:
-    return [content.to_subject_summary(course) for course in tb.DYNAMIC_COURSES]
+    return [
+        *[content.to_subject_summary(course) for course in tb.DYNAMIC_COURSES],
+        *static_content.list_subject_summaries(tb.PHYSIOLOGY),
+    ]
 
 
 @router.get("/subjects/{subject_id}")
@@ -32,6 +41,8 @@ def get_subject(
     tb=Depends(get_fresh_bot_module),
 ) -> dict:
     try:
+        if subject_id == static_content.PHYSIOLOGY_ID:
+            return static_content.get_subject_detail(tb.PHYSIOLOGY, subject_id)
         return content.get_subject_detail(tb.DYNAMIC_COURSES, subject_id)
     except content.ContentNotFoundError as exc:
         raise _not_found(exc) from exc
@@ -45,6 +56,8 @@ def get_section(
     tb=Depends(get_fresh_bot_module),
 ) -> dict:
     try:
+        if subject_id == static_content.PHYSIOLOGY_ID:
+            return static_content.get_section_detail(tb.PHYSIOLOGY, subject_id, section_id)
         return content.get_section_detail(tb.DYNAMIC_COURSES, subject_id, section_id)
     except content.ContentNotFoundError as exc:
         raise _not_found(exc) from exc
@@ -59,6 +72,8 @@ def get_group(
     tb=Depends(get_fresh_bot_module),
 ) -> dict:
     try:
+        if subject_id == static_content.PHYSIOLOGY_ID:
+            return static_content.get_group_detail(tb.PHYSIOLOGY, subject_id, section_id, group_id)
         return content.get_group_detail(tb.DYNAMIC_COURSES, subject_id, section_id, group_id)
     except content.ContentNotFoundError as exc:
         raise _not_found(exc) from exc
@@ -73,7 +88,7 @@ def get_material(
     tb=Depends(get_fresh_bot_module),
 ) -> dict:
     try:
-        return content.get_material(tb.DYNAMIC_COURSES, subject_id, section_id, item_id)
+        return _get_material_data(tb, subject_id, section_id, item_id)
     except content.ContentNotFoundError as exc:
         raise _not_found(exc) from exc
 
@@ -94,7 +109,7 @@ def get_material_media(
     цена проверки нулевая, а её отсутствие было бы тихим допущением, которое легко сломать
     неаккуратной правкой JSON в будущем)."""
     try:
-        material = content.get_material(tb.DYNAMIC_COURSES, subject_id, section_id, item_id)
+        material = _get_material_data(tb, subject_id, section_id, item_id)
     except content.ContentNotFoundError as exc:
         raise _not_found(exc) from exc
 
