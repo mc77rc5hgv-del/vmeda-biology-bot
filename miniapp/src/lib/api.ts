@@ -1,12 +1,17 @@
-// Единственный файл, который нужно будет переписать на реальные fetch('/api/v1/...') вызовы,
-// когда backend (web_api/, Этап 3 ТЗ) будет готов — все страницы уже сегодня ходят только сюда,
-// а не в lib/mockData.ts напрямую, так что подключение реального API не потребует трогать компоненты.
+// Диспетчер: каждая функция здесь пробует НАСТОЯЩИЙ web_api, если он реально что-то знает про
+// запрошенное (см. REAL_BACKED_SUBJECT_IDS ниже), и молча падает обратно на mockData.ts, если
+// нет — либо потому что backend не подключён вообще (нет сессии), либо потому что конкретный
+// предмет ещё не имеет контент-адаптера на бэкенде (7 из 11 предметов, см. web_api/README.md).
+// Компоненты про это ветвление не знают — они видят только эти функции.
+import * as apiClient from "./apiClient";
 import * as mock from "./mockData";
+import { useAuthStore } from "./store";
 import type {
   AccessStatus,
   ContinueItem,
   DashboardStats,
   MaterialDetail,
+  SectionContents,
   SubjectDetail,
   SubjectSummary,
   TestQuestion,
@@ -22,11 +27,35 @@ function resolveAfterDelay<T>(value: T): Promise<T> {
   return new Promise((resolve) => setTimeout(() => resolve(value), MOCK_DELAY_MS));
 }
 
-export function fetchMe(): Promise<UserProfile> {
+// См. web_api/content.py -- список предметов, у которых есть настоящий контент-адаптер. Держать
+// синхронно с REPO_ROOT/web_api/routers/subjects.py вручную -- backend не отдаёт "список
+// подключённых предметов" отдельным полем, а список из четырёх статичен и меняется редко.
+const REAL_BACKED_SUBJECT_IDS = new Set(["biochemistry", "pharmacology", "latin", "law"]);
+
+export function isRealBackedSubject(subjectId: string): boolean {
+  return REAL_BACKED_SUBJECT_IDS.has(subjectId);
+}
+
+function hasSession(): boolean {
+  return apiClient.hasStoredSession();
+}
+
+export async function fetchMe(): Promise<UserProfile> {
+  if (hasSession()) {
+    try {
+      const authProfile = useAuthStore.getState().profile;
+      const me = await apiClient.fetchRealMe();
+      if (authProfile) return apiClient.mergeProfile(authProfile, me);
+    } catch (err) {
+      console.warn("fetchMe: real /api/v1/me failed, falling back to mock", err);
+    }
+  }
   return resolveAfterDelay(mock.mockUser);
 }
 
 export function fetchDashboard(): Promise<DashboardStats> {
+  // Готовность/серия/XP считаются backend'ом по формуле §13 ТЗ -- эндпоинта для них ещё нет
+  // (см. web_api/README.md "Что дальше"), поэтому пока всегда mock, вне зависимости от сессии.
   return resolveAfterDelay(mock.mockDashboard);
 }
 
@@ -34,15 +63,53 @@ export function fetchContinueItem(): Promise<ContinueItem | null> {
   return resolveAfterDelay(mock.mockContinue);
 }
 
-export function fetchSubjects(): Promise<SubjectSummary[]> {
-  return resolveAfterDelay(mock.mockSubjects);
+export async function fetchSubjects(): Promise<SubjectSummary[]> {
+  const mockSubjects = mock.mockSubjects.filter((s) => !REAL_BACKED_SUBJECT_IDS.has(s.id));
+  if (!hasSession()) return resolveAfterDelay(mock.mockSubjects);
+  try {
+    const real = await apiClient.fetchRealSubjects();
+    // Реальные карточки заменяют собой mock-версии тех же самых предметов (не дублируют) --
+    // остальные 7 статичных предметов по-прежнему идут из mockData.ts, пока не появится их
+    // собственный контент-адаптер.
+    return [...real, ...mockSubjects];
+  } catch (err) {
+    console.warn("fetchSubjects: real /api/v1/subjects failed, falling back to mock", err);
+    return mock.mockSubjects;
+  }
 }
 
-export function fetchSubjectDetail(subjectId: string): Promise<SubjectDetail | null> {
+export async function fetchSubjectDetail(subjectId: string): Promise<SubjectDetail | null> {
+  if (hasSession() && REAL_BACKED_SUBJECT_IDS.has(subjectId)) {
+    try {
+      return await apiClient.fetchRealSubjectDetail(subjectId);
+    } catch (err) {
+      console.warn(`fetchSubjectDetail(${subjectId}): real API failed, falling back to mock`, err);
+    }
+  }
   return resolveAfterDelay(mock.getSubjectDetail(subjectId));
 }
 
-export function fetchMaterial(subjectId: string, sectionId: string, materialId: string): Promise<MaterialDetail | null> {
+export async function fetchSection(subjectId: string, sectionId: string): Promise<SectionContents | null> {
+  if (!REAL_BACKED_SUBJECT_IDS.has(subjectId)) return null; // mock-предметы: нет списка элементов, см. SectionPage
+  return apiClient.fetchRealSection(subjectId, sectionId);
+}
+
+export async function fetchGroup(subjectId: string, sectionId: string, groupId: string) {
+  return apiClient.fetchRealGroup(subjectId, sectionId, groupId);
+}
+
+export async function fetchMaterial(
+  subjectId: string,
+  sectionId: string,
+  materialId: string
+): Promise<MaterialDetail | null> {
+  if (hasSession() && REAL_BACKED_SUBJECT_IDS.has(subjectId)) {
+    try {
+      return await apiClient.fetchRealMaterial(subjectId, sectionId, materialId);
+    } catch (err) {
+      console.warn(`fetchMaterial(${subjectId}): real API failed, falling back to mock`, err);
+    }
+  }
   return resolveAfterDelay(mock.getMaterial(subjectId, sectionId, materialId));
 }
 

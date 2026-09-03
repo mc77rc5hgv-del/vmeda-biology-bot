@@ -1,7 +1,7 @@
 import { ChevronRight, Lock, SquareCheckBig } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
-import { fetchAccessStatus, fetchSubjectDetail } from "../lib/api";
+import { fetchAccessStatus, fetchSubjectDetail, isRealBackedSubject } from "../lib/api";
 import { hapticSelection, useTelegramBackButton } from "../lib/telegram";
 import { PressableCard } from "../components/Card";
 import { Icon } from "../components/Icon";
@@ -74,7 +74,14 @@ export function SubjectPage() {
                 className={styles.sectionRow}
                 onClick={() => {
                   hapticSelection();
-                  navigate(`/materials/${subject.id}/${section.id}/1`);
+                  // Реальные предметы: раздел может содержать сотни/тысячи элементов (см.
+                  // web_api/content.py) — сначала список (SectionPage), а не сразу материал #1.
+                  // Mock-предметы (Этап 2): такого списка нет, старое поведение не трогаем.
+                  if (isRealBackedSubject(subject.id)) {
+                    navigate(`/subjects/${subject.id}/sections/${section.id}`);
+                  } else {
+                    navigate(`/materials/${subject.id}/${section.id}/1`);
+                  }
                 }}
               >
                 <div>
