@@ -57,12 +57,17 @@ def test_full_auth_and_me_flow_for_unknown_user():
     """Пользователь, которого бот никогда раньше не видел (случайный ID) -- /api/v1/me не должен
     падать, а должен вернуть честные дефолты: нет доступа, нет подписки, не админ, 0 рефералов."""
     unknown_user_id = 900123456789  # заведомо не в ADMIN_IDS и не в тестовых фикстурах
-    init_data = build_signed_init_data(TEST_BOT_TOKEN, {"id": unknown_user_id, "first_name": "Незнакомец"})
+    init_data = build_signed_init_data(
+        TEST_BOT_TOKEN, {"id": unknown_user_id, "first_name": "Незнакомец", "username": "unknown_guy"}
+    )
 
     auth_resp = client.post("/api/v1/auth/telegram", json={"init_data": init_data})
     assert auth_resp.status_code == 200, auth_resp.text
     body = auth_resp.json()
     assert body["user_id"] == unknown_user_id
+    # Профиль -- из initData (самой свежей), не из stats.json, где этого пользователя вообще нет.
+    assert body["first_name"] == "Незнакомец"
+    assert body["username"] == "unknown_guy"
     session_token = body["session_token"]
     assert session_token
 

@@ -6,8 +6,19 @@ class TelegramAuthRequest(BaseModel):
 
 
 class TelegramAuthResponse(BaseModel):
+    """first_name/last_name/username/photo_url приходят из ТОЛЬКО ЧТО провалидированной initData
+    (auth.verify_telegram_init_data), не из stats.json -- Telegram передаёт их заново при каждом
+    открытии Mini App, так что это самые свежие данные о пользователе, какие вообще бывают,
+    точнее того, что бот успел записать при последнем /start. MeResponse (см. ниже) намеренно НЕ
+    дублирует эти поля -- она читает состояние доступа/рефералов из stats.json и вызывается
+    отдельно, без initData под рукой; фронт берёт профиль отсюда (из ответа на аутентификацию),
+    а /api/v1/me -- только для того, что реально живёт в stats.json."""
     session_token: str
     user_id: int
+    first_name: str | None = None
+    last_name: str | None = None
+    username: str | None = None
+    photo_url: str | None = None
 
 
 class MeResponse(BaseModel):

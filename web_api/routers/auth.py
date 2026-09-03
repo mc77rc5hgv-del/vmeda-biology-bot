@@ -18,6 +18,14 @@ def auth_telegram(payload: TelegramAuthRequest) -> TelegramAuthResponse:
     except InitDataError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
 
-    user_id = verified["user"]["id"]
+    user = verified["user"]
+    user_id = user["id"]
     token = create_session_token(user_id, config.SESSION_SECRET)
-    return TelegramAuthResponse(session_token=token, user_id=user_id)
+    return TelegramAuthResponse(
+        session_token=token,
+        user_id=user_id,
+        first_name=user.get("first_name"),
+        last_name=user.get("last_name"),
+        username=user.get("username"),
+        photo_url=user.get("photo_url"),
+    )
