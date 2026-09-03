@@ -860,6 +860,22 @@ subscription-grant flows rather than duplicating their logic — so a subscripti
 through the same `record_subscription_tier` → (`record_subscription_subject` if needed) →
 `grant_subscription_and_notify_buyer()` path as the original `admin_subscription_prompt` entry point.
 
+**The `"dm_message"` step of the direct admin DM flow accepts a sticker as well as text.**
+`handle_admin_pending_action` (`@dp.message(F.text)`) never sees a sticker message at all — a sticker has
+`message.text is None`, so aiogram never even routes it there — which is why a plain photo/sticker sent while
+`"dm_message"` was pending used to just silently do nothing (no confirmation, no error). `handle_admin_dm_sticker`
+(`@dp.message(F.sticker)`, right after `handle_admin_pending_action` in `telegram_bot.py`) is a second, narrow
+handler that fires only when `ADMIN_PENDING[admin_id]["action"] == "dm_message"` — same
+`is_admin_or_assistant`-free `is_admin` check as the rest of the direct DM flow, plain early `return` (not
+`SkipHandler`) since it's the bot's only sticker handler, same reasoning as `handle_ai_photo_input` being the
+bot's only photo handler. `send_sticker` has no `caption` parameter (unlike `send_photo`), so the
+"✉️ Личное сообщение от администрации" header can't ride along on the sticker itself — it goes out as its own
+preceding text message instead, then the sticker. This is deliberately scoped to ONLY the direct admin flow
+(`ADMIN_PENDING`) — the assistant's own moderated DM flow (`ASSISTANT_PENDING`/`ASSISTANT_DM_REQUESTS`, see
+below) still text-only, since its approve/reject queue is built entirely around a stored `text_html` string
+(the admin's own review screen renders "Текст:\n{text_html}"); extending that to stickers would mean reworking
+the request record shape and both the notify/approve/reject renderers, not just adding a second handler.
+
 **Content search** (`"🔍 Поиск по контенту"`, `admin_content_search_prompt` → the `"content_search"` action →
 `get_admin_content_search_text(query)`) is a read-only, cross-subject substring search so an admin can find the
 exact question behind a complaint ("вопрос про X неправильный") without paging through a subject's normal
