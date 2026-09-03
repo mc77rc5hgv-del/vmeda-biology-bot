@@ -35,6 +35,26 @@
   white-space: pre-line;
 }
 
+/* Таблицы/структурные формулы источника (см. scripts/reflow_generated_course_content.py) --
+   строки, которые нельзя честно перелить в обычную прозу, приходят одним <pre>-блоком внутри
+   .blockBody. pre-wrap (а не голый "pre" из UA-стиля) переносит длинные строки по ширине экрана
+   вместо горизонтального скролла всей страницы -- ни одна строка не обрезается и не теряется,
+   просто оборачивается; overflow-x/word-break остаются страховкой на случай одного очень
+   длинного нераздельного токена. */
+.blockBody pre {
+  margin: var(--space-1) 0;
+  padding: var(--space-2);
+  background: var(--surface-secondary);
+  border-radius: var(--radius-md);
+  font-family: ui-monospace, "SF Mono", "Roboto Mono", Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-x: auto;
+}
+
 .media {
   display: block;
   width: 100%;
