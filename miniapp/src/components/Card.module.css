@@ -1,0 +1,25 @@
+.card {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  padding: var(--space-5);
+}
+
+.card.flat {
+  box-shadow: none;
+  border: 1px solid var(--border);
+}
+
+.pressable {
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+  text-align: left;
+  width: 100%;
+  border: none;
+  color: inherit;
+  font: inherit;
+}
+
+.pressable:active {
+  transform: scale(0.98);
+}

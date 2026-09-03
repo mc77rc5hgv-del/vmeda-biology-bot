@@ -1,0 +1,105 @@
+.subjectRow {
+  display: flex;
+  gap: var(--space-2);
+  overflow-x: auto;
+  padding-bottom: var(--space-1);
+}
+
+.subjectChip {
+  flex-shrink: 0;
+  min-height: 36px;
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-secondary);
+  white-space: nowrap;
+}
+
+.subjectChipActive {
+  background: var(--navy);
+  color: #fff;
+  border-color: var(--navy);
+}
+
+.modeRow {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.modeButton {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: 48px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--ink-secondary);
+}
+
+.modeButtonActive {
+  border-color: var(--academic-blue);
+  color: var(--academic-blue);
+  background: var(--surface);
+}
+
+.dropZone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-8) var(--space-4);
+  border: 2px dashed var(--border);
+  border-radius: var(--radius-lg);
+  color: var(--ink-secondary);
+  text-align: center;
+}
+
+.textArea {
+  width: 100%;
+  min-height: 96px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  padding: var(--space-3);
+  font: inherit;
+  font-size: 14px;
+  color: var(--ink);
+  resize: vertical;
+}
+
+.submit {
+  min-height: var(--tap-min);
+  border-radius: var(--radius-pill);
+  background: var(--academy-red);
+  color: #fff;
+  font-weight: 600;
+}
+
+.submit:disabled {
+  opacity: 0.5;
+}
+
+.confidenceNote {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 12px;
+  color: var(--warning);
+  background: var(--amber-tint);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+}
+
+.answerBody {
+  font-size: 14px;
+  line-height: 1.55;
+  white-space: pre-line;
+}

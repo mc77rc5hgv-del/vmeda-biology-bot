@@ -1,0 +1,83 @@
+@import "./tokens.css";
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--background);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior-y: none;
+}
+
+#root {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+h1, h2, h3, p {
+  margin: 0;
+}
+
+button {
+  font-family: inherit;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+img, svg {
+  display: block;
+  max-width: 100%;
+}
+
+/* Фокус — виден всегда, не только при keyboard-навигации (§18 ТЗ): в Mini App пользователь
+   почти всегда на тачскрине, но требование доступности не делаем условным. */
+:focus-visible {
+  outline: 2px solid var(--academic-blue);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Область прокрутки экрана — верхний отступ под системную зону Telegram (шапка клиента),
+   нижний — под safe-area устройства (§18 ТЗ: "отсутствие элементов под системными областями"). */
+.screen {
+  padding-top: calc(var(--safe-top) + var(--space-4));
+  padding-bottom: calc(var(--safe-bottom) + var(--space-8));
+  padding-left: var(--space-4);
+  padding-right: var(--space-4);
+  max-width: 560px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}

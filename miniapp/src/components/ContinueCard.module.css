@@ -1,0 +1,50 @@
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  background: linear-gradient(135deg, var(--navy) 0%, #1F2E4E 100%);
+  color: var(--ink-inverse);
+  box-shadow: var(--shadow-pop);
+}
+
+.eyebrow {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.title {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.meta {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.progressWrap {
+  flex: 1;
+}
+
+.cta {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  background: var(--academy-red);
+  color: #fff;
+  font-weight: 600;
+  font-size: 13px;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-pill);
+  min-height: var(--tap-min);
+  white-space: nowrap;
+}

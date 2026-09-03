@@ -1,0 +1,121 @@
+/* Design tokens — единственное место, где живут значения цвета/радиуса/отступа/тени.
+   Компоненты и страницы всегда используют var(--...), никогда сырые hex/px. */
+
+:root {
+  /* ---- Base palette (light), см. ТЗ раздел 7 ---- */
+  --background: #F5F4F1;
+  --surface: #FFFFFF;
+  --surface-secondary: #EEF2F8;
+
+  --ink: #111827;
+  --ink-secondary: #667085;
+  --ink-inverse: #FFFFFF;
+
+  --navy: #16213A;
+  --academy-red: #C43B45;
+  --academic-blue: #3157A4;
+  --muted-teal: #3E8C88;
+  --amber: #C98936;
+
+  --border: #DDE2EA;
+  --success: #2F8A68;
+  --warning: #C98936;
+  --danger: #C43B45;
+
+  /* Полупрозрачные версии акцентов — подложки предметных карточек/бейджей,
+     не отдельный цвет, а модификатор одного и того же токена (см. §9 ТЗ: "собственный
+     микродизайн предмета, но единые компоненты"). Заданы явным hex+alpha, а не через CSS
+     Relative Color Syntax (rgb(from ...)) — та часть спецификации не гарантированно
+     поддерживается системным WebView внутри Telegram на старых Android-устройствах. */
+  --academy-red-tint: #C43B451F;
+  --academic-blue-tint: #3157A41F;
+  --muted-teal-tint: #3E8C881F;
+  --amber-tint: #C989361F;
+  --navy-tint: #16213A14;
+
+  /* ---- Геометрия / типографика ---- */
+  --radius-sm: 10px;
+  --radius-md: 16px;
+  --radius-lg: 22px;
+  --radius-pill: 999px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, system-ui, sans-serif;
+
+  --shadow-card: 0 1px 2px rgb(17 24 39 / 4%), 0 8px 20px rgb(17 24 39 / 6%);
+  --shadow-pop: 0 4px 12px rgb(17 24 39 / 10%);
+
+  --tap-min: 44px; /* минимальная область нажатия, см. §18 ТЗ */
+
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+
+  color-scheme: light;
+}
+
+/* ---- Тёмная тема ----
+   Источник истины — Telegram WebApp.colorScheme (см. lib/telegram.ts), который проставляет
+   атрибут [data-theme] на <html>. prefers-color-scheme — запасной вариант ДО того, как скрипт
+   Telegram успел инициализироваться (первый кадр рендера). */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --background: #0F1115;
+    --surface: #191C22;
+    --surface-secondary: #20242C;
+
+    --ink: #F2F3F5;
+    --ink-secondary: #9AA3B2;
+    --ink-inverse: #111827;
+
+    --navy: #C9D3E6;
+    --border: #2B303A;
+
+    --shadow-card: 0 1px 2px rgb(0 0 0 / 30%), 0 8px 20px rgb(0 0 0 / 30%);
+    --shadow-pop: 0 4px 14px rgb(0 0 0 / 40%);
+
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] {
+  --background: #0F1115;
+  --surface: #191C22;
+  --surface-secondary: #20242C;
+
+  --ink: #F2F3F5;
+  --ink-secondary: #9AA3B2;
+  --ink-inverse: #111827;
+
+  --navy: #C9D3E6;
+  --border: #2B303A;
+
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 30%), 0 8px 20px rgb(0 0 0 / 30%);
+  --shadow-pop: 0 4px 14px rgb(0 0 0 / 40%);
+
+  color-scheme: dark;
+}
+
+/* Предметные акценты — единая точка правки цвета конкретного предмета (§9 ТЗ).
+   Компонент SubjectCard берёт цвет через var(--subject-accent), инлайново проставляя
+   style={{ '--subject-accent': tokens.physiology }} — так каждая карточка красится одним
+   CSS custom property, без дублирования палитры в JS. */
+:root {
+  --subject-physiology: var(--academy-red);
+  --subject-operative-surgery: var(--muted-teal);
+  --subject-biochemistry: var(--academic-blue);
+  --subject-pharmacology: var(--amber);
+  --subject-biology: #4E8B5C;
+  --subject-physics: #3157A4;
+  --subject-chemistry: #8A5FB0;
+  --subject-anatomy: #8A6D3E;
+  --subject-histology: #C43B45;
+  --subject-latin: #6B7280;
+  --subject-law: #16213A;
+}

@@ -1,0 +1,39 @@
+.bar {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.pill {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  background: var(--surface);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-3);
+  box-shadow: var(--shadow-card);
+  min-height: var(--tap-min);
+}
+
+.iconWrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+
+.value {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink);
+  line-height: 1.1;
+}
+
+.label {
+  font-size: 10px;
+  color: var(--ink-secondary);
+  line-height: 1.1;
+}

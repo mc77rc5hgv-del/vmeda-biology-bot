@@ -1,0 +1,66 @@
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.eyebrow {
+  font-size: 12px;
+  color: var(--ink-secondary);
+}
+
+.title {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.blockTitle {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--academic-blue);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.blockBody {
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--ink);
+  white-space: pre-line;
+}
+
+.nav {
+  display: flex;
+  gap: var(--space-2);
+  position: sticky;
+  bottom: calc(var(--safe-bottom) + var(--space-2));
+}
+
+.navButton {
+  flex: 1;
+  min-height: var(--tap-min);
+  border-radius: var(--radius-pill);
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.navPrimary {
+  background: var(--academy-red);
+  color: #fff;
+}
+
+.navSecondary {
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--border);
+}
+
+.navSecondary:disabled {
+  opacity: 0.4;
+}
