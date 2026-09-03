@@ -293,6 +293,58 @@ async def main():
     del tb.ADMIN_PENDING[ADMIN_ID]
     print("admin_card_dm/admin_card_sub prime the existing DM/subscription pending flows: OK")
 
+    # ==================== admin DM: sending a sticker instead of text ====================
+    class FakeSticker:
+        def __init__(self, file_id):
+            self.file_id = file_id
+
+    dm_target = fresh_uid()
+    tb.stats["total_users"].add(dm_target)
+
+    sticker_calls = []
+    async def fake_send_message_dm(chat_id, text, **kwargs):
+        sticker_calls.append(("message", chat_id, text))
+    async def fake_send_sticker_dm(chat_id, file_id, **kwargs):
+        sticker_calls.append(("sticker", chat_id, file_id))
+    orig_send_message = tb.bot.send_message
+    orig_send_sticker = getattr(tb.bot, "send_sticker", None)
+    tb.bot.send_message = fake_send_message_dm
+    tb.bot.send_sticker = fake_send_sticker_dm
+
+    tb.ADMIN_PENDING[ADMIN_ID] = {"action": "dm_message", "target_id": dm_target, "target_label": "@stickertarget"}
+    msg_sticker = FakeMsg(from_user=FakeUser(ADMIN_ID))
+    msg_sticker.sticker = FakeSticker("STICKER_FILE_ID_123")
+    await tb.handle_admin_dm_sticker(msg_sticker)
+    assert ADMIN_ID not in tb.ADMIN_PENDING, "pending state must be consumed"
+    assert any(kind == "message" and chat_id == dm_target and "Личное сообщение" in text for kind, chat_id, text in sticker_calls)
+    assert ("sticker", dm_target, "STICKER_FILE_ID_123") in sticker_calls
+    assert msg_sticker.answers and "Стикер отправлен" in msg_sticker.answers[0]
+    print("admin DM: sending a sticker delivers header text + sticker to the target: OK")
+
+    # non-admin sender must be ignored (no pending state exists for them anyway)
+    sticker_calls.clear()
+    non_admin_dm = fresh_uid()
+    msg_sticker_denied = FakeMsg(from_user=FakeUser(non_admin_dm))
+    msg_sticker_denied.sticker = FakeSticker("SHOULD_NOT_SEND")
+    await tb.handle_admin_dm_sticker(msg_sticker_denied)
+    assert not sticker_calls, "non-admin must not be able to trigger a sticker DM"
+    print("admin DM sticker: non-admin ignored: OK")
+
+    # admin with no pending "dm_message" action -> sticker is a no-op, nothing sent
+    sticker_calls.clear()
+    tb.ADMIN_PENDING.pop(ADMIN_ID, None)
+    msg_sticker_idle = FakeMsg(from_user=FakeUser(ADMIN_ID))
+    msg_sticker_idle.sticker = FakeSticker("SHOULD_NOT_SEND_EITHER")
+    await tb.handle_admin_dm_sticker(msg_sticker_idle)
+    assert not sticker_calls, "sticker outside the dm_message flow must be a no-op"
+    print("admin DM sticker: no-op without a pending dm_message action: OK")
+
+    tb.bot.send_message = orig_send_message
+    if orig_send_sticker is not None:
+        tb.bot.send_sticker = orig_send_sticker
+    else:
+        del tb.bot.send_sticker
+
     print("ALL ADMIN LOOKUP TESTS PASSED")
 
 asyncio.run(main())

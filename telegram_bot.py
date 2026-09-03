@@ -2968,7 +2968,10 @@ async def handle_admin_pending_action(message: Message):
 
         elif action == "dm_username":
             ADMIN_PENDING[admin_id] = {"action": "dm_message", "target_id": target_id, "target_label": label}
-            await message.answer(f"✅ Нашёл {label}. Теперь отправь текст сообщения для него.", parse_mode="HTML")
+            await message.answer(
+                f"✅ Нашёл {label}. Теперь отправь текст сообщения или стикер для него.",
+                parse_mode="HTML"
+            )
 
         elif action == "record_donation_username":
             ADMIN_PENDING[admin_id] = {"action": "record_donation_amount", "target_id": target_id, "target_label": label}
@@ -3124,6 +3127,38 @@ async def handle_admin_pending_action(message: Message):
             reply_markup=builder.as_markup()
         )
         return
+
+@dp.message(F.sticker)
+async def handle_admin_dm_sticker(message: Message):
+    """Единственный обработчик входящих стикеров в боте. Нужен только для того, чтобы админ мог
+    отправить пользователю стикер через «✉️ Личное сообщение» (admin_lookup card -> cb_admin_card_dm
+    -> ADMIN_PENDING action "dm_message") — сама handle_admin_pending_action выше зарегистрирована
+    как @dp.message(F.text) и стикеры вообще не видит (у стикера message.text всегда None). Вне
+    этого сценария бот стикеры никогда не обрабатывал, конфликтов с другими хендлерами нет (как и у
+    handle_ai_photo_input для фото). send_sticker не поддерживает caption (в отличие от send_photo),
+    поэтому заголовок "Личное сообщение от администрации" уходит отдельным текстовым сообщением
+    перед самим стикером — тот же двухсообщенческий приём, что и раньше был недоступен в этой ветке."""
+    admin_id = message.from_user.id
+    pending = ADMIN_PENDING.get(admin_id)
+    if not is_admin(admin_id) or not pending or pending.get("action") != "dm_message":
+        return
+    target_id = pending["target_id"]
+    target_label = pending["target_label"]
+    del ADMIN_PENDING[admin_id]
+    try:
+        await bot.send_message(
+            target_id,
+            f"✉️ <b>Личное сообщение от администрации</b>\n{DIVIDER}",
+            parse_mode="HTML"
+        )
+        await bot.send_sticker(target_id, message.sticker.file_id)
+        await message.answer(f"✅ Стикер отправлен {target_label}.", parse_mode="HTML")
+    except Exception:
+        logger.exception("Не удалось отправить стикер пользователю %s", target_id)
+        await message.answer(
+            f"⚠️ Не удалось отправить стикер {target_label} — возможно, он заблокировал бота.",
+            parse_mode="HTML"
+        )
 
 # ==================== ПОМОЩНИК АДМИНИСТРАТОРА ====================
 # Отдельная, сильно урезанная версия админ-панели для user_id из stats["assistant_admins"]

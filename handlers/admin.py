@@ -425,7 +425,7 @@ async def cb_admin_card_dm(callback: CallbackQuery):
     tb.ADMIN_PENDING[callback.from_user.id] = {"action": "dm_message", "target_id": target_id, "target_label": label}
     await tb.safe_edit_text(
         callback.message,
-        f"✉️ <b>Личное сообщение для {label}</b>\n\nОтправь текст сообщения.",
+        f"✉️ <b>Личное сообщение для {label}</b>\n\nОтправь текст сообщения или стикер.",
         parse_mode="HTML",
         reply_markup=get_admin_back_keyboard()
     )
