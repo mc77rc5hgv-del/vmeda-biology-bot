@@ -80,6 +80,8 @@ def test_biochemistry_flat_section_and_material_round_trip():
     assert "Военно-медицинская акаде" in material["content_html"]  # реальный текст источника
     assert material["sources"] == ["учебное пособие.pdf, стр. 1"]
     assert material["group_id"] is None
+    assert material["prev_id"] is None  # первый урок раздела
+    assert material["next_id"] == section["items"][1]["id"]
 
 
 def test_pharmacology_grouped_section_and_material_round_trip():

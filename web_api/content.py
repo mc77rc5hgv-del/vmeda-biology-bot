@@ -116,7 +116,10 @@ def get_group_detail(dynamic_courses: list, subject_id: str, section_id: str, gr
     raise ContentNotFoundError(f"группа {group_id!r} не найдена в разделе {section_id!r}")
 
 
-def _lesson_to_material(lesson: dict, order: int, total: int, *, show_sources: bool, group_id: str | None) -> dict:
+def _lesson_to_material(
+    lesson: dict, order: int, total: int, *, show_sources: bool, group_id: str | None,
+    prev_id: str | None, next_id: str | None,
+) -> dict:
     return {
         "id": lesson["id"],
         "title": lesson["title"],
@@ -125,6 +128,12 @@ def _lesson_to_material(lesson: dict, order: int, total: int, *, show_sources: b
         "order": order,
         "total": total,
         "group_id": group_id,
+        # Реальные id уроков (напр. "core_p1_1") не образуют предсказуемую числовую
+        # последовательность вроде mock-материалов (см. lib/mockData.ts на фронте, где id ==
+        # order) -- фронт не может вычислить "следующий" id сам, поэтому он приходит готовым
+        # здесь же (null на границах раздела/группы).
+        "prev_id": prev_id,
+        "next_id": next_id,
         "media": [
             {"path": m["path"], "caption": m.get("caption", "")}
             for m in lesson.get("media", [])
@@ -146,13 +155,21 @@ def get_material(dynamic_courses: list, subject_id: str, section_id: str, item_i
             lessons = group.get("lessons", [])
             for i, lesson in enumerate(lessons):
                 if lesson["id"] == item_id:
+                    prev_id = lessons[i - 1]["id"] if i > 0 else None
+                    next_id = lessons[i + 1]["id"] if i + 1 < len(lessons) else None
                     return _lesson_to_material(
-                        lesson, i + 1, len(lessons), show_sources=show_sources, group_id=group.get("id")
+                        lesson, i + 1, len(lessons), show_sources=show_sources, group_id=group.get("id"),
+                        prev_id=prev_id, next_id=next_id,
                     )
         raise ContentNotFoundError(f"урок {item_id!r} не найден в разделе {section_id!r}")
 
     lessons = section.get("lessons", [])
     for i, lesson in enumerate(lessons):
         if lesson["id"] == item_id:
-            return _lesson_to_material(lesson, i + 1, len(lessons), show_sources=show_sources, group_id=None)
+            prev_id = lessons[i - 1]["id"] if i > 0 else None
+            next_id = lessons[i + 1]["id"] if i + 1 < len(lessons) else None
+            return _lesson_to_material(
+                lesson, i + 1, len(lessons), show_sources=show_sources, group_id=None,
+                prev_id=prev_id, next_id=next_id,
+            )
     raise ContentNotFoundError(f"урок {item_id!r} не найден в разделе {section_id!r}")

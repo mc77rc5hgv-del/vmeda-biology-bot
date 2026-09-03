@@ -126,6 +126,14 @@ def test_material_flat_section_includes_sources_and_media():
     assert material["total"] == 2
     assert material["group_id"] is None
     assert material["media"] == [{"path": "images/biochemistry/p2.jpg", "caption": "Схема"}]
+    assert material["prev_id"] == "core_p1_1"
+    assert material["next_id"] is None  # последний урок раздела
+
+
+def test_material_prev_next_at_start_of_section():
+    material = get_material(FIXTURE_COURSES, "biochemistry", "core_course", "core_p1_1")
+    assert material["prev_id"] is None  # первый урок раздела
+    assert material["next_id"] == "core_p2_1"
 
 
 def test_material_grouped_section_finds_across_groups():
@@ -136,6 +144,10 @@ def test_material_grouped_section_finds_across_groups():
     assert material["group_id"] == "drug_groups"
     assert material["order"] == 1
     assert material["total"] == 2
+    # prev/next обходят элементы внутри ЭТОЙ группы, а не всего раздела целиком -- у dg_1 нет
+    # предыдущего элемента (первый в своей группе drug_groups), а следующий -- dg_2 из той же группы.
+    assert material["prev_id"] is None
+    assert material["next_id"] == "dg_2"
 
 
 def test_material_respects_show_sources_false():
