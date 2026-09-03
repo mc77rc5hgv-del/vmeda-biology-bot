@@ -56,6 +56,12 @@ export interface SectionGroupRef {
   id: string;
   title: string;
   itemCount: number;
+  /** Только у Анатомии (см. web_api/routers/subjects.py) — часть модулей бесплатна всем, часть
+   * по подписке или временно закрыта тех.режимом. undefined у остальных предметов, где группы
+   * (напр. рубежные контроли Физиологии, тома Оперативной хирургии, группы уроков Фармакологии)
+   * никогда не гейтятся по отдельности. */
+  locked?: boolean;
+  lockedReason?: string | null;
 }
 
 export type SectionContents =

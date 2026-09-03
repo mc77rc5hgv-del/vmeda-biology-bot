@@ -86,3 +86,15 @@ def test_subscription_summary_contains_real_tier_and_utc_expiry():
 def test_unknown_subject_is_404():
     response = _client(FakeBot()).get("/api/v1/access/not-a-subject")
     assert response.status_code == 404
+
+
+def test_operative_surgery_uses_underscore_id_matching_the_rest_of_the_api():
+    """SUBJECT_IDS раньше содержал 'operative-surgery' (дефис), а реальный subject_id, который
+    шлёт фронт (см. miniapp/src/lib/api.ts::REAL_BACKED_SUBJECT_IDS и web_api/static_content.py::
+    OPERATIVE_SURGERY_ID), — 'operative_surgery' (подчёркивание) -- расхождение молча возвращало
+    404 на каждый запрос /api/v1/access/operative_surgery."""
+    client = _client(FakeBot())
+    response = client.get("/api/v1/access/operative_surgery")
+    assert response.status_code == 200
+    assert response.json()["can_open_subject"] is True
+    assert client.get("/api/v1/access/operative-surgery").status_code == 404

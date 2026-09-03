@@ -17,7 +17,7 @@ SUBJECT_IDS = {
     "latin",
     "law",
     "physiology",
-    "operative-surgery",
+    "operative_surgery",
     "biochemistry",
     "pharmacology",
 }

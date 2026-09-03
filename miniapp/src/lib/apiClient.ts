@@ -215,6 +215,8 @@ const ACCENT_BY_SUBJECT_ID: Record<string, string> = {
   latin: "latin",
   law: "law",
   physiology: "physiology",
+  operative_surgery: "operative-surgery",
+  anatomy: "anatomy",
 };
 
 function toSubjectSummary(wire: SubjectSummaryWire): SubjectSummary {
@@ -247,7 +249,14 @@ export async function fetchRealSubjectDetail(subjectId: string): Promise<Subject
 
 type SectionContentsWire =
   | { id: string; title: string; kind: "flat"; items: Array<{ id: string; title: string; order: number; total: number }> }
-  | { id: string; title: string; kind: "grouped"; groups: Array<{ id: string; title: string; item_count: number }> };
+  | {
+      id: string;
+      title: string;
+      kind: "grouped";
+      // locked/locked_reason присутствуют только у Анатомии (см. web_api/routers/subjects.py::
+      // _annotate_anatomy_groups) -- у остальных группированных разделов их нет вообще.
+      groups: Array<{ id: string; title: string; item_count: number; locked?: boolean; locked_reason?: string | null }>;
+    };
 
 export async function fetchRealSection(subjectId: string, sectionId: string): Promise<SectionContents> {
   const wire: SectionContentsWire = await apiFetch(
@@ -256,7 +265,13 @@ export async function fetchRealSection(subjectId: string, sectionId: string): Pr
   if (wire.kind === "grouped") {
     return {
       kind: "grouped",
-      groups: wire.groups.map((g) => ({ id: g.id, title: g.title, itemCount: g.item_count })),
+      groups: wire.groups.map((g) => ({
+        id: g.id,
+        title: g.title,
+        itemCount: g.item_count,
+        locked: g.locked,
+        lockedReason: g.locked_reason,
+      })),
     };
   }
   return {

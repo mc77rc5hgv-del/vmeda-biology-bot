@@ -48,7 +48,9 @@ def test_list_subjects_includes_real_dynamic_courses():
     resp = client.get("/api/v1/subjects", headers=_auth_headers())
     assert resp.status_code == 200
     ids = {s["id"] for s in resp.json()}
-    assert {"biochemistry", "pharmacology", "latin", "law", "physiology", "operative_surgery"} <= ids
+    assert {
+        "biochemistry", "pharmacology", "latin", "law", "physiology", "operative_surgery", "anatomy",
+    } <= ids
 
 
 def test_list_subjects_requires_auth():
@@ -206,6 +208,100 @@ def test_operative_surgery_volumes_and_material_round_trip():
     assert body["group_id"] == "I"
     assert body["prev_id"] is None  # первая тема тома
     assert body["next_id"] == group["items"][1]["id"]
+
+
+def _set_anatomy_maintenance_override(value) -> None:
+    """anatomy_maintenance_mode_enabled() reads stats["anatomy_maintenance_override"] from disk on
+    EVERY request (web_api/deps.py::get_fresh_bot_module calls bot_state.refresh_stats(), which
+    replaces tb.stats with a fresh tb.load_stats() read of STATS_FILE) -- an in-memory-only mutation
+    of tb.stats would just get overwritten by the very next request, so this writes straight to the
+    test's own isolated stats.json on disk, the same file the test bootstrap at the top of this
+    module initialized to {}."""
+    stats_path = os.path.join(os.environ["STATS_DIR"], "stats.json")
+    with open(stats_path, "r", encoding="utf-8") as stream:
+        data = json.load(stream)
+    data["anatomy_maintenance_override"] = value
+    with open(stats_path, "w", encoding="utf-8") as stream:
+        json.dump(data, stream)
+
+
+def _first_anatomy_topic_id(module_key: str) -> str:
+    """Реальный id темы читается напрямую из anatomy.json, а не через /sections/course/groups/{id}
+    -- у платного модуля этот эндпоинт сам гейтится (403), так что через API список тем платного
+    модуля недоступен ДО того, как есть подписка, ровно как и в самом боте (см. cb_anatomy_section)."""
+    with open("anatomy.json", encoding="utf-8") as stream:
+        anatomy = json.load(stream)
+    return next(iter(anatomy[module_key]["topics"]))
+
+
+def test_anatomy_default_maintenance_mode_locks_every_module_for_non_admin():
+    """Свежая база (админ ни разу не трогал тумблер техрежима -- см. CLAUDE.md "Anatomy maintenance
+    mode") -- ANATOMY_MAINTENANCE_MODE=True по умолчанию закрывает ВЕСЬ раздел, включая бесплатные
+    модули, для всех, кроме админа/помощника. Список модулей при этом всё равно виден (см.
+    "hide vs relabel" в CLAUDE.md) -- только помечен locked, а не скрыт."""
+    _set_anatomy_maintenance_override(None)
+    headers = _auth_headers()
+    section = client.get("/api/v1/subjects/anatomy/sections/course", headers=headers).json()
+    assert len(section["groups"]) == 10  # см. отчёт по данным: 10 модулей Кафарова
+    assert all(g["locked"] for g in section["groups"])
+    assert all("технич" in g["locked_reason"].lower() for g in section["groups"])
+
+    free_group_id = section["groups"][0]["id"]
+    resp = client.get(
+        f"/api/v1/subjects/anatomy/sections/course/groups/{free_group_id}", headers=headers
+    )
+    assert resp.status_code == 403
+
+
+def test_anatomy_free_module_open_and_paid_module_locked_once_maintenance_is_off():
+    """С выключенным техрежимом (админ явно открыл раздел) вступает в силу обычный
+    ANATOMY_FREE_SECTIONS-гейт по модулям -- module1_osteology бесплатен всем,
+    module7_nervous нет (см. handlers/anatomy.py::ANATOMY_FREE_SECTIONS)."""
+    _set_anatomy_maintenance_override(False)
+    headers = _auth_headers()
+
+    section = client.get("/api/v1/subjects/anatomy/sections/course", headers=headers).json()
+    groups_by_id = {g["id"]: g for g in section["groups"]}
+    assert groups_by_id["module1_osteology"]["locked"] is False
+    assert groups_by_id["module1_osteology"]["locked_reason"] is None
+    assert groups_by_id["module7_nervous"]["locked"] is True
+    assert "подписк" in groups_by_id["module7_nervous"]["locked_reason"].lower()
+
+    group = client.get(
+        "/api/v1/subjects/anatomy/sections/course/groups/module1_osteology", headers=headers
+    ).json()
+    assert group["items"], "module1_osteology must have real topics"
+    first_topic = group["items"][0]
+
+    material = client.get(
+        f"/api/v1/materials/anatomy/course/{first_topic['id']}", headers=headers
+    )
+    assert material.status_code == 200, material.text
+    body = material.json()
+    assert body["title"] == first_topic["title"]
+    assert body["content_html"]  # реальный текст, не заглушка -- модуль бесплатный
+    assert body["group_id"] == "module1_osteology"
+    assert body["sources"] == []
+
+    locked_group_resp = client.get(
+        "/api/v1/subjects/anatomy/sections/course/groups/module7_nervous", headers=headers
+    )
+    assert locked_group_resp.status_code == 403
+
+    nervous_topic_id = _first_anatomy_topic_id("module7_nervous")
+    locked_material_resp = client.get(
+        f"/api/v1/materials/anatomy/course/{nervous_topic_id}", headers=headers
+    )
+    assert locked_material_resp.status_code == 403
+
+
+def test_anatomy_unknown_module_is_not_found_not_locked():
+    _set_anatomy_maintenance_override(False)
+    headers = _auth_headers()
+    resp = client.get(
+        "/api/v1/subjects/anatomy/sections/course/groups/module99_missing", headers=headers
+    )
+    assert resp.status_code == 404
 
 
 def test_media_endpoint_serves_real_file_when_present():

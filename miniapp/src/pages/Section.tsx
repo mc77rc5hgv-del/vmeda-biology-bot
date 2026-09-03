@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronRight, Layers } from "lucide-react";
+import { ChevronRight, Layers, Lock } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { fetchSection } from "../lib/api";
@@ -57,17 +57,25 @@ export function SectionPage() {
           {section.groups.map((group) => (
             <PressableCard
               key={group.id}
-              className={styles.row}
+              className={[styles.row, group.locked ? styles.rowLocked : ""].join(" ")}
               onClick={() => {
                 hapticSelection();
+                // Клик по закрытому модулю всё равно ведёт на GroupPage — там 403 от backend
+                // рендерится тем же честным locked-состоянием, а не молчаливым "ничего не
+                // произошло" (см. Group.tsx). Источник истины о доступе — сервер, не эта пометка.
                 navigate(`/subjects/${subjectId}/sections/${sectionId}/groups/${group.id}`);
               }}
             >
               <div>
-                <div className={styles.rowTitle}>{group.title}</div>
-                <div className={styles.rowMeta}>{group.itemCount} тем</div>
+                <div className={styles.rowTitle}>
+                  {group.locked ? "🔒 " : ""}
+                  {group.title}
+                </div>
+                <div className={styles.rowMeta}>
+                  {group.locked ? (group.lockedReason ?? "Доступно по подписке") : `${group.itemCount} тем`}
+                </div>
               </div>
-              <Icon icon={Layers} size={18} color="var(--ink-secondary)" />
+              <Icon icon={group.locked ? Lock : Layers} size={18} color="var(--ink-secondary)" />
             </PressableCard>
           ))}
         </div>

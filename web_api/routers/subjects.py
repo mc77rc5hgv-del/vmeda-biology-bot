@@ -17,7 +17,67 @@ def _not_found(exc: content.ContentNotFoundError) -> HTTPException:
     return HTTPException(status_code=404, detail=str(exc))
 
 
-def _get_material_data(tb, subject_id: str, section_id: str, item_id: str) -> dict:
+# ==================== Гейт Анатомии ====================
+# В отличие от Физиологии/Оперативной хирургии (полностью бесплатные в самом боте — см.
+# static_content.py), Анатомия внутри бота гейтится ПО МОДУЛЯМ (ANATOMY_FREE_SECTIONS) и общим
+# тех.режимом (anatomy_maintenance_mode_enabled) — см. handlers/anatomy.py. static_content.py
+# остаётся чистой функцией формы контента (как и для двух других предметов), а проверка прав
+# живёт здесь, потому что только здесь есть user_id (Depends(get_current_user_id)). "group_id" в
+# разделе "course" Анатомии — это ключ модуля (напр. "module1_osteology"), ровно тот же, что
+# принимает anatomy_section_access_ok на боте.
+
+
+def _anatomy_maintenance_locked_reason(tb, user_id: int) -> str | None:
+    if tb.anatomy_maintenance_mode_enabled() and not tb.is_admin_or_assistant(user_id):
+        # Тот же текст, что показывает боту get_anatomy_maintenance_text(), без HTML-обёртки —
+        # раздел временно закрыт технически, это не платный гейт.
+        return (
+            "Раздел временно недоступен по техническим причинам. "
+            "Мы уже работаем над этим — загляни немного позже."
+        )
+    return None
+
+
+def _anatomy_module_locked_reason(tb, user_id: int, module_key: str) -> str | None:
+    maintenance_reason = _anatomy_maintenance_locked_reason(tb, user_id)
+    if maintenance_reason is not None:
+        return maintenance_reason
+    if tb.anatomy_section_access_ok(user_id, module_key):
+        return None
+    cheapest = tb.cheapest_anatomy_tier()
+    return (
+        f"Этот раздел анатомии доступен по подписке от «{cheapest['short']}» "
+        f"({cheapest['price_rub']}₽ / {cheapest['price_stars']}⭐)."
+    )
+
+
+def _annotate_anatomy_groups(tb, user_id: int, section: dict) -> dict:
+    if section.get("id") == static_content.ANATOMY_SECTION_ID:
+        for group in section.get("groups", []):
+            reason = _anatomy_module_locked_reason(tb, user_id, group["id"])
+            group["locked"] = reason is not None
+            group["locked_reason"] = reason
+    return section
+
+
+def _check_anatomy_material_access(tb, user_id: int, section_id: str, item_id: str) -> None:
+    if section_id != static_content.ANATOMY_SECTION_ID:
+        raise HTTPException(status_code=404, detail=f"раздел {section_id!r} не найден в анатомии")
+    module_key = None
+    for candidate_key, module in tb.ANATOMY.items():
+        if item_id in module.get("topics", {}):
+            module_key = candidate_key
+            break
+    if module_key is None:
+        raise HTTPException(status_code=404, detail=f"тема {item_id!r} не найдена в анатомии")
+    reason = _anatomy_module_locked_reason(tb, user_id, module_key)
+    if reason is not None:
+        raise HTTPException(status_code=403, detail=reason)
+
+
+def _get_material_data(tb, user_id: int, subject_id: str, section_id: str, item_id: str) -> dict:
+    if subject_id == static_content.ANATOMY_ID:
+        _check_anatomy_material_access(tb, user_id, section_id, item_id)
     if subject_id in static_content.SUPPORTED_SUBJECT_IDS:
         return static_content.get_material(tb, subject_id, section_id, item_id)
     return content.get_material(tb.DYNAMIC_COURSES, subject_id, section_id, item_id)
@@ -52,15 +112,23 @@ def get_subject(
 def get_section(
     subject_id: str,
     section_id: str,
-    _user_id: int = Depends(get_current_user_id),
+    user_id: int = Depends(get_current_user_id),
     tb=Depends(get_fresh_bot_module),
 ) -> dict:
     try:
         if subject_id in static_content.SUPPORTED_SUBJECT_IDS:
-            return static_content.get_section_detail(tb, subject_id, section_id)
-        return content.get_section_detail(tb.DYNAMIC_COURSES, subject_id, section_id)
+            section = static_content.get_section_detail(tb, subject_id, section_id)
+        else:
+            section = content.get_section_detail(tb.DYNAMIC_COURSES, subject_id, section_id)
     except content.ContentNotFoundError as exc:
         raise _not_found(exc) from exc
+    if subject_id == static_content.ANATOMY_ID:
+        # Список модулей виден всем (названия модулей не секрет — та же логика, что у
+        # get_anatomy_menu_keyboard в боте: платные модули помечены, а не скрыты, см. "hide vs
+        # relabel" в CLAUDE.md), только сами темы/материал внутри платного модуля закрыты (see
+        # get_group/get_material ниже).
+        section = _annotate_anatomy_groups(tb, user_id, section)
+    return section
 
 
 @router.get("/subjects/{subject_id}/sections/{section_id}/groups/{group_id}")
@@ -68,9 +136,15 @@ def get_group(
     subject_id: str,
     section_id: str,
     group_id: str,
-    _user_id: int = Depends(get_current_user_id),
+    user_id: int = Depends(get_current_user_id),
     tb=Depends(get_fresh_bot_module),
 ) -> dict:
+    if subject_id == static_content.ANATOMY_ID and section_id == static_content.ANATOMY_SECTION_ID:
+        if group_id not in tb.ANATOMY:
+            raise HTTPException(status_code=404, detail=f"модуль {group_id!r} не найден в анатомии")
+        reason = _anatomy_module_locked_reason(tb, user_id, group_id)
+        if reason is not None:
+            raise HTTPException(status_code=403, detail=reason)
     try:
         if subject_id in static_content.SUPPORTED_SUBJECT_IDS:
             return static_content.get_group_detail(tb, subject_id, section_id, group_id)
@@ -84,11 +158,11 @@ def get_material(
     subject_id: str,
     section_id: str,
     item_id: str,
-    _user_id: int = Depends(get_current_user_id),
+    user_id: int = Depends(get_current_user_id),
     tb=Depends(get_fresh_bot_module),
 ) -> dict:
     try:
-        return _get_material_data(tb, subject_id, section_id, item_id)
+        return _get_material_data(tb, user_id, subject_id, section_id, item_id)
     except content.ContentNotFoundError as exc:
         raise _not_found(exc) from exc
 
@@ -99,7 +173,7 @@ def get_material_media(
     section_id: str,
     item_id: str,
     media_index: int,
-    _user_id: int = Depends(get_current_user_id),
+    user_id: int = Depends(get_current_user_id),
     tb=Depends(get_fresh_bot_module),
 ) -> FileResponse:
     """Файл всегда резолвится через путь, который УЖЕ лежит в проверенном содержимом
@@ -109,7 +183,7 @@ def get_material_media(
     цена проверки нулевая, а её отсутствие было бы тихим допущением, которое легко сломать
     неаккуратной правкой JSON в будущем)."""
     try:
-        material = _get_material_data(tb, subject_id, section_id, item_id)
+        material = _get_material_data(tb, user_id, subject_id, section_id, item_id)
     except content.ContentNotFoundError as exc:
         raise _not_found(exc) from exc
 

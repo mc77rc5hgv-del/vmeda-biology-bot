@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, Lock } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { fetchGroup } from "../lib/api";
+import { ApiError } from "../lib/apiClient";
 import { hapticSelection, useTelegramBackButton } from "../lib/telegram";
 import { PressableCard } from "../components/Card";
 import { Icon } from "../components/Icon";
@@ -35,6 +36,17 @@ export function GroupPage() {
   }
 
   if (groupQuery.isError || !groupQuery.data) {
+    const err = groupQuery.error;
+    if (err instanceof ApiError && err.status === 403) {
+      // Модуль показан в списке (Section.tsx) с пометкой locked ДО этого перехода — сервер
+      // остаётся единственным источником истины: прямой переход по ссылке на закрытый модуль
+      // должен показать ровно тот же locked-текст, что и клик по помеченной карточке.
+      return (
+        <div className="screen">
+          <StateMessage icon={Lock} title="Раздел закрыт" body={err.message} />
+        </div>
+      );
+    }
     return (
       <div className="screen">
         <StateMessage title="Группа не найдена" onRetry={() => groupQuery.refetch()} />

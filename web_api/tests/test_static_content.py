@@ -7,12 +7,16 @@ from web_api.content import ContentNotFoundError
 class FakeTb:
     """static_content.py принимает "tb-подобный" объект (см. web_api/bot_state.py -- в реальном
     коде это модуль telegram_bot), а не сырые словари напрямую, потому что теперь оно отвечает
-    сразу за несколько статичных предметов (Физиология + Оперативная хирургия) и само решает,
-    какой атрибут прочитать. Тесты собирают минимальную заглушку с ровно теми двумя атрибутами."""
+    сразу за несколько статичных предметов (Физиология + Оперативная хирургия + Анатомия) и само
+    решает, какой атрибут прочитать. Тесты собирают минимальную заглушку с ровно этими тремя
+    атрибутами -- гейт доступа Анатомии (модуль бесплатный/платный, тех.режим) сюда НЕ входит,
+    он живёт в web_api/routers/subjects.py (см. test_subjects_integration.py и test_access.py) и
+    требует user_id, которого у чистых функций формы контента здесь нет."""
 
-    def __init__(self, physiology=None, operative_surgery=None):
+    def __init__(self, physiology=None, operative_surgery=None, anatomy=None):
         self.PHYSIOLOGY = physiology or {}
         self.OPERATIVE_SURGERY = operative_surgery or {}
+        self.ANATOMY = anatomy or {}
 
 
 @pytest.fixture
@@ -195,5 +199,121 @@ def test_list_subject_summaries_includes_both_when_both_present(physiology, oper
 
 
 def test_list_subject_summaries_omits_missing_content():
-    tb = FakeTb()  # ни PHYSIOLOGY, ни OPERATIVE_SURGERY не заданы (пустые словари)
+    tb = FakeTb()  # ни PHYSIOLOGY, ни OPERATIVE_SURGERY, ни ANATOMY не заданы (пустые словари)
     assert static_content.list_subject_summaries(tb) == []
+
+
+# ==================== Анатомия ====================
+# ANATOMY -- dict СЕКЦИЙ (не список, в отличие от OPERATIVE_SURGERY["topics"]) -> dict тем -- см.
+# docstring static_content.py и handlers/anatomy.py::get_anatomy_topic_data. Гейт доступа
+# (ANATOMY_FREE_SECTIONS/anatomy_maintenance_mode_enabled) сюда намеренно НЕ входит -- эти функции
+# чистые над формой контента, гейт живёт в routers/subjects.py и покрыт test_subjects_integration.py.
+
+@pytest.fixture
+def anatomy():
+    return {
+        "module1_osteology": {
+            "title": "Остеология",
+            "topics": {
+                "cranium_intro": {
+                    "title": "Общая характеристика черепа",
+                    "material": [
+                        {"id": "general", "title": "Общее", "content": "<b>Череп</b> — скелет головы."},
+                        {"id": "detail", "title": "Детали", "content": "Два отдела: мозговой и лицевой."},
+                    ],
+                },
+                "empty_stub": {
+                    "title": "Тема-заглушка без контента",
+                    "material": [],
+                },
+            },
+        },
+        "module7_nervous": {
+            "title": "Нервная система",
+            "topics": {
+                "brain_intro": {"title": "Общий план строения мозга", "material": [
+                    {"id": "p1", "title": None, "content": "Головной мозг располагается в полости черепа."},
+                ]},
+            },
+        },
+    }
+
+
+def test_anatomy_summary_and_sections_use_real_counts(anatomy):
+    tb = FakeTb(anatomy=anatomy)
+    detail = static_content.get_subject_detail(tb, "anatomy")
+    assert detail["title"] == "Анатомия"
+    assert detail["sections"] == [
+        {"id": "course", "title": "Курс", "item_count": 3, "kind": "grouped"},
+    ]
+
+
+def test_anatomy_course_section_lists_modules_as_groups(anatomy):
+    tb = FakeTb(anatomy=anatomy)
+    section = static_content.get_section_detail(tb, "anatomy", "course")
+    assert section["kind"] == "grouped"
+    assert [(g["id"], g["title"], g["item_count"]) for g in section["groups"]] == [
+        ("module1_osteology", "Остеология", 2),
+        ("module7_nervous", "Нервная система", 1),
+    ]
+
+
+def test_anatomy_module_group_lists_topics_in_source_order(anatomy):
+    tb = FakeTb(anatomy=anatomy)
+    group = static_content.get_group_detail(tb, "anatomy", "course", "module1_osteology")
+    assert group["title"] == "Остеология"
+    assert [item["id"] for item in group["items"]] == ["cranium_intro", "empty_stub"]
+    assert group["items"][0]["order"] == 1
+    assert group["items"][0]["total"] == 2
+
+
+def test_anatomy_material_concatenates_entries_with_headings(anatomy):
+    tb = FakeTb(anatomy=anatomy)
+    material = static_content.get_material(tb, "anatomy", "course", "cranium_intro")
+    assert material["title"] == "Общая характеристика черепа"
+    assert "<strong>Общее</strong>" in material["content_html"]
+    assert "<b>Череп</b> — скелет головы." in material["content_html"]
+    assert "<strong>Детали</strong>" in material["content_html"]
+    assert material["sources"] == []
+    assert material["group_id"] == "module1_osteology"
+    assert material["order"] == 1
+    assert material["total"] == 2
+    assert material["prev_id"] is None
+    assert material["next_id"] == "empty_stub"
+
+
+def test_anatomy_material_without_title_skips_heading(anatomy):
+    tb = FakeTb(anatomy=anatomy)
+    material = static_content.get_material(tb, "anatomy", "course", "brain_intro")
+    assert "<strong>" not in material["content_html"]
+    assert "Головной мозг располагается в полости черепа." in material["content_html"]
+    assert material["prev_id"] is None
+    assert material["next_id"] is None  # единственная тема своего модуля
+
+
+def test_anatomy_empty_material_gets_honest_placeholder_not_fabricated_text(anatomy):
+    """37 из 107 реальных тем анатомии не имеют material -- см. отчёт по данным. Плейсхолдер
+    должен быть честным UI-текстом ("материал не добавлен"), а не выдуманным содержанием."""
+    tb = FakeTb(anatomy=anatomy)
+    material = static_content.get_material(tb, "anatomy", "course", "empty_stub")
+    assert material["content_html"] == static_content.ANATOMY_EMPTY_MATERIAL_NOTE
+    assert material["prev_id"] == "cranium_intro"
+    assert material["next_id"] is None
+
+
+def test_anatomy_unknown_topic_not_found(anatomy):
+    tb = FakeTb(anatomy=anatomy)
+    with pytest.raises(ContentNotFoundError):
+        static_content.get_material(tb, "anatomy", "course", "nonexistent")
+
+
+def test_anatomy_unknown_module_not_found(anatomy):
+    tb = FakeTb(anatomy=anatomy)
+    with pytest.raises(ContentNotFoundError):
+        static_content.get_group_detail(tb, "anatomy", "course", "module99_missing")
+
+
+def test_list_subject_summaries_includes_anatomy_when_present(anatomy):
+    tb = FakeTb(anatomy=anatomy)
+    ids = {s["id"] for s in static_content.list_subject_summaries(tb)}
+    assert ids == {"anatomy"}

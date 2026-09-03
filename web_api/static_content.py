@@ -9,16 +9,27 @@
 подтемы под лимит сообщения Telegram — у Mini App лимита сообщения нет, поэтому тема отдаётся
 одной страницей).
 
-Подключены: «Нормальная физиология» (23 темы курса + 11 рубежных контролей) и «Оперативная
+Подключены: «Нормальная физиология» (23 темы курса + 11 рубежных контролей), «Оперативная
 хирургия» (61 тема в 4 томах — БЕЗ инструментов/проекций/станций/контрольных вопросов, это
-отдельная задача на будущее, см. SUPPORTED_SUBJECT_IDS ниже)."""
+отдельная задача на будущее) и «Анатомия» (107 тем в 10 модулях — только непрерывный текст
+material[], БЕЗ флеш-карточек/сопоставления/мнемоник/картиночных тестов/разбора по костям/атласа/
+латинских терминов/экзаменационных банков — те же "честный срез" резоны, что и у Оперативной
+хирургии; см. SUPPORTED_SUBJECT_IDS ниже).
+
+В отличие от Физиологии/Оперативной хирургии (полностью бесплатные разделы бота — см. CLAUDE.md),
+Анатомия внутри бота гейтится по модулям (ANATOMY_FREE_SECTIONS) и общим тех.режимом
+(anatomy_maintenance_mode_enabled) — этот модуль сам НИЧЕГО не проверяет (остаётся чистой функцией
+формы контента над tb.ANATOMY, как и остальные два предмета), проверка прав живёт в
+web_api/routers/subjects.py (см. _anatomy_module_access_ok там), у которого есть доступ к user_id."""
 from html import escape
 
 from .content import ContentNotFoundError
 
 PHYSIOLOGY_ID = "physiology"
 OPERATIVE_SURGERY_ID = "operative_surgery"
-SUPPORTED_SUBJECT_IDS = {PHYSIOLOGY_ID, OPERATIVE_SURGERY_ID}
+ANATOMY_ID = "anatomy"
+SUPPORTED_SUBJECT_IDS = {PHYSIOLOGY_ID, OPERATIVE_SURGERY_ID, ANATOMY_ID}
+ANATOMY_SECTION_ID = "course"
 
 PHYSIOLOGY_PAGE_CHAR_BUDGET = 6_000
 
@@ -43,6 +54,15 @@ def list_subject_summaries(tb) -> list[dict]:
             "course": 2,
             "has_ai": True,
         })
+    if tb.ANATOMY:
+        summaries.append({
+            "id": ANATOMY_ID,
+            "title": "Анатомия",
+            "emoji": "🦴",
+            "description": "107 тем в 10 модулях — часть открыта всем, часть по подписке",
+            "course": 1,
+            "has_ai": True,
+        })
     return summaries
 
 
@@ -55,6 +75,13 @@ def _summary_by_id(tb, subject_id: str) -> dict:
 
 def get_subject_detail(tb, subject_id: str) -> dict:
     summary = _summary_by_id(tb, subject_id)
+    if subject_id == ANATOMY_ID:
+        total_topics = sum(len(module.get("topics", {})) for module in tb.ANATOMY.values())
+        summary["sections"] = [
+            {"id": ANATOMY_SECTION_ID, "title": "Курс", "item_count": total_topics, "kind": "grouped"},
+        ]
+        return summary
+
     if subject_id == PHYSIOLOGY_ID:
         physiology = tb.PHYSIOLOGY
         summary["sections"] = [
@@ -91,6 +118,19 @@ def get_subject_detail(tb, subject_id: str) -> dict:
 
 def get_section_detail(tb, subject_id: str, section_id: str) -> dict:
     _summary_by_id(tb, subject_id)  # бросает ContentNotFoundError на неизвестный subject_id
+
+    if subject_id == ANATOMY_ID:
+        if section_id != ANATOMY_SECTION_ID:
+            raise ContentNotFoundError(f"раздел {section_id!r} не найден в анатомии")
+        return {
+            "id": section_id,
+            "title": "Курс",
+            "kind": "grouped",
+            "groups": [
+                {"id": module_key, "title": module["title"], "item_count": len(module.get("topics", {}))}
+                for module_key, module in tb.ANATOMY.items()
+            ],
+        }
 
     if subject_id == PHYSIOLOGY_ID:
         physiology = tb.PHYSIOLOGY
@@ -139,6 +179,23 @@ def get_section_detail(tb, subject_id: str, section_id: str) -> dict:
 def get_group_detail(tb, subject_id: str, section_id: str, group_id: str) -> dict:
     _summary_by_id(tb, subject_id)
 
+    if subject_id == ANATOMY_ID:
+        if section_id != ANATOMY_SECTION_ID:
+            raise ContentNotFoundError(f"в разделе {section_id!r} нет групп")
+        module = tb.ANATOMY.get(group_id)
+        if module is None:
+            raise ContentNotFoundError(f"модуль {group_id!r} не найден в анатомии")
+        topics = module.get("topics", {})
+        total = len(topics)
+        return {
+            "id": group_id,
+            "title": module["title"],
+            "items": [
+                {"id": topic_key, "title": topic["title"], "order": index + 1, "total": total}
+                for index, (topic_key, topic) in enumerate(topics.items())
+            ],
+        }
+
     if subject_id == PHYSIOLOGY_ID:
         if section_id != "boundary-controls":
             raise ContentNotFoundError(f"в разделе {section_id!r} нет групп")
@@ -173,6 +230,8 @@ def get_group_detail(tb, subject_id: str, section_id: str, group_id: str) -> dic
 def get_material(tb, subject_id: str, section_id: str, item_id: str) -> dict:
     _summary_by_id(tb, subject_id)
 
+    if subject_id == ANATOMY_ID:
+        return _anatomy_material(tb.ANATOMY, section_id, item_id)
     if subject_id == PHYSIOLOGY_ID:
         return _physiology_material(tb.PHYSIOLOGY, section_id, item_id)
     return _operative_surgery_material(tb.OPERATIVE_SURGERY, section_id, item_id)
@@ -340,5 +399,63 @@ def _operative_surgery_material(oh: dict, section_id: str, item_id: str) -> dict
         "group_id": volume["id"],
         "prev_id": siblings[index - 1]["id"] if index > 0 else None,
         "next_id": siblings[index + 1]["id"] if index + 1 < len(siblings) else None,
+        "media": [],
+    }
+
+
+# ==================== Анатомия ====================
+# Подключён только раздел «Курс» (107 тем в 10 модулях, реальный текст topic["material"]).
+# flashcards/matching_sets/mnemonics/picture_quiz/bones_list (разбор по костям)/bone_images/
+# atlas_images/latin_terms/экзаменационные банки (ТЕСТ, практика, теория) НЕ подключены в этом
+# заходе — честный срез, не весь объём бота по этому предмету (см. docstring модуля). Права
+# доступа (модуль бесплатный/по подписке, тех.режим) здесь НЕ проверяются — см. docstring модуля.
+
+ANATOMY_EMPTY_MATERIAL_NOTE = "<p>Материал по этой теме пока не добавлен.</p>"
+
+
+def _anatomy_find_topic(anatomy: dict, topic_id: str) -> tuple[str, dict, dict]:
+    """Возвращает (module_key, module, topic). ANATOMY — dict секций -> dict тем (не список), тема
+    ищется перебором модулей — то же самое, что делает handlers/anatomy.py::get_anatomy_topic_data,
+    просто с модулем в возврате (он нужен и здесь, и в web_api/routers/subjects.py для гейта)."""
+    for module_key, module in anatomy.items():
+        topic = module.get("topics", {}).get(topic_id)
+        if topic is not None:
+            return module_key, module, topic
+    raise ContentNotFoundError(f"тема {topic_id!r} не найдена в анатомии")
+
+
+def _anatomy_topic_html(topic: dict) -> str:
+    material = topic.get("material") or []
+    parts = []
+    for entry in material:
+        title = entry.get("title")
+        body = str(entry.get("content", "")).strip()
+        if not body:
+            continue
+        if title:
+            parts.append(f"<p><strong>{escape(str(title))}</strong></p>")
+        parts.append(f"<p>{body}</p>")
+    return "\n".join(parts) if parts else ANATOMY_EMPTY_MATERIAL_NOTE
+
+
+def _anatomy_material(anatomy: dict, section_id: str, item_id: str) -> dict:
+    if section_id != ANATOMY_SECTION_ID:
+        raise ContentNotFoundError(f"раздел {section_id!r} не найден в анатомии")
+
+    module_key, module, topic = _anatomy_find_topic(anatomy, item_id)
+    topics = module.get("topics", {})
+    topic_keys = list(topics.keys())
+    index = topic_keys.index(item_id)
+
+    return {
+        "id": item_id,
+        "title": topic["title"],
+        "content_html": _anatomy_topic_html(topic),
+        "sources": [],
+        "order": index + 1,
+        "total": len(topic_keys),
+        "group_id": module_key,
+        "prev_id": topic_keys[index - 1] if index > 0 else None,
+        "next_id": topic_keys[index + 1] if index + 1 < len(topic_keys) else None,
         "media": [],
     }

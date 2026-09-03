@@ -26,3 +26,9 @@
   font-size: 12px;
   color: var(--ink-secondary);
 }
+
+/* Только у Анатомии (см. lib/types.ts::SectionGroupRef.locked) — платный/временно закрытый
+   модуль остаётся в списке (см. "hide vs relabel" в CLAUDE.md бота), но приглушён и без стрелки. */
+.rowLocked {
+  opacity: 0.6;
+}

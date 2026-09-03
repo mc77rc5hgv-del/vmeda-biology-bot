@@ -1,7 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import DOMPurify from "dompurify";
+import { Lock } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
 import { fetchMaterial } from "../lib/api";
+import { ApiError } from "../lib/apiClient";
 import { hapticImpact, useTelegramBackButton } from "../lib/telegram";
 import { Card } from "../components/Card";
 import { Skeleton } from "../components/Skeleton";
@@ -31,6 +33,17 @@ export function MaterialPage() {
   }
 
   if (materialQuery.isError || !materialQuery.data) {
+    const err = materialQuery.error;
+    if (err instanceof ApiError && err.status === 403) {
+      // Реально достижимо только прямой навигацией (напр. кнопкой "назад/вперёд" на теме,
+      // модуль которой закрылся между открытиями) — обычный путь через GroupPage блокирует
+      // такую тему раньше (см. Group.tsx), не давая на неё вообще перейти.
+      return (
+        <div className="screen">
+          <StateMessage icon={Lock} title="Материал закрыт" body={err.message} />
+        </div>
+      );
+    }
     return (
       <div className="screen">
         <StateMessage title="Материал не найден" onRetry={() => materialQuery.refetch()} />
