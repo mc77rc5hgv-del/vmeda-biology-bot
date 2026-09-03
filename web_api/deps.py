@@ -23,5 +23,8 @@ def get_fresh_bot_module():
     её объявляет (см. bot_state.py, пункт 3 докстринга, за тем, почему это не бесплатная, но и не
     дорогая операция) -- эндпоинт получает telegram_bot-модуль с гарантированно свежим `stats`
     внутри текущего запроса, а не то, что было в памяти на момент старта процесса web_api."""
-    bot_state.refresh_stats()
+    try:
+        bot_state.refresh_stats()
+    except bot_state.BotStateUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     return bot_state.get_bot_module()

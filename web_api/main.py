@@ -6,13 +6,14 @@ telegram_bot.py (свой `uvicorn web_api.main:app`), НЕ добавлен в 
 Запуск:
     export BOT_TOKEN=...            # тот же токен, что у бота
     export SESSION_SECRET=...       # отдельный секрет, только для web_api
+    export STATS_DIR=...            # тот же persistent volume, где бот хранит stats.json
     uvicorn web_api.main:app --reload
 """
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import config
-from .routers import auth, me, subjects
+from .routers import access, auth, me, subjects
 
 app = FastAPI(title="VMEDA web_api", version="0.1.0")
 
@@ -25,6 +26,7 @@ app.add_middleware(
 
 app.include_router(auth.router)
 app.include_router(me.router)
+app.include_router(access.router)
 app.include_router(subjects.router)
 
 

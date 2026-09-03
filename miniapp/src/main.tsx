@@ -23,8 +23,7 @@ const queryClient = new QueryClient({
 });
 
 /** Обмен initData на сессию — ОДИН РАЗ при старте приложения, до первого рендера маршрутов
- * (см. lib/api.ts::fetchMe/fetchSubjects — они читают useAuthStore/session-токен и падают
- * обратно на моки, если аутентификация ещё не завершилась или недоступна). Вне Telegram
+ * (см. lib/api.ts::fetchMe/fetchSubjects — они читают useAuthStore/session-токен). Вне Telegram
  * (обычный браузер, локальная разработка) НЕ подделывает initData — это означало бы держать в
  * отгруженном фронтенд-коде способ создать валидную подпись без реального Telegram-клиента, а
  * бэкенд эту подпись всё равно не примет без настоящего секрета бота (см. web_api/auth.py) —
@@ -43,12 +42,14 @@ async function authenticateOnBoot(): Promise<void> {
     const profile = await authenticateWithTelegram(initData);
     useAuthStore.getState().setAuthenticated(profile);
   } catch (err) {
-    console.warn("authenticateOnBoot: initData verification failed, staying on mock data", err);
-    useAuthStore.getState().setUnavailable();
+    console.error("authenticateOnBoot: initData verification failed", err);
+    // Внутри Telegram нельзя продолжать на демонстрационных данных: это показало бы фиктивный
+    // доступ/подписку именно тогда, когда сервер не смог подтвердить личность пользователя.
+    useAuthStore.getState().setFailed();
   }
 }
 
-function Root() {
+export function Root() {
   const authStatus = useAuthStore((s) => s.status);
 
   useEffect(() => {
@@ -63,6 +64,19 @@ function Root() {
     return (
       <div style={{ minHeight: "100dvh", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--background)" }}>
         <span style={{ fontSize: 13, color: "var(--ink-secondary)" }}>Загрузка…</span>
+      </div>
+    );
+  }
+
+  if (authStatus === "failed") {
+    return (
+      <div style={{ minHeight: "100dvh", display: "grid", placeItems: "center", padding: 24, background: "var(--background)" }}>
+        <div style={{ maxWidth: 360, textAlign: "center" }}>
+          <h1 style={{ fontSize: 20, marginBottom: 8 }}>Не удалось безопасно войти</h1>
+          <p style={{ fontSize: 14, color: "var(--ink-secondary)", lineHeight: 1.5 }}>
+            Закройте мини-приложение и откройте его заново из бота VMEDA.
+          </p>
+        </div>
       </div>
     );
   }

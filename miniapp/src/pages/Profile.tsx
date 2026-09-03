@@ -72,7 +72,9 @@ export function ProfilePage() {
         <div className={styles.subRow}>
           <div>
             <div className={styles.subTitle}>
-              {subQuery.data?.subscriptionTitle ?? "Нет активной подписки"}
+              {subQuery.isError
+                ? "Не удалось проверить подписку"
+                : subQuery.data?.subscriptionTitle ?? "Нет активной подписки"}
             </div>
             {subQuery.data?.subscriptionExpiresAt && (
               <div className={styles.subMeta}>до {formatDate(subQuery.data.subscriptionExpiresAt)}</div>

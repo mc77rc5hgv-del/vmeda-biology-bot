@@ -86,6 +86,31 @@ def test_future_auth_date_is_rejected():
         verify_telegram_init_data(init_data, BOT_TOKEN)
 
 
+def test_small_future_clock_skew_is_allowed():
+    init_data = build_init_data(BOT_TOKEN, default_fields(auth_date=int(time.time()) + 15))
+    verify_telegram_init_data(init_data, BOT_TOKEN)
+
+
+def test_duplicate_fields_are_rejected():
+    init_data = build_init_data(BOT_TOKEN, default_fields()) + "&auth_date=1"
+    with pytest.raises(InitDataError, match="повторяющиеся"):
+        verify_telegram_init_data(init_data, BOT_TOKEN)
+
+
+@pytest.mark.parametrize("bad_id", [None, 0, -1, True, "123"])
+def test_invalid_user_id_is_rejected(bad_id):
+    fields = default_fields()
+    fields["user"] = json.dumps({"id": bad_id, "first_name": "X"})
+    init_data = build_init_data(BOT_TOKEN, fields)
+    with pytest.raises(InitDataError, match="положительного id"):
+        verify_telegram_init_data(init_data, BOT_TOKEN)
+
+
+def test_oversized_init_data_is_rejected():
+    with pytest.raises(InitDataError, match="размер"):
+        verify_telegram_init_data("x" * 20_000, BOT_TOKEN)
+
+
 def test_custom_max_age_is_respected():
     auth_date = int(time.time()) - 3700  # чуть больше часа назад
     init_data = build_init_data(BOT_TOKEN, default_fields(auth_date=auth_date))

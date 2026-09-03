@@ -3,6 +3,7 @@
 // и переводит его в app-типы из lib/types.ts. lib/api.ts (диспетчер, решающий mock vs реальный
 // вызов) — единственный, кто это импортирует; компоненты про существование этого файла не знают.
 import type {
+  AccessStatus,
   ContentSection,
   MaterialDetail,
   SectionContents,
@@ -42,6 +43,19 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError(response.status, detail);
   }
   return response.json() as Promise<T>;
+}
+
+/** Загружает защищённое медиа с тем же session-токеном, что и JSON API. */
+export async function fetchAuthorizedBlob(url: string): Promise<Blob> {
+  const token = getStoredSessionToken();
+  const headers = new Headers();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const response = await fetch(url, { headers });
+  if (!response.ok) {
+    if (response.status === 401) clearStoredSessionToken();
+    throw new ApiError(response.status, response.statusText);
+  }
+  return response.blob();
 }
 
 // ==================== аутентификация (ТЗ §5) ====================
@@ -125,6 +139,38 @@ export async function fetchRealMe(): Promise<RealMe> {
     subscriptionTierTitle: body.subscription_tier_title,
     isAdmin: body.is_admin,
   };
+}
+
+// ==================== подписка и доступ ====================
+
+interface AccessStatusWire {
+  can_open_subject: boolean;
+  can_download: boolean;
+  can_use_ai: boolean;
+  ai_requests_left: number | null;
+  subscription_expires_at: string | null;
+  subscription_title: string | null;
+  locked_reason: string | null;
+}
+
+function toAccessStatus(wire: AccessStatusWire): AccessStatus {
+  return {
+    canOpenSubject: wire.can_open_subject,
+    canDownload: wire.can_download,
+    canUseAi: wire.can_use_ai,
+    aiRequestsLeft: wire.ai_requests_left,
+    subscriptionExpiresAt: wire.subscription_expires_at,
+    subscriptionTitle: wire.subscription_title,
+    lockedReason: wire.locked_reason,
+  };
+}
+
+export async function fetchRealAccessStatus(subjectId: string): Promise<AccessStatus> {
+  return toAccessStatus(await apiFetch(`/api/v1/access/${encodeURIComponent(subjectId)}`));
+}
+
+export async function fetchRealSubscriptionSummary(): Promise<AccessStatus> {
+  return toAccessStatus(await apiFetch("/api/v1/subscription"));
 }
 
 /** Собирает UserProfile (app-тип, см. lib/types.ts) из ДВУХ источников — см. schemas.py на

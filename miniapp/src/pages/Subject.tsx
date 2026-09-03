@@ -24,7 +24,7 @@ export function SubjectPage() {
     queryFn: () => fetchAccessStatus(subjectId),
   });
 
-  if (subjectQuery.isLoading) {
+  if (subjectQuery.isLoading || accessQuery.isLoading) {
     return (
       <div className="screen">
         <Skeleton height={28} width="60%" />
@@ -45,7 +45,7 @@ export function SubjectPage() {
   }
 
   const subject = subjectQuery.data;
-  const locked = accessQuery.data ? !accessQuery.data.canOpenSubject : subject.locked;
+  const locked = accessQuery.isError || !accessQuery.data || !accessQuery.data.canOpenSubject;
 
   return (
     <div className="screen">

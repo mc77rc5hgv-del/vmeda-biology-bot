@@ -33,3 +33,14 @@ class MeResponse(BaseModel):
     has_active_subscription: bool
     subscription_tier_title: str | None
     is_admin: bool
+
+
+class AccessStatusResponse(BaseModel):
+    """Права и лимиты уже рассчитаны сервером; клиент не выводит их из названия тарифа."""
+    can_open_subject: bool
+    can_download: bool
+    can_use_ai: bool
+    ai_requests_left: int | None
+    subscription_expires_at: str | None
+    subscription_title: str | None
+    locked_reason: str | None

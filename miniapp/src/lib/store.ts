@@ -20,13 +20,14 @@ export const useUiStore = create<UiState>((set) => ({
 // старте приложения (см. main.tsx) — сам по себе не пользовательские данные (те приходят через
 // TanStack Query, см. lib/api.ts), а состояние "прошла ли аутентификация в этом запуске
 // приложения", которое нужно синхронно читать из нескольких мест (TopBar, lib/api.ts::fetchMe).
-type AuthStatus = "pending" | "authenticated" | "unavailable";
+type AuthStatus = "pending" | "authenticated" | "unavailable" | "failed";
 
 interface AuthState {
   status: AuthStatus;
   profile: AuthProfile | null;
   setAuthenticated: (profile: AuthProfile) => void;
   setUnavailable: () => void;
+  setFailed: () => void;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
@@ -34,4 +35,5 @@ export const useAuthStore = create<AuthState>((set) => ({
   profile: null,
   setAuthenticated: (profile) => set({ status: "authenticated", profile }),
   setUnavailable: () => set({ status: "unavailable", profile: null }),
+  setFailed: () => set({ status: "failed", profile: null }),
 }));

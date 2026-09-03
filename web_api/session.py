@@ -11,6 +11,7 @@ import base64
 import hashlib
 import hmac
 import json
+import math
 import time
 
 SESSION_TTL_SECONDS = 6 * 60 * 60  # 6 часов -- короче, чем максимальная жизнь initData, но
@@ -34,6 +35,8 @@ def _b64decode(data: str) -> bytes:
 def create_session_token(user_id: int, secret: str, *, now: float | None = None) -> str:
     if not secret:
         raise SessionTokenError("SESSION_SECRET не задан на сервере")
+    if isinstance(user_id, bool) or not isinstance(user_id, int) or user_id <= 0:
+        raise SessionTokenError("user_id должен быть положительным целым числом")
     issued_at = now if now is not None else time.time()
     payload = {"uid": user_id, "iat": issued_at, "exp": issued_at + SESSION_TTL_SECONDS}
     payload_bytes = json.dumps(payload, separators=(",", ":")).encode("utf-8")
@@ -46,7 +49,7 @@ def verify_session_token(token: str, secret: str, *, now: float | None = None) -
     """Возвращает user_id, если токен подлинный и не истёк, иначе бросает SessionTokenError."""
     if not secret:
         raise SessionTokenError("SESSION_SECRET не задан на сервере")
-    if not token or "." not in token:
+    if not token or token.count(".") != 1:
         raise SessionTokenError("некорректный формат токена")
     payload_b64, _, signature = token.partition(".")
     expected_signature = hmac.new(secret.encode("utf-8"), payload_b64.encode("ascii"), hashlib.sha256).hexdigest()
@@ -54,13 +57,30 @@ def verify_session_token(token: str, secret: str, *, now: float | None = None) -
         raise SessionTokenError("подпись токена не совпадает")
     try:
         payload = json.loads(_b64decode(payload_b64))
-    except (ValueError, json.JSONDecodeError) as exc:
+    except (ValueError, TypeError, json.JSONDecodeError) as exc:
         raise SessionTokenError("не удалось разобрать тело токена") from exc
 
+    if not isinstance(payload, dict):
+        raise SessionTokenError("тело токена должно быть JSON-объектом")
+
     current_time = now if now is not None else time.time()
-    if current_time > payload.get("exp", 0):
+    expires_at = payload.get("exp")
+    issued_at = payload.get("iat")
+    if (
+        isinstance(expires_at, bool)
+        or not isinstance(expires_at, (int, float))
+        or not math.isfinite(expires_at)
+        or isinstance(issued_at, bool)
+        or not isinstance(issued_at, (int, float))
+        or not math.isfinite(issued_at)
+        or expires_at <= issued_at
+    ):
+        raise SessionTokenError("в токене нет валидного срока действия")
+    if issued_at > current_time + 30:
+        raise SessionTokenError("токен выпущен в будущем")
+    if current_time > expires_at:
         raise SessionTokenError("токен истёк")
     user_id = payload.get("uid")
-    if not isinstance(user_id, int):
+    if isinstance(user_id, bool) or not isinstance(user_id, int) or user_id <= 0:
         raise SessionTokenError("в токене нет uid")
     return user_id

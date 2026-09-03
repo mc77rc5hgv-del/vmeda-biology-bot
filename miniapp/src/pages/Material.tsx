@@ -1,10 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
+import DOMPurify from "dompurify";
 import { useNavigate, useParams } from "react-router-dom";
 import { fetchMaterial } from "../lib/api";
 import { hapticImpact, useTelegramBackButton } from "../lib/telegram";
 import { Card } from "../components/Card";
 import { Skeleton } from "../components/Skeleton";
 import { StateMessage } from "../components/StateMessage";
+import { AuthenticatedImage } from "../components/AuthenticatedImage";
 import styles from "./Material.module.css";
 
 export function MaterialPage() {
@@ -37,6 +39,10 @@ export function MaterialPage() {
   }
 
   const material = materialQuery.data;
+  const safeHtml = DOMPurify.sanitize(material.rawHtml ?? "", {
+    ALLOWED_TAGS: ["a", "b", "blockquote", "br", "code", "del", "em", "i", "p", "pre", "s", "strong", "u"],
+    ALLOWED_ATTR: ["href", "title"],
+  });
   const order = material.order;
   const total = material.totalInSection;
   // Реальный контент (см. lib/apiClient.ts) присылает готовые id соседей — id вида "core_p1_1"
@@ -87,10 +93,9 @@ export function MaterialPage() {
 
       {isRealContent ? (
         <Card className={styles.block}>
-          {/* content_html приходит из уже доверенной базы курса (generated_courses/*.json,
-              см. web_api/content.py) — не пользовательский ввод, поэтому dangerouslySetInnerHTML
-              здесь оправдан, как и в самом боте (parse_mode="HTML" в handlers/dynamic_courses.py). */}
-          <div className={styles.blockBody} dangerouslySetInnerHTML={{ __html: material.rawHtml ?? "" }} />
+          {/* Импортируемые материалы проходят DOMPurify: Telegram-источник нельзя считать
+              вечным доверенным источником только потому, что результат сохранён в JSON. */}
+          <div className={styles.blockBody} dangerouslySetInnerHTML={{ __html: safeHtml }} />
         </Card>
       ) : (
         material.blocks.map((block) => (
@@ -105,7 +110,7 @@ export function MaterialPage() {
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {material.media.map((m, i) => (
             <figure key={i} style={{ margin: 0 }}>
-              <img src={m.url} alt={m.caption} style={{ borderRadius: "var(--radius-md)" }} />
+              <AuthenticatedImage src={m.url} alt={m.caption || `Иллюстрация ${i + 1}`} className={styles.media} />
               {m.caption && (
                 <figcaption style={{ fontSize: 12, color: "var(--ink-secondary)", marginTop: 4 }}>
                   {m.caption}

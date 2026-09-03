@@ -42,13 +42,10 @@ function hasSession(): boolean {
 
 export async function fetchMe(): Promise<UserProfile> {
   if (hasSession()) {
-    try {
-      const authProfile = useAuthStore.getState().profile;
-      const me = await apiClient.fetchRealMe();
-      if (authProfile) return apiClient.mergeProfile(authProfile, me);
-    } catch (err) {
-      console.warn("fetchMe: real /api/v1/me failed, falling back to mock", err);
-    }
+    const authProfile = useAuthStore.getState().profile;
+    const me = await apiClient.fetchRealMe();
+    if (authProfile) return apiClient.mergeProfile(authProfile, me);
+    throw new Error("Telegram-профиль отсутствует в текущей сессии");
   }
   return resolveAfterDelay(mock.mockUser);
 }
@@ -73,8 +70,8 @@ export async function fetchSubjects(): Promise<SubjectSummary[]> {
     // собственный контент-адаптер.
     return [...real, ...mockSubjects];
   } catch (err) {
-    console.warn("fetchSubjects: real /api/v1/subjects failed, falling back to mock", err);
-    return mock.mockSubjects;
+    console.error("fetchSubjects: real /api/v1/subjects failed", err);
+    throw err;
   }
 }
 
@@ -83,7 +80,8 @@ export async function fetchSubjectDetail(subjectId: string): Promise<SubjectDeta
     try {
       return await apiClient.fetchRealSubjectDetail(subjectId);
     } catch (err) {
-      console.warn(`fetchSubjectDetail(${subjectId}): real API failed, falling back to mock`, err);
+      console.error(`fetchSubjectDetail(${subjectId}): real API failed`, err);
+      throw err;
     }
   }
   return resolveAfterDelay(mock.getSubjectDetail(subjectId));
@@ -107,7 +105,8 @@ export async function fetchMaterial(
     try {
       return await apiClient.fetchRealMaterial(subjectId, sectionId, materialId);
     } catch (err) {
-      console.warn(`fetchMaterial(${subjectId}): real API failed, falling back to mock`, err);
+      console.error(`fetchMaterial(${subjectId}): real API failed`, err);
+      throw err;
     }
   }
   return resolveAfterDelay(mock.getMaterial(subjectId, sectionId, materialId));
@@ -121,10 +120,26 @@ export function fetchTestQuestions(subjectId: string): Promise<TestQuestion[]> {
   return resolveAfterDelay(mock.getTestQuestions(subjectId));
 }
 
-export function fetchAccessStatus(subjectId: string): Promise<AccessStatus> {
-  return resolveAfterDelay(mock.getAccessStatus(subjectId));
+export async function fetchAccessStatus(subjectId: string): Promise<AccessStatus> {
+  if (!hasSession()) return resolveAfterDelay(mock.getAccessStatus(subjectId));
+  try {
+    return await apiClient.fetchRealAccessStatus(subjectId);
+  } catch (err) {
+    console.error(`fetchAccessStatus(${subjectId}): real API failed`, err);
+    return {
+      canOpenSubject: false,
+      canDownload: false,
+      canUseAi: false,
+      aiRequestsLeft: null,
+      subscriptionExpiresAt: null,
+      subscriptionTitle: null,
+      lockedReason: "Не удалось безопасно проверить доступ. Повторите попытку.",
+    };
+  }
 }
 
 export function fetchSubscriptionSummary(): Promise<AccessStatus> {
-  return resolveAfterDelay(mock.mockSubscriptionSummary);
+  return hasSession()
+    ? apiClient.fetchRealSubscriptionSummary()
+    : resolveAfterDelay(mock.mockSubscriptionSummary);
 }

@@ -20,6 +20,8 @@ from urllib.parse import parse_qsl
 
 MAX_INIT_DATA_AGE_SECONDS = 24 * 60 * 60  # initData Telegram сам переиздаёт при каждом открытии
                                             # Mini App — сутки с запасом достаточно, но не бесконечно
+MAX_INIT_DATA_LENGTH = 16_384
+MAX_FUTURE_CLOCK_SKEW_SECONDS = 30
 
 
 class InitDataError(Exception):
@@ -46,8 +48,13 @@ def verify_telegram_init_data(
         raise InitDataError("BOT_TOKEN не задан на сервере — проверка невозможна")
     if not init_data:
         raise InitDataError("пустая initData")
+    if len(init_data) > MAX_INIT_DATA_LENGTH:
+        raise InitDataError("initData превышает допустимый размер")
 
     pairs = parse_qsl(init_data, keep_blank_values=True, strict_parsing=False)
+    keys = [key for key, _ in pairs]
+    if len(keys) != len(set(keys)):
+        raise InitDataError("initData содержит повторяющиеся поля")
     fields = dict(pairs)
 
     received_hash = fields.pop("hash", None)
@@ -69,7 +76,7 @@ def verify_telegram_init_data(
     auth_date = int(auth_date_raw)
     current_time = now if now is not None else time.time()
     age = current_time - auth_date
-    if age < 0:
+    if age < -MAX_FUTURE_CLOCK_SKEW_SECONDS:
         raise InitDataError("auth_date в будущем — подозрительно, отклоняем")
     if age > max_age_seconds:
         raise InitDataError(f"initData протухла ({age:.0f}с > {max_age_seconds}с)")
@@ -81,8 +88,11 @@ def verify_telegram_init_data(
         user = json.loads(user_raw)
     except json.JSONDecodeError as exc:
         raise InitDataError("поле user в initData — не валидный JSON") from exc
-    if "id" not in user:
-        raise InitDataError("в user нет id")
+    if not isinstance(user, dict):
+        raise InitDataError("поле user должно быть JSON-объектом")
+    user_id = user.get("id")
+    if isinstance(user_id, bool) or not isinstance(user_id, int) or user_id <= 0:
+        raise InitDataError("в user нет валидного положительного id")
 
     fields["user"] = user
     fields["auth_date"] = auth_date

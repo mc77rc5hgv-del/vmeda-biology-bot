@@ -3,19 +3,22 @@ generated_courses/pharmacology.json) -- не на фикстуре, как web_a
 и не на моках, как miniapp/src/lib/mockData.ts. Если эти данные когда-нибудь поменяют форму,
 тест должен упасть -- он и есть проверка того, что "контент-адаптер для 2-3 предметов" (Этап 3)
 реально доводит один предмет от JSON до HTTP-ответа."""
+import json
 import os
 import tempfile
 
 os.environ.setdefault("BOT_TOKEN", "123456789:AASubjectsIntegrationTestToken0000000")
 os.environ.setdefault("SESSION_SECRET", "subjects-integration-test-secret")
-os.environ.setdefault("STATS_DIR", tempfile.mkdtemp(prefix="web_api_subjects_test_stats_"))
+_TEST_STATS_DIR = tempfile.mkdtemp(prefix="web_api_subjects_test_stats_")
+os.environ.setdefault("STATS_DIR", _TEST_STATS_DIR)
+with open(os.path.join(os.environ["STATS_DIR"], "stats.json"), "w", encoding="utf-8") as _stats_stream:
+    json.dump({}, _stats_stream)
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.chdir(_REPO_ROOT)
 
 import hashlib  # noqa: E402
 import hmac  # noqa: E402
-import json  # noqa: E402
 import time  # noqa: E402
 from urllib.parse import urlencode  # noqa: E402
 

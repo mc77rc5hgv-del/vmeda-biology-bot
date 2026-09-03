@@ -1,9 +1,8 @@
 # VMEDA web_api — read-only backend (Этап 3 ТЗ)
 
-Отдельный процесс от `telegram_bot.py`. Сегодня — только проверка Telegram `initData` и один
-реальный эндпоинт (`GET /api/v1/me`), читающий состояние через **те же самые** функции доступа,
-которыми пользуется сам бот (`services/access.py`, реэкспортированные на `telegram_bot`), а не
-переизобретённые заново.
+Отдельный процесс от `telegram_bot.py`. Проверяет Telegram `initData`, выдаёт короткоживущую
+серверную сессию и читает профиль, подписку, права доступа и учебный контент через **те же самые**
+функции и данные, которыми пользуется бот, а не переизобретённые клиентом правила.
 
 ## Важное архитектурное ограничение
 
@@ -30,6 +29,7 @@
 pip install -r web_api/requirements.txt
 export BOT_TOKEN=...          # тот же токен, что у бота
 export SESSION_SECRET=...     # свой секрет, только для web_api (подписывает session-токены)
+export STATS_DIR=...          # тот же persistent volume, где бот хранит stats.json
 uvicorn web_api.main:app --reload
 ```
 
@@ -76,7 +76,8 @@ JSON контентного контракта ТЗ §14. **Статичные �
 путь. `show_sources: false` у предмета (сегодня — только Фармакология) вычищает `sources` из
 ответа API, ровно как это уже делает `handlers/dynamic_courses.py` для самого бота.
 
-Эндпоинты сегодня: `POST /api/v1/auth/telegram`, `GET /api/v1/me`, `GET /api/v1/subjects`,
+Эндпоинты сегодня: `POST /api/v1/auth/telegram`, `GET /api/v1/me`,
+`GET /api/v1/subscription`, `GET /api/v1/access/{subject_id}`, `GET /api/v1/subjects`,
 `GET /api/v1/subjects/{id}`, `GET /api/v1/subjects/{id}/sections/{id}`,
 `GET /api/v1/subjects/{id}/sections/{id}/groups/{id}`,
 `GET /api/v1/materials/{subject}/{section}/{item}` (+ `/media/{index}`). `web_api/tests/test_content.py`
@@ -91,7 +92,7 @@ JSON контентного контракта ТЗ §14. **Статичные �
 (контент-адаптер под каждый — отдельная задача, см. выше), прогресс (`/api/v1/progress`),
 избранное (`/api/v1/favorites`), тесты (`/api/v1/tests/{id}` — не путать с `POST .../attempts`,
 записью результата, которая уже требует решения проблемы "два процесса пишут в один JSON",
-см. корневой раздел этого README), подписка (`/api/v1/subscription`), AI (`/api/v1/ai/solve`,
+см. корневой раздел этого README), AI (`/api/v1/ai/solve`,
 `/api/v1/ai/solve-photo`). Новые эндпоинты добавляются тем же паттерном: файл в `routers/`,
 `Depends(get_current_user_id)` + `Depends(get_fresh_bot_module)`, чтение через уже существующие
 функции `tb.*`/новый файл в духе `content.py`, не переизобретённая логика.

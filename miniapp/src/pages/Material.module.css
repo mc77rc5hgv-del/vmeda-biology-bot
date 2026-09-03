@@ -35,6 +35,16 @@
   white-space: pre-line;
 }
 
+.media {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-height: 120px;
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  object-fit: contain;
+}
+
 .nav {
   display: flex;
   gap: var(--space-2);

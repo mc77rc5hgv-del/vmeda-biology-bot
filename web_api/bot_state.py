@@ -26,9 +26,14 @@ JSON-баз контента и конфигурацию AI-пайплайна. 
    но НЕ бесплатно, поэтому не на каждую мелкую операцию внутри одного запроса, а один раз в его
    начале.
 """
+import json
 import os
 
 _bot_module = None
+
+
+class BotStateUnavailableError(RuntimeError):
+    """Критическое состояние недоступно — API обязан закрыться, а не выдавать пустые права."""
 
 
 def get_bot_module():
@@ -38,9 +43,13 @@ def get_bot_module():
     global _bot_module
     if _bot_module is None:
         if not os.environ.get("BOT_TOKEN"):
-            raise RuntimeError(
+            raise BotStateUnavailableError(
                 "BOT_TOKEN не задан -- web_api импортирует telegram_bot.py, а тот требует тот же "
                 "токен, что и сам бот (см. docstring этого файла)."
+            )
+        if not os.environ.get("STATS_DIR"):
+            raise BotStateUnavailableError(
+                "STATS_DIR не задан явно: web_api не может доказать, что читает persistent volume бота"
             )
         import telegram_bot  # noqa: PLC0415 -- намеренно ленивый импорт, см. докстринг выше
 
@@ -53,4 +62,17 @@ def refresh_stats() -> None:
     модуля. services.access читает tb.stats заново при каждом вызове (не кэширует ссылку сама),
     так что подмены самого объекта достаточно -- ничего больше переинициализировать не нужно."""
     tb = get_bot_module()
+    if not os.path.isfile(tb.STATS_FILE):
+        raise BotStateUnavailableError(
+            f"файл состояния {tb.STATS_FILE!r} отсутствует; пустые права намеренно не создаются"
+        )
+    try:
+        with open(tb.STATS_FILE, "r", encoding="utf-8") as stream:
+            raw = json.load(stream)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise BotStateUnavailableError(
+            f"файл состояния {tb.STATS_FILE!r} повреждён или временно недоступен"
+        ) from exc
+    if not isinstance(raw, dict):
+        raise BotStateUnavailableError(f"файл состояния {tb.STATS_FILE!r} не содержит JSON-объект")
     tb.stats = tb.load_stats()
