@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException
 
 from .. import config
 from ..auth import InitDataError, verify_telegram_init_data
+from ..deps import ensure_miniapp_access
 from ..schemas import TelegramAuthRequest, TelegramAuthResponse
 from ..session import create_session_token
 
@@ -20,6 +21,7 @@ def auth_telegram(payload: TelegramAuthRequest) -> TelegramAuthResponse:
 
     user = verified["user"]
     user_id = user["id"]
+    ensure_miniapp_access(user_id)
     token = create_session_token(user_id, config.SESSION_SECRET)
     return TelegramAuthResponse(
         session_token=token,

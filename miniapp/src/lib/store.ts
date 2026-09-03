@@ -25,15 +25,17 @@ type AuthStatus = "pending" | "authenticated" | "unavailable" | "failed";
 interface AuthState {
   status: AuthStatus;
   profile: AuthProfile | null;
+  failureMessage: string | null;
   setAuthenticated: (profile: AuthProfile) => void;
   setUnavailable: () => void;
-  setFailed: () => void;
+  setFailed: (message: string) => void;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
   status: "pending",
   profile: null,
-  setAuthenticated: (profile) => set({ status: "authenticated", profile }),
-  setUnavailable: () => set({ status: "unavailable", profile: null }),
-  setFailed: () => set({ status: "failed", profile: null }),
+  failureMessage: null,
+  setAuthenticated: (profile) => set({ status: "authenticated", profile, failureMessage: null }),
+  setUnavailable: () => set({ status: "unavailable", profile: null, failureMessage: null }),
+  setFailed: (failureMessage) => set({ status: "failed", profile: null, failureMessage }),
 }));

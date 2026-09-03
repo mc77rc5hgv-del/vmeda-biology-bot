@@ -13,9 +13,28 @@ def get_current_user_id(authorization: str | None = Header(default=None)) -> int
         raise HTTPException(status_code=401, detail="нет Bearer-токена в заголовке Authorization")
     token = authorization.removeprefix("Bearer ").strip()
     try:
-        return verify_session_token(token, config.SESSION_SECRET)
+        user_id = verify_session_token(token, config.SESSION_SECRET)
     except SessionTokenError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
+    ensure_miniapp_access(user_id)
+    return user_id
+
+
+def ensure_miniapp_access(user_id: int) -> None:
+    """Временный серверный beta-gate. Проверяется и при входе, и на каждом запросе, поэтому
+    ранее выданный токен не позволяет пережить переключение public -> admin_only."""
+    if config.MINIAPP_ACCESS_MODE == "public":
+        return
+    try:
+        bot_state.refresh_stats()
+        tb = bot_state.get_bot_module()
+    except bot_state.BotStateUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if not tb.is_admin(user_id):
+        raise HTTPException(
+            status_code=403,
+            detail="Мини-приложение пока доступно только администратору VMEDA.",
+        )
 
 
 def get_fresh_bot_module():

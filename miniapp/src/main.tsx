@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { HashRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { App } from "./App";
-import { authenticateWithTelegram } from "./lib/apiClient";
+import { ApiError, authenticateWithTelegram } from "./lib/apiClient";
 import { useAuthStore } from "./lib/store";
 import { getRawInitData, initTelegramApp, isInsideTelegram } from "./lib/telegram";
 import "./styles/global.css";
@@ -45,12 +45,16 @@ async function authenticateOnBoot(): Promise<void> {
     console.error("authenticateOnBoot: initData verification failed", err);
     // Внутри Telegram нельзя продолжать на демонстрационных данных: это показало бы фиктивный
     // доступ/подписку именно тогда, когда сервер не смог подтвердить личность пользователя.
-    useAuthStore.getState().setFailed();
+    const message = err instanceof ApiError && err.status === 403
+      ? err.message
+      : "Закройте мини-приложение и откройте его заново из бота VMEDA.";
+    useAuthStore.getState().setFailed(message);
   }
 }
 
 export function Root() {
   const authStatus = useAuthStore((s) => s.status);
+  const failureMessage = useAuthStore((s) => s.failureMessage);
 
   useEffect(() => {
     initTelegramApp();
@@ -72,9 +76,9 @@ export function Root() {
     return (
       <div style={{ minHeight: "100dvh", display: "grid", placeItems: "center", padding: 24, background: "var(--background)" }}>
         <div style={{ maxWidth: 360, textAlign: "center" }}>
-          <h1 style={{ fontSize: 20, marginBottom: 8 }}>Не удалось безопасно войти</h1>
+          <h1 style={{ fontSize: 20, marginBottom: 8 }}>Доступ пока закрыт</h1>
           <p style={{ fontSize: 14, color: "var(--ink-secondary)", lineHeight: 1.5 }}>
-            Закройте мини-приложение и откройте его заново из бота VMEDA.
+            {failureMessage}
           </p>
         </div>
       </div>

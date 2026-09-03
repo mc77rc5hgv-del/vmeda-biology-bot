@@ -30,6 +30,7 @@ pip install -r web_api/requirements.txt
 export BOT_TOKEN=...          # тот же токен, что у бота
 export SESSION_SECRET=...     # свой секрет, только для web_api (подписывает session-токены)
 export STATS_DIR=...          # тот же persistent volume, где бот хранит stats.json
+export MINIAPP_ACCESS_MODE=admin_only  # закрытая beta; public — открыть всем пользователям
 uvicorn web_api.main:app --reload
 ```
 

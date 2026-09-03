@@ -6,6 +6,7 @@ import tempfile
 
 os.environ.setdefault("BOT_TOKEN", "123456789:AAIntegrationTestTokenNotReal00000000")
 os.environ.setdefault("SESSION_SECRET", "integration-test-session-secret")
+os.environ.setdefault("MINIAPP_ACCESS_MODE", "public")
 
 if not os.environ.get("STATS_DIR"):
     os.environ["STATS_DIR"] = tempfile.mkdtemp(prefix="web_api_test_stats_")
