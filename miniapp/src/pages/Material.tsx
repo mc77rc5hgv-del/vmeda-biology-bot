@@ -96,7 +96,7 @@ export function MaterialPage() {
   }
 
   return (
-    <div className="screen">
+    <div className={`screen ${styles.materialScreen}`}>
       <div className={styles.header}>
         <span className={styles.eyebrow}>
           Тема {order} из {total}
