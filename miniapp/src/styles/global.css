@@ -20,6 +20,10 @@ body {
 #root {
   min-height: 100vh;
   min-height: 100dvh;
+  /* --tg-viewport-height (lib/telegram.ts::syncViewportHeight) переопределяет dvh реальной
+     высотой WebView Telegram, когда доступна -- см. комментарий там про "чёрную область под
+     нижней панелью". Вне Telegram переменная не установлена, откат на 100dvh выше не меняется. */
+  min-height: var(--tg-viewport-height, 100dvh);
 }
 
 h1, h2, h3, p {

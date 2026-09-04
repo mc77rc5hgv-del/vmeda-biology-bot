@@ -66,7 +66,7 @@ export function Root() {
   // как только придёт ответ от web_api (см. docstring authenticateOnBoot выше).
   if (authStatus === "pending") {
     return (
-      <div style={{ minHeight: "100dvh", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--background)" }}>
+      <div style={{ minHeight: "var(--tg-viewport-height, 100dvh)", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--background)" }}>
         <span style={{ fontSize: 13, color: "var(--ink-secondary)" }}>Загрузка…</span>
       </div>
     );
@@ -74,7 +74,7 @@ export function Root() {
 
   if (authStatus === "failed") {
     return (
-      <div style={{ minHeight: "100dvh", display: "grid", placeItems: "center", padding: 24, background: "var(--background)" }}>
+      <div style={{ minHeight: "var(--tg-viewport-height, 100dvh)", display: "grid", placeItems: "center", padding: 24, background: "var(--background)" }}>
         <div style={{ maxWidth: 360, textAlign: "center" }}>
           <h1 style={{ fontSize: 20, marginBottom: 8 }}>Доступ пока закрыт</h1>
           <p style={{ fontSize: 14, color: "var(--ink-secondary)", lineHeight: 1.5 }}>

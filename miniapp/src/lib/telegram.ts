@@ -26,11 +26,14 @@ interface TelegramWebApp {
   colorScheme: "light" | "dark";
   themeParams: TelegramThemeParams;
   viewportHeight: number;
+  viewportStableHeight: number;
   isExpanded: boolean;
   platform: string;
   ready: () => void;
   expand: () => void;
   close: () => void;
+  setBackgroundColor?: (color: string) => void;
+  setHeaderColor?: (color: string) => void;
   onEvent: (event: string, handler: () => void) => void;
   offEvent: (event: string, handler: () => void) => void;
   BackButton: {
@@ -63,12 +66,44 @@ export function initTelegramApp(): void {
   webApp.ready();
   webApp.expand();
   applyThemeAttribute();
+  syncViewportHeight();
   webApp.onEvent("themeChanged", applyThemeAttribute);
+  webApp.onEvent("viewportChanged", syncViewportHeight);
 }
 
 function applyThemeAttribute(): void {
   if (!webApp) return;
   document.documentElement.setAttribute("data-theme", webApp.colorScheme);
+  // Telegram заливает область ВНЕ нашего DOM (шапка клиента, и — что важнее для бага "чёрная
+  // область под нижней панелью" — любой временной зазор между высотой, на которую страница
+  // успела отрисоваться, и высотой, до которой expand() растягивает сам WebView) своим фоном по
+  // умолчанию (часто чёрным в тёмной теме), а не фоном страницы. Явно сообщаем Telegram цвет фона
+  // экрана (читаем уже применённое значение --background, а не дублируем hex из tokens.css —
+  // см. пункт CLAUDE.md про дублирование значений), чтобы даже кратковременный зазор был не
+  // "дырой", а тем же фоном, что и сам экран.
+  const bg = getComputedStyle(document.documentElement).getPropertyValue("--background").trim();
+  if (bg) {
+    webApp.setBackgroundColor?.(bg);
+    webApp.setHeaderColor?.(bg);
+  }
+}
+
+/** Синхронизирует CSS-переменную --tg-viewport-height с реальной высотой WebView Telegram
+ * (viewportStableHeight/viewportHeight), а не полагается только на 100vh/100dvh. Проблема: после
+ * expand() Telegram раскрывает WebView до полной высоты, но на части клиентов (замечено на
+ * некоторых версиях мобильного приложения) браузерный движок не пересчитывает dvh-юниты сам по
+ * себе без отдельного события resize/orientationchange — контент застревает отрисованным на
+ * ПРЕЖНЕЙ, меньшей высоте, и всё, что ниже (включая нижнюю панель, закреплённую position:fixed),
+ * "проваливается" в середину экрана, а под ним видна чистая область WebView. Явная запись
+ * пиксельного значения в CSS-переменную из JS форсирует пересчёт layout, в отличие от пассивной
+ * переоценки dvh-юнита. Слушаем viewportChanged (а не только вызываем один раз при старте) —
+ * событие срабатывает и при повторном раскрытии, и при появлении/скрытии системной клавиатуры. */
+function syncViewportHeight(): void {
+  if (!webApp) return;
+  const height = webApp.viewportStableHeight || webApp.viewportHeight || window.innerHeight;
+  if (height > 0) {
+    document.documentElement.style.setProperty("--tg-viewport-height", `${height}px`);
+  }
 }
 
 /** Сырая initData-строка для будущего заголовка Authorization на реальном backend'е.

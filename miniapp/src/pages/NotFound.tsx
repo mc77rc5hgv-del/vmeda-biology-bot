@@ -13,6 +13,8 @@ export function NotFoundPage() {
         icon={Compass}
         title="Страница не найдена"
         body="Такого экрана нет — вернись на главную."
+        onRetry={() => navigate("/")}
+        actionLabel="На главную"
       />
     </div>
   );
