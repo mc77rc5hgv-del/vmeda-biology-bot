@@ -50,7 +50,7 @@ def test_list_subjects_includes_real_dynamic_courses():
     ids = {s["id"] for s in resp.json()}
     assert {
         "biochemistry", "pharmacology", "latin", "law", "physiology", "operative_surgery", "anatomy",
-        "histology",
+        "histology", "biology",
     } <= ids
 
 
@@ -366,6 +366,88 @@ def test_histology_unknown_diagnostic_is_not_found_not_locked():
     headers = _auth_headers(900_444_555_666)  # уже разблокирован предыдущим тестом
     resp = client.get(
         "/api/v1/subjects/histology/sections/specimens/groups/diagnostika_99", headers=headers
+    )
+    assert resp.status_code == 404
+
+
+def test_biology_default_locked_for_user_with_no_subscription_no_referrals():
+    """Биология гейтится тем же реферальным middleware, что Физика/Химия (has_subject_access) --
+    свежий тестовый пользователь без подписки/рефералов честно заблокирован. Список билетов
+    (группы) всё равно виден с locked=true; раздел "questions" (плоский, сами заголовки вопросов
+    зачёта уже содержательны) отдаёт 403 целиком, а не список с пометками -- см. docstring гейта
+    Биологии в routers/subjects.py."""
+    headers = _auth_headers()
+    section = client.get("/api/v1/subjects/biology/sections/tickets", headers=headers).json()
+    assert len(section["groups"]) == 40  # см. отчёт по данным: 40 билетов
+    assert all(g["locked"] for g in section["groups"])
+    assert all(g["locked_reason"] for g in section["groups"])
+
+    first_ticket_id = section["groups"][0]["id"]
+    locked_group = client.get(
+        f"/api/v1/subjects/biology/sections/tickets/groups/{first_ticket_id}", headers=headers
+    )
+    assert locked_group.status_code == 403
+
+    locked_questions = client.get("/api/v1/subjects/biology/sections/questions", headers=headers)
+    assert locked_questions.status_code == 403
+
+
+def test_biology_ticket_and_question_bank_material_round_trip_once_referral_threshold_is_met():
+    import telegram_bot as tb  # уже импортирован предыдущими тестами (лениво, через bot_state)
+
+    unlocked_user_id = 900_555_666_777
+    tb.stats["total_users"].add(unlocked_user_id)
+    current_month = tb.local_today().strftime("%Y-%m")
+    tb.stats["referral_monthly"][str(unlocked_user_id)] = {"month": current_month, "count": 2}
+    tb.save_stats()
+
+    headers = _auth_headers(unlocked_user_id)
+    detail = client.get("/api/v1/subjects/biology", headers=headers)
+    assert detail.status_code == 200, detail.text
+    sections = {s["id"]: s for s in detail.json()["sections"]}
+    assert sections["tickets"]["item_count"] == 120  # см. отчёт по данным: 40 билетов * 3 вопроса
+    assert sections["questions"]["item_count"] == 185  # см. отчёт по данным
+
+    tickets_section = client.get("/api/v1/subjects/biology/sections/tickets", headers=headers).json()
+    assert all(g["locked"] is False for g in tickets_section["groups"])
+    first_ticket_id = tickets_section["groups"][0]["id"]
+
+    ticket_group = client.get(
+        f"/api/v1/subjects/biology/sections/tickets/groups/{first_ticket_id}", headers=headers
+    ).json()
+    assert len(ticket_group["items"]) == 3  # см. отчёт по данным: 3 вопроса на билет
+    first_question = ticket_group["items"][0]
+
+    ticket_material = client.get(
+        f"/api/v1/materials/biology/tickets/{first_question['id']}", headers=headers
+    )
+    assert ticket_material.status_code == 200, ticket_material.text
+    ticket_body = ticket_material.json()
+    assert ticket_body["title"] == first_question["title"]
+    assert ticket_body["content_html"]  # реальный ответ, не заглушка
+    assert ticket_body["group_id"] == first_ticket_id
+    assert ticket_body["prev_id"] is None
+    assert ticket_body["next_id"] == ticket_group["items"][1]["id"]
+
+    questions_section = client.get("/api/v1/subjects/biology/sections/questions", headers=headers)
+    assert questions_section.status_code == 200, questions_section.text
+    first_bank_question = questions_section.json()["items"][0]
+
+    bank_material = client.get(
+        f"/api/v1/materials/biology/questions/{first_bank_question['id']}", headers=headers
+    )
+    assert bank_material.status_code == 200, bank_material.text
+    bank_body = bank_material.json()
+    assert bank_body["title"] == first_bank_question["title"]
+    assert bank_body["content_html"]
+    assert bank_body["group_id"] is None
+    assert bank_body["prev_id"] is None
+
+
+def test_biology_unknown_ticket_group_is_not_found_not_locked():
+    headers = _auth_headers(900_555_666_777)  # уже разблокирован предыдущим тестом
+    resp = client.get(
+        "/api/v1/subjects/biology/sections/tickets/groups/does-not-exist", headers=headers
     )
     assert resp.status_code == 404
 

@@ -80,6 +80,8 @@ def _get_material_data(tb, user_id: int, subject_id: str, section_id: str, item_
         _check_anatomy_material_access(tb, user_id, section_id, item_id)
     if subject_id == static_content.HISTOLOGY_ID:
         _check_histology_access(tb, user_id)
+    if subject_id == static_content.BIOLOGY_ID:
+        _check_biology_access(tb, user_id)
     if subject_id in static_content.SUPPORTED_SUBJECT_IDS:
         return static_content.get_material(tb, subject_id, section_id, item_id)
     return content.get_material(tb.DYNAMIC_COURSES, subject_id, section_id, item_id)
@@ -115,6 +117,42 @@ def _check_histology_access(tb, user_id: int) -> None:
 def _annotate_histology_groups(tb, user_id: int, section: dict) -> dict:
     if section.get("id") == static_content.HISTOLOGY_SECTION_ID:
         reason = _histology_locked_reason(tb, user_id)
+        for group in section.get("groups", []):
+            group["locked"] = reason is not None
+            group["locked_reason"] = reason
+    return section
+
+
+# ==================== Гейт Биологии ====================
+# Биология гейтится ровно так же, как Физика/Химия -- общим реферальным middleware бота
+# (referral_gate_middleware -> has_subject_access(user_id, "biology")), см. CLAUDE.md "Access
+# control". Тоже один флаг на весь предмет, как у Гистологии (не по билетам отдельно) -- но, в
+# отличие от Гистологии, у Биологии ДВА раздела разной формы: "tickets" (группированный -- список
+# билетов виден всем, как список диагностик у Гистологии) и "questions" (плоский -- сам список из
+# 185 заголовков вопросов уже является содержательной утечкой контента зачёта, скрывать за
+# "именами групп" здесь нечего, поэтому при отсутствии доступа весь раздел "questions" отдаёт 403
+# целиком, а не список с locked=true на каждом элементе).
+
+
+def _biology_locked_reason(tb, user_id: int) -> str | None:
+    if tb.has_subject_access(user_id, "biology"):
+        return None
+    cheapest = tb.cheapest_gated3_tier()
+    return (
+        f"Биология открывается подпиской от «{cheapest['short']}» "
+        f"({cheapest['price_rub']}₽ / {cheapest['price_stars']}⭐) или двумя рефералами в этом месяце."
+    )
+
+
+def _check_biology_access(tb, user_id: int) -> None:
+    reason = _biology_locked_reason(tb, user_id)
+    if reason is not None:
+        raise HTTPException(status_code=403, detail=reason)
+
+
+def _annotate_biology_section(tb, user_id: int, section: dict) -> dict:
+    if section.get("id") == static_content.BIOLOGY_TICKETS_SECTION_ID:
+        reason = _biology_locked_reason(tb, user_id)
         for group in section.get("groups", []):
             group["locked"] = reason is not None
             group["locked_reason"] = reason
@@ -170,6 +208,13 @@ def get_section(
         # Список диагностик виден всем -- гейт применяется одинаково ко всем группам сразу
         # (см. _annotate_histology_groups), а не по отдельным группам, как у Анатомии.
         section = _annotate_histology_groups(tb, user_id, section)
+    if subject_id == static_content.BIOLOGY_ID:
+        if section_id == static_content.BIOLOGY_QUESTIONS_SECTION_ID:
+            # Плоский раздел -- сами заголовки 185 вопросов уже содержательны, прятать их
+            # позади "названий групп" здесь не за чем (см. docstring гейта Биологии выше).
+            _check_biology_access(tb, user_id)
+        else:
+            section = _annotate_biology_section(tb, user_id, section)
     return section
 
 
@@ -191,6 +236,10 @@ def get_group(
         if group_id not in tb.HISTOLOGY:
             raise HTTPException(status_code=404, detail=f"диагностика {group_id!r} не найдена в гистологии")
         _check_histology_access(tb, user_id)
+    if subject_id == static_content.BIOLOGY_ID and section_id == static_content.BIOLOGY_TICKETS_SECTION_ID:
+        if not any(t["num"] == group_id for t in tb.TICKETS):
+            raise HTTPException(status_code=404, detail=f"билет {group_id!r} не найден в биологии")
+        _check_biology_access(tb, user_id)
     try:
         if subject_id in static_content.SUPPORTED_SUBJECT_IDS:
             return static_content.get_group_detail(tb, subject_id, section_id, group_id)

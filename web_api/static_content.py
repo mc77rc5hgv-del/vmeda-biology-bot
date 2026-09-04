@@ -14,14 +14,18 @@
 отдельная задача на будущее), «Анатомия» (107 тем в 10 модулях — только непрерывный текст
 material[], БЕЗ флеш-карточек/сопоставления/мнемоник/картиночных тестов/разбора по костям/атласа/
 латинских терминов/экзаменационных банков — те же "честный срез" резоны, что и у Оперативной
-хирургии) и «Гистология» (71 препарат в 5 диагностиках — реальный протокол описания + реальные
-микрофото, БЕЗ картиночного тренажёра "Найди препарат" — см. SUPPORTED_SUBJECT_IDS ниже).
+хирургии), «Гистология» (71 препарат в 5 диагностиках — реальный протокол описания + реальные
+микрофото, БЕЗ картиночного тренажёра "Найди препарат") и «Биология» (40 билетов по 3 вопроса +
+185 вопросов зачёта — БЕЗ флеш-карточек, это тот же QUESTIONS-банк в другом режиме показа у бота,
+не отдельный контент — см. SUPPORTED_SUBJECT_IDS ниже).
 
 В отличие от Физиологии/Оперативной хирургии (полностью бесплатные разделы бота — см. CLAUDE.md),
-у Анатомии и Гистологии есть собственные гейты внутри бота — этот модуль сам НИЧЕГО не проверяет
-(остаётся чистой функцией формы контента над tb.ANATOMY/tb.HISTOLOGY, как и остальные предметы),
-проверка прав живёт в web_api/routers/subjects.py (см. _anatomy_module_access_ok/
-_histology_access_ok там), у которого есть доступ к user_id."""
+у Анатомии и Гистологии есть собственные гейты внутри бота, а Биология гейтится ОБЩИМ
+реферальным middleware наравне с Физикой/Химией (has_subject_access) — этот модуль сам НИЧЕГО не
+проверяет (остаётся чистой функцией формы контента над tb.ANATOMY/tb.HISTOLOGY/tb.TICKETS/
+tb.QUESTIONS, как и остальные предметы), проверка прав живёт в web_api/routers/subjects.py (см.
+_anatomy_module_access_ok/_histology_access_ok/_biology_access_ok там), у которого есть доступ к
+user_id."""
 from html import escape
 
 from .content import ContentNotFoundError
@@ -30,9 +34,12 @@ PHYSIOLOGY_ID = "physiology"
 OPERATIVE_SURGERY_ID = "operative_surgery"
 ANATOMY_ID = "anatomy"
 HISTOLOGY_ID = "histology"
-SUPPORTED_SUBJECT_IDS = {PHYSIOLOGY_ID, OPERATIVE_SURGERY_ID, ANATOMY_ID, HISTOLOGY_ID}
+BIOLOGY_ID = "biology"
+SUPPORTED_SUBJECT_IDS = {PHYSIOLOGY_ID, OPERATIVE_SURGERY_ID, ANATOMY_ID, HISTOLOGY_ID, BIOLOGY_ID}
 ANATOMY_SECTION_ID = "course"
 HISTOLOGY_SECTION_ID = "specimens"
+BIOLOGY_TICKETS_SECTION_ID = "tickets"
+BIOLOGY_QUESTIONS_SECTION_ID = "questions"
 
 PHYSIOLOGY_PAGE_CHAR_BUDGET = 6_000
 
@@ -72,6 +79,15 @@ def list_subject_summaries(tb) -> list[dict]:
             "title": "Гистология",
             "emoji": "🔬",
             "description": "71 препарат в 5 диагностиках — протокол описания и реальные микрофото",
+            "course": 1,
+            "has_ai": True,
+        })
+    if tb.TICKETS or tb.QUESTIONS:
+        summaries.append({
+            "id": BIOLOGY_ID,
+            "title": "Биология",
+            "emoji": "🧬",
+            "description": "40 билетов и 185 вопросов зачёта",
             "course": 1,
             "has_ai": True,
         })
@@ -119,6 +135,24 @@ def get_subject_detail(tb, subject_id: str) -> dict:
         total_specimens = sum(len(group.get("specimens", [])) for group in tb.HISTOLOGY.values())
         summary["sections"] = [
             {"id": HISTOLOGY_SECTION_ID, "title": "Препараты", "item_count": total_specimens, "kind": "grouped"},
+        ]
+        return summary
+
+    if subject_id == BIOLOGY_ID:
+        ticket_question_count = sum(len(t.get("questions", [])) for t in tb.TICKETS)
+        summary["sections"] = [
+            {
+                "id": BIOLOGY_TICKETS_SECTION_ID,
+                "title": "Билеты",
+                "item_count": ticket_question_count,
+                "kind": "grouped",
+            },
+            {
+                "id": BIOLOGY_QUESTIONS_SECTION_ID,
+                "title": "Вопросы",
+                "item_count": len(tb.QUESTIONS),
+                "kind": "flat",
+            },
         ]
         return summary
 
@@ -194,6 +228,31 @@ def get_section_detail(tb, subject_id: str, section_id: str) -> dict:
             ],
         }
 
+    if subject_id == BIOLOGY_ID:
+        if section_id == BIOLOGY_TICKETS_SECTION_ID:
+            return {
+                "id": section_id,
+                "title": "Билеты",
+                "kind": "grouped",
+                "groups": [
+                    {"id": ticket["num"], "title": ticket["title"], "item_count": len(ticket.get("questions", []))}
+                    for ticket in tb.TICKETS
+                ],
+            }
+        if section_id == BIOLOGY_QUESTIONS_SECTION_ID:
+            keys = list(tb.QUESTIONS.keys())
+            total = len(keys)
+            return {
+                "id": section_id,
+                "title": "Вопросы",
+                "kind": "flat",
+                "items": [
+                    {"id": key, "title": tb.QUESTIONS[key]["title"], "order": index + 1, "total": total}
+                    for index, key in enumerate(keys)
+                ],
+            }
+        raise ContentNotFoundError(f"раздел {section_id!r} не найден в биологии")
+
     # operative_surgery
     if section_id != "volumes":
         raise ContentNotFoundError(f"раздел {section_id!r} не найден в оперативной хирургии")
@@ -260,6 +319,26 @@ def get_group_detail(tb, subject_id: str, section_id: str, group_id: str) -> dic
             ],
         }
 
+    if subject_id == BIOLOGY_ID:
+        if section_id != BIOLOGY_TICKETS_SECTION_ID:
+            raise ContentNotFoundError(f"в разделе {section_id!r} нет групп")
+        ticket = _biology_find_ticket(tb.TICKETS, group_id)
+        questions = ticket.get("questions", [])
+        total = len(questions)
+        return {
+            "id": group_id,
+            "title": ticket["title"],
+            "items": [
+                {
+                    "id": _biology_ticket_item_id(group_id, question["num"]),
+                    "title": question["title"],
+                    "order": index + 1,
+                    "total": total,
+                }
+                for index, question in enumerate(questions)
+            ],
+        }
+
     # operative_surgery
     if section_id != "volumes":
         raise ContentNotFoundError(f"в разделе {section_id!r} нет групп")
@@ -283,6 +362,8 @@ def get_material(tb, subject_id: str, section_id: str, item_id: str) -> dict:
         return _anatomy_material(tb.ANATOMY, section_id, item_id)
     if subject_id == HISTOLOGY_ID:
         return _histology_material(tb.HISTOLOGY, section_id, item_id)
+    if subject_id == BIOLOGY_ID:
+        return _biology_material(tb.TICKETS, tb.QUESTIONS, section_id, item_id)
     if subject_id == PHYSIOLOGY_ID:
         return _physiology_material(tb.PHYSIOLOGY, section_id, item_id)
     return _operative_surgery_material(tb.OPERATIVE_SURGERY, section_id, item_id)
@@ -566,3 +647,83 @@ def _histology_material(histology: dict, section_id: str, item_id: str) -> dict:
             for path in specimen.get("images", [])
         ],
     }
+
+
+# ==================== Биология ====================
+# Подключены оба раздела: «Билеты» (40 билетов по 3 вопроса, tb.TICKETS -- список, не dict) и
+# «Вопросы» (185 вопросов зачёта, tb.QUESTIONS -- dict "1".."185", уже в числовом порядке
+# вставки). Флеш-карточки НЕ подключены -- это тот же QUESTIONS-банк в другом режиме показа у
+# бота (переворачивающиеся карточки), не отдельный контент, так что честный срез уже покрывает
+# все реальные вопросы через раздел "Вопросы".
+#
+# Билетный вопрос уже несёт готовый HTML (<b>...</b>, как у топиков Анатомии/ОХ) -- НЕ эскейпится.
+# Вопрос из отдельного банка QUESTIONS -- обычный plain text (проверено на всех 185 записях, ни в
+# одной нет HTML-тегов) -- эскейпится, как и у Гистологии.
+
+def _biology_ticket_item_id(ticket_num: str, question_num) -> str:
+    return f"{ticket_num}_{question_num}"
+
+
+def _biology_find_ticket(tickets: list, ticket_num: str) -> dict:
+    for ticket in tickets:
+        if ticket["num"] == ticket_num:
+            return ticket
+    raise ContentNotFoundError(f"билет {ticket_num!r} не найден в биологии")
+
+
+def _biology_find_ticket_question(tickets: list, item_id: str) -> tuple[dict, dict]:
+    for ticket in tickets:
+        for question in ticket.get("questions", []):
+            if _biology_ticket_item_id(ticket["num"], question["num"]) == item_id:
+                return ticket, question
+    raise ContentNotFoundError(f"вопрос {item_id!r} не найден в билетах биологии")
+
+
+def _biology_ticket_material(tickets: list, item_id: str) -> dict:
+    ticket, target_question = _biology_find_ticket_question(tickets, item_id)
+    questions = ticket.get("questions", [])
+    index = next(i for i, q in enumerate(questions) if q["num"] == target_question["num"])
+
+    def sibling_id(i: int) -> str:
+        return _biology_ticket_item_id(ticket["num"], questions[i]["num"])
+
+    return {
+        "id": item_id,
+        "title": target_question["title"],
+        "content_html": target_question["answer"],
+        "sources": [],
+        "order": index + 1,
+        "total": len(questions),
+        "group_id": ticket["num"],
+        "prev_id": sibling_id(index - 1) if index > 0 else None,
+        "next_id": sibling_id(index + 1) if index + 1 < len(questions) else None,
+        "media": [],
+    }
+
+
+def _biology_question_material(questions: dict, item_id: str) -> dict:
+    question = questions.get(item_id)
+    if question is None:
+        raise ContentNotFoundError(f"вопрос {item_id!r} не найден в биологии")
+    keys = list(questions.keys())
+    index = keys.index(item_id)
+    return {
+        "id": item_id,
+        "title": question["title"],
+        "content_html": f"<p>{escape(str(question['answer']))}</p>",
+        "sources": [],
+        "order": index + 1,
+        "total": len(keys),
+        "group_id": None,
+        "prev_id": keys[index - 1] if index > 0 else None,
+        "next_id": keys[index + 1] if index + 1 < len(keys) else None,
+        "media": [],
+    }
+
+
+def _biology_material(tickets: list, questions: dict, section_id: str, item_id: str) -> dict:
+    if section_id == BIOLOGY_TICKETS_SECTION_ID:
+        return _biology_ticket_material(tickets, item_id)
+    if section_id == BIOLOGY_QUESTIONS_SECTION_ID:
+        return _biology_question_material(questions, item_id)
+    raise ContentNotFoundError(f"раздел {section_id!r} не найден в биологии")

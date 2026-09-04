@@ -8,17 +8,22 @@ class FakeTb:
     """static_content.py принимает "tb-подобный" объект (см. web_api/bot_state.py -- в реальном
     коде это модуль telegram_bot), а не сырые словари напрямую, потому что теперь оно отвечает
     сразу за несколько статичных предметов (Физиология + Оперативная хирургия + Анатомия +
-    Гистология) и само решает, какой атрибут прочитать. Тесты собирают минимальную заглушку с
-    ровно этими четырьмя атрибутами -- гейты доступа (Анатомия: модуль бесплатный/платный,
-    тех.режим; Гистология: пробный период/подписка/рефералы) сюда НЕ входят, они живут в
+    Гистология + Биология) и само решает, какой атрибут прочитать. Тесты собирают минимальную
+    заглушку с ровно этими атрибутами -- гейты доступа (Анатомия: модуль бесплатный/платный,
+    тех.режим; Гистология/Биология: пробный период/подписка/рефералы) сюда НЕ входят, они живут в
     web_api/routers/subjects.py (см. test_subjects_integration.py и test_access.py) и требуют
     user_id, которого у чистых функций формы контента здесь нет."""
 
-    def __init__(self, physiology=None, operative_surgery=None, anatomy=None, histology=None):
+    def __init__(
+        self, physiology=None, operative_surgery=None, anatomy=None, histology=None,
+        tickets=None, questions=None,
+    ):
         self.PHYSIOLOGY = physiology or {}
         self.OPERATIVE_SURGERY = operative_surgery or {}
         self.ANATOMY = anatomy or {}
         self.HISTOLOGY = histology or {}
+        self.TICKETS = tickets or []
+        self.QUESTIONS = questions or {}
 
 
 @pytest.fixture
@@ -466,3 +471,140 @@ def test_list_subject_summaries_includes_all_four_when_all_present(physiology, o
     tb = FakeTb(physiology=physiology, operative_surgery=operative_surgery, anatomy=anatomy, histology=histology)
     ids = {s["id"] for s in static_content.list_subject_summaries(tb)}
     assert ids == {"physiology", "operative_surgery", "anatomy", "histology"}
+
+
+# ==================== Биология ====================
+# TICKETS -- список (не dict, в отличие от всех остальных подключённых предметов), QUESTIONS --
+# dict "1".."185" в порядке вставки. Гейт доступа (has_subject_access, тот же реферальный
+# middleware, что у Физики/Химии) сюда намеренно НЕ входит -- эти функции чистые над формой
+# контента, гейт живёт в routers/subjects.py и покрыт test_subjects_integration.py.
+
+@pytest.fixture
+def tickets():
+    return [
+        {
+            "num": "1A",
+            "title": "Билет №1",
+            "questions": [
+                {"num": 1, "title": "Вопрос 1.1", "answer": "<b>Ответ</b> на первый вопрос."},
+                {"num": 2, "title": "Вопрос 1.2", "answer": "Ответ на второй вопрос."},
+            ],
+        },
+        {
+            "num": "2A",
+            "title": "Билет №2",
+            "questions": [
+                {"num": 1, "title": "Вопрос 2.1", "answer": "Ответ билета два."},
+            ],
+        },
+    ]
+
+
+@pytest.fixture
+def questions():
+    return {
+        "1": {"title": "Первый вопрос зачёта", "answer": "Обычный текст без HTML <не тег>."},
+        "2": {"title": "Второй вопрос зачёта", "answer": "Второй ответ."},
+    }
+
+
+def test_biology_summary_and_sections(tickets, questions):
+    tb = FakeTb(tickets=tickets, questions=questions)
+    detail = static_content.get_subject_detail(tb, "biology")
+    assert detail["title"] == "Биология"
+    assert detail["sections"] == [
+        {"id": "tickets", "title": "Билеты", "item_count": 3, "kind": "grouped"},
+        {"id": "questions", "title": "Вопросы", "item_count": 2, "kind": "flat"},
+    ]
+
+
+def test_biology_tickets_section_lists_tickets_as_groups(tickets, questions):
+    tb = FakeTb(tickets=tickets, questions=questions)
+    section = static_content.get_section_detail(tb, "biology", "tickets")
+    assert section["kind"] == "grouped"
+    assert [(g["id"], g["title"], g["item_count"]) for g in section["groups"]] == [
+        ("1A", "Билет №1", 2),
+        ("2A", "Билет №2", 1),
+    ]
+
+
+def test_biology_questions_section_is_flat_in_bank_order(tickets, questions):
+    tb = FakeTb(tickets=tickets, questions=questions)
+    section = static_content.get_section_detail(tb, "biology", "questions")
+    assert section["kind"] == "flat"
+    assert [(i["id"], i["title"], i["order"], i["total"]) for i in section["items"]] == [
+        ("1", "Первый вопрос зачёта", 1, 2),
+        ("2", "Второй вопрос зачёта", 2, 2),
+    ]
+
+
+def test_biology_ticket_group_lists_questions_with_composite_ids(tickets, questions):
+    tb = FakeTb(tickets=tickets, questions=questions)
+    group = static_content.get_group_detail(tb, "biology", "tickets", "1A")
+    assert group["title"] == "Билет №1"
+    assert [item["id"] for item in group["items"]] == ["1A_1", "1A_2"]
+    assert group["items"][0]["title"] == "Вопрос 1.1"
+
+
+def test_biology_ticket_question_material_keeps_html_untouched(tickets, questions):
+    tb = FakeTb(tickets=tickets, questions=questions)
+    material = static_content.get_material(tb, "biology", "tickets", "1A_1")
+    assert material["title"] == "Вопрос 1.1"
+    assert material["content_html"] == "<b>Ответ</b> на первый вопрос."  # не эскейпится -- уже HTML
+    assert material["sources"] == []
+    assert material["group_id"] == "1A"
+    assert material["order"] == 1
+    assert material["total"] == 2
+    assert material["prev_id"] is None
+    assert material["next_id"] == "1A_2"
+
+
+def test_biology_ticket_question_material_last_in_ticket_has_no_next(tickets, questions):
+    tb = FakeTb(tickets=tickets, questions=questions)
+    material = static_content.get_material(tb, "biology", "tickets", "1A_2")
+    assert material["prev_id"] == "1A_1"
+    assert material["next_id"] is None
+
+
+def test_biology_second_ticket_is_independent(tickets, questions):
+    tb = FakeTb(tickets=tickets, questions=questions)
+    material = static_content.get_material(tb, "biology", "tickets", "2A_1")
+    assert material["group_id"] == "2A"
+    assert material["order"] == 1
+    assert material["total"] == 1
+    assert material["prev_id"] is None
+    assert material["next_id"] is None
+
+
+def test_biology_question_bank_material_escapes_plain_text(tickets, questions):
+    tb = FakeTb(tickets=tickets, questions=questions)
+    material = static_content.get_material(tb, "biology", "questions", "1")
+    assert material["title"] == "Первый вопрос зачёта"
+    assert material["content_html"] == "<p>Обычный текст без HTML &lt;не тег&gt;.</p>"
+    assert material["group_id"] is None
+    assert material["prev_id"] is None
+    assert material["next_id"] == "2"
+
+
+def test_biology_unknown_ticket_question_not_found(tickets, questions):
+    tb = FakeTb(tickets=tickets, questions=questions)
+    with pytest.raises(ContentNotFoundError):
+        static_content.get_material(tb, "biology", "tickets", "99A_1")
+
+
+def test_biology_unknown_bank_question_not_found(tickets, questions):
+    tb = FakeTb(tickets=tickets, questions=questions)
+    with pytest.raises(ContentNotFoundError):
+        static_content.get_material(tb, "biology", "questions", "999")
+
+
+def test_biology_unknown_ticket_group_not_found(tickets, questions):
+    tb = FakeTb(tickets=tickets, questions=questions)
+    with pytest.raises(ContentNotFoundError):
+        static_content.get_group_detail(tb, "biology", "tickets", "99A")
+
+
+def test_list_subject_summaries_includes_biology_when_tickets_or_questions_present(tickets):
+    tb = FakeTb(tickets=tickets)
+    ids = {s["id"] for s in static_content.list_subject_summaries(tb)}
+    assert ids == {"biology"}
