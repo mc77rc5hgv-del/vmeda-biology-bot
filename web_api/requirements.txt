@@ -1,7 +1,15 @@
 # web_api/ -- отдельный процесс от бота, не входит в requirements.txt в корне репозитория (тот
 # же принцип, что и у scripts/postgres_migration.requirements.txt: свой набор зависимостей для
 # своего процесса). Устанавливать из корня репозитория:
-#   pip install -r web_api/requirements.txt
+#   pip install -r requirements.txt -r web_api/requirements.txt
+# (оба файла сразу, не один web_api/requirements.txt -- см. bot_state.py: web_api импортирует
+# telegram_bot напрямую, поэтому реально нужны зависимости ОБОИХ процессов в одном окружении, а
+# не только fastapi/uvicorn/pydantic сами по себе.)
 fastapi==0.141.1
 uvicorn[standard]==0.52.4
-pydantic==2.13.4
+# pydantic намеренно НЕ закреплён на самой свежей версии (была 2.13.4) -- aiogram==3.7.0 в
+# корневом requirements.txt требует pydantic<2.8,>=2.4.1, и pip не может одновременно
+# удовлетворить оба закрепления при установке в одно окружение (проверено: ResolutionImpossible).
+# schemas.py использует только BaseModel с обычными полями, никаких фич pydantic 2.8+ -- диапазон
+# ниже даёт pip выбрать версию, устраивающую оба процесса сразу.
+pydantic>=2.4.1,<2.8
