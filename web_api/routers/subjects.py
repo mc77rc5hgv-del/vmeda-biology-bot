@@ -87,6 +87,8 @@ def _get_material_data(tb, user_id: int, subject_id: str, section_id: str, item_
             _check_chemistry_tickets_access(tb, user_id)
         else:
             _check_chemistry_access(tb, user_id)
+    if subject_id == static_content.PHYSICS_ID:
+        _check_physics_access(tb, user_id)
     if subject_id in static_content.SUPPORTED_SUBJECT_IDS:
         return static_content.get_material(tb, subject_id, section_id, item_id)
     return content.get_material(tb.DYNAMIC_COURSES, subject_id, section_id, item_id)
@@ -218,6 +220,45 @@ def _annotate_chemistry_section(tb, user_id: int, section: dict) -> dict:
     return section
 
 
+# ==================== Гейт Физики ====================
+# Все семь разделов гейтятся ОДНИМ и тем же has_subject_access(user_id, "physics") -- в отличие от
+# Химии, у Физики нет отдельного более строгого гейта на билеты (см. docstring раздела "Физика" в
+# static_content.py и handlers/physics.py). Три плоских раздела (test/grade45/extra) без группового
+# слоя 403-ят раздел целиком (сами заголовки вопросов уже содержательны -- та же логика, что у
+# "questions" Биологии и "theory"/"labs" Химии); четыре группированных (tasks/task_tickets/
+# theory_tickets/test_tickets) показывают список групп всем, помечая locked -- "hide vs relabel".
+
+
+def _physics_locked_reason(tb, user_id: int) -> str | None:
+    if tb.has_subject_access(user_id, "physics"):
+        return None
+    cheapest = tb.cheapest_gated3_tier()
+    return (
+        f"Физика открывается подпиской от «{cheapest['short']}» "
+        f"({cheapest['price_rub']}₽ / {cheapest['price_stars']}⭐) или двумя рефералами в этом месяце."
+    )
+
+
+def _check_physics_access(tb, user_id: int) -> None:
+    reason = _physics_locked_reason(tb, user_id)
+    if reason is not None:
+        raise HTTPException(status_code=403, detail=reason)
+
+
+def _annotate_physics_section(tb, user_id: int, section: dict) -> dict:
+    if section.get("id") in (
+        static_content.PHYSICS_TASKS_SECTION_ID,
+        static_content.PHYSICS_TASK_TICKETS_SECTION_ID,
+        static_content.PHYSICS_THEORY_TICKETS_SECTION_ID,
+        static_content.PHYSICS_TEST_TICKETS_SECTION_ID,
+    ):
+        reason = _physics_locked_reason(tb, user_id)
+        for group in section.get("groups", []):
+            group["locked"] = reason is not None
+            group["locked_reason"] = reason
+    return section
+
+
 @router.get("/subjects")
 def list_subjects(
     _user_id: int = Depends(get_current_user_id),
@@ -281,6 +322,13 @@ def get_section(
             _check_chemistry_tickets_access(tb, user_id)
         else:
             section = _annotate_chemistry_section(tb, user_id, section)
+    if subject_id == static_content.PHYSICS_ID:
+        if section_id in static_content.PHYSICS_FLAT_SECTION_IDS:
+            # Плоские разделы (test/grade45/extra) -- сами заголовки вопросов уже содержательны,
+            # прятать их позади "названий групп" здесь не за чем (см. docstring гейта Физики выше).
+            _check_physics_access(tb, user_id)
+        else:
+            section = _annotate_physics_section(tb, user_id, section)
     return section
 
 
@@ -315,6 +363,25 @@ def get_group(
             if group_id not in tb.CHEMISTRY_THEORY_TICKETS:
                 raise HTTPException(status_code=404, detail=f"билет {group_id!r} не найден в билетах теории химии")
             _check_chemistry_tickets_access(tb, user_id)
+    if subject_id == static_content.PHYSICS_ID:
+        physics_group_banks = {
+            static_content.PHYSICS_TASKS_SECTION_ID: (tb.PHYSICS_TASKS, "тема", "задачах по физике"),
+            static_content.PHYSICS_TASK_TICKETS_SECTION_ID: (
+                tb.PHYSICS_TASK_TICKETS, "билет", "билетах с задачами физики",
+            ),
+            static_content.PHYSICS_THEORY_TICKETS_SECTION_ID: (
+                tb.PHYSICS_THEORY_TICKETS, "билет", "билетах теории физики",
+            ),
+            static_content.PHYSICS_TEST_TICKETS_SECTION_ID: (
+                tb.PHYSICS_TEST_TICKETS, "билет", "тестовых билетах физики",
+            ),
+        }
+        bank = physics_group_banks.get(section_id)
+        if bank is not None:
+            data, noun, location = bank
+            if group_id not in data:
+                raise HTTPException(status_code=404, detail=f"{noun} {group_id!r} не найден в {location}")
+            _check_physics_access(tb, user_id)
     try:
         if subject_id in static_content.SUPPORTED_SUBJECT_IDS:
             return static_content.get_group_detail(tb, subject_id, section_id, group_id)

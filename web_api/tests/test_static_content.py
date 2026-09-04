@@ -19,6 +19,8 @@ class FakeTb:
         tickets=None, questions=None,
         chemistry_theory=None, chemistry_tasks=None, chemistry_labs=None,
         chemistry_theory_tickets=None, chemistry_practice_tickets=None,
+        physics_questions=None, physics_grade45=None, physics_extra=None, physics_tasks=None,
+        physics_task_tickets=None, physics_theory_tickets=None, physics_test_tickets=None,
     ):
         self.PHYSIOLOGY = physiology or {}
         self.OPERATIVE_SURGERY = operative_surgery or {}
@@ -31,6 +33,14 @@ class FakeTb:
         self.CHEMISTRY_LABS = chemistry_labs or {}
         self.CHEMISTRY_THEORY_TICKETS = chemistry_theory_tickets or {}
         self.CHEMISTRY_PRACTICE_TICKETS = chemistry_practice_tickets or {}
+        self.IMAGES_DIR = "images"
+        self.PHYSICS_QUESTIONS = physics_questions or {}
+        self.PHYSICS_GRADE45_QUESTIONS = physics_grade45 or {}
+        self.PHYSICS_EXTRA_QUESTIONS = physics_extra or {}
+        self.PHYSICS_TASKS = physics_tasks or {}
+        self.PHYSICS_TASK_TICKETS = physics_task_tickets or {}
+        self.PHYSICS_THEORY_TICKETS = physics_theory_tickets or {}
+        self.PHYSICS_TEST_TICKETS = physics_test_tickets or {}
 
 
 @pytest.fixture
@@ -867,3 +877,301 @@ def test_list_subject_summaries_includes_chemistry_when_theory_present(chemistry
     tb = _chemistry_tb(chemistry_theory=chemistry_theory)
     ids = {s["id"] for s in static_content.list_subject_summaries(tb)}
     assert ids == {"chemistry"}
+
+
+# ==================== Физика ====================
+
+@pytest.fixture
+def physics_questions():
+    return {
+        "1": {"title": "Вопрос 1", "answer": "Ответ 1 без HTML."},
+        "2": {"title": "Вопрос 2", "answer": "Ответ 2 <опасный> текст."},
+    }
+
+
+@pytest.fixture
+def physics_grade45():
+    return {
+        "1": {"title": "Вопрос на 4/5 №1", "answer": "Ответ на 4/5."},
+    }
+
+
+@pytest.fixture
+def physics_extra():
+    return {
+        "1": {"title": "Доп. вопрос №1", "image": "physics/ecg.jpg", "answer": "Ответ с картинкой."},
+        "2": {"title": "Доп. вопрос №2", "answer": "Ответ без картинки."},
+    }
+
+
+@pytest.fixture
+def physics_tasks():
+    return {
+        "1": {
+            "title": "Термодинамика",
+            "intro": "Вступление без HTML.",
+            "formulas": "<b>Формулы:</b> T[K] = t[°C] + 273.",
+            "tasks": [
+                {"num": 1, "title": "Задача 1.1", "condition": "Дано: <опасный> текст.", "solution": "<b>Решение 1.</b>"},
+                {"num": 2, "title": "Задача 1.2", "condition": "Условие 2.", "solution": "<b>Решение 2.</b>"},
+            ],
+        },
+        "2": {
+            "title": "Тема без формул",
+            "intro": "",
+            "formulas": "",
+            "tasks": [
+                {"num": 1, "title": "Задача 2.1", "condition": "Условие.", "solution": "Решение без HTML."},
+            ],
+        },
+    }
+
+
+@pytest.fixture
+def physics_task_tickets():
+    return {
+        "1": {
+            "title": "Билет №1 (задачи)",
+            "tasks": [
+                {"num": 1, "title": "Задача 1", "condition": "Дано: <опасный> текст.", "solution": "<b>Решение 1.</b>"},
+                {"num": 2, "title": "Задача 2", "condition": "Условие 2.", "solution": "<b>Решение 2.</b>"},
+            ],
+        },
+        "2": {
+            "title": "Билет №2 (задачи)",
+            "tasks": [{"num": 1, "title": "Задача 1", "condition": "Условие.", "solution": "<b>Решение.</b>"}],
+        },
+    }
+
+
+@pytest.fixture
+def physics_theory_tickets():
+    return {
+        "1": {
+            "title": "Билет №1 (теория)",
+            "questions": [
+                {"title": "Вопрос 1.1", "answer": "Ответ 1.1 без HTML."},
+                {"title": "Вопрос 1.2", "answer": "Ответ 1.2 <опасный> текст."},
+            ],
+        },
+        "2": {
+            "title": "Билет №2 (теория)",
+            "questions": [{"title": "Вопрос 2.1", "answer": "Ответ 2.1."}],
+        },
+    }
+
+
+@pytest.fixture
+def physics_test_tickets():
+    return {
+        "66": {
+            "title": "Билет №66",
+            "questions": [
+                {
+                    "num": 1, "text": "Единица измерения силы тока?",
+                    "options": {"A": "Вольт", "B": "Ампер", "C": "Ом", "D": "Ватт"},
+                    "correct": "B",
+                },
+            ],
+            "tasks": [
+                {"num": 1, "title": "Задача 1", "condition": "Дано: <опасный> текст.", "solution": "<b>Решение 1.</b>"},
+            ],
+        },
+        "9": {
+            # Билет без "Часть 2. Задачи" -- честный случай, есть и в реальных данных (3 из 23).
+            "title": "Билет №9",
+            "questions": [
+                {
+                    "num": 1, "text": "Второй закон Ньютона?",
+                    "options": {"A": "F=ma", "B": "E=mc^2", "C": "p=mv", "D": "F=qE"},
+                    "correct": "A",
+                },
+            ],
+            "tasks": [],
+        },
+    }
+
+
+def _physics_tb(physics_questions=None, physics_grade45=None, physics_extra=None, physics_tasks=None,
+                physics_task_tickets=None, physics_theory_tickets=None, physics_test_tickets=None):
+    return FakeTb(
+        physics_questions=physics_questions, physics_grade45=physics_grade45, physics_extra=physics_extra,
+        physics_tasks=physics_tasks, physics_task_tickets=physics_task_tickets,
+        physics_theory_tickets=physics_theory_tickets, physics_test_tickets=physics_test_tickets,
+    )
+
+
+def test_physics_summary_and_sections(
+    physics_questions, physics_grade45, physics_extra, physics_tasks,
+    physics_task_tickets, physics_theory_tickets, physics_test_tickets,
+):
+    tb = _physics_tb(
+        physics_questions, physics_grade45, physics_extra, physics_tasks,
+        physics_task_tickets, physics_theory_tickets, physics_test_tickets,
+    )
+    detail = static_content.get_subject_detail(tb, "physics")
+    assert detail["title"] == "Физика"
+    sections = {s["id"]: s for s in detail["sections"]}
+    assert sections["test"] == {"id": "test", "title": "Тестовая часть", "item_count": 2, "kind": "flat"}
+    assert sections["grade45"] == {"id": "grade45", "title": "Вопросы на 4/5", "item_count": 1, "kind": "flat"}
+    assert sections["extra"] == {
+        "id": "extra", "title": "Доп. вопросы от преподавателей", "item_count": 2, "kind": "flat",
+    }
+    assert sections["tasks"] == {"id": "tasks", "title": "Задачи по темам", "item_count": 5, "kind": "grouped"}
+    assert sections["task_tickets"] == {
+        "id": "task_tickets", "title": "Билеты с задачами", "item_count": 3, "kind": "grouped",
+    }
+    assert sections["theory_tickets"] == {
+        "id": "theory_tickets", "title": "Билеты теоретической части", "item_count": 3, "kind": "grouped",
+    }
+    # test_tickets: билет 66 -- 1 mcq-блок + 1 задача = 2; билет 9 -- только mcq-блок = 1
+    assert sections["test_tickets"] == {
+        "id": "test_tickets", "title": "Тестовые билеты", "item_count": 3, "kind": "grouped",
+    }
+
+
+def test_physics_test_material_escapes_plain_text(physics_questions):
+    tb = _physics_tb(physics_questions=physics_questions)
+    material = static_content.get_material(tb, "physics", "test", "2")
+    assert material["title"] == "Вопрос 2"
+    assert "&lt;опасный&gt;" in material["content_html"]
+    assert material["group_id"] is None
+    assert material["prev_id"] == "1"
+    assert material["next_id"] is None
+
+
+def test_physics_grade45_material(physics_questions, physics_grade45):
+    tb = _physics_tb(physics_questions=physics_questions, physics_grade45=physics_grade45)
+    material = static_content.get_material(tb, "physics", "grade45", "1")
+    assert material["content_html"] == "<p>Ответ на 4/5.</p>"
+
+
+def test_physics_extra_material_has_media_when_image_present(physics_questions, physics_extra):
+    tb = _physics_tb(physics_questions=physics_questions, physics_extra=physics_extra)
+    material = static_content.get_material(tb, "physics", "extra", "1")
+    assert material["media"] == [{"path": "images/physics/ecg.jpg", "caption": "Доп. вопрос №1"}]
+
+    material_no_image = static_content.get_material(tb, "physics", "extra", "2")
+    assert material_no_image["media"] == []
+
+
+def test_physics_tasks_group_lists_formulas_card_first(physics_tasks):
+    tb = _physics_tb(physics_tasks=physics_tasks)
+    group = static_content.get_group_detail(tb, "physics", "tasks", "1")
+    assert group["title"] == "Термодинамика"
+    assert [item["id"] for item in group["items"]] == ["1_formulas", "1_1", "1_2"]
+    assert group["items"][0]["title"] == "📐 Формулы и алгоритм"
+
+
+def test_physics_formulas_material_escapes_intro_trusts_formulas(physics_tasks):
+    tb = _physics_tb(physics_tasks=physics_tasks)
+    material = static_content.get_material(tb, "physics", "tasks", "1_formulas")
+    assert "Вступление без HTML." in material["content_html"]
+    assert "<b>Формулы:</b> T[K] = t[°C] + 273." in material["content_html"]
+    assert material["group_id"] == "1"
+    assert material["prev_id"] is None
+    assert material["next_id"] == "1_1"
+
+
+def test_physics_task_material_escapes_condition_trusts_solution(physics_tasks):
+    tb = _physics_tb(physics_tasks=physics_tasks)
+    material = static_content.get_material(tb, "physics", "tasks", "1_1")
+    assert "&lt;опасный&gt;" in material["content_html"]
+    assert "<b>Решение 1.</b>" in material["content_html"]
+    assert material["prev_id"] == "1_formulas"
+    assert material["next_id"] == "1_2"
+
+
+def test_physics_topic_without_formulas_still_has_formulas_card(physics_tasks):
+    tb = _physics_tb(physics_tasks=physics_tasks)
+    material = static_content.get_material(tb, "physics", "tasks", "2_formulas")
+    assert material["content_html"] == ""
+    assert material["next_id"] == "2_1"
+
+
+def test_physics_task_ticket_group_and_material(physics_questions, physics_task_tickets):
+    tb = _physics_tb(physics_questions=physics_questions, physics_task_tickets=physics_task_tickets)
+    group = static_content.get_group_detail(tb, "physics", "task_tickets", "1")
+    assert group["title"] == "Билет №1 (задачи)"
+    assert [item["id"] for item in group["items"]] == ["1_1", "1_2"]
+
+    material = static_content.get_material(tb, "physics", "task_tickets", "1_1")
+    assert material["title"] == "Задача 1"
+    assert "&lt;опасный&gt;" in material["content_html"]
+    assert "<b>Решение 1.</b>" in material["content_html"]
+    assert material["group_id"] == "1"
+    assert material["prev_id"] is None
+    assert material["next_id"] == "1_2"
+
+
+def test_physics_theory_ticket_group_and_material(physics_questions, physics_theory_tickets):
+    tb = _physics_tb(physics_questions=physics_questions, physics_theory_tickets=physics_theory_tickets)
+    group = static_content.get_group_detail(tb, "physics", "theory_tickets", "1")
+    assert group["title"] == "Билет №1 (теория)"
+    assert [item["id"] for item in group["items"]] == ["1_0", "1_1"]
+
+    material = static_content.get_material(tb, "physics", "theory_tickets", "1_1")
+    assert material["title"] == "Вопрос 1.2"
+    assert "&lt;опасный&gt;" in material["content_html"]
+    assert material["group_id"] == "1"
+    assert material["next_id"] is None
+
+
+def test_physics_test_ticket_group_has_mcq_block_first_then_tasks(physics_questions, physics_test_tickets):
+    tb = _physics_tb(physics_questions=physics_questions, physics_test_tickets=physics_test_tickets)
+    group = static_content.get_group_detail(tb, "physics", "test_tickets", "66")
+    assert [item["id"] for item in group["items"]] == ["66_mcq", "66_1"]
+    assert group["items"][0]["title"] == "📝 Тестовая часть билета"
+
+
+def test_physics_test_ticket_mcq_material_marks_correct_option(physics_questions, physics_test_tickets):
+    tb = _physics_tb(physics_questions=physics_questions, physics_test_tickets=physics_test_tickets)
+    material = static_content.get_material(tb, "physics", "test_tickets", "66_mcq")
+    assert "Единица измерения силы тока?" in material["content_html"]
+    assert "✅ B) Ампер" in material["content_html"]
+    assert "A) Вольт" in material["content_html"] and "✅ A)" not in material["content_html"]
+    assert material["group_id"] == "66"
+    assert material["prev_id"] is None
+    assert material["next_id"] == "66_1"
+
+
+def test_physics_test_ticket_task_material_escapes_condition_trusts_solution(
+    physics_questions, physics_test_tickets,
+):
+    tb = _physics_tb(physics_questions=physics_questions, physics_test_tickets=physics_test_tickets)
+    material = static_content.get_material(tb, "physics", "test_tickets", "66_1")
+    assert "&lt;опасный&gt;" in material["content_html"]
+    assert "<b>Решение 1.</b>" in material["content_html"]
+    assert material["prev_id"] == "66_mcq"
+    assert material["next_id"] is None
+
+
+def test_physics_test_ticket_without_tasks_group_has_only_mcq_block(physics_questions, physics_test_tickets):
+    """Билет 9 честно не имеет "Часть 2. Задачи" -- ровно как 3 из 23 реальных билетов физики."""
+    tb = _physics_tb(physics_questions=physics_questions, physics_test_tickets=physics_test_tickets)
+    group = static_content.get_group_detail(tb, "physics", "test_tickets", "9")
+    assert [item["id"] for item in group["items"]] == ["9_mcq"]
+
+
+def test_physics_unknown_question_not_found(physics_questions):
+    tb = _physics_tb(physics_questions=physics_questions)
+    with pytest.raises(ContentNotFoundError):
+        static_content.get_material(tb, "physics", "test", "99")
+
+
+def test_physics_unknown_task_group_not_found(physics_tasks):
+    tb = _physics_tb(physics_tasks=physics_tasks)
+    with pytest.raises(ContentNotFoundError):
+        static_content.get_group_detail(tb, "physics", "tasks", "99")
+
+
+def test_physics_unknown_test_ticket_group_not_found(physics_questions, physics_test_tickets):
+    tb = _physics_tb(physics_questions=physics_questions, physics_test_tickets=physics_test_tickets)
+    with pytest.raises(ContentNotFoundError):
+        static_content.get_group_detail(tb, "physics", "test_tickets", "999")
+
+
+def test_list_subject_summaries_includes_physics_when_questions_present(physics_questions):
+    tb = _physics_tb(physics_questions=physics_questions)
+    ids = {s["id"] for s in static_content.list_subject_summaries(tb)}
+    assert ids == {"physics"}

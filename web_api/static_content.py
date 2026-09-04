@@ -17,20 +17,27 @@ material[], БЕЗ флеш-карточек/сопоставления/мнем
 хирургии), «Гистология» (71 препарат в 5 диагностиках — реальный протокол описания + реальные
 микрофото, БЕЗ картиночного тренажёра "Найди препарат"), «Биология» (40 билетов по 3 вопроса +
 185 вопросов зачёта — БЕЗ флеш-карточек, это тот же QUESTIONS-банк в другом режиме показа у бота,
-не отдельный контент) и «Химия» (16 тем теории + 15 тем задач (60 задач + 15 карточек "формулы и
+не отдельный контент), «Химия» (16 тем теории + 15 тем задач (60 задач + 15 карточек "формулы и
 алгоритм") + 6 лабораторных + 11 билетов теории (22 вопроса) + 12 билетов практики — все пять
-реальных банков бота, см. SUPPORTED_SUBJECT_IDS ниже).
+реальных банков бота) и «Физика» (186 вопросов тестовой части + 60 вопросов "на 4/5" + 13 доп.
+вопросов от преподавателей (часть — с картинкой) + 9 тем задач (49 задач + 9 карточек формул) + 8
+билетов с задачами (40 задач) + 30 билетов теории (60 вопросов) + 23 тестовых билета (МСQ-блок +
+задачи "Часть 2", как их же и показывает бот одним сообщением — см. handlers/physics.py — а не
+раздельной навигацией по вопросу) — все семь реальных банков бота, см. SUPPORTED_SUBJECT_IDS
+ниже).
 
 В отличие от Физиологии/Оперативной хирургии (полностью бесплатные разделы бота — см. CLAUDE.md),
-у Анатомии и Гистологии есть собственные гейты внутри бота, а Биология и Химия гейтятся ОБЩИМ
-реферальным middleware наравне друг с другом и Физикой (has_subject_access) — Химия
-дополнительно ужесточает это для своих БИЛЕТОВ (theory_tickets/practice_tickets) отдельной,
-более строгой проверкой chemistry_tickets_access_ok (не считает ручной/временный доступ и
-промо-акции достаточными — см. handlers/chemistry.py). Этот модуль сам НИЧЕГО не проверяет
-(остаётся чистой функцией формы контента над tb.ANATOMY/tb.HISTOLOGY/tb.TICKETS/tb.QUESTIONS/
-tb.CHEMISTRY_*, как и остальные предметы), проверка прав живёт в web_api/routers/subjects.py (см.
-_anatomy_module_access_ok/_histology_access_ok/_biology_access_ok/_chemistry_*_access там), у
-которого есть доступ к user_id."""
+у Анатомии и Гистологии есть собственные гейты внутри бота, а Биология, Физика и Химия гейтятся
+ОБЩИМ реферальным middleware наравне друг с другом (has_subject_access) — Химия дополнительно
+ужесточает это для своих БИЛЕТОВ (theory_tickets/practice_tickets) отдельной, более строгой
+проверкой chemistry_tickets_access_ok (не считает ручной/временный доступ и промо-акции
+достаточными — см. handlers/chemistry.py); Физика такого дополнительного ужесточения не имеет —
+один и тот же has_subject_access(user_id, "physics") гейт на все семь разделов. Этот модуль сам
+НИЧЕГО не проверяет (остаётся чистой функцией формы контента над tb.ANATOMY/tb.HISTOLOGY/
+tb.TICKETS/tb.QUESTIONS/tb.CHEMISTRY_*/tb.PHYSICS_*, как и остальные предметы), проверка прав
+живёт в web_api/routers/subjects.py (см. _anatomy_module_access_ok/_histology_access_ok/
+_biology_access_ok/_chemistry_*_access/_physics_access там), у которого есть доступ к user_id."""
+import os
 from html import escape
 
 from .content import ContentNotFoundError
@@ -41,8 +48,10 @@ ANATOMY_ID = "anatomy"
 HISTOLOGY_ID = "histology"
 BIOLOGY_ID = "biology"
 CHEMISTRY_ID = "chemistry"
+PHYSICS_ID = "physics"
 SUPPORTED_SUBJECT_IDS = {
     PHYSIOLOGY_ID, OPERATIVE_SURGERY_ID, ANATOMY_ID, HISTOLOGY_ID, BIOLOGY_ID, CHEMISTRY_ID,
+    PHYSICS_ID,
 }
 ANATOMY_SECTION_ID = "course"
 HISTOLOGY_SECTION_ID = "specimens"
@@ -54,6 +63,18 @@ CHEMISTRY_LABS_SECTION_ID = "labs"
 CHEMISTRY_THEORY_TICKETS_SECTION_ID = "theory_tickets"
 CHEMISTRY_PRACTICE_TICKETS_SECTION_ID = "practice_tickets"
 CHEMISTRY_TICKET_SECTION_IDS = {CHEMISTRY_THEORY_TICKETS_SECTION_ID, CHEMISTRY_PRACTICE_TICKETS_SECTION_ID}
+PHYSICS_TEST_SECTION_ID = "test"
+PHYSICS_GRADE45_SECTION_ID = "grade45"
+PHYSICS_EXTRA_SECTION_ID = "extra"
+PHYSICS_TASKS_SECTION_ID = "tasks"
+PHYSICS_TASK_TICKETS_SECTION_ID = "task_tickets"
+PHYSICS_THEORY_TICKETS_SECTION_ID = "theory_tickets"
+PHYSICS_TEST_TICKETS_SECTION_ID = "test_tickets"
+PHYSICS_FLAT_SECTION_IDS = {PHYSICS_TEST_SECTION_ID, PHYSICS_GRADE45_SECTION_ID, PHYSICS_EXTRA_SECTION_ID}
+PHYSICS_GROUPED_SECTION_IDS = {
+    PHYSICS_TASKS_SECTION_ID, PHYSICS_TASK_TICKETS_SECTION_ID,
+    PHYSICS_THEORY_TICKETS_SECTION_ID, PHYSICS_TEST_TICKETS_SECTION_ID,
+}
 
 PHYSIOLOGY_PAGE_CHAR_BUDGET = 6_000
 
@@ -111,6 +132,15 @@ def list_subject_summaries(tb) -> list[dict]:
             "title": "Химия",
             "emoji": "⚗️",
             "description": "Теория, задачи, лабораторные и билеты",
+            "course": 1,
+            "has_ai": True,
+        })
+    if tb.PHYSICS_QUESTIONS or tb.PHYSICS_TASKS:
+        summaries.append({
+            "id": PHYSICS_ID,
+            "title": "Физика",
+            "emoji": "⚛️",
+            "description": "Тестовая часть, задачи и билеты всех видов",
             "course": 1,
             "has_ai": True,
         })
@@ -204,6 +234,47 @@ def get_subject_detail(tb, subject_id: str) -> dict:
             {
                 "id": CHEMISTRY_PRACTICE_TICKETS_SECTION_ID, "title": "Билеты практики",
                 "item_count": len(tb.CHEMISTRY_PRACTICE_TICKETS), "kind": "flat",
+            },
+        ]
+        return summary
+
+    if subject_id == PHYSICS_ID:
+        tasks_item_count = sum(
+            1 + len(topic.get("tasks", [])) for topic in tb.PHYSICS_TASKS.values()
+        )  # +1 за карточку формул на тему, как у Химии -- см. _physics_tasks_group_items
+        task_tickets_item_count = sum(len(t.get("tasks", [])) for t in tb.PHYSICS_TASK_TICKETS.values())
+        theory_tickets_item_count = sum(len(t.get("questions", [])) for t in tb.PHYSICS_THEORY_TICKETS.values())
+        test_tickets_item_count = sum(
+            1 + len(t.get("tasks", [])) for t in tb.PHYSICS_TEST_TICKETS.values()
+        )  # +1 за МСQ-блок билета -- см. _physics_test_tickets_group_items
+        summary["sections"] = [
+            {
+                "id": PHYSICS_TEST_SECTION_ID, "title": "Тестовая часть",
+                "item_count": len(tb.PHYSICS_QUESTIONS), "kind": "flat",
+            },
+            {
+                "id": PHYSICS_GRADE45_SECTION_ID, "title": "Вопросы на 4/5",
+                "item_count": len(tb.PHYSICS_GRADE45_QUESTIONS), "kind": "flat",
+            },
+            {
+                "id": PHYSICS_EXTRA_SECTION_ID, "title": "Доп. вопросы от преподавателей",
+                "item_count": len(tb.PHYSICS_EXTRA_QUESTIONS), "kind": "flat",
+            },
+            {
+                "id": PHYSICS_TASKS_SECTION_ID, "title": "Задачи по темам",
+                "item_count": tasks_item_count, "kind": "grouped",
+            },
+            {
+                "id": PHYSICS_TASK_TICKETS_SECTION_ID, "title": "Билеты с задачами",
+                "item_count": task_tickets_item_count, "kind": "grouped",
+            },
+            {
+                "id": PHYSICS_THEORY_TICKETS_SECTION_ID, "title": "Билеты теоретической части",
+                "item_count": theory_tickets_item_count, "kind": "grouped",
+            },
+            {
+                "id": PHYSICS_TEST_TICKETS_SECTION_ID, "title": "Тестовые билеты",
+                "item_count": test_tickets_item_count, "kind": "grouped",
             },
         ]
         return summary
@@ -367,6 +438,91 @@ def get_section_detail(tb, subject_id: str, section_id: str) -> dict:
             }
         raise ContentNotFoundError(f"раздел {section_id!r} не найден в химии")
 
+    if subject_id == PHYSICS_ID:
+        if section_id == PHYSICS_TEST_SECTION_ID:
+            keys = list(tb.PHYSICS_QUESTIONS.keys())
+            total = len(keys)
+            return {
+                "id": section_id,
+                "title": "Тестовая часть",
+                "kind": "flat",
+                "items": [
+                    {"id": key, "title": tb.PHYSICS_QUESTIONS[key]["title"], "order": index + 1, "total": total}
+                    for index, key in enumerate(keys)
+                ],
+            }
+        if section_id == PHYSICS_GRADE45_SECTION_ID:
+            keys = list(tb.PHYSICS_GRADE45_QUESTIONS.keys())
+            total = len(keys)
+            return {
+                "id": section_id,
+                "title": "Вопросы на 4/5",
+                "kind": "flat",
+                "items": [
+                    {
+                        "id": key, "title": tb.PHYSICS_GRADE45_QUESTIONS[key]["title"],
+                        "order": index + 1, "total": total,
+                    }
+                    for index, key in enumerate(keys)
+                ],
+            }
+        if section_id == PHYSICS_EXTRA_SECTION_ID:
+            keys = list(tb.PHYSICS_EXTRA_QUESTIONS.keys())
+            total = len(keys)
+            return {
+                "id": section_id,
+                "title": "Доп. вопросы от преподавателей",
+                "kind": "flat",
+                "items": [
+                    {
+                        "id": key, "title": tb.PHYSICS_EXTRA_QUESTIONS[key]["title"],
+                        "order": index + 1, "total": total,
+                    }
+                    for index, key in enumerate(keys)
+                ],
+            }
+        if section_id == PHYSICS_TASKS_SECTION_ID:
+            return {
+                "id": section_id,
+                "title": "Задачи по темам",
+                "kind": "grouped",
+                "groups": [
+                    {"id": key, "title": topic["title"], "item_count": 1 + len(topic.get("tasks", []))}
+                    for key, topic in tb.PHYSICS_TASKS.items()
+                ],
+            }
+        if section_id == PHYSICS_TASK_TICKETS_SECTION_ID:
+            return {
+                "id": section_id,
+                "title": "Билеты с задачами",
+                "kind": "grouped",
+                "groups": [
+                    {"id": key, "title": ticket["title"], "item_count": len(ticket.get("tasks", []))}
+                    for key, ticket in tb.PHYSICS_TASK_TICKETS.items()
+                ],
+            }
+        if section_id == PHYSICS_THEORY_TICKETS_SECTION_ID:
+            return {
+                "id": section_id,
+                "title": "Билеты теоретической части",
+                "kind": "grouped",
+                "groups": [
+                    {"id": key, "title": ticket["title"], "item_count": len(ticket.get("questions", []))}
+                    for key, ticket in tb.PHYSICS_THEORY_TICKETS.items()
+                ],
+            }
+        if section_id == PHYSICS_TEST_TICKETS_SECTION_ID:
+            return {
+                "id": section_id,
+                "title": "Тестовые билеты",
+                "kind": "grouped",
+                "groups": [
+                    {"id": key, "title": ticket["title"], "item_count": 1 + len(ticket.get("tasks", []))}
+                    for key, ticket in tb.PHYSICS_TEST_TICKETS.items()
+                ],
+            }
+        raise ContentNotFoundError(f"раздел {section_id!r} не найден в физике")
+
     # operative_surgery
     if section_id != "volumes":
         raise ContentNotFoundError(f"раздел {section_id!r} не найден в оперативной хирургии")
@@ -484,6 +640,65 @@ def get_group_detail(tb, subject_id: str, section_id: str, group_id: str) -> dic
             }
         raise ContentNotFoundError(f"в разделе {section_id!r} нет групп")
 
+    if subject_id == PHYSICS_ID:
+        if section_id == PHYSICS_TASKS_SECTION_ID:
+            topic = tb.PHYSICS_TASKS.get(group_id)
+            if topic is None:
+                raise ContentNotFoundError(f"тема {group_id!r} не найдена в задачах по физике")
+            return {
+                "id": group_id,
+                "title": topic["title"],
+                "items": _physics_tasks_group_items(group_id, topic),
+            }
+        if section_id == PHYSICS_TASK_TICKETS_SECTION_ID:
+            ticket = tb.PHYSICS_TASK_TICKETS.get(group_id)
+            if ticket is None:
+                raise ContentNotFoundError(f"билет {group_id!r} не найден в билетах с задачами физики")
+            tasks = ticket.get("tasks", [])
+            total = len(tasks)
+            return {
+                "id": group_id,
+                "title": ticket["title"],
+                "items": [
+                    {
+                        "id": _physics_task_item_id(group_id, task["num"]),
+                        "title": task["title"],
+                        "order": index + 1,
+                        "total": total,
+                    }
+                    for index, task in enumerate(tasks)
+                ],
+            }
+        if section_id == PHYSICS_THEORY_TICKETS_SECTION_ID:
+            ticket = tb.PHYSICS_THEORY_TICKETS.get(group_id)
+            if ticket is None:
+                raise ContentNotFoundError(f"билет {group_id!r} не найден в билетах теории физики")
+            questions = ticket.get("questions", [])
+            total = len(questions)
+            return {
+                "id": group_id,
+                "title": ticket["title"],
+                "items": [
+                    {
+                        "id": _physics_theory_ticket_question_id(group_id, index),
+                        "title": question["title"],
+                        "order": index + 1,
+                        "total": total,
+                    }
+                    for index, question in enumerate(questions)
+                ],
+            }
+        if section_id == PHYSICS_TEST_TICKETS_SECTION_ID:
+            ticket = tb.PHYSICS_TEST_TICKETS.get(group_id)
+            if ticket is None:
+                raise ContentNotFoundError(f"билет {group_id!r} не найден в тестовых билетах физики")
+            return {
+                "id": group_id,
+                "title": ticket["title"],
+                "items": _physics_test_tickets_group_items(group_id, ticket),
+            }
+        raise ContentNotFoundError(f"в разделе {section_id!r} нет групп")
+
     # operative_surgery
     if section_id != "volumes":
         raise ContentNotFoundError(f"в разделе {section_id!r} нет групп")
@@ -511,6 +726,8 @@ def get_material(tb, subject_id: str, section_id: str, item_id: str) -> dict:
         return _biology_material(tb.TICKETS, tb.QUESTIONS, section_id, item_id)
     if subject_id == CHEMISTRY_ID:
         return _chemistry_material(tb, section_id, item_id)
+    if subject_id == PHYSICS_ID:
+        return _physics_material(tb, section_id, item_id)
     if subject_id == PHYSIOLOGY_ID:
         return _physiology_material(tb.PHYSIOLOGY, section_id, item_id)
     return _operative_surgery_material(tb.OPERATIVE_SURGERY, section_id, item_id)
@@ -1116,3 +1333,284 @@ def _chemistry_material(tb, section_id: str, item_id: str) -> dict:
     if section_id == CHEMISTRY_PRACTICE_TICKETS_SECTION_ID:
         return _chemistry_practice_tickets_material(tb.CHEMISTRY_PRACTICE_TICKETS, item_id)
     raise ContentNotFoundError(f"раздел {section_id!r} не найден в химии")
+
+
+# ==================== Физика ====================
+# Подключены все семь реальных банков бота (tb.PHYSICS_QUESTIONS/_GRADE45_QUESTIONS/
+# _EXTRA_QUESTIONS/_TASKS/_TASK_TICKETS/_THEORY_TICKETS/_TEST_TICKETS). В отличие от Химии, у
+# Физики нет отдельного более строгого гейта на билеты -- один has_subject_access(user_id,
+# "physics") на все семь разделов (handlers/physics.py гейтит физику наравне с Биологией/Химией
+# через общий реферальный middleware, без доп. ужесточения -- см. GATED_CALLBACKS_PHYSICS /
+# GATED_PREFIXES_PHYSICS в services/access.py).
+#
+# "Тестовые билеты" (test_tickets) -- единственный раздел составной формы: каждый билет несёт И
+# тестовую часть (МСQ-вопросы с вариантами и правильным ответом), И "Часть 2. Задачи" (условие +
+# решение). Повторяем это ровно так, как их же одним сообщением показывает бот (cb_phys_test_ticket
+# в handlers/physics.py: все МСQ-вопросы билета выводятся одним текстовым блоком с отмеченным ✅
+# правильным вариантом, а не по одному вопросу с постраничной навигацией, как у "билетов теории") --
+# группа билета содержит один МСQ-блок первым пунктом (order=1), затем отдельные карточки задач
+# "Часть 2", если у билета вообще есть задачи (3 из 23 билетов их не имеют — см. коммит).
+#
+# Правило эскейпинга по полям (проверено на ВСЕХ реальных записях, см. commit message): решение
+# задачи (solution) и формулы темы (formulas) уже несут готовый HTML (<b>/<u>, как у Химии) -- НЕ
+# эскейпятся. Ответ вопроса зачёта/на 4-5/доп. вопроса (answer), вступление к теме задач (intro),
+# условие задачи (condition), текст и варианты МСQ-вопроса (text/options) и заголовок+ответ вопроса
+# билета теории (title/answer) -- обычный plain text -- эскейпятся.
+
+def _physics_formulas_item_id(topic_key: str) -> str:
+    return f"{topic_key}_formulas"
+
+
+def _physics_task_item_id(scope_key: str, task_num) -> str:
+    """Общий id-хелпер для задач темы (PHYSICS_TASKS), билета с задачами (PHYSICS_TASK_TICKETS) и
+    задач "Часть 2" тестового билета (PHYSICS_TEST_TICKETS) -- все три коллекции задач имеют
+    одинаковую форму {num, title, condition, solution} и ищутся внутри своей же группы, так что
+    общий "{scope_key}_{num}" не может столкнуться между разделами."""
+    return f"{scope_key}_{task_num}"
+
+
+def _physics_theory_ticket_question_id(ticket_key: str, index: int) -> str:
+    return f"{ticket_key}_{index}"
+
+
+def _physics_test_ticket_mcq_item_id(ticket_key: str) -> str:
+    return f"{ticket_key}_mcq"
+
+
+def _physics_tasks_group_items(topic_key: str, topic: dict) -> list[dict]:
+    """Карточка "формулы и алгоритм" темы идёт первым пунктом группы (order=1), затем сами
+    пронумерованные задачи -- та же схема, что у _chemistry_tasks_group_items."""
+    tasks = topic.get("tasks", [])
+    total = 1 + len(tasks)
+    items = [
+        {"id": _physics_formulas_item_id(topic_key), "title": "📐 Формулы и алгоритм", "order": 1, "total": total},
+    ]
+    items.extend(
+        {
+            "id": _physics_task_item_id(topic_key, task["num"]),
+            "title": task["title"],
+            "order": index + 2,
+            "total": total,
+        }
+        for index, task in enumerate(tasks)
+    )
+    return items
+
+
+def _physics_test_tickets_group_items(ticket_key: str, ticket: dict) -> list[dict]:
+    """МСQ-блок билета идёт первым пунктом группы (order=1, несёт ВСЕ тестовые вопросы билета
+    сразу -- см. docstring раздела выше), затем задачи "Часть 2" по отдельности, если они у билета
+    вообще есть (3 из 23 билетов их не имеют)."""
+    tasks = ticket.get("tasks", [])
+    total = 1 + len(tasks)
+    items = [
+        {
+            "id": _physics_test_ticket_mcq_item_id(ticket_key), "title": "📝 Тестовая часть билета",
+            "order": 1, "total": total,
+        },
+    ]
+    items.extend(
+        {
+            "id": _physics_task_item_id(ticket_key, task["num"]),
+            "title": task["title"],
+            "order": index + 2,
+            "total": total,
+        }
+        for index, task in enumerate(tasks)
+    )
+    return items
+
+
+def _physics_question_material(questions: dict, item_id: str) -> dict:
+    question = questions.get(item_id)
+    if question is None:
+        raise ContentNotFoundError(f"вопрос {item_id!r} не найден в физике")
+    keys = list(questions.keys())
+    index = keys.index(item_id)
+    return {
+        "id": item_id,
+        "title": question["title"],
+        "content_html": f"<p>{escape(str(question['answer']))}</p>",
+        "sources": [],
+        "order": index + 1,
+        "total": len(keys),
+        "group_id": None,
+        "prev_id": keys[index - 1] if index > 0 else None,
+        "next_id": keys[index + 1] if index + 1 < len(keys) else None,
+        "media": [],
+    }
+
+
+def _physics_extra_question_material(tb, item_id: str) -> dict:
+    questions = tb.PHYSICS_EXTRA_QUESTIONS
+    question = questions.get(item_id)
+    if question is None:
+        raise ContentNotFoundError(f"доп. вопрос {item_id!r} не найден в физике")
+    keys = list(questions.keys())
+    index = keys.index(item_id)
+    image = question.get("image")
+    media = [{"path": os.path.join(tb.IMAGES_DIR, image), "caption": question["title"]}] if image else []
+    return {
+        "id": item_id,
+        "title": question["title"],
+        "content_html": f"<p>{escape(str(question['answer']))}</p>",
+        "sources": [],
+        "order": index + 1,
+        "total": len(keys),
+        "group_id": None,
+        "prev_id": keys[index - 1] if index > 0 else None,
+        "next_id": keys[index + 1] if index + 1 < len(keys) else None,
+        "media": media,
+    }
+
+
+def _physics_task_html(task: dict) -> str:
+    parts = []
+    condition = str(task.get("condition", "")).strip()
+    if condition:
+        parts.append(f"<p><strong>Условие:</strong> {escape(condition)}</p>")
+    solution = str(task.get("solution", "")).strip()
+    if solution:
+        parts.append(f"<p>{solution}</p>")
+    return "\n".join(parts)
+
+
+def _physics_formulas_html(topic: dict) -> str:
+    parts = []
+    intro = str(topic.get("intro", "")).strip()
+    if intro:
+        parts.append(f"<p>{escape(intro)}</p>")
+    formulas = str(topic.get("formulas", "")).strip()
+    if formulas:
+        parts.append(f"<p>{formulas}</p>")
+    return "\n".join(parts)
+
+
+def _physics_tasks_material(tasks: dict, item_id: str) -> dict:
+    for topic_key, topic in tasks.items():
+        items = _physics_tasks_group_items(topic_key, topic)
+        for index, item in enumerate(items):
+            if item["id"] != item_id:
+                continue
+            is_formulas = index == 0
+            content_html = (
+                _physics_formulas_html(topic) if is_formulas
+                else _physics_task_html(topic["tasks"][index - 1])
+            )
+            return {
+                "id": item_id,
+                "title": item["title"],
+                "content_html": content_html,
+                "sources": [],
+                "order": item["order"],
+                "total": item["total"],
+                "group_id": topic_key,
+                "prev_id": items[index - 1]["id"] if index > 0 else None,
+                "next_id": items[index + 1]["id"] if index + 1 < len(items) else None,
+                "media": [],
+            }
+    raise ContentNotFoundError(f"задача {item_id!r} не найдена в физике")
+
+
+def _physics_task_tickets_material(task_tickets: dict, item_id: str) -> dict:
+    for ticket_key, ticket in task_tickets.items():
+        tasks = ticket.get("tasks", [])
+        total = len(tasks)
+        for index, task in enumerate(tasks):
+            if _physics_task_item_id(ticket_key, task["num"]) != item_id:
+                continue
+            return {
+                "id": item_id,
+                "title": task["title"],
+                "content_html": _physics_task_html(task),
+                "sources": [],
+                "order": index + 1,
+                "total": total,
+                "group_id": ticket_key,
+                "prev_id": _physics_task_item_id(ticket_key, tasks[index - 1]["num"]) if index > 0 else None,
+                "next_id": (
+                    _physics_task_item_id(ticket_key, tasks[index + 1]["num"]) if index + 1 < total else None
+                ),
+                "media": [],
+            }
+    raise ContentNotFoundError(f"задача {item_id!r} не найдена в билетах с задачами физики")
+
+
+def _physics_theory_tickets_material(theory_tickets: dict, item_id: str) -> dict:
+    for ticket_key, ticket in theory_tickets.items():
+        questions = ticket.get("questions", [])
+        for index, question in enumerate(questions):
+            if _physics_theory_ticket_question_id(ticket_key, index) != item_id:
+                continue
+            return {
+                "id": item_id,
+                "title": question["title"],
+                "content_html": f"<p>{escape(str(question['answer']))}</p>",
+                "sources": [],
+                "order": index + 1,
+                "total": len(questions),
+                "group_id": ticket_key,
+                "prev_id": _physics_theory_ticket_question_id(ticket_key, index - 1) if index > 0 else None,
+                "next_id": (
+                    _physics_theory_ticket_question_id(ticket_key, index + 1)
+                    if index + 1 < len(questions) else None
+                ),
+                "media": [],
+            }
+    raise ContentNotFoundError(f"вопрос {item_id!r} не найден в билетах теории физики")
+
+
+def _physics_mcq_block_html(questions: list) -> str:
+    parts = []
+    for question in questions:
+        parts.append(f"<p><strong>{question['num']}. {escape(str(question['text']))}</strong></p>")
+        option_lines = []
+        for letter, option in question.get("options", {}).items():
+            marker = "✅ " if letter == question.get("correct") else ""
+            option_lines.append(f"{marker}{escape(str(letter))}) {escape(str(option))}")
+        parts.append("<p>" + "\n".join(option_lines) + "</p>")
+    return "\n".join(parts)
+
+
+def _physics_test_tickets_material(test_tickets: dict, item_id: str) -> dict:
+    for ticket_key, ticket in test_tickets.items():
+        items = _physics_test_tickets_group_items(ticket_key, ticket)
+        for index, item in enumerate(items):
+            if item["id"] != item_id:
+                continue
+            is_mcq_block = index == 0
+            content_html = (
+                _physics_mcq_block_html(ticket.get("questions", [])) if is_mcq_block
+                else _physics_task_html(ticket["tasks"][index - 1])
+            )
+            return {
+                "id": item_id,
+                "title": item["title"],
+                "content_html": content_html,
+                "sources": [],
+                "order": item["order"],
+                "total": item["total"],
+                "group_id": ticket_key,
+                "prev_id": items[index - 1]["id"] if index > 0 else None,
+                "next_id": items[index + 1]["id"] if index + 1 < len(items) else None,
+                "media": [],
+            }
+    raise ContentNotFoundError(f"элемент {item_id!r} не найден в тестовых билетах физики")
+
+
+def _physics_material(tb, section_id: str, item_id: str) -> dict:
+    if section_id == PHYSICS_TEST_SECTION_ID:
+        return _physics_question_material(tb.PHYSICS_QUESTIONS, item_id)
+    if section_id == PHYSICS_GRADE45_SECTION_ID:
+        return _physics_question_material(tb.PHYSICS_GRADE45_QUESTIONS, item_id)
+    if section_id == PHYSICS_EXTRA_SECTION_ID:
+        return _physics_extra_question_material(tb, item_id)
+    if section_id == PHYSICS_TASKS_SECTION_ID:
+        return _physics_tasks_material(tb.PHYSICS_TASKS, item_id)
+    if section_id == PHYSICS_TASK_TICKETS_SECTION_ID:
+        return _physics_task_tickets_material(tb.PHYSICS_TASK_TICKETS, item_id)
+    if section_id == PHYSICS_THEORY_TICKETS_SECTION_ID:
+        return _physics_theory_tickets_material(tb.PHYSICS_THEORY_TICKETS, item_id)
+    if section_id == PHYSICS_TEST_TICKETS_SECTION_ID:
+        return _physics_test_tickets_material(tb.PHYSICS_TEST_TICKETS, item_id)
+    raise ContentNotFoundError(f"раздел {section_id!r} не найден в физике")

@@ -50,7 +50,7 @@ def test_list_subjects_includes_real_dynamic_courses():
     ids = {s["id"] for s in resp.json()}
     assert {
         "biochemistry", "pharmacology", "latin", "law", "physiology", "operative_surgery", "anatomy",
-        "histology", "biology", "chemistry",
+        "histology", "biology", "chemistry", "physics",
     } <= ids
 
 
@@ -610,6 +610,192 @@ def test_chemistry_unknown_task_group_and_ticket_group_are_not_found_not_locked(
     assert resp.status_code == 404
     resp2 = client.get(
         "/api/v1/subjects/chemistry/sections/theory_tickets/groups/does-not-exist", headers=headers
+    )
+    assert resp2.status_code == 404
+
+
+def test_physics_default_locked_for_user_with_no_subscription_no_referrals():
+    """Физика гейтится одним и тем же has_subject_access(user_id, "physics") на все семь разделов
+    (в отличие от Химии, без доп. ужесточения на билеты — см. docstring раздела "Физика" в
+    static_content.py). Свежий пользователь без подписки/рефералов заблокирован везде: три плоских
+    раздела (test/grade45/extra) 403-ят целиком, четыре группированных (tasks/task_tickets/
+    theory_tickets/test_tickets) показывают список групп с locked=true (hide vs relabel)."""
+    headers = _auth_headers()
+
+    test_resp = client.get("/api/v1/subjects/physics/sections/test", headers=headers)
+    assert test_resp.status_code == 403
+
+    grade45_resp = client.get("/api/v1/subjects/physics/sections/grade45", headers=headers)
+    assert grade45_resp.status_code == 403
+
+    extra_resp = client.get("/api/v1/subjects/physics/sections/extra", headers=headers)
+    assert extra_resp.status_code == 403
+
+    tasks_section = client.get("/api/v1/subjects/physics/sections/tasks", headers=headers).json()
+    assert len(tasks_section["groups"]) == 9  # см. отчёт по данным: 9 тем задач
+    assert all(g["locked"] for g in tasks_section["groups"])
+    assert all(g["locked_reason"] for g in tasks_section["groups"])
+    first_tasks_group_id = tasks_section["groups"][0]["id"]
+    locked_tasks_group = client.get(
+        f"/api/v1/subjects/physics/sections/tasks/groups/{first_tasks_group_id}", headers=headers
+    )
+    assert locked_tasks_group.status_code == 403
+
+    test_tickets_section = client.get(
+        "/api/v1/subjects/physics/sections/test_tickets", headers=headers
+    ).json()
+    assert len(test_tickets_section["groups"]) == 23  # см. отчёт по данным: 23 тестовых билета
+    assert all(g["locked"] for g in test_tickets_section["groups"])
+    first_test_ticket_id = test_tickets_section["groups"][0]["id"]
+    locked_test_ticket_group = client.get(
+        f"/api/v1/subjects/physics/sections/test_tickets/groups/{first_test_ticket_id}", headers=headers
+    )
+    assert locked_test_ticket_group.status_code == 403
+
+
+def test_physics_full_round_trip_once_referral_threshold_is_met():
+    """REFERRAL_FULL_ACCESS_THRESHOLD рефералов в этом месяце удовлетворяет has_subject_access --
+    один и тот же грант открывает все семь разделов физики разом. Отдельный user_id, чтобы не
+    трогать состояние доступа остальных тестов."""
+    import telegram_bot as tb  # уже импортирован предыдущими тестами (лениво, через bot_state)
+
+    unlocked_user_id = 900_111_222_333
+    tb.stats["total_users"].add(unlocked_user_id)
+    current_month = tb.local_today().strftime("%Y-%m")
+    tb.stats["referral_monthly"][str(unlocked_user_id)] = {"month": current_month, "count": 2}
+    tb.save_stats()
+
+    headers = _auth_headers(unlocked_user_id)
+    detail = client.get("/api/v1/subjects/physics", headers=headers)
+    assert detail.status_code == 200, detail.text
+    sections = {s["id"]: s for s in detail.json()["sections"]}
+    assert sections["test"]["item_count"] == 186  # см. отчёт по данным
+    assert sections["grade45"]["item_count"] == 60
+    assert sections["extra"]["item_count"] == 13
+    assert sections["tasks"]["item_count"] == 58  # 9 тем * (1 карточка формул + N задач)
+    assert sections["task_tickets"]["item_count"] == 40  # 8 билетов * N задач
+    assert sections["theory_tickets"]["item_count"] == 60  # 30 билетов * 2 вопроса
+    assert sections["test_tickets"]["item_count"] == 123  # 23 билета * (1 mcq-блок + N задач)
+
+    # test: плоский раздел, содержательный ответ вопроса
+    test_section = client.get("/api/v1/subjects/physics/sections/test", headers=headers).json()
+    first_test_item = test_section["items"][0]
+    test_material = client.get(
+        f"/api/v1/materials/physics/test/{first_test_item['id']}", headers=headers
+    )
+    assert test_material.status_code == 200, test_material.text
+    test_body = test_material.json()
+    assert test_body["title"] == first_test_item["title"]
+    assert test_body["content_html"]
+    assert test_body["group_id"] is None
+
+    # extra: плоский раздел с картинками у части вопросов
+    extra_section = client.get("/api/v1/subjects/physics/sections/extra", headers=headers).json()
+    extra_with_media = None
+    for item in extra_section["items"]:
+        material = client.get(f"/api/v1/materials/physics/extra/{item['id']}", headers=headers).json()
+        if material["media"]:
+            extra_with_media = material
+            break
+    assert extra_with_media is not None, "expected at least one extra question with an image"
+    media_resp = client.get(
+        f"/api/v1/materials/physics/extra/{extra_with_media['id']}/media/0", headers=headers
+    )
+    assert media_resp.status_code == 200
+    assert len(media_resp.content) > 0
+
+    # tasks: группированный раздел -- первая карточка группы это "Формулы и алгоритм"
+    tasks_section = client.get("/api/v1/subjects/physics/sections/tasks", headers=headers).json()
+    assert all(g["locked"] is False for g in tasks_section["groups"])
+    first_tasks_group_id = tasks_section["groups"][0]["id"]
+    tasks_group = client.get(
+        f"/api/v1/subjects/physics/sections/tasks/groups/{first_tasks_group_id}", headers=headers
+    ).json()
+    assert tasks_group["items"], "task group must have at least the formulas card"
+    formulas_item = tasks_group["items"][0]
+    assert formulas_item["id"].endswith("_formulas")
+    formulas_material = client.get(
+        f"/api/v1/materials/physics/tasks/{formulas_item['id']}", headers=headers
+    )
+    assert formulas_material.status_code == 200, formulas_material.text
+    assert formulas_material.json()["group_id"] == first_tasks_group_id
+
+    # task_tickets: группированный раздел, задачи без формул
+    task_tickets_section = client.get(
+        "/api/v1/subjects/physics/sections/task_tickets", headers=headers
+    ).json()
+    assert all(g["locked"] is False for g in task_tickets_section["groups"])
+    first_task_ticket_id = task_tickets_section["groups"][0]["id"]
+    task_ticket_group = client.get(
+        f"/api/v1/subjects/physics/sections/task_tickets/groups/{first_task_ticket_id}", headers=headers
+    ).json()
+    assert task_ticket_group["items"]
+    first_ticket_task = task_ticket_group["items"][0]
+    ticket_task_material = client.get(
+        f"/api/v1/materials/physics/task_tickets/{first_ticket_task['id']}", headers=headers
+    )
+    assert ticket_task_material.status_code == 200, ticket_task_material.text
+    ticket_task_body = ticket_task_material.json()
+    assert ticket_task_body["title"] == first_ticket_task["title"]
+    assert ticket_task_body["content_html"]
+    assert ticket_task_body["group_id"] == first_task_ticket_id
+
+    # theory_tickets: группированный раздел, вопрос-ответ внутри билета
+    theory_tickets_section = client.get(
+        "/api/v1/subjects/physics/sections/theory_tickets", headers=headers
+    ).json()
+    assert all(g["locked"] is False for g in theory_tickets_section["groups"])
+    first_theory_ticket_id = theory_tickets_section["groups"][0]["id"]
+    theory_ticket_group = client.get(
+        f"/api/v1/subjects/physics/sections/theory_tickets/groups/{first_theory_ticket_id}", headers=headers
+    ).json()
+    assert theory_ticket_group["items"]
+    first_theory_question = theory_ticket_group["items"][0]
+    theory_question_material = client.get(
+        f"/api/v1/materials/physics/theory_tickets/{first_theory_question['id']}", headers=headers
+    )
+    assert theory_question_material.status_code == 200, theory_question_material.text
+    theory_question_body = theory_question_material.json()
+    assert theory_question_body["title"] == first_theory_question["title"]
+    assert theory_question_body["content_html"]
+    assert theory_question_body["group_id"] == first_theory_ticket_id
+
+    # test_tickets: группированный раздел, МСQ-блок первым пунктом + задачи "Часть 2"
+    test_tickets_section = client.get(
+        "/api/v1/subjects/physics/sections/test_tickets", headers=headers
+    ).json()
+    assert all(g["locked"] is False for g in test_tickets_section["groups"])
+    first_test_ticket_id = test_tickets_section["groups"][0]["id"]
+    test_ticket_group = client.get(
+        f"/api/v1/subjects/physics/sections/test_tickets/groups/{first_test_ticket_id}", headers=headers
+    ).json()
+    assert test_ticket_group["items"]
+    mcq_item = test_ticket_group["items"][0]
+    assert mcq_item["id"].endswith("_mcq")
+    mcq_material = client.get(
+        f"/api/v1/materials/physics/test_tickets/{mcq_item['id']}", headers=headers
+    )
+    assert mcq_material.status_code == 200, mcq_material.text
+    mcq_body = mcq_material.json()
+    assert mcq_body["group_id"] == first_test_ticket_id
+    assert "✅" in mcq_body["content_html"]  # правильный вариант отмечен
+    if len(test_ticket_group["items"]) > 1:
+        task_item = test_ticket_group["items"][1]
+        task_material = client.get(
+            f"/api/v1/materials/physics/test_tickets/{task_item['id']}", headers=headers
+        )
+        assert task_material.status_code == 200, task_material.text
+        assert task_material.json()["group_id"] == first_test_ticket_id
+
+
+def test_physics_unknown_task_group_and_test_ticket_group_are_not_found_not_locked():
+    headers = _auth_headers(900_111_222_333)  # уже разблокирован предыдущим тестом
+    resp = client.get(
+        "/api/v1/subjects/physics/sections/tasks/groups/does-not-exist", headers=headers
+    )
+    assert resp.status_code == 404
+    resp2 = client.get(
+        "/api/v1/subjects/physics/sections/test_tickets/groups/does-not-exist", headers=headers
     )
     assert resp2.status_code == 404
 
