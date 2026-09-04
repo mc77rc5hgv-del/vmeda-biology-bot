@@ -15,17 +15,22 @@
 material[], БЕЗ флеш-карточек/сопоставления/мнемоник/картиночных тестов/разбора по костям/атласа/
 латинских терминов/экзаменационных банков — те же "честный срез" резоны, что и у Оперативной
 хирургии), «Гистология» (71 препарат в 5 диагностиках — реальный протокол описания + реальные
-микрофото, БЕЗ картиночного тренажёра "Найди препарат") и «Биология» (40 билетов по 3 вопроса +
+микрофото, БЕЗ картиночного тренажёра "Найди препарат"), «Биология» (40 билетов по 3 вопроса +
 185 вопросов зачёта — БЕЗ флеш-карточек, это тот же QUESTIONS-банк в другом режиме показа у бота,
-не отдельный контент — см. SUPPORTED_SUBJECT_IDS ниже).
+не отдельный контент) и «Химия» (16 тем теории + 15 тем задач (60 задач + 15 карточек "формулы и
+алгоритм") + 6 лабораторных + 11 билетов теории (22 вопроса) + 12 билетов практики — все пять
+реальных банков бота, см. SUPPORTED_SUBJECT_IDS ниже).
 
 В отличие от Физиологии/Оперативной хирургии (полностью бесплатные разделы бота — см. CLAUDE.md),
-у Анатомии и Гистологии есть собственные гейты внутри бота, а Биология гейтится ОБЩИМ
-реферальным middleware наравне с Физикой/Химией (has_subject_access) — этот модуль сам НИЧЕГО не
-проверяет (остаётся чистой функцией формы контента над tb.ANATOMY/tb.HISTOLOGY/tb.TICKETS/
-tb.QUESTIONS, как и остальные предметы), проверка прав живёт в web_api/routers/subjects.py (см.
-_anatomy_module_access_ok/_histology_access_ok/_biology_access_ok там), у которого есть доступ к
-user_id."""
+у Анатомии и Гистологии есть собственные гейты внутри бота, а Биология и Химия гейтятся ОБЩИМ
+реферальным middleware наравне друг с другом и Физикой (has_subject_access) — Химия
+дополнительно ужесточает это для своих БИЛЕТОВ (theory_tickets/practice_tickets) отдельной,
+более строгой проверкой chemistry_tickets_access_ok (не считает ручной/временный доступ и
+промо-акции достаточными — см. handlers/chemistry.py). Этот модуль сам НИЧЕГО не проверяет
+(остаётся чистой функцией формы контента над tb.ANATOMY/tb.HISTOLOGY/tb.TICKETS/tb.QUESTIONS/
+tb.CHEMISTRY_*, как и остальные предметы), проверка прав живёт в web_api/routers/subjects.py (см.
+_anatomy_module_access_ok/_histology_access_ok/_biology_access_ok/_chemistry_*_access там), у
+которого есть доступ к user_id."""
 from html import escape
 
 from .content import ContentNotFoundError
@@ -35,11 +40,20 @@ OPERATIVE_SURGERY_ID = "operative_surgery"
 ANATOMY_ID = "anatomy"
 HISTOLOGY_ID = "histology"
 BIOLOGY_ID = "biology"
-SUPPORTED_SUBJECT_IDS = {PHYSIOLOGY_ID, OPERATIVE_SURGERY_ID, ANATOMY_ID, HISTOLOGY_ID, BIOLOGY_ID}
+CHEMISTRY_ID = "chemistry"
+SUPPORTED_SUBJECT_IDS = {
+    PHYSIOLOGY_ID, OPERATIVE_SURGERY_ID, ANATOMY_ID, HISTOLOGY_ID, BIOLOGY_ID, CHEMISTRY_ID,
+}
 ANATOMY_SECTION_ID = "course"
 HISTOLOGY_SECTION_ID = "specimens"
 BIOLOGY_TICKETS_SECTION_ID = "tickets"
 BIOLOGY_QUESTIONS_SECTION_ID = "questions"
+CHEMISTRY_THEORY_SECTION_ID = "theory"
+CHEMISTRY_TASKS_SECTION_ID = "tasks"
+CHEMISTRY_LABS_SECTION_ID = "labs"
+CHEMISTRY_THEORY_TICKETS_SECTION_ID = "theory_tickets"
+CHEMISTRY_PRACTICE_TICKETS_SECTION_ID = "practice_tickets"
+CHEMISTRY_TICKET_SECTION_IDS = {CHEMISTRY_THEORY_TICKETS_SECTION_ID, CHEMISTRY_PRACTICE_TICKETS_SECTION_ID}
 
 PHYSIOLOGY_PAGE_CHAR_BUDGET = 6_000
 
@@ -88,6 +102,15 @@ def list_subject_summaries(tb) -> list[dict]:
             "title": "Биология",
             "emoji": "🧬",
             "description": "40 билетов и 185 вопросов зачёта",
+            "course": 1,
+            "has_ai": True,
+        })
+    if tb.CHEMISTRY_THEORY or tb.CHEMISTRY_TASKS or tb.CHEMISTRY_LABS:
+        summaries.append({
+            "id": CHEMISTRY_ID,
+            "title": "Химия",
+            "emoji": "⚗️",
+            "description": "Теория, задачи, лабораторные и билеты",
             "course": 1,
             "has_ai": True,
         })
@@ -152,6 +175,35 @@ def get_subject_detail(tb, subject_id: str) -> dict:
                 "title": "Вопросы",
                 "item_count": len(tb.QUESTIONS),
                 "kind": "flat",
+            },
+        ]
+        return summary
+
+    if subject_id == CHEMISTRY_ID:
+        tasks_item_count = sum(
+            1 + len(topic.get("tasks", [])) for topic in tb.CHEMISTRY_TASKS.values()
+        )  # +1 за карточку "формулы и алгоритм" на тему -- см. _chemistry_tasks_group_items
+        theory_tickets_item_count = sum(len(t.get("questions", [])) for t in tb.CHEMISTRY_THEORY_TICKETS.values())
+        summary["sections"] = [
+            {
+                "id": CHEMISTRY_THEORY_SECTION_ID, "title": "Теория",
+                "item_count": len(tb.CHEMISTRY_THEORY), "kind": "flat",
+            },
+            {
+                "id": CHEMISTRY_TASKS_SECTION_ID, "title": "Задачи",
+                "item_count": tasks_item_count, "kind": "grouped",
+            },
+            {
+                "id": CHEMISTRY_LABS_SECTION_ID, "title": "Лабораторные",
+                "item_count": len(tb.CHEMISTRY_LABS.get("labs", [])), "kind": "flat",
+            },
+            {
+                "id": CHEMISTRY_THEORY_TICKETS_SECTION_ID, "title": "Билеты теории",
+                "item_count": theory_tickets_item_count, "kind": "grouped",
+            },
+            {
+                "id": CHEMISTRY_PRACTICE_TICKETS_SECTION_ID, "title": "Билеты практики",
+                "item_count": len(tb.CHEMISTRY_PRACTICE_TICKETS), "kind": "flat",
             },
         ]
         return summary
@@ -253,6 +305,68 @@ def get_section_detail(tb, subject_id: str, section_id: str) -> dict:
             }
         raise ContentNotFoundError(f"раздел {section_id!r} не найден в биологии")
 
+    if subject_id == CHEMISTRY_ID:
+        if section_id == CHEMISTRY_THEORY_SECTION_ID:
+            keys = list(tb.CHEMISTRY_THEORY.keys())
+            total = len(keys)
+            return {
+                "id": section_id,
+                "title": "Теория",
+                "kind": "flat",
+                "items": [
+                    {"id": key, "title": tb.CHEMISTRY_THEORY[key]["title"], "order": index + 1, "total": total}
+                    for index, key in enumerate(keys)
+                ],
+            }
+        if section_id == CHEMISTRY_TASKS_SECTION_ID:
+            return {
+                "id": section_id,
+                "title": "Задачи",
+                "kind": "grouped",
+                "groups": [
+                    {"id": key, "title": topic["title"], "item_count": 1 + len(topic.get("tasks", []))}
+                    for key, topic in tb.CHEMISTRY_TASKS.items()
+                ],
+            }
+        if section_id == CHEMISTRY_LABS_SECTION_ID:
+            labs = tb.CHEMISTRY_LABS.get("labs", [])
+            total = len(labs)
+            return {
+                "id": section_id,
+                "title": "Лабораторные",
+                "kind": "flat",
+                "items": [
+                    {"id": str(lab["number"]), "title": lab["title"], "order": index + 1, "total": total}
+                    for index, lab in enumerate(labs)
+                ],
+            }
+        if section_id == CHEMISTRY_THEORY_TICKETS_SECTION_ID:
+            return {
+                "id": section_id,
+                "title": "Билеты теории",
+                "kind": "grouped",
+                "groups": [
+                    {"id": key, "title": ticket["title"], "item_count": len(ticket.get("questions", []))}
+                    for key, ticket in tb.CHEMISTRY_THEORY_TICKETS.items()
+                ],
+            }
+        if section_id == CHEMISTRY_PRACTICE_TICKETS_SECTION_ID:
+            keys = list(tb.CHEMISTRY_PRACTICE_TICKETS.keys())
+            total = len(keys)
+            return {
+                "id": section_id,
+                "title": "Билеты практики",
+                "kind": "flat",
+                "items": [
+                    {
+                        "id": key, "title": tb.CHEMISTRY_PRACTICE_TICKETS[key]["title"],
+                        "order": index + 1, "total": total,
+                    }
+                    for index, key in enumerate(keys)
+                ],
+            }
+        raise ContentNotFoundError(f"раздел {section_id!r} не найден в химии")
+
     # operative_surgery
     if section_id != "volumes":
         raise ContentNotFoundError(f"раздел {section_id!r} не найден в оперативной хирургии")
@@ -339,6 +453,37 @@ def get_group_detail(tb, subject_id: str, section_id: str, group_id: str) -> dic
             ],
         }
 
+    if subject_id == CHEMISTRY_ID:
+        if section_id == CHEMISTRY_TASKS_SECTION_ID:
+            topic = tb.CHEMISTRY_TASKS.get(group_id)
+            if topic is None:
+                raise ContentNotFoundError(f"тема {group_id!r} не найдена в задачах по химии")
+            return {
+                "id": group_id,
+                "title": topic["title"],
+                "items": _chemistry_tasks_group_items(group_id, topic),
+            }
+        if section_id == CHEMISTRY_THEORY_TICKETS_SECTION_ID:
+            ticket = tb.CHEMISTRY_THEORY_TICKETS.get(group_id)
+            if ticket is None:
+                raise ContentNotFoundError(f"билет {group_id!r} не найден в билетах теории химии")
+            questions = ticket.get("questions", [])
+            total = len(questions)
+            return {
+                "id": group_id,
+                "title": ticket["title"],
+                "items": [
+                    {
+                        "id": _chemistry_ticket_question_id(group_id, index),
+                        "title": question["title"],
+                        "order": index + 1,
+                        "total": total,
+                    }
+                    for index, question in enumerate(questions)
+                ],
+            }
+        raise ContentNotFoundError(f"в разделе {section_id!r} нет групп")
+
     # operative_surgery
     if section_id != "volumes":
         raise ContentNotFoundError(f"в разделе {section_id!r} нет групп")
@@ -364,6 +509,8 @@ def get_material(tb, subject_id: str, section_id: str, item_id: str) -> dict:
         return _histology_material(tb.HISTOLOGY, section_id, item_id)
     if subject_id == BIOLOGY_ID:
         return _biology_material(tb.TICKETS, tb.QUESTIONS, section_id, item_id)
+    if subject_id == CHEMISTRY_ID:
+        return _chemistry_material(tb, section_id, item_id)
     if subject_id == PHYSIOLOGY_ID:
         return _physiology_material(tb.PHYSIOLOGY, section_id, item_id)
     return _operative_surgery_material(tb.OPERATIVE_SURGERY, section_id, item_id)
@@ -727,3 +874,245 @@ def _biology_material(tickets: list, questions: dict, section_id: str, item_id: 
     if section_id == BIOLOGY_QUESTIONS_SECTION_ID:
         return _biology_question_material(questions, item_id)
     raise ContentNotFoundError(f"раздел {section_id!r} не найден в биологии")
+
+
+# ==================== Химия ====================
+# Подключены все пять реальных банков бота (tb.CHEMISTRY_THEORY/_TASKS/_LABS/_THEORY_TICKETS/
+# _PRACTICE_TICKETS). _chemistry_material принимает весь tb (не отдельные словари, как остальные
+# _*_material выше) -- единственное исключение в файле, оправданное тем, что здесь нужно РОВНО
+# пять разных атрибутов сразу, а не один-два.
+#
+# Правило эскейпинга по полям (проверено на ВСЕХ реальных записях, см. commit message): формулы
+# темы (formulas), решение задачи (solution), ответ билета теории (answer), содержимое билета
+# практики (content), вывод лабораторной (summary) и текст темы теории (content у THEORY) уже
+# несут готовый HTML (<b>/<i>, как у Анатомии/ОХ) -- НЕ эскейпятся. Вступление к теме задач
+# (intro), условие задачи (condition) и все текстовые поля лабораторных, КРОМЕ summary, --
+# обычный plain text -- эскейпятся.
+
+def _chemistry_formulas_item_id(topic_key: str) -> str:
+    return f"{topic_key}_formulas"
+
+
+def _chemistry_task_item_id(topic_key: str, task_num) -> str:
+    return f"{topic_key}_{task_num}"
+
+
+def _chemistry_ticket_question_id(ticket_key: str, index: int) -> str:
+    return f"{ticket_key}_{index}"
+
+
+def _chemistry_tasks_group_items(topic_key: str, topic: dict) -> list[dict]:
+    """Карточка "формулы и алгоритм" темы идёт первым пунктом группы (order=1), затем сами
+    пронумерованные задачи -- реальный контент темы (intro+formulas), не выдуманный элемент
+    навигации."""
+    tasks = topic.get("tasks", [])
+    total = 1 + len(tasks)
+    items = [
+        {"id": _chemistry_formulas_item_id(topic_key), "title": "📐 Формулы и алгоритм", "order": 1, "total": total},
+    ]
+    items.extend(
+        {
+            "id": _chemistry_task_item_id(topic_key, task["num"]),
+            "title": task["title"],
+            "order": index + 2,
+            "total": total,
+        }
+        for index, task in enumerate(tasks)
+    )
+    return items
+
+
+def _chemistry_theory_material(theory: dict, item_id: str) -> dict:
+    topic = theory.get(item_id)
+    if topic is None:
+        raise ContentNotFoundError(f"тема {item_id!r} не найдена в теории химии")
+    keys = list(theory.keys())
+    index = keys.index(item_id)
+    return {
+        "id": item_id,
+        "title": topic["title"],
+        "content_html": topic["content"],
+        "sources": [],
+        "order": index + 1,
+        "total": len(keys),
+        "group_id": None,
+        "prev_id": keys[index - 1] if index > 0 else None,
+        "next_id": keys[index + 1] if index + 1 < len(keys) else None,
+        "media": [],
+    }
+
+
+def _chemistry_formulas_html(topic: dict) -> str:
+    parts = []
+    intro = str(topic.get("intro", "")).strip()
+    if intro:
+        parts.append(f"<p>{escape(intro)}</p>")
+    formulas = str(topic.get("formulas", "")).strip()
+    if formulas:
+        parts.append(f"<p>{formulas}</p>")
+    return "\n".join(parts)
+
+
+def _chemistry_task_html(task: dict) -> str:
+    parts = []
+    condition = str(task.get("condition", "")).strip()
+    if condition:
+        parts.append(f"<p><strong>Условие:</strong> {escape(condition)}</p>")
+    solution = str(task.get("solution", "")).strip()
+    if solution:
+        parts.append(f"<p>{solution}</p>")
+    return "\n".join(parts)
+
+
+def _chemistry_tasks_material(tasks: dict, item_id: str) -> dict:
+    for topic_key, topic in tasks.items():
+        items = _chemistry_tasks_group_items(topic_key, topic)
+        for index, item in enumerate(items):
+            if item["id"] != item_id:
+                continue
+            is_formulas = index == 0
+            content_html = (
+                _chemistry_formulas_html(topic) if is_formulas
+                else _chemistry_task_html(topic["tasks"][index - 1])
+            )
+            return {
+                "id": item_id,
+                "title": item["title"],
+                "content_html": content_html,
+                "sources": [],
+                "order": item["order"],
+                "total": item["total"],
+                "group_id": topic_key,
+                "prev_id": items[index - 1]["id"] if index > 0 else None,
+                "next_id": items[index + 1]["id"] if index + 1 < len(items) else None,
+                "media": [],
+            }
+    raise ContentNotFoundError(f"задача {item_id!r} не найдена в химии")
+
+
+_CHEMISTRY_LAB_FIELD_LABELS = {
+    "theme": "Тема",
+    "condition": "Условие",
+    "positive_sol": "Положительная проба",
+    "negative_sol": "Отрицательная проба",
+    "procedure": "Методика",
+    "theory": "Теория",
+    "titrant": "Титрант",
+    "indicator": "Индикатор",
+    "buffer": "Буферный раствор",
+    "equations": "Уравнения реакций",
+    "calculations": "Расчёты",
+    "summary": "Вывод",
+}
+_CHEMISTRY_LAB_TRUSTED_HTML_FIELDS = {"summary"}  # см. проверку в commit message: только summary несёт HTML
+_CHEMISTRY_EXPERIMENT_FIELD_LABELS = {
+    "description": "Описание",
+    "mechanism": "Механизм",
+    "technique": "Техника выполнения",
+    "sorbent": "Сорбент",
+    "eluent": "Элюент",
+    "procedure": "Ход работы",
+}
+
+
+def _chemistry_experiment_html(experiment: dict) -> str:
+    parts = [f"<p><strong>{escape(str(experiment.get('name', 'Опыт')))}</strong></p>"]
+    for field, label in _CHEMISTRY_EXPERIMENT_FIELD_LABELS.items():
+        value = str(experiment.get(field, "")).strip()
+        if value:
+            parts.append(f"<p><strong>{label}:</strong> {escape(value)}</p>")
+    return "\n".join(parts)
+
+
+def _chemistry_lab_html(lab: dict) -> str:
+    parts = []
+    for field, label in _CHEMISTRY_LAB_FIELD_LABELS.items():
+        value = lab.get(field)
+        if not value:
+            continue
+        value = str(value).strip()
+        if not value:
+            continue
+        body = value if field in _CHEMISTRY_LAB_TRUSTED_HTML_FIELDS else escape(value)
+        parts.append(f"<p><strong>{label}:</strong></p>")
+        parts.append(f"<p>{body}</p>")
+    for experiment in lab.get("experiments", []):
+        parts.append(_chemistry_experiment_html(experiment))
+    return "\n".join(parts)
+
+
+def _chemistry_labs_material(labs_data: dict, item_id: str) -> dict:
+    labs = labs_data.get("labs", [])
+    for index, lab in enumerate(labs):
+        if str(lab["number"]) != item_id:
+            continue
+        return {
+            "id": item_id,
+            "title": lab["title"],
+            "content_html": _chemistry_lab_html(lab),
+            "sources": [],
+            "order": index + 1,
+            "total": len(labs),
+            "group_id": None,
+            "prev_id": str(labs[index - 1]["number"]) if index > 0 else None,
+            "next_id": str(labs[index + 1]["number"]) if index + 1 < len(labs) else None,
+            "media": [],
+        }
+    raise ContentNotFoundError(f"лабораторная {item_id!r} не найдена в химии")
+
+
+def _chemistry_theory_tickets_material(theory_tickets: dict, item_id: str) -> dict:
+    for ticket_key, ticket in theory_tickets.items():
+        questions = ticket.get("questions", [])
+        for index, question in enumerate(questions):
+            if _chemistry_ticket_question_id(ticket_key, index) != item_id:
+                continue
+            return {
+                "id": item_id,
+                "title": question["title"],
+                "content_html": question["answer"],
+                "sources": [],
+                "order": index + 1,
+                "total": len(questions),
+                "group_id": ticket_key,
+                "prev_id": _chemistry_ticket_question_id(ticket_key, index - 1) if index > 0 else None,
+                "next_id": (
+                    _chemistry_ticket_question_id(ticket_key, index + 1) if index + 1 < len(questions) else None
+                ),
+                "media": [],
+            }
+    raise ContentNotFoundError(f"вопрос {item_id!r} не найден в билетах теории химии")
+
+
+def _chemistry_practice_tickets_material(practice_tickets: dict, item_id: str) -> dict:
+    ticket = practice_tickets.get(item_id)
+    if ticket is None:
+        raise ContentNotFoundError(f"билет {item_id!r} не найден в билетах практики химии")
+    keys = list(practice_tickets.keys())
+    index = keys.index(item_id)
+    return {
+        "id": item_id,
+        "title": ticket["title"],
+        "content_html": ticket["content"],
+        "sources": [],
+        "order": index + 1,
+        "total": len(keys),
+        "group_id": None,
+        "prev_id": keys[index - 1] if index > 0 else None,
+        "next_id": keys[index + 1] if index + 1 < len(keys) else None,
+        "media": [],
+    }
+
+
+def _chemistry_material(tb, section_id: str, item_id: str) -> dict:
+    if section_id == CHEMISTRY_THEORY_SECTION_ID:
+        return _chemistry_theory_material(tb.CHEMISTRY_THEORY, item_id)
+    if section_id == CHEMISTRY_TASKS_SECTION_ID:
+        return _chemistry_tasks_material(tb.CHEMISTRY_TASKS, item_id)
+    if section_id == CHEMISTRY_LABS_SECTION_ID:
+        return _chemistry_labs_material(tb.CHEMISTRY_LABS, item_id)
+    if section_id == CHEMISTRY_THEORY_TICKETS_SECTION_ID:
+        return _chemistry_theory_tickets_material(tb.CHEMISTRY_THEORY_TICKETS, item_id)
+    if section_id == CHEMISTRY_PRACTICE_TICKETS_SECTION_ID:
+        return _chemistry_practice_tickets_material(tb.CHEMISTRY_PRACTICE_TICKETS, item_id)
+    raise ContentNotFoundError(f"раздел {section_id!r} не найден в химии")

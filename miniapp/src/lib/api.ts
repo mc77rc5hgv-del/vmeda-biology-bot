@@ -32,7 +32,7 @@ function resolveAfterDelay<T>(value: T): Promise<T> {
 // подключённых предметов" отдельным полем, а этот список статичен и меняется редко.
 const REAL_BACKED_SUBJECT_IDS = new Set([
   "biochemistry", "pharmacology", "latin", "law", "physiology", "operative_surgery", "anatomy",
-  "histology", "biology",
+  "histology", "biology", "chemistry",
 ]);
 
 export function isRealBackedSubject(subjectId: string): boolean {

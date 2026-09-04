@@ -8,15 +8,17 @@ class FakeTb:
     """static_content.py принимает "tb-подобный" объект (см. web_api/bot_state.py -- в реальном
     коде это модуль telegram_bot), а не сырые словари напрямую, потому что теперь оно отвечает
     сразу за несколько статичных предметов (Физиология + Оперативная хирургия + Анатомия +
-    Гистология + Биология) и само решает, какой атрибут прочитать. Тесты собирают минимальную
-    заглушку с ровно этими атрибутами -- гейты доступа (Анатомия: модуль бесплатный/платный,
-    тех.режим; Гистология/Биология: пробный период/подписка/рефералы) сюда НЕ входят, они живут в
-    web_api/routers/subjects.py (см. test_subjects_integration.py и test_access.py) и требуют
-    user_id, которого у чистых функций формы контента здесь нет."""
+    Гистология + Биология + Химия) и само решает, какой атрибут прочитать. Тесты собирают
+    минимальную заглушку с ровно этими атрибутами -- гейты доступа (Анатомия: модуль
+    бесплатный/платный, тех.режим; Гистология/Биология/Химия: пробный период/подписка/рефералы)
+    сюда НЕ входят, они живут в web_api/routers/subjects.py (см. test_subjects_integration.py и
+    test_access.py) и требуют user_id, которого у чистых функций формы контента здесь нет."""
 
     def __init__(
         self, physiology=None, operative_surgery=None, anatomy=None, histology=None,
         tickets=None, questions=None,
+        chemistry_theory=None, chemistry_tasks=None, chemistry_labs=None,
+        chemistry_theory_tickets=None, chemistry_practice_tickets=None,
     ):
         self.PHYSIOLOGY = physiology or {}
         self.OPERATIVE_SURGERY = operative_surgery or {}
@@ -24,6 +26,11 @@ class FakeTb:
         self.HISTOLOGY = histology or {}
         self.TICKETS = tickets or []
         self.QUESTIONS = questions or {}
+        self.CHEMISTRY_THEORY = chemistry_theory or {}
+        self.CHEMISTRY_TASKS = chemistry_tasks or {}
+        self.CHEMISTRY_LABS = chemistry_labs or {}
+        self.CHEMISTRY_THEORY_TICKETS = chemistry_theory_tickets or {}
+        self.CHEMISTRY_PRACTICE_TICKETS = chemistry_practice_tickets or {}
 
 
 @pytest.fixture
@@ -608,3 +615,255 @@ def test_list_subject_summaries_includes_biology_when_tickets_or_questions_prese
     tb = FakeTb(tickets=tickets)
     ids = {s["id"] for s in static_content.list_subject_summaries(tb)}
     assert ids == {"biology"}
+
+
+# ==================== Химия ====================
+# Пять банков разной формы: THEORY/PRACTICE_TICKETS -- dict "1".."N" -> {title, content}, flat;
+# TASKS/THEORY_TICKETS -- dict -> {title, ...вложенный список}, grouped; LABS -- {"labs": [...]}
+# (единственный банк, обёрнутый в объект, а не голый dict/список). Гейт доступа (обычный +
+# усиленный chemistry_tickets_access_ok для билетов) сюда намеренно НЕ входит -- см. docstring
+# static_content.py и test_subjects_integration.py.
+
+@pytest.fixture
+def chemistry_theory():
+    return {
+        "1": {"title": "Тема 1", "content": "<b>Растворы</b> — гомогенные системы."},
+        "2": {"title": "Тема 2", "content": "Вторая тема."},
+    }
+
+
+@pytest.fixture
+def chemistry_tasks():
+    return {
+        "1": {
+            "title": "Концентрации растворов",
+            "intro": "Вступление без HTML.",
+            "formulas": "<b>Формулы:</b> C = n/V.",
+            "tasks": [
+                {"num": 1, "title": "Задача 1.1", "condition": "Дано: <опасный> текст.", "solution": "<b>Решение 1.</b>"},
+                {"num": 2, "title": "Задача 1.2", "condition": "Условие 2.", "solution": "<b>Решение 2.</b>"},
+            ],
+        },
+        "2": {
+            "title": "Тема без задач формул",
+            "intro": "",
+            "formulas": "",
+            "tasks": [
+                {"num": 1, "title": "Задача 2.1", "condition": "Условие.", "solution": "Решение без HTML."},
+            ],
+        },
+    }
+
+
+@pytest.fixture
+def chemistry_labs():
+    return {
+        "section": "Химия",
+        "description": "desc",
+        "labs": [
+            {
+                "number": 1,
+                "title": "Лабораторная работа 1",
+                "theme": "Хроматография",
+                "condition": "Условие лабораторной <опасное>.",
+                "experiments": [
+                    {
+                        "name": "Опыт 1",
+                        "description": "Описание опыта.",
+                        "mechanism": "Адсорбционный",
+                        "technique": "",
+                        "sorbent": "Бумага",
+                        "eluent": "Вода",
+                        "procedure": "Ход работы опыта.",
+                    },
+                ],
+                "calculations": "Rf = l/L",
+                "summary": "<b>Вывод:</b> метод сработал.",
+            },
+            {
+                "number": 2,
+                "title": "Лабораторная работа 2",
+                "theme": "Титрование",
+                "condition": "Условие 2.",
+                "titrant": "HCl",
+                "indicator": "Фенолфталеин",
+                "procedure": "Методика титрования.",
+                "calculations": "V·C = const",
+                "summary": "<b>Вывод 2.</b>",
+            },
+        ],
+    }
+
+
+@pytest.fixture
+def chemistry_theory_tickets():
+    return {
+        "1": {
+            "title": "Билет №1",
+            "questions": [
+                {"title": "Вопрос 1.1", "answer": "<b>Ответ 1.1.</b>"},
+                {"title": "Вопрос 1.2", "answer": "<b>Ответ 1.2.</b>"},
+            ],
+        },
+        "2": {
+            "title": "Билет №2",
+            "questions": [{"title": "Вопрос 2.1", "answer": "<b>Ответ 2.1.</b>"}],
+        },
+    }
+
+
+@pytest.fixture
+def chemistry_practice_tickets():
+    return {
+        "1": {"title": "Билет №1 (практика)", "content": "<b>Условие:</b> задача практики."},
+        "2": {"title": "Билет №2 (практика)", "content": "Условие 2."},
+    }
+
+
+def _chemistry_tb(chemistry_theory=None, chemistry_tasks=None, chemistry_labs=None,
+                   chemistry_theory_tickets=None, chemistry_practice_tickets=None):
+    return FakeTb(
+        chemistry_theory=chemistry_theory, chemistry_tasks=chemistry_tasks, chemistry_labs=chemistry_labs,
+        chemistry_theory_tickets=chemistry_theory_tickets, chemistry_practice_tickets=chemistry_practice_tickets,
+    )
+
+
+def test_chemistry_summary_and_sections(
+    chemistry_theory, chemistry_tasks, chemistry_labs, chemistry_theory_tickets, chemistry_practice_tickets,
+):
+    tb = _chemistry_tb(chemistry_theory, chemistry_tasks, chemistry_labs, chemistry_theory_tickets, chemistry_practice_tickets)
+    detail = static_content.get_subject_detail(tb, "chemistry")
+    assert detail["title"] == "Химия"
+    sections = {s["id"]: s for s in detail["sections"]}
+    assert sections["theory"] == {"id": "theory", "title": "Теория", "item_count": 2, "kind": "flat"}
+    assert sections["tasks"] == {"id": "tasks", "title": "Задачи", "item_count": 5, "kind": "grouped"}  # 2 formulas + 3 tasks
+    assert sections["labs"] == {"id": "labs", "title": "Лабораторные", "item_count": 2, "kind": "flat"}
+    assert sections["theory_tickets"] == {
+        "id": "theory_tickets", "title": "Билеты теории", "item_count": 3, "kind": "grouped",
+    }
+    assert sections["practice_tickets"] == {
+        "id": "practice_tickets", "title": "Билеты практики", "item_count": 2, "kind": "flat",
+    }
+
+
+def test_chemistry_theory_material_trusts_html(chemistry_theory):
+    tb = _chemistry_tb(chemistry_theory=chemistry_theory)
+    material = static_content.get_material(tb, "chemistry", "theory", "1")
+    assert material["title"] == "Тема 1"
+    assert material["content_html"] == "<b>Растворы</b> — гомогенные системы."
+    assert material["prev_id"] is None
+    assert material["next_id"] == "2"
+
+
+def test_chemistry_tasks_group_lists_formulas_card_first(chemistry_tasks):
+    tb = _chemistry_tb(chemistry_tasks=chemistry_tasks)
+    group = static_content.get_group_detail(tb, "chemistry", "tasks", "1")
+    assert group["title"] == "Концентрации растворов"
+    assert [item["id"] for item in group["items"]] == ["1_formulas", "1_1", "1_2"]
+    assert group["items"][0]["title"] == "📐 Формулы и алгоритм"
+
+
+def test_chemistry_formulas_material_escapes_intro_trusts_formulas(chemistry_tasks):
+    tb = _chemistry_tb(chemistry_tasks=chemistry_tasks)
+    material = static_content.get_material(tb, "chemistry", "tasks", "1_formulas")
+    assert "Вступление без HTML." in material["content_html"]
+    assert "<b>Формулы:</b> C = n/V." in material["content_html"]
+    assert material["group_id"] == "1"
+    assert material["prev_id"] is None
+    assert material["next_id"] == "1_1"
+
+
+def test_chemistry_task_material_escapes_condition_trusts_solution(chemistry_tasks):
+    tb = _chemistry_tb(chemistry_tasks=chemistry_tasks)
+    material = static_content.get_material(tb, "chemistry", "tasks", "1_1")
+    assert "&lt;опасный&gt;" in material["content_html"]  # condition эскейпится
+    assert "<b>Решение 1.</b>" in material["content_html"]  # solution -- уже HTML
+    assert material["prev_id"] == "1_formulas"
+    assert material["next_id"] == "1_2"
+
+
+def test_chemistry_task_material_last_item_has_no_next(chemistry_tasks):
+    tb = _chemistry_tb(chemistry_tasks=chemistry_tasks)
+    material = static_content.get_material(tb, "chemistry", "tasks", "1_2")
+    assert material["next_id"] is None
+
+
+def test_chemistry_topic_without_formulas_still_has_formulas_card(chemistry_tasks):
+    """intro/formulas пустые у темы 2 -- карточка "Формулы и алгоритм" всё равно существует
+    (честно, просто с пустым content_html), не пропадает из списка."""
+    tb = _chemistry_tb(chemistry_tasks=chemistry_tasks)
+    material = static_content.get_material(tb, "chemistry", "tasks", "2_formulas")
+    assert material["content_html"] == ""
+    assert material["next_id"] == "2_1"
+
+
+def test_chemistry_lab_material_renders_experiments_and_trusts_summary(chemistry_labs):
+    tb = _chemistry_tb(chemistry_labs=chemistry_labs)
+    material = static_content.get_material(tb, "chemistry", "labs", "1")
+    assert material["title"] == "Лабораторная работа 1"
+    assert "&lt;опасное&gt;" in material["content_html"]  # condition эскейпится
+    assert "<strong>Опыт 1</strong>" in material["content_html"]
+    assert "Описание опыта." in material["content_html"]
+    assert "<b>Вывод:</b> метод сработал." in material["content_html"]  # summary -- уже HTML
+    assert material["prev_id"] is None
+    assert material["next_id"] == "2"
+
+
+def test_chemistry_lab_without_experiments_still_renders(chemistry_labs):
+    tb = _chemistry_tb(chemistry_labs=chemistry_labs)
+    material = static_content.get_material(tb, "chemistry", "labs", "2")
+    assert "Методика титрования." in material["content_html"]
+    assert material["prev_id"] == "1"
+    assert material["next_id"] is None
+
+
+def test_chemistry_theory_ticket_group_and_material(chemistry_theory, chemistry_theory_tickets):
+    tb = _chemistry_tb(chemistry_theory=chemistry_theory, chemistry_theory_tickets=chemistry_theory_tickets)
+    group = static_content.get_group_detail(tb, "chemistry", "theory_tickets", "1")
+    assert group["title"] == "Билет №1"
+    assert [item["id"] for item in group["items"]] == ["1_0", "1_1"]
+
+    material = static_content.get_material(tb, "chemistry", "theory_tickets", "1_0")
+    assert material["title"] == "Вопрос 1.1"
+    assert material["content_html"] == "<b>Ответ 1.1.</b>"
+    assert material["group_id"] == "1"
+    assert material["prev_id"] is None
+    assert material["next_id"] == "1_1"
+
+
+def test_chemistry_practice_ticket_material_trusts_html(chemistry_theory, chemistry_practice_tickets):
+    tb = _chemistry_tb(chemistry_theory=chemistry_theory, chemistry_practice_tickets=chemistry_practice_tickets)
+    material = static_content.get_material(tb, "chemistry", "practice_tickets", "1")
+    assert material["content_html"] == "<b>Условие:</b> задача практики."
+    assert material["group_id"] is None
+    assert material["next_id"] == "2"
+
+
+def test_chemistry_unknown_theory_topic_not_found(chemistry_theory):
+    tb = _chemistry_tb(chemistry_theory=chemistry_theory)
+    with pytest.raises(ContentNotFoundError):
+        static_content.get_material(tb, "chemistry", "theory", "99")
+
+
+def test_chemistry_unknown_task_not_found(chemistry_tasks):
+    tb = _chemistry_tb(chemistry_tasks=chemistry_tasks)
+    with pytest.raises(ContentNotFoundError):
+        static_content.get_material(tb, "chemistry", "tasks", "99_1")
+
+
+def test_chemistry_unknown_lab_not_found(chemistry_labs):
+    tb = _chemistry_tb(chemistry_labs=chemistry_labs)
+    with pytest.raises(ContentNotFoundError):
+        static_content.get_material(tb, "chemistry", "labs", "99")
+
+
+def test_chemistry_unknown_task_group_not_found(chemistry_tasks):
+    tb = _chemistry_tb(chemistry_tasks=chemistry_tasks)
+    with pytest.raises(ContentNotFoundError):
+        static_content.get_group_detail(tb, "chemistry", "tasks", "99")
+
+
+def test_list_subject_summaries_includes_chemistry_when_theory_present(chemistry_theory):
+    tb = _chemistry_tb(chemistry_theory=chemistry_theory)
+    ids = {s["id"] for s in static_content.list_subject_summaries(tb)}
+    assert ids == {"chemistry"}

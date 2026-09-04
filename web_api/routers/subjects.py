@@ -82,6 +82,11 @@ def _get_material_data(tb, user_id: int, subject_id: str, section_id: str, item_
         _check_histology_access(tb, user_id)
     if subject_id == static_content.BIOLOGY_ID:
         _check_biology_access(tb, user_id)
+    if subject_id == static_content.CHEMISTRY_ID:
+        if section_id in static_content.CHEMISTRY_TICKET_SECTION_IDS:
+            _check_chemistry_tickets_access(tb, user_id)
+        else:
+            _check_chemistry_access(tb, user_id)
     if subject_id in static_content.SUPPORTED_SUBJECT_IDS:
         return static_content.get_material(tb, subject_id, section_id, item_id)
     return content.get_material(tb.DYNAMIC_COURSES, subject_id, section_id, item_id)
@@ -159,6 +164,60 @@ def _annotate_biology_section(tb, user_id: int, section: dict) -> dict:
     return section
 
 
+# ==================== Гейт Химии ====================
+# Теория/Задачи/Лабораторные гейтятся ровно как Биология/Физика -- has_subject_access. Билеты
+# (theory_tickets/practice_tickets) поверх этого ужесточены отдельным, более строгим предикатом
+# chemistry_tickets_access_ok (не считает ручной/временный доступ и промо-акции достаточными --
+# см. handlers/chemistry.py и docstring static_content.py). Два плоских раздела (theory, labs)
+# без группового слоя гейтятся целиком, как "questions" у Биологии; практика билетов (тоже
+# плоский) -- так же, только строгим предикатом.
+
+
+def _chemistry_locked_reason(tb, user_id: int) -> str | None:
+    if tb.has_subject_access(user_id, "chemistry"):
+        return None
+    cheapest = tb.cheapest_gated3_tier()
+    return (
+        f"Химия открывается подпиской от «{cheapest['short']}» "
+        f"({cheapest['price_rub']}₽ / {cheapest['price_stars']}⭐) или двумя рефералами в этом месяце."
+    )
+
+
+def _chemistry_tickets_locked_reason(tb, user_id: int) -> str | None:
+    if tb.chemistry_tickets_access_ok(user_id):
+        return None
+    return (
+        "Билеты по химии закрыты дополнительным условием: нужно 2 реферала в этом месяце или "
+        "подписка от 89₽ -- обычного доступа к Химии для билетов недостаточно."
+    )
+
+
+def _check_chemistry_access(tb, user_id: int) -> None:
+    reason = _chemistry_locked_reason(tb, user_id)
+    if reason is not None:
+        raise HTTPException(status_code=403, detail=reason)
+
+
+def _check_chemistry_tickets_access(tb, user_id: int) -> None:
+    reason = _chemistry_tickets_locked_reason(tb, user_id)
+    if reason is not None:
+        raise HTTPException(status_code=403, detail=reason)
+
+
+def _annotate_chemistry_section(tb, user_id: int, section: dict) -> dict:
+    section_id = section.get("id")
+    if section_id == static_content.CHEMISTRY_TASKS_SECTION_ID:
+        reason = _chemistry_locked_reason(tb, user_id)
+    elif section_id == static_content.CHEMISTRY_THEORY_TICKETS_SECTION_ID:
+        reason = _chemistry_tickets_locked_reason(tb, user_id)
+    else:
+        return section
+    for group in section.get("groups", []):
+        group["locked"] = reason is not None
+        group["locked_reason"] = reason
+    return section
+
+
 @router.get("/subjects")
 def list_subjects(
     _user_id: int = Depends(get_current_user_id),
@@ -215,6 +274,13 @@ def get_section(
             _check_biology_access(tb, user_id)
         else:
             section = _annotate_biology_section(tb, user_id, section)
+    if subject_id == static_content.CHEMISTRY_ID:
+        if section_id in (static_content.CHEMISTRY_THEORY_SECTION_ID, static_content.CHEMISTRY_LABS_SECTION_ID):
+            _check_chemistry_access(tb, user_id)
+        elif section_id == static_content.CHEMISTRY_PRACTICE_TICKETS_SECTION_ID:
+            _check_chemistry_tickets_access(tb, user_id)
+        else:
+            section = _annotate_chemistry_section(tb, user_id, section)
     return section
 
 
@@ -240,6 +306,15 @@ def get_group(
         if not any(t["num"] == group_id for t in tb.TICKETS):
             raise HTTPException(status_code=404, detail=f"билет {group_id!r} не найден в биологии")
         _check_biology_access(tb, user_id)
+    if subject_id == static_content.CHEMISTRY_ID:
+        if section_id == static_content.CHEMISTRY_TASKS_SECTION_ID:
+            if group_id not in tb.CHEMISTRY_TASKS:
+                raise HTTPException(status_code=404, detail=f"тема {group_id!r} не найдена в задачах по химии")
+            _check_chemistry_access(tb, user_id)
+        elif section_id == static_content.CHEMISTRY_THEORY_TICKETS_SECTION_ID:
+            if group_id not in tb.CHEMISTRY_THEORY_TICKETS:
+                raise HTTPException(status_code=404, detail=f"билет {group_id!r} не найден в билетах теории химии")
+            _check_chemistry_tickets_access(tb, user_id)
     try:
         if subject_id in static_content.SUPPORTED_SUBJECT_IDS:
             return static_content.get_group_detail(tb, subject_id, section_id, group_id)
