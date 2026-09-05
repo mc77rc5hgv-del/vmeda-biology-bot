@@ -309,6 +309,46 @@ interface MaterialWire {
   media: Array<{ path: string; caption: string }>;
 }
 
+// ==================== VMedA AI ====================
+// Единственный роутер web_api, который реально вызывает AI-пайплайн бота (см.
+// web_api/routers/ai.py) -- всё остальное здесь только отдаёт уже готовый контент.
+
+interface AiSolveResponseWire {
+  answer_html: string;
+  low_confidence: boolean;
+  confidence_note: string | null;
+  requests_left: number | null;
+  session_active: boolean;
+}
+
+export interface AiSolveResult {
+  answerHtml: string;
+  lowConfidence: boolean;
+  confidenceNote: string | null;
+  requestsLeft: number | null;
+  sessionActive: boolean;
+}
+
+export interface AiSolveInput {
+  mode: "text" | "photo";
+  text?: string;
+  imageBase64?: string;
+}
+
+export async function solveAiTask(input: AiSolveInput): Promise<AiSolveResult> {
+  const wire: AiSolveResponseWire = await apiFetch("/api/v1/ai/solve", {
+    method: "POST",
+    body: JSON.stringify({ mode: input.mode, text: input.text, image_base64: input.imageBase64 }),
+  });
+  return {
+    answerHtml: wire.answer_html,
+    lowConfidence: wire.low_confidence,
+    confidenceNote: wire.confidence_note,
+    requestsLeft: wire.requests_left,
+    sessionActive: wire.session_active,
+  };
+}
+
 export async function fetchRealMaterial(
   subjectId: string,
   sectionId: string,

@@ -44,3 +44,22 @@ class AccessStatusResponse(BaseModel):
     subscription_expires_at: str | None
     subscription_title: str | None
     locked_reason: str | None
+
+
+class AiSolveRequest(BaseModel):
+    """mode="text" -- заполнен text, mode="photo" -- заполнен image_base64 (сырой base64, без
+    префикса "data:image/...;base64," -- клиент срезает его сам, см. apiClient.ts)."""
+    mode: str
+    text: str | None = None
+    image_base64: str | None = None
+
+
+class AiSolveResponse(BaseModel):
+    """answer_html -- уже прогнан через ai.service.format_answer_html и НЕ содержит
+    confidence_note (та идёт отдельным полем -- см. web_api/routers/ai.py) -- клиент рендерит
+    его через DOMPurify, как и обычный материал (см. Material.tsx)."""
+    answer_html: str
+    low_confidence: bool
+    confidence_note: str | None
+    requests_left: int | None
+    session_active: bool

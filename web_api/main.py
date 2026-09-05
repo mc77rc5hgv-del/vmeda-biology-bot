@@ -13,7 +13,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import config
-from .routers import access, auth, me, subjects
+from .routers import access, ai, auth, me, subjects
 
 app = FastAPI(title="VMEDA web_api", version="0.1.0")
 
@@ -28,6 +28,7 @@ app.include_router(auth.router)
 app.include_router(me.router)
 app.include_router(access.router)
 app.include_router(subjects.router)
+app.include_router(ai.router)
 
 
 @app.get("/healthz")

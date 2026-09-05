@@ -1,6 +1,9 @@
-import { useState } from "react";
-import { AlertTriangle, Camera, Sparkles, Type } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import DOMPurify from "dompurify";
+import { AlertTriangle, Camera, Sparkles, Type, X } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
+import { fetchSubscriptionSummary, solveAiTask } from "../lib/api";
+import { ApiError } from "../lib/apiClient";
 import { hapticImpact, useTelegramBackButton } from "../lib/telegram";
 import { mockSubjects } from "../lib/mockData";
 import { Card } from "../components/Card";
@@ -10,28 +13,36 @@ import styles from "./Ai.module.css";
 
 type Mode = "photo" | "text";
 
-interface MockAnswer {
-  text: string;
+interface SolveResult {
+  html: string;
   lowConfidence: boolean;
   note: string | null;
 }
 
-/** Мок-ответ AI-раздела — иллюстрирует ИМЕННО те состояния, которые ТЗ требует явно показывать
- * пользователю (§11): низкая уверенность, недостаточно данных. Реальный вызов появится вместе
- * с /api/v1/ai/solve и /api/v1/ai/solve-photo (Этап 3+), эта функция — только для верстки. */
-function buildMockAnswer(mode: Mode, subjectTitle: string): MockAnswer {
-  if (mode === "photo") {
-    return {
-      text: `По материалам курса «${subjectTitle}»: краткий разбор задания появится здесь после подключения реального AI-пайплайна бота.`,
-      lowConfidence: true,
-      note: "Фотография частично нечёткая — уверенность в ответе ниже обычной. Попробуй переснять при лучшем освещении.",
+/** dataURL вида "data:image/jpeg;base64,/9j/4AAQ..." -> голый base64 без префикса — ровно то,
+ * что ждёт web_api/routers/ai.py (см. AiSolveRequest.image_base64). */
+function readFileAsBareBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      const commaIndex = result.indexOf(",");
+      resolve(commaIndex >= 0 ? result.slice(commaIndex + 1) : result);
     };
+    reader.onerror = () => reject(reader.error ?? new Error("Не удалось прочитать файл"));
+    reader.readAsDataURL(file);
+  });
+}
+
+/** Единая точка перевода ошибки запроса в понятный студенту текст — статусы отражают ровно то,
+ * что реально возвращает web_api/routers/ai.py (429 квота/занято, 503 автовыключатель/перегрузка,
+ * 422 отказ модели, 400 некорректный запрос), а не общее "что-то пошло не так". */
+function describeError(err: unknown): string {
+  if (err instanceof ApiError) {
+    if (err.status === 401) return "Сессия истекла — закрой мини-приложение и открой его заново из бота.";
+    return err.message || "Не удалось получить ответ от AI.";
   }
-  return {
-    text: `Краткий ответ по предмету «${subjectTitle}» — заглушка для прототипа. Подробный разбор со ссылками на темы курса появится после подключения ai/service.solve().`,
-    lowConfidence: false,
-    note: null,
-  };
+  return "Не удалось получить ответ от AI. Проверь соединение и попробуй ещё раз.";
 }
 
 export function AiPage() {
@@ -43,23 +54,85 @@ export function AiPage() {
   const [subjectId, setSubjectId] = useState(mockSubjects[0]?.id ?? "");
   const [mode, setMode] = useState<Mode>(initialMode);
   const [text, setText] = useState("");
-  const [photoAttached, setPhotoAttached] = useState(false);
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
   const [isThinking, setIsThinking] = useState(false);
-  const [answer, setAnswer] = useState<MockAnswer | null>(null);
+  const [result, setResult] = useState<SolveResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [requestsLeft, setRequestsLeft] = useState<number | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const subject = mockSubjects.find((s) => s.id === subjectId);
-  const canSubmit = mode === "text" ? text.trim().length > 0 : photoAttached;
+  useEffect(() => {
+    let cancelled = false;
+    fetchSubscriptionSummary()
+      .then((status) => {
+        if (!cancelled) setRequestsLeft(status.aiRequestsLeft);
+      })
+      .catch(() => {
+        // квота — не критичная для экрана информация, тихо остаёмся без неё
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-  function handleSubmit() {
-    if (!canSubmit || !subject) return;
+  useEffect(() => {
+    return () => {
+      if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
+    };
+  }, [photoPreviewUrl]);
+
+  const canSubmit = mode === "text" ? text.trim().length > 0 : photoFile !== null;
+
+  function resetOutcome() {
+    setResult(null);
+    setError(null);
+  }
+
+  function handlePickPhoto() {
+    fileInputRef.current?.click();
+  }
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0] ?? null;
+    if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
+    setPhotoFile(file);
+    setPhotoPreviewUrl(file ? URL.createObjectURL(file) : null);
+    resetOutcome();
+  }
+
+  function handleClearPhoto() {
+    if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
+    setPhotoFile(null);
+    setPhotoPreviewUrl(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  async function handleSubmit() {
+    if (!canSubmit || isThinking) return;
     hapticImpact("light");
     setIsThinking(true);
-    setAnswer(null);
-    window.setTimeout(() => {
-      setAnswer(buildMockAnswer(mode, subject.title));
+    resetOutcome();
+    try {
+      const imageBase64 = mode === "photo" && photoFile ? await readFileAsBareBase64(photoFile) : undefined;
+      const response = await solveAiTask({
+        mode,
+        text: mode === "text" ? text.trim() : undefined,
+        imageBase64,
+      });
+      setResult({ html: response.answerHtml, lowConfidence: response.lowConfidence, note: response.confidenceNote });
+      setRequestsLeft(response.requestsLeft);
+      hapticImpact("light");
+    } catch (err) {
+      setError(describeError(err));
+    } finally {
       setIsThinking(false);
-    }, 900);
+    }
   }
+
+  const safeAnswerHtml = result
+    ? DOMPurify.sanitize(result.html, { ALLOWED_TAGS: ["b", "i", "br"], ALLOWED_ATTR: [] })
+    : "";
 
   return (
     <div className="screen">
@@ -67,6 +140,7 @@ export function AiPage() {
         <h1 style={{ fontSize: 20, fontWeight: 700 }}>VMEDA AI</h1>
         <p style={{ fontSize: 13, color: "var(--ink-secondary)", marginTop: 4 }}>
           Разбор заданий по материалам курса
+          {requestsLeft !== null && ` · осталось запросов сегодня: ${requestsLeft}`}
         </p>
       </div>
 
@@ -91,7 +165,10 @@ export function AiPage() {
         <button
           type="button"
           className={[styles.modeButton, mode === "photo" ? styles.modeButtonActive : ""].join(" ")}
-          onClick={() => setMode("photo")}
+          onClick={() => {
+            setMode("photo");
+            resetOutcome();
+          }}
         >
           <Icon icon={Camera} size={16} />
           Фото
@@ -99,7 +176,10 @@ export function AiPage() {
         <button
           type="button"
           className={[styles.modeButton, mode === "text" ? styles.modeButtonActive : ""].join(" ")}
-          onClick={() => setMode("text")}
+          onClick={() => {
+            setMode("text");
+            resetOutcome();
+          }}
         >
           <Icon icon={Type} size={16} />
           Текст
@@ -107,26 +187,43 @@ export function AiPage() {
       </div>
 
       {mode === "photo" ? (
-        <button
-          type="button"
-          className={styles.dropZone}
-          onClick={() => setPhotoAttached(true)}
-          aria-pressed={photoAttached}
-        >
-          <Icon icon={Camera} size={28} />
-          <span>{photoAttached ? "Фото прикреплено — можно отправлять" : "Открыть камеру или выбрать фото"}</span>
-        </button>
+        <>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="visually-hidden"
+            onChange={handleFileChange}
+          />
+          {photoPreviewUrl ? (
+            <div className={styles.photoPreviewWrap}>
+              <img src={photoPreviewUrl} alt="Прикреплённое фото задания" className={styles.photoPreview} />
+              <button type="button" className={styles.photoClear} onClick={handleClearPhoto} aria-label="Убрать фото">
+                <Icon icon={X} size={16} />
+              </button>
+            </div>
+          ) : (
+            <button type="button" className={styles.dropZone} onClick={handlePickPhoto}>
+              <Icon icon={Camera} size={28} />
+              <span>Открыть камеру или выбрать фото</span>
+            </button>
+          )}
+        </>
       ) : (
         <textarea
           className={styles.textArea}
           placeholder="Опиши задание или вставь вопрос текстом…"
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            setText(e.target.value);
+            resetOutcome();
+          }}
         />
       )}
 
-      <button type="button" className={styles.submit} disabled={!canSubmit} onClick={handleSubmit}>
-        Разобрать задание
+      <button type="button" className={styles.submit} disabled={!canSubmit || isThinking} onClick={handleSubmit}>
+        {isThinking ? "Разбираю…" : "Разобрать задание"}
       </button>
 
       {isThinking && (
@@ -137,17 +234,26 @@ export function AiPage() {
         </Card>
       )}
 
-      {answer && (
+      {error && (
+        <Card style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <Icon icon={AlertTriangle} size={16} color="var(--danger)" />
+          <span style={{ fontSize: 13, color: "var(--ink)" }}>{error}</span>
+        </Card>
+      )}
+
+      {result && (
         <Card style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <Icon icon={Sparkles} size={16} color="var(--academic-blue)" />
             <span style={{ fontSize: 12, fontWeight: 700, color: "var(--academic-blue)" }}>Ответ VMEDA AI</span>
           </div>
-          <p className={styles.answerBody}>{answer.text}</p>
-          {answer.note && (
+          {/* Ответ модели проходит DOMPurify так же, как обычный материал (см. Material.tsx) —
+              внешний, не полностью доверенный текст, даже если это наш собственный backend. */}
+          <div className={styles.answerBody} dangerouslySetInnerHTML={{ __html: safeAnswerHtml }} />
+          {result.note && (
             <div className={styles.confidenceNote}>
               <Icon icon={AlertTriangle} size={16} />
-              <span>{answer.note}</span>
+              <span>{result.note}</span>
             </div>
           )}
         </Card>

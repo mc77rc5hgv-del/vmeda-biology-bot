@@ -4,6 +4,7 @@
 // предмет ещё не имеет контент-адаптера на бэкенде (6 из 11 предметов, см. web_api/README.md).
 // Компоненты про это ветвление не знают — они видят только эти функции.
 import * as apiClient from "./apiClient";
+import type { AiSolveInput, AiSolveResult } from "./apiClient";
 import * as mock from "./mockData";
 import { useAuthStore } from "./store";
 import type {
@@ -145,4 +146,13 @@ export function fetchSubscriptionSummary(): Promise<AccessStatus> {
   return hasSession()
     ? apiClient.fetchRealSubscriptionSummary()
     : resolveAfterDelay(mock.mockSubscriptionSummary);
+}
+
+/** web_api/routers/ai.py — единственный содержательный вызов из lib/api.ts, требующий реальной
+ * сессии для чего-то большего, чем чтение уже готового контента: вне Telegram (нет initData —
+ * см. docstring web_api/routers/ai.py) настоящий эндпоинт недостижим в принципе, поэтому здесь
+ * mock-ветка не искусственное упрощение, а единственный вариант вообще что-то показать. */
+export function solveAiTask(input: AiSolveInput): Promise<AiSolveResult> {
+  if (!hasSession()) return resolveAfterDelay(mock.getAiMockAnswer(input.mode));
+  return apiClient.solveAiTask(input);
 }
