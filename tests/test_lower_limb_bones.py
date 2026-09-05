@@ -95,8 +95,8 @@ async def main():
         check_html(cb_mat.message.edits[0])
     print("every bone hub (7) + material page renders correctly: OK")
 
-    # 5. no images/flashcards/mnemonics/pairs -> graceful alert, not a crash
-    # (patella still has no photos yet, unlike femur/pelvis/hip_bone/foot_bones)
+    # 5. no images -> graceful alert, not a crash (patella still has no photos yet, unlike
+    # femur/pelvis/hip_bone/foot_bones)
     cb_slides = FakeCB("anatomy_bone_slides:lower_limb_skeleton:patella:0")
     await tb.cb_anatomy_bone_slides(cb_slides)
     assert not cb_slides.message.edits
@@ -106,19 +106,26 @@ async def main():
     await tb.cb_anatomy_bone_atlas(cb_atlas)
     assert not cb_atlas.message.edits
     assert cb_atlas._answers and "нет" in (cb_atlas._answers[0][0] or "")
+    print("empty bone images degrade gracefully (no crash): OK")
 
+    # 5b. lower_limb_skeleton now has real per-bone flashcards/matching_sets/mnemonics (see
+    # anatomy.json) -- femur/hip_bone are populated, so these should render real content, not
+    # the "nothing here" alert.
     cb_flash = FakeCB("anatomy_bone_flash_start:lower_limb_skeleton:femur")
     await tb.cb_anatomy_bone_flash_start(cb_flash)
-    assert not cb_flash.message.edits
+    assert cb_flash.message.edits, "femur has real flashcards now, should render"
+    check_html(cb_flash.message.edits[0])
 
     cb_match = FakeCB("anatomy_bone_match_start:lower_limb_skeleton:femur")
     await tb.cb_anatomy_bone_match_start(cb_match)
-    assert not cb_match.message.edits
+    assert cb_match.message.edits, "femur has real matching sets now, should render"
+    check_html(cb_match.message.edits[0])
 
     cb_mnemo = FakeCB("anatomy_bone_mnemonics:lower_limb_skeleton:femur:0")
     await tb.cb_anatomy_bone_mnemonics(cb_mnemo)
-    assert not cb_mnemo.message.edits
-    print("empty images/flashcards/matching/mnemonics degrade gracefully (no crash): OK")
+    assert cb_mnemo.message.edits, "femur has real mnemonics now, should render"
+    check_html(cb_mnemo.message.edits[0])
+    print("femur flashcards/matching/mnemonics render real content: OK")
 
     # 6. non-admin has free access (osteology, incl. lower_limb_skeleton, is in ANATOMY_FREE_SECTIONS)
     non_admin = 918273645
