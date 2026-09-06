@@ -33,9 +33,14 @@
   justify-content: center;
   border-radius: var(--radius-pill);
   background: var(--surface-secondary);
-  border: 1px solid var(--border);
+  border: 2px solid var(--academic-blue-tint);
   overflow: hidden;
   padding: 0;
+  transition: border-color 150ms ease;
+}
+
+.avatarButton:active {
+  border-color: var(--academic-blue);
 }
 
 .avatarImg {

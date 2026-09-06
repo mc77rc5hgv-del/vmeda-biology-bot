@@ -12,7 +12,7 @@
 
 .pressable {
   cursor: pointer;
-  transition: transform 120ms ease, box-shadow 120ms ease;
+  transition: transform 120ms ease, box-shadow 150ms ease;
   text-align: left;
   width: 100%;
   border: none;
@@ -22,4 +22,16 @@
 
 .pressable:active {
   transform: scale(0.98);
+}
+
+.pressable:not(.flat):active {
+  box-shadow: var(--shadow-card);
+}
+
+/* Наведение мышью актуально только для устройств с реальным курсором (десктоп-превью) —
+   на тачскрине в Telegram :hover не участвует в UX, только :active выше. */
+@media (hover: hover) and (pointer: fine) {
+  .pressable:not(.flat):hover {
+    box-shadow: var(--shadow-pop);
+  }
 }

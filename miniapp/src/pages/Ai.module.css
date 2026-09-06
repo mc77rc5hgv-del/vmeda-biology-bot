@@ -19,9 +19,9 @@
 }
 
 .subjectChipActive {
-  background: var(--navy);
+  background: var(--navy-surface);
   color: #fff;
-  border-color: var(--navy);
+  border-color: var(--navy-surface);
 }
 
 .modeRow {

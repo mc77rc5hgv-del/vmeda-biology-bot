@@ -55,6 +55,7 @@ export function SubjectCard({ subject }: SubjectCardProps) {
       onClick={handleOpen}
       aria-label={subject.locked ? `${subject.title} — заблокировано` : subject.title}
     >
+      <span className={styles.accentBar} style={{ background: accentVar }} aria-hidden="true" />
       <div className={styles.top}>
         {/* Флет var(--surface-secondary), не полупрозрачный color-mix() поверх акцента — тот же
             резон совместимости со старым Android WebView, что и у --*-tint токенов в tokens.css. */}

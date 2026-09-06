@@ -2,7 +2,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
-  background: linear-gradient(135deg, var(--navy) 0%, #1F2E4E 100%);
+  background: linear-gradient(135deg, var(--navy-surface) 0%, #1F2E4E 100%);
   color: var(--ink-inverse);
   box-shadow: var(--shadow-pop);
 }

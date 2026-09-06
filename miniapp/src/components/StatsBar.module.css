@@ -13,6 +13,11 @@
   padding: var(--space-3) var(--space-3);
   box-shadow: var(--shadow-card);
   min-height: var(--tap-min);
+  transition: transform 120ms ease;
+}
+
+.pill:active {
+  transform: scale(0.97);
 }
 
 .iconWrap {

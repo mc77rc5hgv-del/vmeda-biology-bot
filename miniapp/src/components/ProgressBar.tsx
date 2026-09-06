@@ -20,7 +20,7 @@ export function ProgressBar({ percent, color, label }: ProgressBarProps) {
       aria-valuemax={100}
       aria-label={label}
     >
-      <div className={styles.fill} style={{ width: `${clamped}%`, background: color }} />
+      <div className={styles.fill} style={{ width: `${clamped}%`, backgroundColor: color }} />
     </div>
   );
 }
