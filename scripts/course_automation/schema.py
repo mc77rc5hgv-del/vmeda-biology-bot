@@ -4,7 +4,13 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 SLUG_RE = re.compile(r"^[a-z][a-z0-9_]{1,30}$")
-ALLOWED_TAGS = {"b", "i", "code", "u", "s"}
+# "pre" was missing here even though scripts/reflow_generated_course_content.py already relies
+# on it (table/diagram-shaped source runs get wrapped in a single <pre> block) and both render
+# surfaces already accept it -- Telegram's own HTML parse_mode, and the Mini App's DOMPurify
+# config (see ALLOWED_TAGS there). This validator's own allow-list had simply never been updated
+# to match, so every lesson using <pre> failed validate_course() even though it renders correctly
+# on both surfaces.
+ALLOWED_TAGS = {"b", "i", "code", "u", "s", "pre"}
 
 
 class _SafeTelegramHTMLParser(HTMLParser):
