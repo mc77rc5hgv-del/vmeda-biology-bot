@@ -3,7 +3,7 @@ import os
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 
-from .. import content
+from .. import content, schemas
 from ..deps import get_current_user_id, get_fresh_bot_module
 
 router = APIRouter(prefix="/api/v1", tags=["subjects"])
@@ -15,6 +15,10 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__fi
 
 def _not_found(exc: content.ContentNotFoundError) -> HTTPException:
     return HTTPException(status_code=404, detail=str(exc))
+
+
+def _bad_quiz_answer(exc: content.InvalidQuizAnswerError) -> HTTPException:
+    return HTTPException(status_code=400, detail=str(exc))
 
 
 @router.get("/subjects")
@@ -76,6 +80,29 @@ def get_material(
         return content.get_material(tb.DYNAMIC_COURSES, subject_id, section_id, item_id)
     except content.ContentNotFoundError as exc:
         raise _not_found(exc) from exc
+
+
+@router.post("/materials/{subject_id}/{section_id}/{item_id}/answer")
+def answer_quiz(
+    subject_id: str,
+    section_id: str,
+    item_id: str,
+    body: schemas.QuizAnswerRequest,
+    _user_id: int = Depends(get_current_user_id),
+    tb=Depends(get_fresh_bot_module),
+) -> schemas.QuizAnswerResponse:
+    """correct_index никогда не приходит в GET /materials -- этот эндпоинт единственный, кто его
+    раскрывает, и только после того как пользователь уже выбрал вариант (см. content.py::
+    check_quiz_answer)."""
+    try:
+        result = content.check_quiz_answer(
+            tb.DYNAMIC_COURSES, subject_id, section_id, item_id, body.selected_index,
+        )
+    except content.ContentNotFoundError as exc:
+        raise _not_found(exc) from exc
+    except content.InvalidQuizAnswerError as exc:
+        raise _bad_quiz_answer(exc) from exc
+    return schemas.QuizAnswerResponse(**result)
 
 
 @router.get("/materials/{subject_id}/{section_id}/{item_id}/media/{media_index}")

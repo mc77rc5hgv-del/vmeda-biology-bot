@@ -187,3 +187,66 @@ def test_media_endpoint_serves_real_file_when_present():
                     assert len(media_resp.content) > 0
                     return
     pytest.fail("expected at least one lesson with media, found none")
+
+
+def test_biochemistry_quiz_material_exposes_options_never_correct_index():
+    """test_1 is one of the batch-1 manually-verified MCQ tests (see commit message) -- real
+    data, real correct answer, checked below via the actual endpoint chain end to end."""
+    headers = _auth_headers()
+    material = client.get(
+        "/api/v1/materials/biochemistry/tests_and_controls/test_1", headers=headers
+    ).json()
+    assert material["quiz"] == {
+        "options": ["глюкоза", "аминокислоты", "пептон", "нуклеозид"],
+    }
+    assert "correct_index" not in material["quiz"]
+
+
+def test_biochemistry_quiz_answer_endpoint_reveals_correctness_only_after_answering():
+    headers = _auth_headers()
+    correct = client.post(
+        "/api/v1/materials/biochemistry/tests_and_controls/test_1/answer",
+        headers=headers, json={"selected_index": 1},
+    )
+    assert correct.status_code == 200
+    assert correct.json() == {"correct": True, "correct_index": 1}
+
+    wrong = client.post(
+        "/api/v1/materials/biochemistry/tests_and_controls/test_1/answer",
+        headers=headers, json={"selected_index": 0},
+    )
+    assert wrong.status_code == 200
+    assert wrong.json() == {"correct": False, "correct_index": 1}
+
+
+def test_biochemistry_non_quiz_lesson_has_null_quiz_and_rejects_answer():
+    """test_2 is a deliberately-skipped ambiguous question (see commit message) -- no quiz data,
+    renders as plain text, answering it is a 400 not a crash."""
+    headers = _auth_headers()
+    material = client.get(
+        "/api/v1/materials/biochemistry/tests_and_controls/test_2", headers=headers
+    ).json()
+    assert material["quiz"] is None
+
+    resp = client.post(
+        "/api/v1/materials/biochemistry/tests_and_controls/test_2/answer",
+        headers=headers, json={"selected_index": 0},
+    )
+    assert resp.status_code == 400
+
+
+def test_biochemistry_quiz_answer_out_of_range_index_rejected():
+    headers = _auth_headers()
+    resp = client.post(
+        "/api/v1/materials/biochemistry/tests_and_controls/test_1/answer",
+        headers=headers, json={"selected_index": 99},
+    )
+    assert resp.status_code == 400
+
+
+def test_quiz_answer_requires_auth():
+    resp = client.post(
+        "/api/v1/materials/biochemistry/tests_and_controls/test_1/answer",
+        json={"selected_index": 1},
+    )
+    assert resp.status_code == 401
