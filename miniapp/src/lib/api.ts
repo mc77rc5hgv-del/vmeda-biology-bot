@@ -12,6 +12,7 @@ import type {
   ContinueItem,
   DashboardStats,
   MaterialDetail,
+  LearningState,
   SectionContents,
   SubjectDetail,
   SubjectSummary,
@@ -165,6 +166,27 @@ export function fetchSubscriptionSummary(): Promise<AccessStatus> {
   return hasSession()
     ? apiClient.fetchRealSubscriptionSummary()
     : resolveAfterDelay(mock.mockSubscriptionSummary);
+}
+
+const EMPTY_LEARNING_STATE: LearningState = {
+  completedKeys: [], favorites: [], lastMaterial: null, completedBySubject: {},
+  completedTotal: 0, quizAttempts: 0, quizCorrect: 0,
+};
+
+export function fetchLearningState(): Promise<LearningState> {
+  return hasSession() ? apiClient.fetchLearningState() : resolveAfterDelay(EMPTY_LEARNING_STATE);
+}
+
+export function touchLearningMaterial(input: apiClient.MaterialTouchInput): Promise<LearningState> {
+  return hasSession() ? apiClient.touchLearningMaterial(input) : resolveAfterDelay(EMPTY_LEARNING_STATE);
+}
+
+export function setLearningFlag(
+  input: Pick<apiClient.MaterialTouchInput, "subjectId" | "sectionId" | "materialId">,
+  flag: "completed" | "favorite",
+  value: boolean,
+): Promise<LearningState> {
+  return hasSession() ? apiClient.setLearningFlag(input, flag, value) : resolveAfterDelay(EMPTY_LEARNING_STATE);
 }
 
 /** web_api/routers/ai.py — единственный содержательный вызов из lib/api.ts, требующий реальной

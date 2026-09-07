@@ -19,7 +19,11 @@ export function ContinueCard({ item }: ContinueCardProps) {
 
   function handleContinue() {
     hapticSelection();
-    navigate(`/subjects/${item.subjectId}`);
+    if (item.sectionId && item.materialId) {
+      navigate(`/materials/${item.subjectId}/${item.sectionId}/${item.materialId}`);
+    } else {
+      navigate(`/subjects/${item.subjectId}`);
+    }
   }
 
   return (

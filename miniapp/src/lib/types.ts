@@ -161,11 +161,35 @@ export interface DashboardStats {
 
 export interface ContinueItem {
   subjectId: string;
+  sectionId?: string;
+  materialId?: string;
   subjectTitle: string;
   sectionTitle: string;
   materialTitle: string;
   order: number;
   totalInSection: number;
+}
+
+export interface LearningMaterialState {
+  subjectId: string;
+  sectionId: string;
+  materialId: string;
+  subjectTitle: string;
+  sectionTitle: string;
+  materialTitle: string;
+  materialOrder: number;
+  totalInSection: number;
+  lastOpenedAt: string;
+}
+
+export interface LearningState {
+  completedKeys: string[];
+  favorites: LearningMaterialState[];
+  lastMaterial: LearningMaterialState | null;
+  completedBySubject: Record<string, number>;
+  completedTotal: number;
+  quizAttempts: number;
+  quizCorrect: number;
 }
 
 /** Права доступа — решает ТОЛЬКО backend (§16 ТЗ), фронт лишь отображает эти уже посчитанные поля. */

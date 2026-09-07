@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { ChevronRight, Lock } from "lucide-react";
+import { CheckCircle2, ChevronRight, Lock } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
-import { fetchGroup, hasContentSession } from "../lib/api";
+import { fetchGroup, fetchLearningState, hasContentSession } from "../lib/api";
 import { ApiError } from "../lib/apiClient";
 import { hapticSelection, useTelegramBackButton } from "../lib/telegram";
 import { PressableCard } from "../components/Card";
@@ -26,6 +26,7 @@ export function GroupPage() {
     queryFn: () => fetchGroup(subjectId, sectionId, groupId),
     enabled: hasSession,
   });
+  const learningQuery = useQuery({ queryKey: ["learning"], queryFn: fetchLearningState, enabled: hasSession });
 
   if (!hasSession) {
     return (
@@ -72,7 +73,9 @@ export function GroupPage() {
     <div className="screen">
       <h1 className={styles.header}>{group.title}</h1>
       <div className={styles.list} role="list">
-        {visibleItems.map((item) => (
+        {visibleItems.map((item) => {
+          const done = learningQuery.data?.completedKeys.includes(`${subjectId}/${sectionId}/${item.id}`) ?? false;
+          return (
           <PressableCard
             key={item.id}
             className={styles.row}
@@ -87,9 +90,10 @@ export function GroupPage() {
                 {item.order} из {item.total}
               </div>
             </div>
-            <Icon icon={ChevronRight} size={18} color="var(--ink-secondary)" />
+            <Icon icon={done ? CheckCircle2 : ChevronRight} size={18} color={done ? "var(--success)" : "var(--ink-secondary)"} />
           </PressableCard>
-        ))}
+          );
+        })}
       </div>
       {visibleCount < group.items.length && (
         <PressableCard className={styles.row} onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}>

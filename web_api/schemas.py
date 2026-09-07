@@ -30,6 +30,21 @@ class QuizAnswerResponse(BaseModel):
     correct_index: int
 
 
+class LearningFlagRequest(BaseModel):
+    value: bool
+
+
+class LearningMaterialTouchRequest(BaseModel):
+    subject_id: str
+    section_id: str
+    material_id: str
+    subject_title: str = ""
+    section_title: str = ""
+    material_title: str = ""
+    material_order: int = 1
+    total_in_section: int = 1
+
+
 class MeResponse(BaseModel):
     """См. ТЗ §16 -- все поля здесь СЧИТАЕТ backend через уже существующие предикаты бота
     (services.access, реэкспортированные на telegram_bot), фронт их только показывает."""

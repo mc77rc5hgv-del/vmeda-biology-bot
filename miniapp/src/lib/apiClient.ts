@@ -6,6 +6,7 @@ import type {
   AccessStatus,
   ContentSection,
   MaterialDetail,
+  LearningState,
   SectionContents,
   SectionItemRef,
   SubjectDetail,
@@ -410,4 +411,95 @@ export async function fetchRealMaterial(
     })),
     quiz: wire.quiz,
   };
+}
+
+interface LearningMaterialWire {
+  subject_id: string;
+  section_id: string;
+  material_id: string;
+  subject_title: string;
+  section_title: string;
+  material_title: string;
+  material_order: number;
+  total_in_section: number;
+  last_opened_at: string;
+}
+
+interface LearningStateWire {
+  completed_keys: string[];
+  favorites: LearningMaterialWire[];
+  last_material: LearningMaterialWire | null;
+  completed_by_subject: Record<string, number>;
+  completed_total: number;
+  quiz_attempts: number;
+  quiz_correct: number;
+}
+
+function toLearningMaterial(wire: LearningMaterialWire) {
+  return {
+    subjectId: wire.subject_id,
+    sectionId: wire.section_id,
+    materialId: wire.material_id,
+    subjectTitle: wire.subject_title,
+    sectionTitle: wire.section_title,
+    materialTitle: wire.material_title,
+    materialOrder: wire.material_order,
+    totalInSection: wire.total_in_section,
+    lastOpenedAt: wire.last_opened_at,
+  };
+}
+
+function toLearningState(wire: LearningStateWire): LearningState {
+  return {
+    completedKeys: wire.completed_keys,
+    favorites: wire.favorites.map(toLearningMaterial),
+    lastMaterial: wire.last_material ? toLearningMaterial(wire.last_material) : null,
+    completedBySubject: wire.completed_by_subject,
+    completedTotal: wire.completed_total,
+    quizAttempts: wire.quiz_attempts,
+    quizCorrect: wire.quiz_correct,
+  };
+}
+
+export async function fetchLearningState(): Promise<LearningState> {
+  return toLearningState(await apiFetch<LearningStateWire>("/api/v1/learning/state"));
+}
+
+export interface MaterialTouchInput {
+  subjectId: string;
+  sectionId: string;
+  materialId: string;
+  subjectTitle?: string;
+  sectionTitle?: string;
+  materialTitle: string;
+  materialOrder: number;
+  totalInSection: number;
+}
+
+export async function touchLearningMaterial(input: MaterialTouchInput): Promise<LearningState> {
+  return toLearningState(await apiFetch<LearningStateWire>("/api/v1/learning/materials/touch", {
+    method: "POST",
+    body: JSON.stringify({
+      subject_id: input.subjectId,
+      section_id: input.sectionId,
+      material_id: input.materialId,
+      subject_title: input.subjectTitle ?? "",
+      section_title: input.sectionTitle ?? "",
+      material_title: input.materialTitle,
+      material_order: input.materialOrder,
+      total_in_section: input.totalInSection,
+    }),
+  }));
+}
+
+export async function setLearningFlag(
+  input: Pick<MaterialTouchInput, "subjectId" | "sectionId" | "materialId">,
+  flag: "completed" | "favorite",
+  value: boolean,
+): Promise<LearningState> {
+  const path = [input.subjectId, input.sectionId, input.materialId].map(encodeURIComponent).join("/");
+  return toLearningState(await apiFetch<LearningStateWire>(`/api/v1/learning/materials/${path}/${flag}`, {
+    method: "POST",
+    body: JSON.stringify({ value }),
+  }));
 }

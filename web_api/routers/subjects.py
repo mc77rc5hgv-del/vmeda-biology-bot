@@ -414,7 +414,7 @@ def answer_quiz(
     section_id: str,
     item_id: str,
     body: schemas.QuizAnswerRequest,
-    _user_id: int = Depends(get_current_user_id),
+    user_id: int = Depends(get_current_user_id),
     tb=Depends(get_fresh_bot_module),
 ) -> schemas.QuizAnswerResponse:
     """correct_index никогда не приходит в GET /materials -- этот эндпоинт единственный, кто его
@@ -428,6 +428,8 @@ def answer_quiz(
         raise _not_found(exc) from exc
     except content.InvalidQuizAnswerError as exc:
         raise _bad_quiz_answer(exc) from exc
+    from .. import learning
+    learning.record_quiz_attempt(user_id, subject_id, section_id, item_id, result["correct"])
     return schemas.QuizAnswerResponse(**result)
 
 

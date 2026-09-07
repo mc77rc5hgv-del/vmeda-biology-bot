@@ -1,7 +1,7 @@
 import { ChevronRight, Lock, Sparkles, SquareCheckBig } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
-import { fetchAccessStatus, fetchSubjectDetail, isRealBackedSubject } from "../lib/api";
+import { fetchAccessStatus, fetchLearningState, fetchSubjectDetail, isRealBackedSubject } from "../lib/api";
 import { formatMaterialCount } from "../lib/format";
 import { hapticSelection, useTelegramBackButton } from "../lib/telegram";
 import { PressableCard } from "../components/Card";
@@ -24,6 +24,7 @@ export function SubjectPage() {
     queryKey: ["access", subjectId],
     queryFn: () => fetchAccessStatus(subjectId),
   });
+  const learningQuery = useQuery({ queryKey: ["learning"], queryFn: fetchLearningState });
 
   if (subjectQuery.isLoading || accessQuery.isLoading) {
     return (
@@ -47,6 +48,9 @@ export function SubjectPage() {
 
   const subject = subjectQuery.data;
   const locked = accessQuery.isError || !accessQuery.data || !accessQuery.data.canOpenSubject;
+  const totalMaterials = subject.sections.reduce((sum, section) => sum + section.itemCount, 0);
+  const completedMaterials = learningQuery.data?.completedBySubject[subject.id] ?? 0;
+  const readiness = totalMaterials ? Math.min(100, Math.round((completedMaterials / totalMaterials) * 100)) : 0;
 
   return (
     <div className="screen">
@@ -60,8 +64,8 @@ export function SubjectPage() {
           />
         ) : (
           <div className={styles.readinessRow}>
-            <ProgressBar percent={subject.readiness ?? 0} color={`var(--subject-${subject.accent})`} label="Готовность" />
-            <span className={styles.readinessValue}>Готовность: {subject.readiness ?? 0}%</span>
+            <ProgressBar percent={readiness} color={`var(--subject-${subject.accent})`} label="Готовность" />
+            <span className={styles.readinessValue}>Изучено: {completedMaterials} из {totalMaterials} · {readiness}%</span>
           </div>
         )}
       </div>

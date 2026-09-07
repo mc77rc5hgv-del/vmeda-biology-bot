@@ -1,4 +1,4 @@
-"""VMEDA web_api -- read-only backend для Mini App (ТЗ, Этап 3). Отдельный процесс от
+"""VMEDA web_api -- backend для Mini App. Отдельный процесс от
 telegram_bot.py (свой `uvicorn web_api.main:app`), НЕ добавлен в Procfile/railway.json бота --
 как и telegram_bot.py, требует запуска из корня репозитория (относительные пути к JSON-контенту,
 см. repositories/knowledge.py) и того же BOT_TOKEN, что и сам бот (см. bot_state.py).
@@ -13,9 +13,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import config
-from .routers import access, ai, auth, me, subjects
+from .routers import access, ai, auth, learning, me, subjects
 
-app = FastAPI(title="VMEDA web_api", version="0.1.0")
+app = FastAPI(title="VMEDA web_api", version="0.2.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -29,6 +29,7 @@ app.include_router(me.router)
 app.include_router(access.router)
 app.include_router(subjects.router)
 app.include_router(ai.router)
+app.include_router(learning.router)
 
 
 @app.get("/healthz")

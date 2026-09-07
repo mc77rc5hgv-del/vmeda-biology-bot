@@ -28,6 +28,39 @@
   font-weight: 700;
 }
 
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.actionButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: var(--tap-min);
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--ink-secondary);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.actionButtonActive {
+  border-color: var(--academic-blue);
+  background: var(--academic-blue-tint);
+  color: var(--academic-blue);
+}
+
+.actionButtonDone {
+  border-color: var(--success);
+  background: var(--success-tint);
+  color: var(--success);
+}
+
 .block {
   display: flex;
   flex-direction: column;

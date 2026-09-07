@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { fetchContinueItem, fetchDashboard, fetchMe, fetchSubjects } from "../lib/api";
+import { fetchLearningState, fetchMe, fetchSubjects } from "../lib/api";
 import { useUiStore } from "../lib/store";
 import { useTelegramBackButton } from "../lib/telegram";
 import { TopBar } from "../components/TopBar";
@@ -20,15 +20,14 @@ export function HomePage() {
   useTelegramBackButton(null); // главный экран — кнопка "Назад" Telegram скрыта
 
   const meQuery = useQuery({ queryKey: ["me"], queryFn: fetchMe });
-  const dashboardQuery = useQuery({ queryKey: ["dashboard"], queryFn: fetchDashboard });
-  const continueQuery = useQuery({ queryKey: ["continue"], queryFn: fetchContinueItem });
+  const learningQuery = useQuery({ queryKey: ["learning"], queryFn: fetchLearningState });
   const subjectsQuery = useQuery({ queryKey: ["subjects"], queryFn: fetchSubjects });
 
   const selectedCourse = useUiStore((s) => s.selectedCourse);
   const setSelectedCourse = useUiStore((s) => s.setSelectedCourse);
 
-  const isLoading = meQuery.isLoading || dashboardQuery.isLoading;
-  const hasError = meQuery.isError || dashboardQuery.isError || subjectsQuery.isError;
+  const isLoading = meQuery.isLoading || learningQuery.isLoading;
+  const hasError = meQuery.isError || learningQuery.isError || subjectsQuery.isError;
 
   if (hasError) {
     return (
@@ -38,7 +37,7 @@ export function HomePage() {
           body="Попробуй ещё раз через пару секунд."
           onRetry={() => {
             meQuery.refetch();
-            dashboardQuery.refetch();
+            learningQuery.refetch();
             subjectsQuery.refetch();
           }}
         />
@@ -47,6 +46,19 @@ export function HomePage() {
   }
 
   const subjectsForCourse = (subjectsQuery.data ?? []).filter((s) => s.course === selectedCourse);
+  const learning = learningQuery.data;
+  const accuracy = learning?.quizAttempts ? Math.round((learning.quizCorrect / learning.quizAttempts) * 100) : 0;
+  const last = learning?.lastMaterial;
+  const continueItem = last ? {
+    subjectId: last.subjectId,
+    sectionId: last.sectionId,
+    materialId: last.materialId,
+    subjectTitle: last.subjectTitle || (subjectsQuery.data?.find((item) => item.id === last.subjectId)?.title ?? "Предмет"),
+    sectionTitle: last.sectionTitle || "Материал",
+    materialTitle: last.materialTitle,
+    order: last.materialOrder,
+    totalInSection: last.totalInSection,
+  } : null;
 
   return (
     <div className="screen">
@@ -56,25 +68,25 @@ export function HomePage() {
         <TopBar user={meQuery.data} />
       )}
 
-      {isLoading || !dashboardQuery.data ? (
+      {isLoading ? (
         <Skeleton height={64} radius="16px" />
       ) : (
-        <StatsBar stats={dashboardQuery.data} />
+        <StatsBar completed={learning?.completedTotal ?? 0} accuracy={accuracy} favorites={learning?.favorites.length ?? 0} />
       )}
 
-      {dashboardQuery.data && meQuery.data && (
+      {learning && meQuery.data && (
         <div>
           <h1 style={{ fontSize: 20, fontWeight: 700 }}>{meQuery.data.firstName}, продолжаем?</h1>
           <p style={{ fontSize: 13, color: "var(--ink-secondary)", marginTop: 4 }}>
-            {greetingTime(dashboardQuery.data.minutesLeftToday)}
+            {learning.completedTotal ? "продолжай в своём темпе" : greetingTime(15)}
           </p>
         </div>
       )}
 
-      {continueQuery.isLoading ? (
+      {learningQuery.isLoading ? (
         <Skeleton height={130} radius="22px" />
       ) : (
-        continueQuery.data && <ContinueCard item={continueQuery.data} />
+        continueItem && <ContinueCard item={continueItem} />
       )}
 
       <QuickActions />

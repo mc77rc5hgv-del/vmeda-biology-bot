@@ -1,31 +1,30 @@
 import { useState } from "react";
-import { Flame, Target, Zap } from "lucide-react";
-import type { DashboardStats } from "../lib/types";
+import { Bookmark, CircleCheckBig, Target } from "lucide-react";
 import { Icon } from "./Icon";
 import styles from "./StatsBar.module.css";
 
 interface StatsBarProps {
-  stats: DashboardStats;
+  completed: number;
+  accuracy: number;
+  favorites: number;
 }
 
-type StatKey = "streak" | "xp" | "readiness";
+type StatKey = "completed" | "accuracy" | "favorites";
 
 const EXPLANATIONS: Record<StatKey, string> = {
-  streak: "Серия — количество дней подряд, когда ты открывал и проходил хотя бы один материал или тест.",
-  xp: "XP — баллы за завершённые активности: пройденную тему, тест, повторение ошибок.",
-  readiness: "Готовность — общий показатель по всем предметам: 30% завершённые темы, 30% результаты тестов, 20% повторение ошибок, 20% экзаменационные тренировки.",
+  completed: "Количество материалов, которые ты отметил изученными.",
+  accuracy: "Доля правильных ответов во всех пройденных тестовых заданиях.",
+  favorites: "Материалы, сохранённые для быстрого возвращения и повторения.",
 };
 
-/** Компактная строка учебной статистики (§8 ТЗ) — это не декоративные цифры: тап по любой
- * плашке раскрывает объяснение, как именно посчитано число, ровно по требованию "пользователь
- * должен понимать, как рассчитываются показатели". */
-export function StatsBar({ stats }: StatsBarProps) {
+/** Компактная строка реальной учебной статистики: тап по любой плашке объясняет показатель. */
+export function StatsBar({ completed, accuracy, favorites }: StatsBarProps) {
   const [active, setActive] = useState<StatKey | null>(null);
 
-  const items: Array<{ key: StatKey; icon: typeof Flame; value: string; label: string; accent: string }> = [
-    { key: "streak", icon: Flame, value: `${stats.streakDays} дн.`, label: "Серия", accent: "var(--amber-tint)" },
-    { key: "xp", icon: Zap, value: `${stats.xp}`, label: "XP", accent: "var(--academic-blue-tint)" },
-    { key: "readiness", icon: Target, value: `${stats.readinessPercent}%`, label: "Готовность", accent: "var(--muted-teal-tint)" },
+  const items: Array<{ key: StatKey; icon: typeof Target; value: string; label: string; accent: string }> = [
+    { key: "completed", icon: CircleCheckBig, value: `${completed}`, label: "Изучено", accent: "var(--success-tint)" },
+    { key: "accuracy", icon: Target, value: `${accuracy}%`, label: "Точность", accent: "var(--academic-blue-tint)" },
+    { key: "favorites", icon: Bookmark, value: `${favorites}`, label: "Сохранено", accent: "var(--amber-tint)" },
   ];
 
   return (

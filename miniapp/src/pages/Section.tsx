@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { ChevronRight, Layers, Lock } from "lucide-react";
+import { CheckCircle2, ChevronRight, Layers, Lock } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
-import { fetchSection, hasContentSession } from "../lib/api";
+import { fetchLearningState, fetchSection, hasContentSession } from "../lib/api";
 import { formatMaterialCount } from "../lib/format";
 import { hapticSelection, useTelegramBackButton } from "../lib/telegram";
 import { PressableCard } from "../components/Card";
@@ -31,6 +31,7 @@ export function SectionPage() {
     queryFn: () => fetchSection(subjectId, sectionId),
     enabled: hasSession,
   });
+  const learningQuery = useQuery({ queryKey: ["learning"], queryFn: fetchLearningState, enabled: hasSession });
 
   if (!hasSession) {
     return (
@@ -101,7 +102,9 @@ export function SectionPage() {
     <div className="screen">
       <h1 className={styles.header}>Темы</h1>
       <div className={styles.list} role="list">
-        {visibleItems.map((item) => (
+        {visibleItems.map((item) => {
+          const done = learningQuery.data?.completedKeys.includes(`${subjectId}/${sectionId}/${item.id}`) ?? false;
+          return (
           <PressableCard
             key={item.id}
             className={styles.row}
@@ -116,9 +119,10 @@ export function SectionPage() {
                 {item.order} из {item.total}
               </div>
             </div>
-            <Icon icon={ChevronRight} size={18} color="var(--ink-secondary)" />
+            <Icon icon={done ? CheckCircle2 : ChevronRight} size={18} color={done ? "var(--success)" : "var(--ink-secondary)"} />
           </PressableCard>
-        ))}
+          );
+        })}
       </div>
       {visibleCount < section.items.length && (
         <PressableCard className={styles.row} onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}>

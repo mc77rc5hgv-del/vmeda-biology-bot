@@ -1,12 +1,14 @@
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import DOMPurify from "dompurify";
-import { Lock } from "lucide-react";
+import { Bookmark, BookmarkCheck, Check, Lock } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
-import { checkQuizAnswer, fetchMaterial, hasContentSession, isRealBackedSubject } from "../lib/api";
+import { checkQuizAnswer, fetchLearningState, fetchMaterial, hasContentSession, isRealBackedSubject, setLearningFlag, touchLearningMaterial } from "../lib/api";
 import { ApiError, type QuizAnswerResult } from "../lib/apiClient";
+import type { SubjectDetail } from "../lib/types";
 import { hapticImpact, useTelegramBackButton } from "../lib/telegram";
 import { Card } from "../components/Card";
+import { Icon } from "../components/Icon";
 import { Skeleton } from "../components/Skeleton";
 import { StateMessage } from "../components/StateMessage";
 import { AuthenticatedImage } from "../components/AuthenticatedImage";
@@ -17,6 +19,7 @@ import testStyles from "./Test.module.css";
 export function MaterialPage() {
   const { subjectId = "", sectionId = "", materialId = "1" } = useParams();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   useTelegramBackButton(() => navigate(`/subjects/${subjectId}`));
   const needsTelegramSession = isRealBackedSubject(subjectId) && !hasContentSession();
 
@@ -24,6 +27,11 @@ export function MaterialPage() {
     queryKey: ["material", subjectId, sectionId, materialId],
     queryFn: () => fetchMaterial(subjectId, sectionId, materialId),
     enabled: !needsTelegramSession,
+  });
+  const learningQuery = useQuery({
+    queryKey: ["learning"],
+    queryFn: fetchLearningState,
+    enabled: hasContentSession(),
   });
 
   // Тестовый урок (material.quiz) -- ответ выбирается на этом же экране, сервер сравнивает его
@@ -36,6 +44,29 @@ export function MaterialPage() {
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [answerResult, setAnswerResult] = useState<QuizAnswerResult | null>(null);
   const [answering, setAnswering] = useState(false);
+
+  const learningMutation = useMutation({
+    mutationFn: ({ flag, value }: { flag: "completed" | "favorite"; value: boolean }) =>
+      setLearningFlag({ subjectId, sectionId, materialId }, flag, value),
+    onSuccess: (state) => queryClient.setQueryData(["learning"], state),
+  });
+
+  const materialCandidate = materialQuery.data;
+  useEffect(() => {
+    if (!materialCandidate || !hasContentSession()) return;
+    const subject = queryClient.getQueryData<SubjectDetail>(["subject", subjectId]);
+    const section = subject?.sections.find((item) => item.id === sectionId);
+    touchLearningMaterial({
+      subjectId,
+      sectionId,
+      materialId,
+      subjectTitle: subject?.title ?? "",
+      sectionTitle: section?.title ?? "",
+      materialTitle: materialCandidate.title,
+      materialOrder: materialCandidate.order,
+      totalInSection: materialCandidate.totalInSection,
+    }).then((state) => queryClient.setQueryData(["learning"], state)).catch(() => undefined);
+  }, [materialCandidate, materialId, queryClient, sectionId, subjectId]);
 
   if (needsTelegramSession) {
     return (
@@ -59,6 +90,7 @@ export function MaterialPage() {
     try {
       const result = await checkQuizAnswer(subjectId, sectionId, materialId, optionIndex);
       setAnswerResult(result);
+      queryClient.invalidateQueries({ queryKey: ["learning"] });
       hapticImpact(result.correct ? "light" : "heavy");
     } catch {
       // Не удалось проверить ответ (сеть/сессия) -- откатываем выбор, чтобы можно было
@@ -100,6 +132,11 @@ export function MaterialPage() {
   }
 
   const material = materialQuery.data;
+  const learningKey = `${subjectId}/${sectionId}/${materialId}`;
+  const isCompleted = learningQuery.data?.completedKeys.includes(learningKey) ?? false;
+  const isFavorite = learningQuery.data?.favorites.some((item) =>
+    item.subjectId === subjectId && item.sectionId === sectionId && item.materialId === materialId
+  ) ?? false;
   const safeHtml = DOMPurify.sanitize(material.rawHtml ?? "", {
     ALLOWED_TAGS: ["a", "b", "blockquote", "br", "code", "del", "em", "i", "p", "pre", "s", "strong", "u"],
     ALLOWED_ATTR: ["href", "title"],
@@ -133,6 +170,7 @@ export function MaterialPage() {
   }
 
   function handleNext() {
+    if (!isCompleted) learningMutation.mutate({ flag: "completed", value: true });
     if (isRealContent) {
       if (material.nextId) goTo(material.nextId);
       else goBackToList();
@@ -150,6 +188,26 @@ export function MaterialPage() {
           Тема {order} из {total}
         </span>
         <h1 className={styles.title}>{material.title}</h1>
+        <div className={styles.actions}>
+          <button
+            type="button"
+            className={[styles.actionButton, isFavorite ? styles.actionButtonActive : ""].join(" ")}
+            aria-pressed={isFavorite}
+            onClick={() => learningMutation.mutate({ flag: "favorite", value: !isFavorite })}
+          >
+            <Icon icon={isFavorite ? BookmarkCheck : Bookmark} size={17} />
+            {isFavorite ? "В избранном" : "Сохранить"}
+          </button>
+          <button
+            type="button"
+            className={[styles.actionButton, isCompleted ? styles.actionButtonDone : ""].join(" ")}
+            aria-pressed={isCompleted}
+            onClick={() => learningMutation.mutate({ flag: "completed", value: !isCompleted })}
+          >
+            <Icon icon={Check} size={17} />
+            {isCompleted ? "Изучено" : "Отметить изученным"}
+          </button>
+        </div>
       </div>
 
       {isRealContent ? (

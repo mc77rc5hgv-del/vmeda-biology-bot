@@ -20,7 +20,7 @@ export function QuickActions() {
       icon: SquareCheckBig,
       label: "Тест",
       accent: "var(--academic-blue-tint)",
-      onClick: () => navigate("/tests/biochemistry"),
+      onClick: () => navigate("/subjects/biochemistry/sections/tests_and_controls"),
     },
     {
       key: "repeat",
