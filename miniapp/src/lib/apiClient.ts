@@ -307,6 +307,32 @@ interface MaterialWire {
   prev_id: string | null;
   next_id: string | null;
   media: Array<{ path: string; caption: string }>;
+  quiz: { options: string[] } | null;
+}
+
+interface QuizAnswerResponseWire {
+  correct: boolean;
+  correct_index: number;
+}
+
+export interface QuizAnswerResult {
+  correct: boolean;
+  correctIndex: number;
+}
+
+/** correct_index раскрывается только этим запросом, ПОСЛЕ того как пользователь уже выбрал
+ * вариант -- см. web_api/content.py::check_quiz_answer и docstring MaterialDetail.quiz. */
+export async function checkQuizAnswer(
+  subjectId: string,
+  sectionId: string,
+  itemId: string,
+  selectedIndex: number
+): Promise<QuizAnswerResult> {
+  const wire: QuizAnswerResponseWire = await apiFetch(
+    `/api/v1/materials/${encodeURIComponent(subjectId)}/${encodeURIComponent(sectionId)}/${encodeURIComponent(itemId)}/answer`,
+    { method: "POST", body: JSON.stringify({ selected_index: selectedIndex }) }
+  );
+  return { correct: wire.correct, correctIndex: wire.correct_index };
 }
 
 // ==================== VMedA AI ====================
@@ -375,5 +401,6 @@ export async function fetchRealMaterial(
       url: `${API_BASE_URL}/api/v1/materials/${encodeURIComponent(subjectId)}/${encodeURIComponent(sectionId)}/${encodeURIComponent(itemId)}/media/${index}`,
       caption: m.caption,
     })),
+    quiz: wire.quiz,
   };
 }

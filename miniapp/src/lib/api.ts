@@ -116,6 +116,18 @@ export async function fetchMaterial(
   return resolveAfterDelay(mock.getMaterial(subjectId, sectionId, materialId));
 }
 
+/** Тестовые уроки (MaterialDetail.quiz) существуют только у реального контента (см.
+ * web_api/content.py) -- эта функция вызывается только когда material.quiz реально есть, что уже
+ * подразумевает hasSession() && REAL_BACKED_SUBJECT_IDS, поэтому здесь нет mock-ветки. */
+export function checkQuizAnswer(
+  subjectId: string,
+  sectionId: string,
+  itemId: string,
+  selectedIndex: number
+) {
+  return apiClient.checkQuizAnswer(subjectId, sectionId, itemId, selectedIndex);
+}
+
 export function fetchTestSummary(subjectId: string): Promise<TestSummary> {
   return resolveAfterDelay(mock.getTestSummary(subjectId));
 }

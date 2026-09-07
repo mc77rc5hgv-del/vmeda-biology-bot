@@ -1,15 +1,17 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import DOMPurify from "dompurify";
 import { Lock } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
-import { fetchMaterial } from "../lib/api";
-import { ApiError } from "../lib/apiClient";
+import { checkQuizAnswer, fetchMaterial } from "../lib/api";
+import { ApiError, type QuizAnswerResult } from "../lib/apiClient";
 import { hapticImpact, useTelegramBackButton } from "../lib/telegram";
 import { Card } from "../components/Card";
 import { Skeleton } from "../components/Skeleton";
 import { StateMessage } from "../components/StateMessage";
 import { AuthenticatedImage } from "../components/AuthenticatedImage";
 import styles from "./Material.module.css";
+import testStyles from "./Test.module.css";
 
 export function MaterialPage() {
   const { subjectId = "", sectionId = "", materialId = "1" } = useParams();
@@ -20,6 +22,40 @@ export function MaterialPage() {
     queryKey: ["material", subjectId, sectionId, materialId],
     queryFn: () => fetchMaterial(subjectId, sectionId, materialId),
   });
+
+  // Тестовый урок (material.quiz) -- ответ выбирается на этом же экране, сервер сравнивает его
+  // на своей стороне (см. apiClient.checkQuizAnswer/web_api/content.py::check_quiz_answer,
+  // correct_index никогда не приходит в GET /materials заранее). Состояние сбрасывается при
+  // переходе на другой materialId -- компонент не размонтируется React Router'ом при смене
+  // параметра одного и того же маршрута, поэтому сброс идёт прямо во время рендера (React-
+  // рекомендуемый паттерн "adjusting state when a prop changes"), а не эффектом.
+  const [quizMaterialId, setQuizMaterialId] = useState(materialId);
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+  const [answerResult, setAnswerResult] = useState<QuizAnswerResult | null>(null);
+  const [answering, setAnswering] = useState(false);
+  if (materialId !== quizMaterialId) {
+    setQuizMaterialId(materialId);
+    setSelectedIndex(null);
+    setAnswerResult(null);
+    setAnswering(false);
+  }
+
+  async function handleSelectOption(optionIndex: number) {
+    if (selectedIndex !== null || answering) return;
+    setAnswering(true);
+    setSelectedIndex(optionIndex);
+    try {
+      const result = await checkQuizAnswer(subjectId, sectionId, materialId, optionIndex);
+      setAnswerResult(result);
+      hapticImpact(result.correct ? "light" : "heavy");
+    } catch {
+      // Не удалось проверить ответ (сеть/сессия) -- откатываем выбор, чтобы можно было
+      // попробовать снова, а не застрять с "выбранным, но непроверенным" вариантом.
+      setSelectedIndex(null);
+    } finally {
+      setAnswering(false);
+    }
+  }
 
   if (materialQuery.isLoading) {
     return (
@@ -119,6 +155,43 @@ export function MaterialPage() {
         ))
       )}
 
+      {material.quiz && (
+        <>
+          <div className={testStyles.options} role="radiogroup" aria-label="Варианты ответа">
+            {material.quiz.options.map((option, optionIndex) => {
+              const isSelected = selectedIndex === optionIndex;
+              const isCorrectOption = answerResult && optionIndex === answerResult.correctIndex;
+              const showState = answerResult !== null;
+              const cls = [
+                testStyles.option,
+                showState && isCorrectOption ? testStyles.optionCorrect : "",
+                showState && isSelected && !isCorrectOption ? testStyles.optionWrong : "",
+              ]
+                .filter(Boolean)
+                .join(" ");
+              return (
+                <button
+                  key={optionIndex}
+                  type="button"
+                  className={cls}
+                  role="radio"
+                  aria-checked={isSelected}
+                  disabled={selectedIndex !== null}
+                  onClick={() => handleSelectOption(optionIndex)}
+                >
+                  {option}
+                </button>
+              );
+            })}
+          </div>
+          {answerResult && (
+            <p style={{ fontSize: 14, fontWeight: 600, color: answerResult.correct ? "var(--success)" : "var(--danger)" }}>
+              {answerResult.correct ? "✅ Верно!" : "❌ Неверно."}
+            </p>
+          )}
+        </>
+      )}
+
       {material.media && material.media.length > 0 && (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {material.media.map((m, i) => (
@@ -140,19 +213,24 @@ export function MaterialPage() {
         </p>
       )}
 
-      <div className={styles.nav}>
-        <button
-          type="button"
-          className={`${styles.navButton} ${styles.navSecondary}`}
-          disabled={!hasPrev}
-          onClick={handlePrev}
-        >
-          Назад
-        </button>
-        <button type="button" className={`${styles.navButton} ${styles.navPrimary}`} onClick={handleNext}>
-          {hasNext ? "Понятно, дальше" : "Завершить раздел"}
-        </button>
-      </div>
+      {/* Тестовый урок форсирует ответ: до выбора варианта навигация скрыта (тот же принцип,
+          что клавиатура quiz-урока в боте -- см. handlers/dynamic_courses.py::
+          get_dynamic_group_quiz_keyboard, без prev/next, пока не нажата одна из кнопок варианта). */}
+      {(!material.quiz || answerResult !== null) && (
+        <div className={styles.nav}>
+          <button
+            type="button"
+            className={`${styles.navButton} ${styles.navSecondary}`}
+            disabled={!hasPrev}
+            onClick={handlePrev}
+          >
+            Назад
+          </button>
+          <button type="button" className={`${styles.navButton} ${styles.navPrimary}`} onClick={handleNext}>
+            {hasNext ? "Понятно, дальше" : "Завершить раздел"}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
