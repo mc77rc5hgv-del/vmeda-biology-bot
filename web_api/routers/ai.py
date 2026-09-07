@@ -80,10 +80,15 @@ async def ai_solve(
                 task_repr, parse_usage = await tb.ai_vision_parser.parse_task(image_bytes=image_bytes)
                 if parse_usage.get("input_tokens") or parse_usage.get("output_tokens"):
                     tb.record_ai_cost(parse_usage)
-                clean_answer, low_confidence, note = await _solve_first_message(tb, user_id, task_repr)
+                clean_answer, low_confidence, note = await _solve_first_message(
+                    tb, user_id, task_repr, payload.subject_id
+                )
             else:
                 text = payload.text.strip()
-                precache = tb.get_raw_text_precache_answer(text)
+                # Предметный режим обязан пройти через соответствующую базу знаний. Глобальный
+                # precache не хранит subject_id и может вернуть ответ от другого предмета на
+                # одинаково сформулированный вопрос, поэтому используем его только без режима.
+                precache = None if payload.subject_id else tb.get_raw_text_precache_answer(text)
                 if precache is not None:
                     cached_answer, _text_part = precache
                     clean_answer, low_confidence, note = cached_answer, False, None
@@ -91,7 +96,9 @@ async def ai_solve(
                     task_repr, parse_usage = await tb.ai_vision_parser.parse_task(text=text)
                     if parse_usage.get("input_tokens") or parse_usage.get("output_tokens"):
                         tb.record_ai_cost(parse_usage)
-                    clean_answer, low_confidence, note = await _solve_first_message(tb, user_id, task_repr)
+                    clean_answer, low_confidence, note = await _solve_first_message(
+                        tb, user_id, task_repr, payload.subject_id
+                    )
                     tb.record_raw_text_alias(text, task_repr)
         except tb.AIRefusalError as exc:
             logger.warning("AI отказался ответить пользователю %s через Mini App", user_id)
@@ -123,7 +130,9 @@ async def ai_solve(
     )
 
 
-async def _solve_first_message(tb, user_id: int, task_repr) -> tuple[str, bool, str | None]:
+async def _solve_first_message(
+    tb, user_id: int, task_repr, subject_id: str | None = None
+) -> tuple[str, bool, str | None]:
     """Обёртка над tb.get_first_message_ai_answer с тем же одноразовым session-словарём, что и
     AI_SESSIONS[user_id] у бота (см. docstring модуля) -- возвращает (чистый_ответ_без_пометки,
     low_confidence, текст_пометки_или_None). session["quick_answer"], которое выставляет сама
@@ -133,7 +142,7 @@ async def _solve_first_message(tb, user_id: int, task_repr) -> tuple[str, bool, 
     внутри get_first_message_ai_answer (см. её собственный докстринг про ai.confidence.decide)."""
     session = {
         "task": task_repr, "messages": [], "rag_context": None, "bucket": tb.ai_router.route_bucket(task_repr),
-        "quick_answer": None,
+        "quick_answer": None, "mode": subject_id,
     }
     display_answer, _user_turn = await tb.get_first_message_ai_answer(user_id, session, task_repr)
     clean_answer = session.get("quick_answer") or display_answer

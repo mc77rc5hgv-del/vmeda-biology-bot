@@ -232,6 +232,7 @@ function toSubjectSummary(wire: SubjectSummaryWire): SubjectSummary {
     course: wire.course,
     readiness: null, // прогресс/готовность для реальных предметов ещё не подключены (см. README web_api)
     locked: false, // ни один "динамический" предмет сегодня не гейтится, см. content.py/CLAUDE.md
+    hasAi: wire.has_ai,
   };
 }
 
@@ -356,6 +357,7 @@ export interface AiSolveResult {
 }
 
 export interface AiSolveInput {
+  subjectId?: string;
   mode: "text" | "photo";
   text?: string;
   imageBase64?: string;
@@ -364,7 +366,12 @@ export interface AiSolveInput {
 export async function solveAiTask(input: AiSolveInput): Promise<AiSolveResult> {
   const wire: AiSolveResponseWire = await apiFetch("/api/v1/ai/solve", {
     method: "POST",
-    body: JSON.stringify({ mode: input.mode, text: input.text, image_base64: input.imageBase64 }),
+    body: JSON.stringify({
+      subject_id: input.subjectId,
+      mode: input.mode,
+      text: input.text,
+      image_base64: input.imageBase64,
+    }),
   });
   return {
     answerHtml: wire.answer_html,

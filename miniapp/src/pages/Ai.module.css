@@ -3,6 +3,12 @@
   gap: var(--space-2);
   overflow-x: auto;
   padding-bottom: var(--space-1);
+  scrollbar-width: none;
+  scroll-snap-type: x proximity;
+}
+
+.subjectRow::-webkit-scrollbar {
+  display: none;
 }
 
 .subjectChip {
@@ -16,6 +22,7 @@
   font-weight: 600;
   color: var(--ink-secondary);
   white-space: nowrap;
+  scroll-snap-align: start;
 }
 
 .subjectChipActive {

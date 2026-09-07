@@ -38,6 +38,7 @@ tb.TICKETS/tb.QUESTIONS/tb.CHEMISTRY_*/tb.PHYSICS_*, как и остальны�
 живёт в web_api/routers/subjects.py (см. _anatomy_module_access_ok/_histology_access_ok/
 _biology_access_ok/_chemistry_*_access/_physics_access там), у которого есть доступ к user_id."""
 import os
+import posixpath
 from html import escape
 
 from .content import ContentNotFoundError
@@ -1449,7 +1450,8 @@ def _physics_extra_question_material(tb, item_id: str) -> dict:
     keys = list(questions.keys())
     index = keys.index(item_id)
     image = question.get("image")
-    media = [{"path": os.path.join(tb.IMAGES_DIR, image), "caption": question["title"]}] if image else []
+    # Это URL-путь для frontend, а не путь локальной Windows-ФС: обратный слэш ломает media URL.
+    media = [{"path": posixpath.join(tb.IMAGES_DIR, image), "caption": question["title"]}] if image else []
     return {
         "id": item_id,
         "title": question["title"],

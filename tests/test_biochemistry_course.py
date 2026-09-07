@@ -15,6 +15,7 @@ async def main():
 
     assert validate_course(course) == []
     assert course["course"] == 2
+    assert course["ai_mode"] == "biochemistry"
     # Биохимия v2 (см. commit message) -- раздел сведён только к экзамену/зачёту/тестам, убраны
     # неструктурированные конспект/практикум/введение (источник "сдвинутого" текста с потерей
     # пробелов между словами, реальная жалоба пользователя). original_source_count/lesson_count/

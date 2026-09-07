@@ -50,8 +50,12 @@ export function AiPage() {
 
   const [searchParams] = useSearchParams();
   const initialMode: Mode = searchParams.get("mode") === "photo" ? "photo" : "text";
+  const requestedSubjectId = searchParams.get("subject");
+  const initialSubjectId = mockSubjects.find((subject) => !subject.locked && subject.id === requestedSubjectId)?.id
+    ?? mockSubjects.find((subject) => !subject.locked)?.id
+    ?? "";
 
-  const [subjectId, setSubjectId] = useState(mockSubjects[0]?.id ?? "");
+  const [subjectId, setSubjectId] = useState(initialSubjectId);
   const [mode, setMode] = useState<Mode>(initialMode);
   const [text, setText] = useState("");
   const [photoFile, setPhotoFile] = useState<File | null>(null);
@@ -61,6 +65,11 @@ export function AiPage() {
   const [error, setError] = useState<string | null>(null);
   const [requestsLeft, setRequestsLeft] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const activeSubjectRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    activeSubjectRef.current?.scrollIntoView({ behavior: "auto", block: "nearest", inline: "center" });
+  }, [subjectId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -116,6 +125,7 @@ export function AiPage() {
     try {
       const imageBase64 = mode === "photo" && photoFile ? await readFileAsBareBase64(photoFile) : undefined;
       const response = await solveAiTask({
+        subjectId,
         mode,
         text: mode === "text" ? text.trim() : undefined,
         imageBase64,
@@ -150,6 +160,7 @@ export function AiPage() {
           .map((s) => (
             <button
               key={s.id}
+              ref={s.id === subjectId ? activeSubjectRef : undefined}
               type="button"
               role="tab"
               aria-selected={s.id === subjectId}
@@ -164,6 +175,7 @@ export function AiPage() {
       <div className={styles.modeRow}>
         <button
           type="button"
+          aria-pressed={mode === "photo"}
           className={[styles.modeButton, mode === "photo" ? styles.modeButtonActive : ""].join(" ")}
           onClick={() => {
             setMode("photo");
@@ -175,6 +187,7 @@ export function AiPage() {
         </button>
         <button
           type="button"
+          aria-pressed={mode === "text"}
           className={[styles.modeButton, mode === "text" ? styles.modeButtonActive : ""].join(" ")}
           onClick={() => {
             setMode("text");
@@ -200,6 +213,8 @@ export function AiPage() {
             type="file"
             accept="image/*"
             className="visually-hidden"
+            tabIndex={-1}
+            aria-hidden="true"
             onChange={handleFileChange}
           />
           {photoPreviewUrl ? (
@@ -217,15 +232,19 @@ export function AiPage() {
           )}
         </>
       ) : (
-        <textarea
-          className={styles.textArea}
-          placeholder="Опиши задание или вставь вопрос текстом…"
-          value={text}
-          onChange={(e) => {
-            setText(e.target.value);
-            resetOutcome();
-          }}
-        />
+        <>
+          <label className="visually-hidden" htmlFor="ai-task-text">Текст задания</label>
+          <textarea
+            id="ai-task-text"
+            className={styles.textArea}
+            placeholder="Опиши задание или вставь вопрос текстом…"
+            value={text}
+            onChange={(e) => {
+              setText(e.target.value);
+              resetOutcome();
+            }}
+          />
+        </>
       )}
 
       <button type="button" className={styles.submit} disabled={!canSubmit || isThinking} onClick={handleSubmit}>

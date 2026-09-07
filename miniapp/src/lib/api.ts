@@ -44,6 +44,11 @@ function hasSession(): boolean {
   return apiClient.hasStoredSession();
 }
 
+/** Экранам глубокого контента нужен честный способ отличить браузерный preview от Telegram-сессии. */
+export function hasContentSession(): boolean {
+  return hasSession();
+}
+
 export async function fetchMe(): Promise<UserProfile> {
   if (hasSession()) {
     const authProfile = useAuthStore.getState().profile;
@@ -92,11 +97,12 @@ export async function fetchSubjectDetail(subjectId: string): Promise<SubjectDeta
 }
 
 export async function fetchSection(subjectId: string, sectionId: string): Promise<SectionContents | null> {
-  if (!REAL_BACKED_SUBJECT_IDS.has(subjectId)) return null; // mock-предметы: нет списка элементов, см. SectionPage
+  if (!hasSession() || !REAL_BACKED_SUBJECT_IDS.has(subjectId)) return null;
   return apiClient.fetchRealSection(subjectId, sectionId);
 }
 
 export async function fetchGroup(subjectId: string, sectionId: string, groupId: string) {
+  if (!hasSession()) return null;
   return apiClient.fetchRealGroup(subjectId, sectionId, groupId);
 }
 
@@ -105,6 +111,7 @@ export async function fetchMaterial(
   sectionId: string,
   materialId: string
 ): Promise<MaterialDetail | null> {
+  if (REAL_BACKED_SUBJECT_IDS.has(subjectId) && !hasSession()) return null;
   if (hasSession() && REAL_BACKED_SUBJECT_IDS.has(subjectId)) {
     try {
       return await apiClient.fetchRealMaterial(subjectId, sectionId, materialId);

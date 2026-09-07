@@ -4776,7 +4776,20 @@ async def ensure_rag_context(session: dict) -> str:
         return session["rag_context"]
     if session.get("task") is None:
         return ""
-    subject_filter = {"latin": "латинский язык", "pharmacology": "фармакология"}.get(session.get("mode"))
+    subject_filters = {
+        "physics": "физика",
+        "chemistry": "химия",
+        "biology": "биология",
+        "anatomy": "анатомия",
+        "histology": "гистология",
+        "latin": "латинский язык",
+        "law": "правоведение",
+        "physiology": "нормальная физиология",
+        "operative_surgery": "оперативная хирургия",
+        "biochemistry": "биохимия",
+        "pharmacology": "фармакология",
+    }
+    subject_filter = subject_filters.get(session.get("mode"))
     if subject_filter:
         snippets, rag_usage = await ai_rag.search_for_task(session["task"], subject_filter=subject_filter)
     else:
@@ -4799,6 +4812,20 @@ async def ensure_rag_context(session: dict) -> str:
             "материалы курса ниже, чётко различай фармакологическую группу, механизм, эффекты, "
             "показания, противопоказания и побочные действия. Не придумывай дозировки и не выдавай "
             "учебный ответ за индивидуальное назначение.\n\n" + session["rag_context"]
+        )
+    elif session.get("mode") == "biochemistry":
+        session["rag_context"] = (
+            "Ты работаешь в специализированном режиме биохимии ВМедА. Опирайся прежде всего "
+            "на закрытые материалы курса ниже. Чётко связывай реакцию, фермент, кофермент, "
+            "локализацию, регуляцию и клиническое значение; не смешивай сходные метаболические "
+            "пути и честно отмечай, если данных для точного ответа недостаточно.\n\n"
+            + session["rag_context"]
+        )
+    elif subject_filter:
+        session["rag_context"] = (
+            f"Ты работаешь в предметном режиме ВМедА: {subject_filter}. "
+            "Отвечай в рамках выбранного предмета и опирайся на материалы курса ниже.\n\n"
+            + session["rag_context"]
         )
     return session["rag_context"]
 
@@ -4975,6 +5002,12 @@ async def begin_ai_session(callback: CallbackQuery, mode: str | None = None):
             f"💊 <b>VMedA AI — Фармакология</b>\n{DIVIDER}\n\n"
             "Пришли текст или чёткое фото задания. Ответ будет основан на материалах курса ВМедА. "
             "Дозировки и назначения обязательно сверяй с актуальной инструкцией и преподавателем."
+        )
+    elif mode == "biochemistry":
+        waiting_text = (
+            f"🧬 <b>VMedA AI — Биохимия</b>\n{DIVIDER}\n\n"
+            "Пришли текст или чёткое фото задания. AI сверит ответ с загруженной базой ВМедА "
+            "по биохимии и разберёт реакцию, ферменты, регуляцию и клиническое значение."
         )
     else:
         waiting_text = (

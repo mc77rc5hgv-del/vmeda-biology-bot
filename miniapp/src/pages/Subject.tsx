@@ -1,4 +1,4 @@
-import { ChevronRight, Lock, SquareCheckBig } from "lucide-react";
+import { ChevronRight, Lock, Sparkles, SquareCheckBig } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { fetchAccessStatus, fetchSubjectDetail, isRealBackedSubject } from "../lib/api";
@@ -94,6 +94,28 @@ export function SubjectPage() {
               </PressableCard>
             ))}
           </div>
+
+          {subject.hasAi && (
+            <PressableCard
+              className={[styles.sectionRow, styles.aiRow].join(" ")}
+              aria-label={`Открыть VMEDA AI по предмету ${subject.title}`}
+              onClick={() => {
+                hapticSelection();
+                navigate(`/ai?subject=${encodeURIComponent(subject.id)}&mode=photo`);
+              }}
+            >
+              <div className={styles.aiContent}>
+                <span className={styles.aiIcon} aria-hidden="true">
+                  <Icon icon={Sparkles} size={18} />
+                </span>
+                <div>
+                  <div className={styles.aiTitle}>VMEDA AI</div>
+                  <div className={styles.aiDescription}>Сфотографируй задание — AI разберёт его по материалам курса</div>
+                </div>
+              </div>
+              <Icon icon={ChevronRight} size={18} color="currentColor" />
+            </PressableCard>
+          )}
 
           {!isRealBackedSubject(subject.id) && (
             <PressableCard

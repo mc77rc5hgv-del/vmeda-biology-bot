@@ -3,13 +3,14 @@ import { useQuery } from "@tanstack/react-query";
 import DOMPurify from "dompurify";
 import { Lock } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
-import { checkQuizAnswer, fetchMaterial } from "../lib/api";
+import { checkQuizAnswer, fetchMaterial, hasContentSession, isRealBackedSubject } from "../lib/api";
 import { ApiError, type QuizAnswerResult } from "../lib/apiClient";
 import { hapticImpact, useTelegramBackButton } from "../lib/telegram";
 import { Card } from "../components/Card";
 import { Skeleton } from "../components/Skeleton";
 import { StateMessage } from "../components/StateMessage";
 import { AuthenticatedImage } from "../components/AuthenticatedImage";
+import { TelegramContentGate } from "../components/TelegramContentGate";
 import styles from "./Material.module.css";
 import testStyles from "./Test.module.css";
 
@@ -17,10 +18,12 @@ export function MaterialPage() {
   const { subjectId = "", sectionId = "", materialId = "1" } = useParams();
   const navigate = useNavigate();
   useTelegramBackButton(() => navigate(`/subjects/${subjectId}`));
+  const needsTelegramSession = isRealBackedSubject(subjectId) && !hasContentSession();
 
   const materialQuery = useQuery({
     queryKey: ["material", subjectId, sectionId, materialId],
     queryFn: () => fetchMaterial(subjectId, sectionId, materialId),
+    enabled: !needsTelegramSession,
   });
 
   // Тестовый урок (material.quiz) -- ответ выбирается на этом же экране, сервер сравнивает его
@@ -33,6 +36,15 @@ export function MaterialPage() {
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [answerResult, setAnswerResult] = useState<QuizAnswerResult | null>(null);
   const [answering, setAnswering] = useState(false);
+
+  if (needsTelegramSession) {
+    return (
+      <div className="screen">
+        <TelegramContentGate />
+      </div>
+    );
+  }
+
   if (materialId !== quizMaterialId) {
     setQuizMaterialId(materialId);
     setSelectedIndex(null);

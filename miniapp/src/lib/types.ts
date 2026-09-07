@@ -22,6 +22,8 @@ export interface SubjectSummary {
   /** null — готовность ещё не считалась (пользователь не открывал предмет). */
   readiness: number | null;
   locked: boolean;
+  /** Для предмета доступен специализированный вход в VMEDA AI. */
+  hasAi?: boolean;
   /** Короткая причина блокировки для локализованного текста на карточке, если locked. */
   lockedReason?: string;
 }

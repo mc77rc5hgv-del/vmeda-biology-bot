@@ -2,12 +2,13 @@ import { useState } from "react";
 import { ChevronRight, Layers, Lock } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
-import { fetchSection } from "../lib/api";
+import { fetchSection, hasContentSession } from "../lib/api";
 import { hapticSelection, useTelegramBackButton } from "../lib/telegram";
 import { PressableCard } from "../components/Card";
 import { Icon } from "../components/Icon";
 import { Skeleton } from "../components/Skeleton";
 import { StateMessage } from "../components/StateMessage";
+import { TelegramContentGate } from "../components/TelegramContentGate";
 import styles from "./Section.module.css";
 
 // Backend отдаёт раздел целиком одним ответом (см. web_api/content.py) — у самых больших
@@ -22,11 +23,21 @@ export function SectionPage() {
   const navigate = useNavigate();
   useTelegramBackButton(() => navigate(`/subjects/${subjectId}`));
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const hasSession = hasContentSession();
 
   const sectionQuery = useQuery({
     queryKey: ["section", subjectId, sectionId],
     queryFn: () => fetchSection(subjectId, sectionId),
+    enabled: hasSession,
   });
+
+  if (!hasSession) {
+    return (
+      <div className="screen">
+        <TelegramContentGate />
+      </div>
+    );
+  }
 
   if (sectionQuery.isLoading) {
     return (

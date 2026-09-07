@@ -57,7 +57,9 @@ def validate_course(course: dict) -> list[str]:
             errors.append(f"{key} must be a non-empty string")
     if course.get("course", 2) not in (1, 2):
         errors.append("course must be 1 or 2")
-    if course.get("ai_mode") is not None and course.get("ai_mode") not in {"latin", "pharmacology"}:
+    if course.get("ai_mode") is not None and course.get("ai_mode") not in {
+        "latin", "pharmacology", "biochemistry"
+    }:
         errors.append("ai_mode is unsupported")
     sections = course.get("sections")
     if not isinstance(sections, list) or not sections:

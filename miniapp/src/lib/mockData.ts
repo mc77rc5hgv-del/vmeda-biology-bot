@@ -54,13 +54,13 @@ export const mockSubjects: SubjectSummary[] = [
   { id: "biology", title: "Биология", accent: "biology", tag: "Флеш-карточки", course: 1, readiness: 71, locked: false },
   { id: "anatomy", title: "Анатомия", accent: "anatomy", tag: "10 модулей", course: 1, readiness: 24, locked: false },
   { id: "histology", title: "Гистология", accent: "histology", tag: "Тренажёр", course: 1, readiness: null, locked: true, lockedReason: "Нужно 2 реферала в этом месяце" },
-  { id: "latin", title: "Латинский язык", accent: "latin", tag: "Зачёт", course: 1, readiness: 10, locked: false },
+  { id: "latin", title: "Латинский язык", accent: "latin", tag: "Зачёт", course: 1, readiness: 10, locked: false, hasAi: true },
   { id: "law", title: "Правоведение", accent: "law", tag: "81 вопрос", course: 1, readiness: 0, locked: false },
   // ---- 2 курс ----
   { id: "physiology", title: "Нормальная физиология", accent: "physiology", tag: "Рубежные", course: 2, readiness: 55, locked: false },
   { id: "operative_surgery", title: "Оперативная хирургия", accent: "operative-surgery", tag: "31 станция", course: 2, readiness: 18, locked: false },
-  { id: "biochemistry", title: "Биохимия", accent: "biochemistry", tag: "68%", course: 2, readiness: 68, locked: false },
-  { id: "pharmacology", title: "Фармакология", accent: "pharmacology", tag: "Контрольные", course: 2, readiness: 8, locked: false },
+  { id: "biochemistry", title: "Биохимия", accent: "biochemistry", tag: "68%", course: 2, readiness: 68, locked: false, hasAi: true },
+  { id: "pharmacology", title: "Фармакология", accent: "pharmacology", tag: "Контрольные", course: 2, readiness: 8, locked: false, hasAi: true },
 ];
 
 const subjectSections: Record<string, SubjectDetail["sections"]> = {
@@ -89,8 +89,7 @@ const subjectSections: Record<string, SubjectDetail["sections"]> = {
     { id: "trainer", title: "Тренажёр по препаратам", itemCount: 40 },
   ],
   latin: [
-    { id: "course", title: "Курс", itemCount: 14 },
-    { id: "ai", title: "VMEDA AI", itemCount: 0 },
+    { id: "latin_credit", title: "Зачёт", itemCount: 1 },
   ],
   law: [
     { id: "questions", title: "Вопросы к зачёту", itemCount: 81 },
@@ -107,18 +106,15 @@ const subjectSections: Record<string, SubjectDetail["sections"]> = {
     { id: "stations", title: "Практические станции", itemCount: 2 },
   ],
   biochemistry: [
-    { id: "course", title: "Курс", itemCount: 22 },
-    { id: "controls", title: "Контрольные", itemCount: 4 },
-    { id: "credit", title: "Зачёт", itemCount: 1 },
-    { id: "exam", title: "Экзамен", itemCount: 1 },
-    { id: "ai", title: "VMEDA AI", itemCount: 0 },
+    { id: "tests_and_controls", title: "Тесты и контрольные", itemCount: 1653, kind: "grouped" },
+    { id: "credit", title: "Зачёт", itemCount: 109, kind: "flat" },
+    { id: "exam", title: "Экзамен", itemCount: 230, kind: "grouped" },
   ],
   pharmacology: [
-    { id: "course", title: "Курс", itemCount: 18 },
-    { id: "controls", title: "Контрольные", itemCount: 3 },
-    { id: "credit", title: "Зачёт", itemCount: 1 },
-    { id: "exam", title: "Экзамен", itemCount: 1 },
-    { id: "ai", title: "VMEDA AI", itemCount: 0 },
+    { id: "course", title: "Курс", itemCount: 1174, kind: "grouped" },
+    { id: "controls", title: "Контрольные", itemCount: 254, kind: "grouped" },
+    { id: "credit", title: "Зачёт", itemCount: 221, kind: "grouped" },
+    { id: "exam", title: "Экзамен", itemCount: 599, kind: "grouped" },
   ],
 };
 

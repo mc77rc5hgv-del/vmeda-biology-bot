@@ -90,6 +90,7 @@ class FakeBot:
         self.attempts_cost_calls = []
         self.raw_text_alias_calls = []
         self.first_message_calls = []
+        self.first_message_sessions = []
 
     def ai_provider_available(self):
         return self.provider_available
@@ -126,6 +127,7 @@ class FakeBot:
 
     async def get_first_message_ai_answer(self, user_id, session, task):
         self.first_message_calls.append((user_id, task))
+        self.first_message_sessions.append(dict(session))
         if self._first_message_raises:
             raise self._first_message_raises
         display_answer, quick_answer = self._first_message_result
@@ -229,6 +231,23 @@ def test_text_fresh_solve_calls_pipeline_and_records_alias():
     assert fake_bot.cost_calls == [{"input_tokens": 10, "output_tokens": 5}]
     assert fake_bot.raw_text_alias_calls == [("новый вопрос", task)]
     assert fake_bot.first_message_calls == [(123, task)]
+
+
+def test_selected_subject_is_passed_to_ai_session_and_skips_global_precache():
+    task = SimpleNamespace()
+    vision_parser = FakeVisionParser(task=task)
+    fake_bot = FakeBot(precache=("чужой кэш", "вопрос"), vision_parser=vision_parser)
+    client = _client(fake_bot)
+
+    resp = client.post(
+        "/api/v1/ai/solve",
+        json={"subject_id": "biochemistry", "mode": "text", "text": "вопрос"},
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert vision_parser.calls == [{"image_bytes": None, "text": "вопрос"}]
+    assert fake_bot.first_message_calls == [(123, task)]
+    assert fake_bot.first_message_sessions[0]["mode"] == "biochemistry"
 
 
 def test_photo_mode_decodes_base64_and_calls_pipeline():

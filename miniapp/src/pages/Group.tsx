@@ -2,13 +2,14 @@ import { useState } from "react";
 import { ChevronRight, Lock } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
-import { fetchGroup } from "../lib/api";
+import { fetchGroup, hasContentSession } from "../lib/api";
 import { ApiError } from "../lib/apiClient";
 import { hapticSelection, useTelegramBackButton } from "../lib/telegram";
 import { PressableCard } from "../components/Card";
 import { Icon } from "../components/Icon";
 import { Skeleton } from "../components/Skeleton";
 import { StateMessage } from "../components/StateMessage";
+import { TelegramContentGate } from "../components/TelegramContentGate";
 import styles from "./Section.module.css";
 
 const PAGE_SIZE = 50; // см. Section.tsx за тем, почему это временная мера, а не виртуализация
@@ -18,11 +19,21 @@ export function GroupPage() {
   const navigate = useNavigate();
   useTelegramBackButton(() => navigate(`/subjects/${subjectId}/sections/${sectionId}`));
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const hasSession = hasContentSession();
 
   const groupQuery = useQuery({
     queryKey: ["group", subjectId, sectionId, groupId],
     queryFn: () => fetchGroup(subjectId, sectionId, groupId),
+    enabled: hasSession,
   });
+
+  if (!hasSession) {
+    return (
+      <div className="screen">
+        <TelegramContentGate />
+      </div>
+    );
+  }
 
   if (groupQuery.isLoading) {
     return (

@@ -58,6 +58,7 @@ class AccessStatusResponse(BaseModel):
 class AiSolveRequest(BaseModel):
     """mode="text" -- заполнен text, mode="photo" -- заполнен image_base64 (сырой base64, без
     префикса "data:image/...;base64," -- клиент срезает его сам, см. apiClient.ts)."""
+    subject_id: str | None = None
     mode: str
     text: str | None = None
     image_base64: str | None = None
