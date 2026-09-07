@@ -21,6 +21,15 @@ class TelegramAuthResponse(BaseModel):
     photo_url: str | None = None
 
 
+class QuizAnswerRequest(BaseModel):
+    selected_index: int
+
+
+class QuizAnswerResponse(BaseModel):
+    correct: bool
+    correct_index: int
+
+
 class MeResponse(BaseModel):
     """См. ТЗ §16 -- все поля здесь СЧИТАЕТ backend через уже существующие предикаты бота
     (services.access, реэкспортированные на telegram_bot), фронт их только показывает."""

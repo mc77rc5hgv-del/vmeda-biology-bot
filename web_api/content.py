@@ -22,6 +22,12 @@ class ContentNotFoundError(Exception):
     """Предмет/раздел/группа/урок с таким id не существует."""
 
 
+class InvalidQuizAnswerError(Exception):
+    """Урок существует, но не является тестом с вариантами ответа, либо selected_index вне
+    диапазона доступных вариантов -- отдельно от ContentNotFoundError, потому что это не "ничего
+    не найдено" (404), а некорректный запрос к существующему уроку (400)."""
+
+
 def find_dynamic_course(dynamic_courses: list, subject_id: str) -> tuple[int, dict]:
     for index, course in enumerate(dynamic_courses):
         if course.get("id") == subject_id:
@@ -120,6 +126,7 @@ def _lesson_to_material(
     lesson: dict, order: int, total: int, *, show_sources: bool, group_id: str | None,
     prev_id: str | None, next_id: str | None,
 ) -> dict:
+    quiz = lesson.get("quiz")
     return {
         "id": lesson["id"],
         "title": lesson["title"],
@@ -138,38 +145,73 @@ def _lesson_to_material(
             {"path": m["path"], "caption": m.get("caption", "")}
             for m in lesson.get("media", [])
         ],
+        # Только options -- НИКОГДА correct_index здесь: клиент не должен получить правильный
+        # ответ раньше, чем реально ответит (тот же принцип, что уже используют MCQ-сессии бота
+        # -- ANATOMY_LATIN_SESSIONS/ANATOMY_EXAM_TEST_SESSIONS никогда не кладут верный вариант в
+        # исходящую клавиатуру, только в серверную сессию). Проверка ответа -- через отдельный
+        # check_quiz_answer(), см. ниже. Урок без сохранённого quiz (ещё не проверен вручную,
+        # см. commit message) отдаёт quiz: null -- фронт рендерит его как обычный текстовый
+        # материал, без интерактивности, а не с угаданным/непроверенным "правильным" ответом.
+        "quiz": {"options": quiz["options"]} if quiz else None,
     }
 
 
-def get_material(dynamic_courses: list, subject_id: str, section_id: str, item_id: str) -> dict:
-    """Ищет урок по item_id внутри раздела -- НЕ требует знать заранее, плоский раздел или с
-    группами (URL-контракт одинаковый в обоих случаях, см. docstring модуля): если в разделе есть
-    группы, ищет по всем группам подряд (id урока уникален в пределах раздела -- проверено на
-    реальных данных Фармакологии, 1174 из 1174 уникальны)."""
-    _, course = find_dynamic_course(dynamic_courses, subject_id)
-    section = _find_section(course, section_id)
-    show_sources = course.get("show_sources", True)
-
+def _find_lesson_in_section(section: dict, item_id: str):
+    """Возвращает (lesson, index, lessons, group_id) или None -- ищет по всем группам подряд,
+    если у раздела есть группы (id урока уникален в пределах раздела -- проверено на реальных
+    данных Фармакологии, 1174 из 1174 уникальны), иначе по плоскому списку. Общая логика поиска
+    для get_material() и check_quiz_answer(), чтобы не дублировать обход groups/lessons трижды."""
     if "groups" in section:
         for group in section["groups"]:
             lessons = group.get("lessons", [])
             for i, lesson in enumerate(lessons):
                 if lesson["id"] == item_id:
-                    prev_id = lessons[i - 1]["id"] if i > 0 else None
-                    next_id = lessons[i + 1]["id"] if i + 1 < len(lessons) else None
-                    return _lesson_to_material(
-                        lesson, i + 1, len(lessons), show_sources=show_sources, group_id=group.get("id"),
-                        prev_id=prev_id, next_id=next_id,
-                    )
-        raise ContentNotFoundError(f"урок {item_id!r} не найден в разделе {section_id!r}")
-
+                    return lesson, i, lessons, group.get("id")
+        return None
     lessons = section.get("lessons", [])
     for i, lesson in enumerate(lessons):
         if lesson["id"] == item_id:
-            prev_id = lessons[i - 1]["id"] if i > 0 else None
-            next_id = lessons[i + 1]["id"] if i + 1 < len(lessons) else None
-            return _lesson_to_material(
-                lesson, i + 1, len(lessons), show_sources=show_sources, group_id=None,
-                prev_id=prev_id, next_id=next_id,
-            )
-    raise ContentNotFoundError(f"урок {item_id!r} не найден в разделе {section_id!r}")
+            return lesson, i, lessons, None
+    return None
+
+
+def get_material(dynamic_courses: list, subject_id: str, section_id: str, item_id: str) -> dict:
+    """Ищет урок по item_id внутри раздела -- НЕ требует знать заранее, плоский раздел или с
+    группами (URL-контракт одинаковый в обоих случаях, см. docstring модуля)."""
+    _, course = find_dynamic_course(dynamic_courses, subject_id)
+    section = _find_section(course, section_id)
+    show_sources = course.get("show_sources", True)
+
+    found = _find_lesson_in_section(section, item_id)
+    if found is None:
+        raise ContentNotFoundError(f"урок {item_id!r} не найден в разделе {section_id!r}")
+    lesson, i, lessons, group_id = found
+    prev_id = lessons[i - 1]["id"] if i > 0 else None
+    next_id = lessons[i + 1]["id"] if i + 1 < len(lessons) else None
+    return _lesson_to_material(
+        lesson, i + 1, len(lessons), show_sources=show_sources, group_id=group_id,
+        prev_id=prev_id, next_id=next_id,
+    )
+
+
+def check_quiz_answer(
+    dynamic_courses: list, subject_id: str, section_id: str, item_id: str, selected_index: int,
+) -> dict:
+    """Правильный ответ (correct_index) никогда не уходит клиенту заранее (см. _lesson_to_material)
+    -- проверка всегда идёт через этот эндпоинт, так же как бот проверяет ответ на сервере в
+    ANATOMY_LATIN_SESSIONS/ANATOMY_EXAM_TEST_SESSIONS, а не полагается на клиента. Возвращает
+    {"correct": bool, "correct_index": int} -- верный индекс раскрывается только сейчас, уже
+    после того как пользователь ответил."""
+    _, course = find_dynamic_course(dynamic_courses, subject_id)
+    section = _find_section(course, section_id)
+    found = _find_lesson_in_section(section, item_id)
+    if found is None:
+        raise ContentNotFoundError(f"урок {item_id!r} не найден в разделе {section_id!r}")
+    lesson = found[0]
+    quiz = lesson.get("quiz")
+    if not quiz:
+        raise InvalidQuizAnswerError(f"урок {item_id!r} не является тестом с вариантами ответа")
+    correct_index = quiz["correct_index"]
+    if not (0 <= selected_index < len(quiz["options"])):
+        raise InvalidQuizAnswerError(f"selected_index {selected_index} вне диапазона вариантов")
+    return {"correct": selected_index == correct_index, "correct_index": correct_index}
