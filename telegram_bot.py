@@ -15,7 +15,7 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.types import (
     Message, CallbackQuery, InlineKeyboardButton, FSInputFile, BufferedInputFile, Update,
     BotCommand, BotCommandScopeDefault, BotCommandScopeChat, LabeledPrice,
-    ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove,
+    ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, WebAppInfo,
 )
 from aiogram.filters import CommandStart, Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -69,6 +69,10 @@ CHANNEL_ID = "@Vmeda_examen"
 ADMIN_IDS = {1326779223, 8601892147}
 STATS_DIR = os.getenv("STATS_DIR", ".")
 STATS_FILE = os.path.join(STATS_DIR, "stats.json")
+MINIAPP_URL = os.getenv(
+    "MINIAPP_URL",
+    "https://vmeda-miniapp-preview-production.up.railway.app/",
+).strip()
 
 # Все студенты и админы бота — в России, но контейнер (Railway) по умолчанию работает в UTC,
 # так что "новый день"/"новый месяц" по системному времени наступает на 3 часа позже реального
@@ -1936,6 +1940,14 @@ def _histology_menu_label(user_id: int = None) -> str:
 
 def get_main_menu(user_id: int = None):
     builder = InlineKeyboardBuilder()
+    # Пока web_api закрыт серверным admin_only-гейтом, кнопку также видит только админ. Это не
+    # защита (источник истины всё равно deps.ensure_miniapp_access), а честный интерфейс без
+    # заведомо неработающего действия у студентов. При публичном запуске условие можно снять.
+    if user_id is not None and is_admin(user_id) and MINIAPP_URL:
+        builder.row(InlineKeyboardButton(
+            text="🎓 Открыть VMEDA App",
+            web_app=WebAppInfo(url=MINIAPP_URL),
+        ))
     builder.button(text="🤖 VMedA AI (бета)", callback_data="ai_menu")
     builder.button(text="1️⃣ Первый курс", callback_data="course_menu:1")
     builder.button(text="2️⃣ Второй курс", callback_data="course_menu:2")
