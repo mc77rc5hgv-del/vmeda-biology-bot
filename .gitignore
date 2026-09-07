@@ -11,3 +11,5 @@ stats.json
 stats.json.tmp
 .env
 scripts/ai_model_compare_results.txt
+miniapp/node_modules/
+miniapp/dist/

@@ -60,34 +60,61 @@ def test_list_subjects_requires_auth():
 
 
 def test_biochemistry_subject_detail_has_real_sections():
+    """Биохимия v2 (см. commit message) -- раздел сведён только к экзамену/зачёту/тестам,
+    убраны неструктурированные конспект/практикум/введение (были источником "сдвинутого"
+    текста с потерей пробелов между словами, реальная жалоба пользователя)."""
     resp = client.get("/api/v1/subjects/biochemistry", headers=_auth_headers())
     assert resp.status_code == 200
     body = resp.json()
     assert body["title"] == "Биохимия"
     section_ids = {s["id"] for s in body["sections"]}
-    assert {"core_course", "credit", "exam_tickets"} <= section_ids
-    core = next(s for s in body["sections"] if s["id"] == "core_course")
-    assert core["kind"] == "flat"
-    assert core["item_count"] == 47  # см. отчёт аудита
+    assert section_ids == {"exam", "credit", "tests_and_controls"}
+    credit = next(s for s in body["sections"] if s["id"] == "credit")
+    assert credit["kind"] == "flat"
+    assert credit["item_count"] == 109  # см. отчёт аудита
+    exam = next(s for s in body["sections"] if s["id"] == "exam")
+    assert exam["kind"] == "grouped"
 
 
 def test_biochemistry_flat_section_and_material_round_trip():
     headers = _auth_headers()
-    section = client.get("/api/v1/subjects/biochemistry/sections/core_course", headers=headers).json()
+    section = client.get("/api/v1/subjects/biochemistry/sections/credit", headers=headers).json()
     assert section["kind"] == "flat"
     first_item = section["items"][0]
-    assert first_item["id"] == "core_p1_1"
+    assert first_item["id"] == "credit_p1_1"
     assert first_item["order"] == 1
+    assert first_item["title"] == "Стр. 1"  # короткая метка списка, не всё содержимое урока
 
     material = client.get(
-        f"/api/v1/materials/biochemistry/core_course/{first_item['id']}", headers=headers
+        f"/api/v1/materials/biochemistry/credit/{first_item['id']}", headers=headers
     ).json()
     assert material["title"] == first_item["title"]
-    assert "Военно-медицинская акаде" in material["content_html"]  # реальный текст источника
-    assert material["sources"] == ["учебное пособие.pdf, стр. 1"]
+    assert "Аминокислотный состав белковой молекулы" in material["content_html"]  # реальный текст источника
+    assert material["sources"] == ["c_биохимия зачет все вопросы.pdf, стр. 1"]
     assert material["group_id"] is None
     assert material["prev_id"] is None  # первый урок раздела
     assert material["next_id"] == section["items"][1]["id"]
+
+
+def test_biochemistry_grouped_exam_section_and_material_round_trip():
+    headers = _auth_headers()
+    section = client.get("/api/v1/subjects/biochemistry/sections/exam", headers=headers).json()
+    assert section["kind"] == "grouped"
+    group_ids = {g["id"] for g in section["groups"]}
+    assert group_ids == {"exam_tickets", "exam_questions", "exam_practical"}
+
+    group = client.get(
+        "/api/v1/subjects/biochemistry/sections/exam/groups/exam_tickets", headers=headers
+    ).json()
+    first_item = group["items"][0]
+    assert first_item["id"] == "exam_ticket_1_1"
+    assert first_item["title"] == "Билет 1"  # короткая метка, не дублирует содержимое билета
+
+    material = client.get(
+        f"/api/v1/materials/biochemistry/exam/{first_item['id']}", headers=headers
+    ).json()
+    assert material["title"] == first_item["title"]
+    assert material["group_id"] == "exam_tickets"
 
 
 def test_pharmacology_grouped_section_and_material_round_trip():
@@ -125,7 +152,7 @@ def test_unknown_section_returns_404():
 
 def test_unknown_material_returns_404():
     resp = client.get(
-        "/api/v1/materials/biochemistry/core_course/does-not-exist", headers=_auth_headers()
+        "/api/v1/materials/biochemistry/credit/does-not-exist", headers=_auth_headers()
     )
     assert resp.status_code == 404
 
@@ -801,27 +828,38 @@ def test_physics_unknown_task_group_and_test_ticket_group_are_not_found_not_lock
 
 
 def test_media_endpoint_serves_real_file_when_present():
-    """Биохимия: реальный урок с media (см. отчёт по данным -- 5 таких уроков в предмете).
-    Находим первый попавшийся динамически, а не хардкодим id -- список media может измениться
-    при перегенерации контента, а сам факт "если media есть, эндпоинт должен её отдать" -- нет."""
+    """Реальный урок с media -- Биохимия v2 (см. commit message) убрала свой единственный
+    раздел с картинками ("Введение", вместе с остальным неструктурированным конспектом), так
+    что теперь единственный предмет с media -- Фармакология, причём внутри ГРУППИРОВАННОГО
+    раздела (course/drug_comparison, 455 уроков). Обход поэтому заходит и в groups, а не
+    только в плоские секции, как раньше, когда единственный известный пример был плоским."""
     headers = _auth_headers()
-    subject = client.get("/api/v1/subjects/biochemistry", headers=headers).json()
-    for section_summary in subject["sections"]:
-        section = client.get(
-            f"/api/v1/subjects/biochemistry/sections/{section_summary['id']}", headers=headers
-        ).json()
-        if section["kind"] != "flat":
-            continue
-        for item in section["items"]:
-            material = client.get(
-                f"/api/v1/materials/biochemistry/{section['id']}/{item['id']}", headers=headers
+    for subject_id in ("pharmacology", "biochemistry"):
+        subject = client.get(f"/api/v1/subjects/{subject_id}", headers=headers).json()
+        for section_summary in subject["sections"]:
+            section = client.get(
+                f"/api/v1/subjects/{subject_id}/sections/{section_summary['id']}", headers=headers
             ).json()
-            if material["media"]:
-                media_resp = client.get(
-                    f"/api/v1/materials/biochemistry/{section['id']}/{item['id']}/media/0",
-                    headers=headers,
-                )
-                assert media_resp.status_code == 200
-                assert len(media_resp.content) > 0
-                return
-    pytest.fail("expected at least one biochemistry lesson with media, found none")
+            if section["kind"] == "grouped":
+                item_refs = []
+                for group_summary in section["groups"]:
+                    group = client.get(
+                        f"/api/v1/subjects/{subject_id}/sections/{section['id']}/groups/{group_summary['id']}",
+                        headers=headers,
+                    ).json()
+                    item_refs.extend(group["items"])
+            else:
+                item_refs = section["items"]
+            for item in item_refs:
+                material = client.get(
+                    f"/api/v1/materials/{subject_id}/{section['id']}/{item['id']}", headers=headers
+                ).json()
+                if material["media"]:
+                    media_resp = client.get(
+                        f"/api/v1/materials/{subject_id}/{section['id']}/{item['id']}/media/0",
+                        headers=headers,
+                    )
+                    assert media_resp.status_code == 200
+                    assert len(media_resp.content) > 0
+                    return
+    pytest.fail("expected at least one lesson with media, found none")
