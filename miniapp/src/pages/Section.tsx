@@ -3,6 +3,7 @@ import { ChevronRight, Layers, Lock } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { fetchSection, hasContentSession } from "../lib/api";
+import { formatMaterialCount } from "../lib/format";
 import { hapticSelection, useTelegramBackButton } from "../lib/telegram";
 import { PressableCard } from "../components/Card";
 import { Icon } from "../components/Icon";
@@ -83,7 +84,7 @@ export function SectionPage() {
                   {group.title}
                 </div>
                 <div className={styles.rowMeta}>
-                  {group.locked ? (group.lockedReason ?? "Доступно по подписке") : `${group.itemCount} тем`}
+                  {group.locked ? (group.lockedReason ?? "Доступно по подписке") : formatMaterialCount(group.itemCount)}
                 </div>
               </div>
               <Icon icon={group.locked ? Lock : Layers} size={18} color="var(--ink-secondary)" />

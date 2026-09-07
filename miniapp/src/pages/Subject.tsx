@@ -2,6 +2,7 @@ import { ChevronRight, Lock, Sparkles, SquareCheckBig } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { fetchAccessStatus, fetchSubjectDetail, isRealBackedSubject } from "../lib/api";
+import { formatMaterialCount } from "../lib/format";
 import { hapticSelection, useTelegramBackButton } from "../lib/telegram";
 import { PressableCard } from "../components/Card";
 import { Icon } from "../components/Icon";
@@ -87,7 +88,7 @@ export function SubjectPage() {
                 <div>
                   <div className={styles.sectionTitle}>{section.title}</div>
                   {section.itemCount > 0 && (
-                    <div className={styles.sectionCount}>{section.itemCount} элементов</div>
+                    <div className={styles.sectionCount}>{formatMaterialCount(section.itemCount)}</div>
                   )}
                 </div>
                 <Icon icon={ChevronRight} size={18} color="var(--ink-secondary)" />
