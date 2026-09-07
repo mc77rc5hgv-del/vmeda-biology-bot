@@ -212,9 +212,7 @@ export function AiPage() {
             ref={fileInputRef}
             type="file"
             accept="image/*"
-            className="visually-hidden"
-            tabIndex={-1}
-            aria-hidden="true"
+            hidden
             onChange={handleFileChange}
           />
           {photoPreviewUrl ? (
