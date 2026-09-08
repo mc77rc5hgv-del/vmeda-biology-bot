@@ -1094,17 +1094,27 @@ async def referral_gate_middleware(handler, event: Update, data):
 # ==================== ПЕРЕКЛИЧКА ГРУПП ====================
 # Собираем по одному представителю от каждой группы, чтобы быть с ними на связи. Список
 # групп генерируется по шаблону, не хранится в JSON — сами группы никогда не меняются местами.
-ROLLCALL_GROUP_COUNT = 45
+ROLLCALL_COHORT = "26"
+ROLLCALL_GROUP_COUNT = 40
+ROLLCALL_BONUS_SECONDS = 30 * 24 * 60 * 60
 
 def rollcall_group_name(n: int) -> str:
-    return f"25-ЛД/СТ-{n}"
+    return f"{ROLLCALL_COHORT}-ЛД/СТ-{n}"
+
+def get_rollcall_confirmed_count() -> int:
+    """Count only the current cohort while preserving prior roll-call records."""
+    confirmed = stats["rollcall_confirmed"]
+    return sum(
+        rollcall_group_name(n) in confirmed
+        for n in range(1, ROLLCALL_GROUP_COUNT + 1)
+    )
 
 def get_rollcall_menu_text() -> str:
-    confirmed = len(stats["rollcall_confirmed"])
+    confirmed = get_rollcall_confirmed_count()
     return (
-        f"📋 <b>Перекличка групп</b>\n{DIVIDER}\n\n"
-        "Собираем по одному представителю от каждой группы, чтобы быть на связи.\n\n"
-        "⚡ <b>ПЕРВЫМ ВЫБЕРИ СВОЮ ГРУППУ</b> и получи бонусную подписку на неделю!\n\n"
+        f"📋 <b>Перекличка первого курса</b>\n{DIVIDER}\n\n"
+        "Собираем по одному представителю от каждой группы первого курса, чтобы быть на связи.\n\n"
+        "⚡ <b>ПЕРВЫМ ВЫБЕРИ СВОЮ ГРУППУ</b> и получи подписку на 30 дней!\n\n"
         f"Подтверждено представителей: <b>{confirmed}</b> из {ROLLCALL_GROUP_COUNT}\n\n"
         "Выбери номер своей группы:"
     )
@@ -1127,7 +1137,7 @@ def get_rollcall_group_text(n: int) -> str:
         f"👥 <b>Группа {group}</b>\n{DIVIDER}\n\n"
         "Нажми на кнопку ниже — откроется чат с @vmeda_helper, сообщение с номером твоей "
         "группы уже будет готово. Напиши его и подтверди, что ты из этой группы — как только "
-        "это проверят, тебе включат бонусную подписку на неделю.\n\n"
+        "это проверят, тебе включат бонусную подписку на 30 дней.\n\n"
         "Спасибо, что будешь на связи! 🙏"
     )
 
@@ -1160,9 +1170,10 @@ async def notify_admins_of_rollcall_request(n: int, user) -> None:
 
 def get_rollcall_announcement_text() -> str:
     return (
-        f"📋 <b>Перекличка групп!</b>\n{DIVIDER}\n\n"
-        "Собираем по одному представителю от каждой группы, чтобы быть на связи с курсом.\n\n"
-        "⚡ <b>ПЕРВЫМ ВЫБЕРИ СВОЮ ГРУППУ</b> и получи бонусную подписку на неделю!\n\n"
+        f"📋 <b>ПЕРЕКЛИЧКА ПЕРВОГО КУРСА!</b>\n{DIVIDER}\n\n"
+        "Собираем по одному представителю от каждой группы первого курса, чтобы быть на связи с курсом.\n\n"
+        "🎁 <b>ПРИЗ — ПОДПИСКА НА 30 ДНЕЙ</b>\n\n"
+        "⚡ <b>ПЕРВЫМ ВЫБЕРИ СВОЮ ГРУППУ</b> и забери приз!\n\n"
         "Жми «📋 Перекличка» в главном меню и выбирай номер своей группы."
     )
 
@@ -1231,8 +1242,12 @@ async def cb_rollcall_confirm(callback: CallbackQuery):
         )
         return
 
-    stats["rollcall_confirmed"][group] = {"user_id": target_id, "confirmed_at": time.time()}
-    stats["temporary_access"][str(target_id)] = time.time() + TEMP_ACCESS_GRANT_SECONDS
+    now = time.time()
+    stats["rollcall_confirmed"][group] = {"user_id": target_id, "confirmed_at": now}
+    # Keep the prize separate from paid subscriptions: confirmation must never overwrite or
+    # downgrade an existing plan. Extend an existing bonus instead of shortening it.
+    current_bonus_until = stats["temporary_access"].get(str(target_id), 0)
+    stats["temporary_access"][str(target_id)] = max(now, current_bonus_until) + ROLLCALL_BONUS_SECONDS
     save_stats()
     await callback.answer("Подтверждено ✅", show_alert=True)
     await safe_edit_text(
@@ -1244,8 +1259,8 @@ async def cb_rollcall_confirm(callback: CallbackQuery):
         await bot.send_message(
             target_id,
             f"🎉 <b>Ты подтверждён как представитель группы {group}!</b>\n\n"
-            "Бонусная подписка на неделю активирована — доступ к Биологии, Физике и Химии "
-            "открыт на 7 дней без рефералов. Спасибо, что будешь на связи! 🙏",
+            "Бонусная подписка на 30 дней активирована — доступ к Биологии, Физике и Химии "
+            "открыт на 30 дней без рефералов. Спасибо, что будешь на связи! 🙏",
             parse_mode="HTML"
         )
     except Exception:
@@ -1949,7 +1964,7 @@ def get_main_menu(user_id: int = None):
     builder.button(text="2️⃣ Второй курс", callback_data="course_menu:2")
     builder.button(text="👥 Пригласить друзей", callback_data="referral_info")
     builder.button(text="🏆 Рейтинг", callback_data="referral_leaderboard")
-    rollcall_confirmed_count = len(stats["rollcall_confirmed"])
+    rollcall_confirmed_count = get_rollcall_confirmed_count()
     builder.button(
         text=f"📋 Перекличка ({rollcall_confirmed_count}/{ROLLCALL_GROUP_COUNT})",
         callback_data="rollcall_menu"

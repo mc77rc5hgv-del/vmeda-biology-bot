@@ -946,15 +946,17 @@ also reachable by the payment-admin role, not just full admins — see "Three ad
 
 ### Group roll-call (перекличка)
 
-Recruits one point-of-contact per group. `ROLLCALL_GROUP_COUNT` (45) generates group names on the fly via
-`rollcall_group_name(n) -> "25-ЛД/СТ-{n}"` — group names are never stored, only `stats["rollcall_confirmed"][group]
+Recruits one point-of-contact per group. `ROLLCALL_GROUP_COUNT` (40) generates current first-year group names via
+`rollcall_group_name(n) -> "26-ЛД/СТ-{n}"` — group names are never stored, only `stats["rollcall_confirmed"][group]
 = {"user_id", "confirmed_at"}` once an admin has confirmed one. Tapping an unclaimed group does **not** lock it —
 multiple people can tap the same group and get the `@vmeda_helper` deep-link screen; the group only locks (button
 becomes `"✅ {group}"` / `callback_data="rollcall_taken"`) once an admin taps confirm, mirroring the one-tap
 payment-confirm pattern (`notify_admins_of_rollcall_request()` pings every `ADMIN_IDS` entry the moment someone
 taps a group, `cb_rollcall_confirm` grants and guards against two admins racing the same group the same way
-`cb_admin_confirm_sub` does for payments). The reward is a flat `TEMP_ACCESS_GRANT_SECONDS` (7-day) blanket grant
-via `stats["temporary_access"]` — the same mechanism the referral-exhausted recovery broadcast uses — not a real
+`cb_admin_confirm_sub` does for payments). `get_rollcall_confirmed_count()` counts only the current cohort, leaving
+prior cohorts' records untouched. The reward is a 30-day `ROLLCALL_BONUS_SECONDS` blanket grant, added after any
+existing temporary-access expiry so an earlier bonus is never shortened. It lives in `stats["temporary_access"]`
+— the same mechanism the referral-exhausted recovery broadcast uses — not a real
 `SUBSCRIPTION_TIERS` entry, since it's promotional and unlocks only Biology/Physics/Chemistry (not
 Histology/Anatomy, which check their own subscription-specific flags, not `has_temp_access()`).
 
