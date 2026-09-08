@@ -12,6 +12,30 @@ router = Router()
 LESSONS_PER_PAGE = 12
 
 
+def get_maintenance_keyboard(course: dict):
+    builder = InlineKeyboardBuilder()
+    course_number = course.get("course", 2)
+    builder.button(text=f"🔙 К {course_number}-му курсу", callback_data=f"course_menu:{course_number}")
+    return builder.as_markup()
+
+
+async def deny_maintenance_course(callback: CallbackQuery, course_index: int) -> bool:
+    """Server-side gate shared by every dynamic-course callback, including old deep links."""
+    course = get_dynamic_item(course_index)
+    if not course or not tb.dynamic_course_under_maintenance(course):
+        return False
+    await callback.answer("Раздел временно закрыт на переработку", show_alert=True)
+    await tb.safe_edit_text(
+        callback.message,
+        f"🛠 <b>{html.escape(course['title'])} — техобслуживание</b>\n{tb.DIVIDER}\n\n"
+        "Раздел временно закрыт на полную переработку материалов и структуры. "
+        "Мы вернём его после повторной проверки качества.",
+        parse_mode="HTML",
+        reply_markup=get_maintenance_keyboard(course),
+    )
+    return True
+
+
 def get_dynamic_course_keyboard(course_index: int):
     builder = InlineKeyboardBuilder()
     for section_index, section in enumerate(tb.DYNAMIC_COURSES[course_index]["sections"]):
@@ -35,6 +59,8 @@ async def cb_dynamic_ai(callback: CallbackQuery):
     course = get_dynamic_item(course_index)
     if not course or not course.get("ai_mode"):
         await callback.answer("AI для предмета не найден", show_alert=True)
+        return
+    if await deny_maintenance_course(callback, course_index):
         return
     await tb.begin_ai_session(callback, mode=course["ai_mode"])
 
@@ -167,6 +193,8 @@ async def cb_dynamic_course(callback: CallbackQuery):
     if not course:
         await callback.answer("Предмет не найден", show_alert=True)
         return
+    if await deny_maintenance_course(callback, course_index):
+        return
     await callback.answer()
     await tb.safe_edit_text(
         callback.message,
@@ -189,6 +217,8 @@ async def cb_dynamic_section(callback: CallbackQuery):
     if not section:
         await callback.answer("Раздел не найден", show_alert=True)
         return
+    if await deny_maintenance_course(callback, course_index):
+        return
     await callback.answer()
     await tb.safe_edit_text(
         callback.message,
@@ -207,6 +237,8 @@ async def cb_dynamic_group(callback: CallbackQuery):
     except (ValueError, IndexError, KeyError, TypeError):
         await callback.answer("Подраздел не найден", show_alert=True)
         return
+    if await deny_maintenance_course(callback, course_index):
+        return
     page_count = max(1, (len(group["lessons"]) + LESSONS_PER_PAGE - 1) // LESSONS_PER_PAGE)
     if page < 0 or page >= page_count:
         await callback.answer("Страница не найдена", show_alert=True)
@@ -224,6 +256,8 @@ async def cb_dynamic_group_lesson(callback: CallbackQuery):
         lesson = course["sections"][section_index]["groups"][group_index]["lessons"][lesson_index]
     except (ValueError, IndexError, KeyError, TypeError):
         await callback.answer("Тема не найдена", show_alert=True)
+        return
+    if await deny_maintenance_course(callback, course_index):
         return
     await callback.answer()
     quiz = lesson.get("quiz")
@@ -253,6 +287,8 @@ async def cb_dynamic_group_quiz_answer(callback: CallbackQuery):
     except (ValueError, IndexError, KeyError, TypeError):
         await callback.answer("Тест не найден", show_alert=True)
         return
+    if await deny_maintenance_course(callback, course_index):
+        return
     if not (0 <= chosen_index < len(quiz["options"])):
         await callback.answer("Вариант не найден", show_alert=True)
         return
@@ -277,6 +313,8 @@ async def cb_dynamic_lesson(callback: CallbackQuery):
     lesson = get_dynamic_item(course_index, section_index, lesson_index)
     if not lesson:
         await callback.answer("Тема не найдена", show_alert=True)
+        return
+    if await deny_maintenance_course(callback, course_index):
         return
     await callback.answer()
     course = get_dynamic_item(course_index)

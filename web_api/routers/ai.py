@@ -61,6 +61,11 @@ async def ai_solve(
     user_id: int = Depends(get_current_user_id),
     tb=Depends(get_fresh_bot_module),
 ) -> AiSolveResponse:
+    if payload.subject_id in {"biochemistry", "pharmacology"}:
+        raise HTTPException(
+            status_code=503,
+            detail="AI по этому предмету временно закрыт вместе с разделом на переработку.",
+        )
     if payload.mode not in ("text", "photo"):
         raise HTTPException(status_code=400, detail="mode должен быть 'text' или 'photo'")
     if payload.mode == "text" and not (payload.text or "").strip():

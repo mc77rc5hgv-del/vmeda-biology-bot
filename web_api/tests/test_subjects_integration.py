@@ -26,8 +26,15 @@ import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from web_api.main import app  # noqa: E402
+import telegram_bot as tb  # noqa: E402
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def _keep_content_contract_tests_independent_from_temporary_closure(monkeypatch):
+    """Most tests below validate content shape, not the temporary operational switch."""
+    monkeypatch.setattr(tb, "DYNAMIC_COURSE_MAINTENANCE_IDS", frozenset())
 
 
 def _auth_headers(user_id: int = 900_777_888_999) -> dict:
@@ -57,6 +64,25 @@ def test_list_subjects_includes_real_dynamic_courses():
 def test_list_subjects_requires_auth():
     resp = client.get("/api/v1/subjects")
     assert resp.status_code == 401
+
+
+@pytest.mark.parametrize("subject_id", ["biochemistry", "pharmacology"])
+def test_reworked_subjects_are_closed_at_every_api_depth(monkeypatch, subject_id):
+    monkeypatch.setattr(tb, "DYNAMIC_COURSE_MAINTENANCE_IDS", frozenset({"biochemistry", "pharmacology"}))
+    headers = _auth_headers()
+    listing = client.get("/api/v1/subjects", headers=headers).json()
+    card = next(item for item in listing if item["id"] == subject_id)
+    assert card["maintenance"] is True
+    assert "переработ" in card["maintenance_reason"]
+
+    detail = client.get(f"/api/v1/subjects/{subject_id}", headers=headers)
+    assert detail.status_code == 200
+    assert detail.json()["maintenance"] is True
+
+    section_id = "credit" if subject_id == "biochemistry" else "course"
+    section = client.get(f"/api/v1/subjects/{subject_id}/sections/{section_id}", headers=headers)
+    assert section.status_code == 503
+    assert "переработ" in section.json()["detail"]
 
 
 def test_biochemistry_subject_detail_has_real_sections():

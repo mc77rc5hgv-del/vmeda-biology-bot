@@ -151,6 +151,18 @@ def test_invalid_mode_returns_400():
     assert resp.status_code == 400
 
 
+def test_maintenance_subject_ai_is_closed_before_provider_call():
+    fake_bot = FakeBot()
+    client = _client(fake_bot)
+    for subject_id in ("biochemistry", "pharmacology"):
+        resp = client.post(
+            "/api/v1/ai/solve",
+            json={"subject_id": subject_id, "mode": "text", "text": "вопрос"},
+        )
+        assert resp.status_code == 503
+        assert fake_bot.first_message_calls == []
+
+
 def test_text_mode_without_text_returns_400():
     client = _client(FakeBot())
     resp = client.post("/api/v1/ai/solve", json={"mode": "text", "text": "   "})
@@ -241,13 +253,13 @@ def test_selected_subject_is_passed_to_ai_session_and_skips_global_precache():
 
     resp = client.post(
         "/api/v1/ai/solve",
-        json={"subject_id": "biochemistry", "mode": "text", "text": "вопрос"},
+        json={"subject_id": "physiology", "mode": "text", "text": "вопрос"},
     )
 
     assert resp.status_code == 200, resp.text
     assert vision_parser.calls == [{"image_bytes": None, "text": "вопрос"}]
     assert fake_bot.first_message_calls == [(123, task)]
-    assert fake_bot.first_message_sessions[0]["mode"] == "biochemistry"
+    assert fake_bot.first_message_sessions[0]["mode"] == "physiology"
 
 
 def test_photo_mode_decodes_base64_and_calls_pipeline():

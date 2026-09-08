@@ -11,6 +11,21 @@ router = APIRouter(prefix="/api/v1", tags=["subjects"])
 # Динамические предметы идут через content.py; постепенно подключаемые статичные — через
 # static_content.py. Маршруты остаются едиными для клиента.
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+MAINTENANCE_REASON = (
+    "Раздел временно закрыт на полную переработку материалов и структуры. "
+    "Он вернётся после повторной проверки качества."
+)
+
+
+def _check_subject_maintenance(tb, subject_id: str) -> None:
+    if tb.dynamic_course_under_maintenance(subject_id):
+        raise HTTPException(status_code=503, detail=MAINTENANCE_REASON)
+
+
+def _with_maintenance(tb, summary: dict) -> dict:
+    if tb.dynamic_course_under_maintenance(summary.get("id")):
+        return {**summary, "maintenance": True, "maintenance_reason": MAINTENANCE_REASON}
+    return summary
 
 
 def _not_found(exc: content.ContentNotFoundError) -> HTTPException:
@@ -80,6 +95,7 @@ def _check_anatomy_material_access(tb, user_id: int, section_id: str, item_id: s
 
 
 def _get_material_data(tb, user_id: int, subject_id: str, section_id: str, item_id: str) -> dict:
+    _check_subject_maintenance(tb, subject_id)
     if subject_id == static_content.ANATOMY_ID:
         _check_anatomy_material_access(tb, user_id, section_id, item_id)
     if subject_id == static_content.HISTOLOGY_ID:
@@ -269,7 +285,7 @@ def list_subjects(
     tb=Depends(get_fresh_bot_module),
 ) -> list[dict]:
     return [
-        *[content.to_subject_summary(course) for course in tb.DYNAMIC_COURSES],
+        *[_with_maintenance(tb, content.to_subject_summary(course)) for course in tb.DYNAMIC_COURSES],
         *static_content.list_subject_summaries(tb),
     ]
 
@@ -283,7 +299,7 @@ def get_subject(
     try:
         if subject_id in static_content.SUPPORTED_SUBJECT_IDS:
             return static_content.get_subject_detail(tb, subject_id)
-        return content.get_subject_detail(tb.DYNAMIC_COURSES, subject_id)
+        return _with_maintenance(tb, content.get_subject_detail(tb.DYNAMIC_COURSES, subject_id))
     except content.ContentNotFoundError as exc:
         raise _not_found(exc) from exc
 
@@ -295,6 +311,7 @@ def get_section(
     user_id: int = Depends(get_current_user_id),
     tb=Depends(get_fresh_bot_module),
 ) -> dict:
+    _check_subject_maintenance(tb, subject_id)
     try:
         if subject_id in static_content.SUPPORTED_SUBJECT_IDS:
             section = static_content.get_section_detail(tb, subject_id, section_id)
@@ -344,6 +361,7 @@ def get_group(
     user_id: int = Depends(get_current_user_id),
     tb=Depends(get_fresh_bot_module),
 ) -> dict:
+    _check_subject_maintenance(tb, subject_id)
     if subject_id == static_content.ANATOMY_ID and section_id == static_content.ANATOMY_SECTION_ID:
         if group_id not in tb.ANATOMY:
             raise HTTPException(status_code=404, detail=f"модуль {group_id!r} не найден в анатомии")
@@ -420,6 +438,7 @@ def answer_quiz(
     """correct_index никогда не приходит в GET /materials -- этот эндпоинт единственный, кто его
     раскрывает, и только после того как пользователь уже выбрал вариант (см. content.py::
     check_quiz_answer)."""
+    _check_subject_maintenance(tb, subject_id)
     try:
         result = content.check_quiz_answer(
             tb.DYNAMIC_COURSES, subject_id, section_id, item_id, body.selected_index,

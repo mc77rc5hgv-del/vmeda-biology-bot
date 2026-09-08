@@ -204,6 +204,8 @@ interface SubjectSummaryWire {
   description: string | null;
   course: 1 | 2;
   has_ai: boolean;
+  maintenance?: boolean;
+  maintenance_reason?: string | null;
 }
 
 interface SubjectDetailWire extends SubjectSummaryWire {
@@ -229,11 +231,12 @@ function toSubjectSummary(wire: SubjectSummaryWire): SubjectSummary {
     id: wire.id,
     title: wire.title,
     accent: ACCENT_BY_SUBJECT_ID[wire.id] ?? "biochemistry",
-    tag: wire.has_ai ? "VMEDA AI" : "Курс",
+    tag: wire.maintenance ? "Техобслуживание" : (wire.has_ai ? "VMEDA AI" : "Курс"),
     course: wire.course,
     readiness: null, // прогресс/готовность для реальных предметов ещё не подключены (см. README web_api)
-    locked: false, // ни один "динамический" предмет сегодня не гейтится, см. content.py/CLAUDE.md
+    locked: wire.maintenance ?? false,
     hasAi: wire.has_ai,
+    lockedReason: wire.maintenance_reason ?? undefined,
   };
 }
 

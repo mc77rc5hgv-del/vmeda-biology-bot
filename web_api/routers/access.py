@@ -22,6 +22,8 @@ SUBJECT_IDS = {
     "pharmacology",
 }
 GATED_SUBJECT_IDS = {"physics", "chemistry", "biology"}
+MAINTENANCE_SUBJECT_IDS = {"biochemistry", "pharmacology"}
+MAINTENANCE_REASON = "Раздел временно закрыт на полную переработку материалов и структуры."
 
 
 def _subscription_fields(tb, user_id: int) -> tuple[str | None, str | None]:
@@ -45,6 +47,8 @@ def _ai_fields(tb, user_id: int) -> tuple[bool, int | None]:
 
 
 def _subject_is_open(tb, user_id: int, subject_id: str) -> bool:
+    if subject_id in MAINTENANCE_SUBJECT_IDS:
+        return False
     if subject_id in GATED_SUBJECT_IDS:
         return tb.has_subject_access(user_id, subject_id)
     if subject_id == "histology":
@@ -57,6 +61,8 @@ def _subject_is_open(tb, user_id: int, subject_id: str) -> bool:
 
 
 def _locked_reason(subject_id: str) -> str:
+    if subject_id in MAINTENANCE_SUBJECT_IDS:
+        return MAINTENANCE_REASON
     if subject_id == "histology":
         return "Нужен действующий пробный доступ, подписка или 2 реферала в этом месяце."
     return "Нужна подписка, временный доступ или 2 реферала в этом месяце."

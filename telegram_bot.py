@@ -168,6 +168,16 @@ def load_dynamic_courses() -> list[dict]:
 
 DYNAMIC_COURSES = load_dynamic_courses()
 
+# Эти два курса временно полностью скрыты за техэкраном на время переработки. Константа стоит
+# рядом с источником динамических курсов, чтобы бот, web_api и тесты ссылались на один явный
+# список, а не на разрозненные проверки названий.
+DYNAMIC_COURSE_MAINTENANCE_IDS = frozenset({"biochemistry", "pharmacology"})
+
+
+def dynamic_course_under_maintenance(course_or_id) -> bool:
+    course_id = course_or_id.get("id") if isinstance(course_or_id, dict) else course_or_id
+    return course_id in DYNAMIC_COURSE_MAINTENANCE_IDS
+
 EXTRA_AI_ENTRIES = []
 for knowledge_filename in ("latin_ai.json", "biochemistry_ai.json", "pharmacology_ai.json"):
     try:
@@ -2007,8 +2017,9 @@ def get_course_menu_keyboard(course: int, user_id: int = None):
         builder.button(text=label, callback_data=callback_data)
     for course_index, dynamic_course in enumerate(DYNAMIC_COURSES):
         if dynamic_course.get("course", 2) == course:
+            maintenance_suffix = " — техобслуживание" if dynamic_course_under_maintenance(dynamic_course) else ""
             builder.button(
-                text=f"{dynamic_course.get('emoji', '📚')} {dynamic_course['title']}",
+                text=f"{dynamic_course.get('emoji', '📚')} {dynamic_course['title']}{maintenance_suffix}",
                 callback_data=f"dyn_c:{course_index}",
             )
     builder.adjust(1)
