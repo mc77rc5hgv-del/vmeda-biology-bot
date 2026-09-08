@@ -3488,6 +3488,12 @@ def get_admin_payment_confirm_keyboard(tier_id: int, target_id: int, subject: st
     builder.adjust(1)
     return builder.as_markup()
 
+
+def get_known_admin_target_label(target_id: int) -> str:
+    """Admin-facing identity from the existing user index; does not mutate payment/user data."""
+    username = stats["user_username"].get(str(target_id))
+    return format_admin_target_label(username, target_id)
+
 async def notify_admins_of_payment_request(
     tier_id: int, target_id: int, user, subject: str | None = None, price: int | None = None
 ) -> None:
@@ -4037,7 +4043,7 @@ async def cb_admin_confirm_sub(callback: CallbackQuery):
         await safe_edit_text(
             callback.message,
             f"✅ Уже подтверждено — подписка «{SUBSCRIPTION_TIERS[tier_id]['title']}» "
-            f"выдана {format_admin_target_label(None, target_id)}.",
+            f"выдана {get_known_admin_target_label(target_id)}.",
             parse_mode="HTML"
         )
         return
@@ -4047,7 +4053,7 @@ async def cb_admin_confirm_sub(callback: CallbackQuery):
     await safe_edit_text(
         callback.message,
         f"✅ Подтверждено — подписка «{SUBSCRIPTION_TIERS[tier_id]['title']}» "
-        f"выдана {format_admin_target_label(None, target_id)}.",
+        f"выдана {get_known_admin_target_label(target_id)}.",
         parse_mode="HTML"
     )
 

@@ -966,6 +966,7 @@ async def main():
     # grants the subscription immediately (old manual admin flow still works too)
     confirm_uid = random.randint(10_000_000, 99_999_999)
     tb.stats["subscriptions"].pop(str(confirm_uid), None)
+    tb.stats["user_username"][str(confirm_uid)] = "confirmbuyer"
     admin_sent = []
     async def fake_send_message5(chat_id, text, **kwargs):
         admin_sent.append((chat_id, text, kwargs.get("reply_markup")))
@@ -990,6 +991,7 @@ async def main():
     assert tb.get_subscription(confirm_uid)["tier"] == 22
     assert tb.get_subscription(confirm_uid)["method"] == "rubles"
     assert cb_confirm.message.edits and "Подтверждено" in cb_confirm.message.edits[0][0]
+    assert f"@confirmbuyer (ID {confirm_uid})" in cb_confirm.message.edits[0][0]
     buyer_notified = [(c, t) for c, t, _ in admin_sent if c == confirm_uid]
     assert buyer_notified and "активирована" in buyer_notified[0][1]
     print("tapping the admin confirm button grants the subscription and notifies the buyer: OK")
@@ -999,6 +1001,7 @@ async def main():
     cb_confirm2 = FakeCB(confirm_cb_data, uid=ADMIN_ID)
     await tb.cb_admin_confirm_sub(cb_confirm2)
     assert cb_confirm2.message.edits and "Уже подтверждено" in cb_confirm2.message.edits[0][0]
+    assert f"@confirmbuyer (ID {confirm_uid})" in cb_confirm2.message.edits[0][0]
     assert not [c for c, t, _ in admin_sent if c == confirm_uid], "must not re-notify the buyer"
     print("double-confirm (race between two admins) does not re-grant or re-notify: OK")
 
