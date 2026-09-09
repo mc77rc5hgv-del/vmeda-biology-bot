@@ -27,6 +27,7 @@ MUG_MODELS = {
         "title": "Классика ВМедА",
         "price_rub": 799,
         "image": "images/mugs/vmeda-classic.png",
+        "asset_version": 2,
         "description": "Герб, надпись «ВМедА · Санкт-Петербург · 1798» и фасад Академии.",
     },
     "2": {
@@ -56,8 +57,14 @@ def get_mug_image_path(model_id: str) -> Path:
     return Path(__file__).resolve().parents[1] / get_mug_model(model_id)["image"]
 
 
+def get_mug_photo_cache_key(model_id: str) -> str:
+    model = get_mug_model(model_id)
+    return f"{model_id}:{model.get('asset_version', 1)}"
+
+
 def get_mug_photo(model_id: str):
-    return tb.stats.get("mug_file_ids", {}).get(model_id) or FSInputFile(get_mug_image_path(model_id))
+    cache_key = get_mug_photo_cache_key(model_id)
+    return tb.stats.get("mug_file_ids", {}).get(cache_key) or FSInputFile(get_mug_image_path(model_id))
 
 
 def cache_mug_photo(model_id: str, sent_message) -> bool:
@@ -65,9 +72,10 @@ def cache_mug_photo(model_id: str, sent_message) -> bool:
     if not photo_sizes:
         return False
     file_id = photo_sizes[-1].file_id
-    if tb.stats["mug_file_ids"].get(model_id) == file_id:
+    cache_key = get_mug_photo_cache_key(model_id)
+    if tb.stats["mug_file_ids"].get(cache_key) == file_id:
         return False
-    tb.stats["mug_file_ids"][model_id] = file_id
+    tb.stats["mug_file_ids"][cache_key] = file_id
     return True
 
 

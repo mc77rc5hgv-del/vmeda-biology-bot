@@ -974,7 +974,9 @@ Only admin confirmation moves that snapshot to the append-only `stats["mug_order
 `admin_mug_orders:*`; pending/rejected users never appear there. The feature must never write subscription,
 payment, donation, or access keys. The three lossless source PNGs live in `images/mugs/`; model cards and admin
 requests show the corresponding photo, while `stats["mug_file_ids"]` caches Telegram file IDs after the first
-upload. The Announcements submenu exposes `admin_announce_mugs_confirm` → a real three-image preview →
+upload. Cache keys include each model's `asset_version`, so replacing an image forces one fresh Telegram upload
+without deleting historical state or touching user/order data. The Announcements submenu exposes
+`admin_announce_mugs_confirm` → a real three-image preview →
 `admin_announce_mugs_go`; only the second tap broadcasts the album and CTA. Prices remain intentionally absent
 from payment/subscription configuration: they live only in each `MUG_MODELS[*]["price_rub"]` entry (799/849/999)
 and are snapshotted into confirmed preorder records for auditability.

@@ -4,6 +4,8 @@ import copy
 import random
 import urllib.parse
 
+from aiogram.types import FSInputFile
+
 from _bootstrap import tb
 
 ADMIN_ID = next(iter(tb.ADMIN_IDS))
@@ -73,6 +75,13 @@ async def main():
     }
     assert [spec["price_rub"] for spec in tb.MUG_MODELS.values()] == [799, 849, 999]
     assert all(tb.mugs_handlers.get_mug_image_path(model_id).is_file() for model_id in tb.MUG_MODELS)
+    tb.stats["mug_file_ids"]["1"] = "stale-classic-photo"
+    assert isinstance(tb.mugs_handlers.get_mug_photo("1"), FSInputFile)
+    classic_cache_key = tb.mugs_handlers.get_mug_photo_cache_key("1")
+    assert classic_cache_key == "1:2"
+    tb.stats["mug_file_ids"][classic_cache_key] = "current-classic-photo"
+    assert tb.mugs_handlers.get_mug_photo("1") == "current-classic-photo"
+    del tb.stats["mug_file_ids"][classic_cache_key]
     classic_keyboard = tb.mugs_handlers.get_mug_model_keyboard("1", 1326779223, False, False)
     classic_url = next(button.url for row in classic_keyboard.inline_keyboard for button in row if button.url)
     classic_text = urllib.parse.parse_qs(urllib.parse.urlparse(classic_url).query)["text"][0]
