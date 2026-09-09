@@ -5768,6 +5768,7 @@ get_admin_mug_orders_text = mugs_handlers.get_admin_mug_orders_text
 get_admin_mug_orders_keyboard = mugs_handlers.get_admin_mug_orders_keyboard
 cb_mugs_menu = mugs_handlers.cb_mugs_menu
 cb_mugs_model = mugs_handlers.cb_mugs_model
+cb_mugs_quantity = mugs_handlers.cb_mugs_quantity
 cb_mugs_order = mugs_handlers.cb_mugs_order
 cb_mugs_order_status = mugs_handlers.cb_mugs_order_status
 cb_admin_mug_confirm = mugs_handlers.cb_admin_mug_confirm

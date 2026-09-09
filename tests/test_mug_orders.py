@@ -87,7 +87,7 @@ async def main():
     classic_text = urllib.parse.parse_qs(urllib.parse.urlparse(classic_url).query)["text"][0]
     assert classic_text == (
         "Здравствуйте! Хочу заказать кружку VMEDA — Классика ВМедА. "
-        "Пришлите, пожалуйста, реквизиты для перевода."
+        "Количество: 1 шт. Пришлите, пожалуйста, реквизиты для перевода."
     )
 
     tb.MUG_PREORDER_ENABLED = False
@@ -136,17 +136,31 @@ async def main():
     assert parsed_url.netloc == "t.me" and parsed_url.path == "/vmeda_helper"
     assert helper_text == (
         "Здравствуйте! Хочу заказать кружку VMEDA — Наследие Академии. "
-        "Пришлите, пожалуйста, реквизиты для перевода."
+        "Количество: 1 шт. Пришлите, пожалуйста, реквизиты для перевода."
     )
     assert str(uid) not in helper_text and "После оплаты" not in helper_text
-    assert "mugs_order:2" in callback_data(model_keyboard)
+    assert "mugs_order:2:1" in callback_data(model_keyboard)
+    assert "mugs_qty:2:2" in callback_data(model_keyboard)
+
+    # Quantity controls update both the displayed total and the order snapshot.
+    quantity_callback = FakeCallback("mugs_qty:2:3", uid=uid, username="mugbuyer")
+    await tb.cb_mugs_quantity(quantity_callback)
+    quantity_text, quantity_kwargs = quantity_callback.message.edits[-1]
+    assert "Количество: <b>3 шт.</b>" in quantity_text and "Итого: <b>2547 ₽</b>" in quantity_text
+    quantity_keyboard = quantity_kwargs["reply_markup"]
+    quantity_url = next(button.url for row in quantity_keyboard.inline_keyboard for button in row if button.url)
+    quantity_helper_text = urllib.parse.parse_qs(urllib.parse.urlparse(quantity_url).query)["text"][0]
+    assert "Количество: 3 шт." in quantity_helper_text
+    assert "mugs_order:2:3" in callback_data(quantity_keyboard)
 
     # Only the explicit user confirmation creates the request and notifies admins.
-    order_callback = FakeCallback("mugs_order:2", uid=uid, username="mugbuyer")
+    order_callback = FakeCallback("mugs_order:2:3", uid=uid, username="mugbuyer")
     await tb.cb_mugs_order(order_callback)
     assert key in tb.stats["mug_order_requests"]
     assert tb.stats["mug_order_requests"][key]["user_confirmed_at"]
-    assert tb.stats["mug_order_requests"][key]["price_rub"] == 849
+    assert tb.stats["mug_order_requests"][key]["quantity"] == 3
+    assert tb.stats["mug_order_requests"][key]["unit_price_rub"] == 849
+    assert tb.stats["mug_order_requests"][key]["price_rub"] == 2547
     assert len([row for row in sent_photos if row[0] in tb.ADMIN_IDS]) == len(tb.ADMIN_IDS)
     assert any(
         "Оплата проверяется" in button.text
@@ -156,7 +170,7 @@ async def main():
 
     # Pressing confirmation again reuses the pending request instead of spamming admins.
     photos_before_repeat = len(sent_photos)
-    await tb.cb_mugs_order(FakeCallback("mugs_order:2", uid=uid, username="mugbuyer"))
+    await tb.cb_mugs_order(FakeCallback("mugs_order:2:3", uid=uid, username="mugbuyer"))
     assert len(sent_photos) == photos_before_repeat
     assert len(tb.stats["mug_order_requests"]) == 1
 
@@ -171,6 +185,9 @@ async def main():
     assert key not in tb.stats["mug_order_requests"]
     assert len(tb.stats["mug_orders"]) == 1
     assert tb.stats["mug_orders"][0]["model_name"] == "Наследие Академии"
+    assert tb.stats["mug_orders"][0]["quantity"] == 3
+    assert tb.stats["mug_orders"][0]["price_rub"] == 2547
+    assert tb.get_confirmed_mug_order_count() == 3
     assert "@mugbuyer" in confirm.message.edits[0][0]
     assert any(chat_id == uid and "Оплата заказа подтверждена" in text for chat_id, text, _ in sent)
     assert "Наследие Академии" in tb.get_admin_mug_orders_text() and "@mugbuyer" in tb.get_admin_mug_orders_text()
@@ -188,7 +205,7 @@ async def main():
     await tb.cb_mugs_model(reject_select)
     reject_key = tb.get_mug_order_request_key("3", reject_uid)
     assert reject_key not in tb.stats["mug_order_requests"]
-    await tb.cb_mugs_order(FakeCallback("mugs_order:3", uid=reject_uid, username="rejectbuyer"))
+    await tb.cb_mugs_order(FakeCallback("mugs_order:3:1", uid=reject_uid, username="rejectbuyer"))
     reject = FakeCallback(f"admin_mug_reject:3:{reject_uid}", uid=ADMIN_ID)
     await tb.cb_admin_mug_reject(reject)
     assert reject_key not in tb.stats["mug_order_requests"]
@@ -219,6 +236,8 @@ async def main():
     assert all(spec["title"] in announcement_text for spec in tb.MUG_MODELS.values())
     assert all(str(spec["price_rub"]) in announcement_text for spec in tb.MUG_MODELS.values())
     assert "50" in announcement_text and "Подтвердить оплату и заказать" in announcement_text
+    assert "подарок ко Дню учителя" in announcement_text
+    assert "заказ отменить нельзя" in announcement_text and "Сроки доставки" in announcement_text
     preview = FakeCallback("admin_announce_mugs_confirm", uid=ADMIN_ID)
     albums_before_preview = len(sent_albums)
     await tb.cb_admin_announce_mugs_confirm(preview)
