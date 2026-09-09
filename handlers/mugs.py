@@ -158,8 +158,8 @@ def get_mug_model_text(
         status = "✅ <b>Оплата этого заказа уже подтверждена.</b>"
     elif request_exists:
         status = (
-            "⏳ <b>Заявка отправлена.</b> Администратор проверяет перевод. После подтверждения "
-            "бот сообщит, что заказ принят."
+            "⏳ <b>Заявка отправлена.</b> До подтверждения администратором количество можно "
+            "изменить кнопками ниже. После изменения нажми «Обновить количество заявки»."
         )
     else:
         status = (
@@ -194,7 +194,7 @@ def get_mug_model_keyboard(
     )
     url = f"{tb.HELPER_ACCOUNT_URL}?text={urllib.parse.quote(template)}"
     builder = InlineKeyboardBuilder()
-    if not request_exists and not already_confirmed:
+    if not already_confirmed:
         decrease_callback = (
             f"mugs_qty:{model_id}:{quantity - 1}" if quantity > 1 else "mugs_quantity_status"
         )
@@ -212,7 +212,12 @@ def get_mug_model_keyboard(
     if already_confirmed:
         builder.row(InlineKeyboardButton(text="✅ Заказ подтверждён", callback_data="mugs_order_status"))
     elif request_exists:
-        builder.row(InlineKeyboardButton(text="⏳ Оплата проверяется", callback_data="mugs_order_status"))
+        builder.row(
+            InlineKeyboardButton(
+                text="🔄 Обновить количество заявки",
+                callback_data=f"mugs_order:{model_id}:{quantity}",
+            )
+        )
     else:
         builder.row(
             InlineKeyboardButton(
@@ -228,12 +233,19 @@ def get_admin_mug_request_text(request: dict) -> str:
     username = request.get("username")
     user_id = request["user_id"]
     label = tb.format_admin_target_label(username, user_id)
+    heading = "Обновлённая заявка на кружку VMEDA" if request.get("quantity_updated_at") else "Заявка на кружку VMEDA"
+    update_note = (
+        "\nКоличество изменено пользователем. Проверяй актуальную сумму из этой карточки.\n"
+        if request.get("quantity_updated_at")
+        else ""
+    )
     return (
-        f"☕ <b>Заявка на кружку VMEDA</b>\n{tb.DIVIDER}\n\n"
+        f"☕ <b>{heading}</b>\n{tb.DIVIDER}\n\n"
         f"Модель: <b>{html.escape(request['model_name'])}</b>\n"
         f"Количество: <b>{request.get('quantity', 1)} шт.</b>\n"
         f"Сумма: <b>{request['price_rub']} ₽</b>\n"
-        f"Пользователь: {label}\n\n"
+        f"Пользователь: {label}\n"
+        f"{update_note}\n"
         "Пользователь нажал «Подтвердить оплату и заказать». Подтверди заказ только после "
         "проверки перевода в диалоге с @vmeda_helper. До админского подтверждения заявка не "
         "показывается в списке заказов."
@@ -377,14 +389,14 @@ async def cb_mugs_quantity(callback: CallbackQuery):
     request = tb.stats["mug_order_requests"].get(request_key)
     request_exists = bool(request and request.get("user_confirmed_at"))
     already_confirmed = _has_confirmed_order(model_id, user.id)
-    if request_exists or already_confirmed:
+    if already_confirmed:
         await callback.answer("Количество уже зафиксировано в заказе", show_alert=True)
         return
     await callback.answer()
     await callback.message.edit_caption(
-        caption=get_mug_model_text(model_id, False, False, quantity),
+        caption=get_mug_model_text(model_id, request_exists, False, quantity),
         parse_mode="HTML",
-        reply_markup=get_mug_model_keyboard(model_id, user.id, False, False, quantity),
+        reply_markup=get_mug_model_keyboard(model_id, user.id, request_exists, False, quantity),
     )
 
 
@@ -409,7 +421,10 @@ async def cb_mugs_order(callback: CallbackQuery):
         return
     request_key = get_mug_order_request_key(model_id, user.id)
     request = tb.stats["mug_order_requests"].get(request_key)
-    should_notify = not request or not request.get("user_confirmed_at")
+    request_exists = bool(request and request.get("user_confirmed_at"))
+    previous_quantity = max(1, int(request.get("quantity", 1))) if request_exists else None
+    quantity_changed = request_exists and previous_quantity != quantity
+    should_notify = not request_exists or quantity_changed
     if should_notify:
         now = time.time()
         request = {
@@ -423,13 +438,19 @@ async def cb_mugs_order(callback: CallbackQuery):
             "username": user.username,
             "full_name": user.full_name,
             "requested_at": request.get("requested_at", now) if request else now,
-            "user_confirmed_at": now,
+            "user_confirmed_at": request.get("user_confirmed_at", now) if request else now,
         }
+        if quantity_changed:
+            request["quantity_updated_at"] = now
         tb.stats["mug_order_requests"][request_key] = request
         tb.save_stats()
         await notify_mug_order_admins(request)
     await callback.answer(
-        "Заявка отправлена администратору. Оплату проверят вручную.",
+        (
+            "Количество обновлено. Администратору отправлена новая сумма."
+            if quantity_changed
+            else "Заявка отправлена администратору. Оплату проверят вручную."
+        ),
         show_alert=True,
     )
     await callback.message.edit_caption(

@@ -970,7 +970,8 @@ Only that second, explicit «Подтвердить оплату и заказа
 user/model in `stats["mug_order_requests"]` and sends full/payment admins a one-tap confirm/reject card.
 Before confirmation, the model card lets the buyer select 1–50 mugs; `quantity`, unit price, and the calculated
 total are snapshotted into the request and shown to the buyer and admins. The 50-unit sales target counts mugs,
-not the number of order records. Confirmed quantities are immutable through the public flow.
+not the number of order records. A buyer may update a pending request's quantity; this rewrites only that pending
+snapshot and sends admins a fresh card. Quantities become immutable after admin confirmation.
 Legacy pending snapshots without `user_confirmed_at` cannot be approved until the user explicitly taps the
 new confirmation button.
 Only admin confirmation moves that snapshot to the append-only `stats["mug_orders"]` list shown by

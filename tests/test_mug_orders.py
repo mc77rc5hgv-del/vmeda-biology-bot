@@ -163,7 +163,7 @@ async def main():
     assert tb.stats["mug_order_requests"][key]["price_rub"] == 2547
     assert len([row for row in sent_photos if row[0] in tb.ADMIN_IDS]) == len(tb.ADMIN_IDS)
     assert any(
-        "Оплата проверяется" in button.text
+        "Обновить количество заявки" in button.text
         for row in order_callback.message.edits[-1][1]["reply_markup"].inline_keyboard
         for button in row
     )
@@ -173,6 +173,20 @@ async def main():
     await tb.cb_mugs_order(FakeCallback("mugs_order:2:3", uid=uid, username="mugbuyer"))
     assert len(sent_photos) == photos_before_repeat
     assert len(tb.stats["mug_order_requests"]) == 1
+
+    # A pending request remains editable; saving a changed quantity updates the snapshot and
+    # sends admins a fresh card with the new total.
+    pending_quantity = FakeCallback("mugs_qty:2:4", uid=uid, username="mugbuyer")
+    await tb.cb_mugs_quantity(pending_quantity)
+    assert "Количество: <b>4 шт.</b>" in pending_quantity.message.edits[-1][0]
+    assert "mugs_order:2:4" in callback_data(pending_quantity.message.edits[-1][1]["reply_markup"])
+    photos_before_update = len(sent_photos)
+    update_quantity = FakeCallback("mugs_order:2:4", uid=uid, username="mugbuyer")
+    await tb.cb_mugs_order(update_quantity)
+    assert len(sent_photos) == photos_before_update + len(tb.ADMIN_IDS)
+    assert tb.stats["mug_order_requests"][key]["quantity"] == 4
+    assert tb.stats["mug_order_requests"][key]["price_rub"] == 3396
+    assert tb.stats["mug_order_requests"][key]["quantity_updated_at"]
 
     non_admin = random.randint(10_000_000, 99_999_999)
     denied = FakeCallback(f"admin_mug_confirm:2:{uid}", uid=non_admin)
@@ -185,9 +199,9 @@ async def main():
     assert key not in tb.stats["mug_order_requests"]
     assert len(tb.stats["mug_orders"]) == 1
     assert tb.stats["mug_orders"][0]["model_name"] == "Наследие Академии"
-    assert tb.stats["mug_orders"][0]["quantity"] == 3
-    assert tb.stats["mug_orders"][0]["price_rub"] == 2547
-    assert tb.get_confirmed_mug_order_count() == 3
+    assert tb.stats["mug_orders"][0]["quantity"] == 4
+    assert tb.stats["mug_orders"][0]["price_rub"] == 3396
+    assert tb.get_confirmed_mug_order_count() == 4
     assert "@mugbuyer" in confirm.message.edits[0][0]
     assert any(chat_id == uid and "Оплата заказа подтверждена" in text for chat_id, text, _ in sent)
     assert "Наследие Академии" in tb.get_admin_mug_orders_text() and "@mugbuyer" in tb.get_admin_mug_orders_text()
