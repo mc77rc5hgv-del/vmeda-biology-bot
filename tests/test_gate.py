@@ -40,6 +40,8 @@ EXEMPT_EXAMPLES = [
     "admin_channel_post_prompt", "admin_channel_post_go", "admin_channel_post_cancel",
     "rollcall_menu", "rollcall_group:1", "rollcall_taken", "rollcall_confirm:1:123",
     "admin_announce_rollcall_confirm", "admin_announce_rollcall_go",
+    "mugs_menu", "mugs_model:1", "admin_mug_confirm:1:123", "admin_mug_reject:1:123",
+    "admin_mug_orders:0",
     "admin_histology_promo_confirm", "admin_histology_promo_go",
     "admin_global_promo_confirm", "admin_global_promo_go",
     "anatomy_menu", "anatomy_osteology", "anatomy_topic:skull", "anatomy_bones:skull",

@@ -960,6 +960,18 @@ existing temporary-access expiry so an earlier bonus is never shortened. It live
 `SUBSCRIPTION_TIERS` entry, since it's promotional and unlocks only Biology/Physics/Chemistry (not
 Histology/Anatomy, which check their own subscription-specific flags, not `has_temp_access()`).
 
+### Temporary VMEDA mug preorder
+
+`handlers/mugs.py` owns the public three-model preorder flow and the confirmed-order register.
+`MUG_PREORDER_ENABLED=0` hides the public main-menu entry and closes stale public callbacks without
+deleting any order data; the admin register remains available after shutdown. Selecting a model creates
+one persistent pending snapshot per user/model in `stats["mug_order_requests"]`, sends full/payment admins
+a one-tap confirm/reject card, and renders an `@vmeda_helper` deep link with the model and Telegram ID.
+Only admin confirmation moves that snapshot to the append-only `stats["mug_orders"]` list shown by
+`admin_mug_orders:*`; pending/rejected users never appear there. The feature must never write subscription,
+payment, donation, or access keys. Model titles are placeholders until the user supplies photos, names, and
+prices.
+
 ### VMedA AI (AI-помощник) — pipeline architecture
 
 The `ai/` package is a self-contained pipeline that never imports `telegram_bot` (to avoid a

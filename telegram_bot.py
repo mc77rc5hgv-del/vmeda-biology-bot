@@ -69,6 +69,7 @@ CHANNEL_ID = "@Vmeda_examen"
 ADMIN_IDS = {1326779223, 8601892147}
 STATS_DIR = os.getenv("STATS_DIR", ".")
 STATS_FILE = os.path.join(STATS_DIR, "stats.json")
+MUG_PREORDER_ENABLED = os.environ.get("MUG_PREORDER_ENABLED", "1") != "0"
 
 # Все студенты и админы бота — в России, но контейнер (Railway) по умолчанию работает в UTC,
 # так что "новый день"/"новый месяц" по системному времени наступает на 3 часа позже реального
@@ -227,6 +228,8 @@ def load_stats() -> dict:
             data.setdefault("histology_warnings", {})
             data.setdefault("histology_temp_access", {})
             data.setdefault("rollcall_confirmed", {})
+            data.setdefault("mug_order_requests", {})
+            data.setdefault("mug_orders", [])
             data.setdefault("anatomy_latin_scores", {})
             data.setdefault("anatomy_exam_test_scores", {})
             data.setdefault("anatomy_exam_test_mode", {})
@@ -279,6 +282,8 @@ def load_stats() -> dict:
         "histology_warnings": {},
         "histology_temp_access": {},
         "rollcall_confirmed": {},
+        "mug_order_requests": {},
+        "mug_orders": [],
         "anatomy_latin_scores": {},
         "anatomy_exam_test_scores": {},
         "anatomy_exam_test_mode": {},
@@ -1969,6 +1974,8 @@ def get_main_menu(user_id: int = None):
         text=f"📋 Перекличка ({rollcall_confirmed_count}/{ROLLCALL_GROUP_COUNT})",
         callback_data="rollcall_menu"
     )
+    if MUG_PREORDER_ENABLED:
+        builder.button(text="☕ Кружки VMEDA — предзаказ", callback_data="mugs_menu")
     battle_label = "⚔️ Битва рефералов 🔥" if is_battle_active() else "⚔️ Битва рефералов"
     builder.button(text=battle_label, callback_data="referral_battle")
     if user_id is not None and has_active_subscription(user_id):
@@ -5744,6 +5751,24 @@ cb_dynamic_course = dynamic_course_handlers.cb_dynamic_course
 cb_dynamic_section = dynamic_course_handlers.cb_dynamic_section
 cb_dynamic_lesson = dynamic_course_handlers.cb_dynamic_lesson
 cb_dynamic_ai = dynamic_course_handlers.cb_dynamic_ai
+
+# ==================== КРУЖКИ VMEDA — ВРЕМЕННЫЙ ПРЕДЗАКАЗ ====================
+from handlers import mugs as mugs_handlers  # noqa: E402 — deliberately late
+
+dp.include_router(mugs_handlers.router)
+MUG_MODELS = mugs_handlers.MUG_MODELS
+MUG_SALES_TARGET = mugs_handlers.MUG_SALES_TARGET
+get_confirmed_mug_order_count = mugs_handlers.get_confirmed_mug_order_count
+get_mugs_menu_text = mugs_handlers.get_mugs_menu_text
+get_mugs_menu_keyboard = mugs_handlers.get_mugs_menu_keyboard
+get_mug_order_request_key = mugs_handlers.get_mug_order_request_key
+get_admin_mug_orders_text = mugs_handlers.get_admin_mug_orders_text
+get_admin_mug_orders_keyboard = mugs_handlers.get_admin_mug_orders_keyboard
+cb_mugs_menu = mugs_handlers.cb_mugs_menu
+cb_mugs_model = mugs_handlers.cb_mugs_model
+cb_admin_mug_confirm = mugs_handlers.cb_admin_mug_confirm
+cb_admin_mug_reject = mugs_handlers.cb_admin_mug_reject
+cb_admin_mug_orders = mugs_handlers.cb_admin_mug_orders
 
 get_phys_topic = physiology_handlers.get_phys_topic
 phys_topic_ids_in_order = physiology_handlers.phys_topic_ids_in_order

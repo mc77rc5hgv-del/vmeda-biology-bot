@@ -83,6 +83,11 @@ def get_admin_menu():
     builder.button(text="💰 Записать донат рублями", callback_data="admin_donation_prompt")
     builder.button(text="💎 Выдать подписку по username/ID", callback_data="admin_subscription_prompt")
     builder.button(text="💎👥 Выдать подписку нескольким сразу", callback_data="admin_bulk_subscription_prompt")
+    mug_orders_count = tb.get_confirmed_mug_order_count()
+    builder.button(
+        text=f"☕ Заказы кружек ({mug_orders_count})",
+        callback_data="admin_mug_orders:0",
+    )
     builder.button(text="🎁 Восстановить доступ исчерпавшим (7 дней)", callback_data="admin_restore_access_confirm")
     builder.button(
         text=f"📣 Напомнить о реферале/подписке (<{tb.REFERRAL_FULL_ACCESS_THRESHOLD} реф.)",
@@ -2000,6 +2005,10 @@ def get_payment_admin_menu_text() -> str:
 
 def get_payment_admin_menu_keyboard():
     builder = InlineKeyboardBuilder()
+    builder.button(
+        text=f"☕ Заказы кружек ({tb.get_confirmed_mug_order_count()})",
+        callback_data="admin_mug_orders:0",
+    )
     builder.button(text="📣 Анонсы", callback_data="admin_announcements_menu")
     builder.adjust(1)
     return builder.as_markup()

@@ -99,15 +99,19 @@ async def main():
     assert plain_msg.edits == []
     print("4. /admin routes payment admin to its own panel: OK")
 
-    # ---- 5. the payment-admin panel only offers Анонсы (no full admin-panel actions) ----
+    # ---- 5. the payment-admin panel only offers payment-adjacent actions ----
     cb_panel = FakeCB("payment_admin_panel", uid=payer_id)
     await tb.cb_payment_admin_panel(cb_panel)
     panel_texts = kb_texts(cb_panel.message.edits[-1][1])
-    assert panel_texts == ["📣 Анонсы"]
+    assert panel_texts == ["☕ Заказы кружек (0)", "📣 Анонсы"]
+    cb_mugs = FakeCB("admin_mug_orders:0", uid=payer_id)
+    await tb.cb_admin_mug_orders(cb_mugs)
+    assert cb_mugs.message.edits and "Подтверждённые заказы кружек" in cb_mugs.message.edits[-1][0]
+    assert kb_data(cb_mugs.message.edits[-1][1])[-1] == "payment_admin_panel"
     cb_panel_blocked = FakeCB("payment_admin_panel", uid=non_admin)
     await tb.cb_payment_admin_panel(cb_panel_blocked)
     assert not cb_panel_blocked.message.edits, "non-payment-admin must be blocked"
-    print("5. payment-admin panel exposes exactly one action (Анонсы), blocks non-payment-admins: OK")
+    print("5. payment-admin panel exposes only orders/announcements, blocks non-payment-admins: OK")
 
     # ---- 6. payment admin can reach the Announcements submenu, back button routes to ITS panel ----
     cb_ann = FakeCB("admin_announcements_menu", uid=payer_id)
