@@ -27,6 +27,10 @@ class FakeMessage:
         self.edits.append((text, kwargs))
         return self
 
+    async def edit_caption(self, caption, **kwargs):
+        self.edits.append((caption, kwargs))
+        return self
+
     async def delete(self):
         self.deleted = True
 
@@ -65,9 +69,17 @@ async def main():
     assert "mugs_menu" in callback_data(tb.get_main_menu())
     assert "admin_mug_orders:0" in callback_data(tb.get_admin_menu())
     assert {spec["title"] for spec in tb.MUG_MODELS.values()} == {
-        "Классика ВМедА", "Наследие Академии", "Там, где растут врачи",
+        "Классика ВМедА", "Наследие Академии", "Штаб ВМедА",
     }
+    assert [spec["price_rub"] for spec in tb.MUG_MODELS.values()] == [799, 849, 999]
     assert all(tb.mugs_handlers.get_mug_image_path(model_id).is_file() for model_id in tb.MUG_MODELS)
+    classic_keyboard = tb.mugs_handlers.get_mug_model_keyboard("1", 1326779223, False, False)
+    classic_url = next(button.url for row in classic_keyboard.inline_keyboard for button in row if button.url)
+    classic_text = urllib.parse.parse_qs(urllib.parse.urlparse(classic_url).query)["text"][0]
+    assert classic_text == (
+        "Здравствуйте! Хочу заказать кружку VMEDA — Классика ВМедА. "
+        "Пришлите, пожалуйста, реквизиты для перевода."
+    )
 
     tb.MUG_PREORDER_ENABLED = False
     assert "mugs_menu" not in callback_data(tb.get_main_menu())
@@ -102,21 +114,40 @@ async def main():
     await tb.cb_mugs_model(select)
 
     key = tb.get_mug_order_request_key("2", uid)
-    assert key in tb.stats["mug_order_requests"]
+    assert key not in tb.stats["mug_order_requests"], "viewing a model must not create an order request"
     assert tb.stats["mug_orders"] == [], "pending request must not appear as a confirmed order"
-    assert len([row for row in sent_photos if row[0] in tb.ADMIN_IDS]) == len(tb.ADMIN_IDS)
+    assert not sent_photos, "admins must not be notified when the user only views a model"
     assert "Подтверждённых заказов пока нет" in tb.get_admin_mug_orders_text()
 
     assert select.message.deleted and len(select.message.photos) == 1
     model_keyboard = select.message.photos[0][1]["reply_markup"]
     order_url = next(button.url for row in model_keyboard.inline_keyboard for button in row if button.url)
-    decoded_url = urllib.parse.unquote(order_url)
-    assert "t.me/vmeda_helper" in decoded_url
-    assert "Наследие Академии" in decoded_url and str(uid) in decoded_url
+    parsed_url = urllib.parse.urlparse(order_url)
+    helper_text = urllib.parse.parse_qs(parsed_url.query)["text"][0]
+    assert parsed_url.netloc == "t.me" and parsed_url.path == "/vmeda_helper"
+    assert helper_text == (
+        "Здравствуйте! Хочу заказать кружку VMEDA — Наследие Академии. "
+        "Пришлите, пожалуйста, реквизиты для перевода."
+    )
+    assert str(uid) not in helper_text and "После оплаты" not in helper_text
+    assert "mugs_order:2" in callback_data(model_keyboard)
 
-    # Opening the same model again reuses the pending request instead of spamming admins.
+    # Only the explicit user confirmation creates the request and notifies admins.
+    order_callback = FakeCallback("mugs_order:2", uid=uid, username="mugbuyer")
+    await tb.cb_mugs_order(order_callback)
+    assert key in tb.stats["mug_order_requests"]
+    assert tb.stats["mug_order_requests"][key]["user_confirmed_at"]
+    assert tb.stats["mug_order_requests"][key]["price_rub"] == 849
+    assert len([row for row in sent_photos if row[0] in tb.ADMIN_IDS]) == len(tb.ADMIN_IDS)
+    assert any(
+        "Оплата проверяется" in button.text
+        for row in order_callback.message.edits[-1][1]["reply_markup"].inline_keyboard
+        for button in row
+    )
+
+    # Pressing confirmation again reuses the pending request instead of spamming admins.
     photos_before_repeat = len(sent_photos)
-    await tb.cb_mugs_model(FakeCallback("mugs_model:2", uid=uid, username="mugbuyer"))
+    await tb.cb_mugs_order(FakeCallback("mugs_order:2", uid=uid, username="mugbuyer"))
     assert len(sent_photos) == photos_before_repeat
     assert len(tb.stats["mug_order_requests"]) == 1
 
@@ -147,16 +178,38 @@ async def main():
     reject_select = FakeCallback("mugs_model:3", uid=reject_uid, username="rejectbuyer")
     await tb.cb_mugs_model(reject_select)
     reject_key = tb.get_mug_order_request_key("3", reject_uid)
+    assert reject_key not in tb.stats["mug_order_requests"]
+    await tb.cb_mugs_order(FakeCallback("mugs_order:3", uid=reject_uid, username="rejectbuyer"))
     reject = FakeCallback(f"admin_mug_reject:3:{reject_uid}", uid=ADMIN_ID)
     await tb.cb_admin_mug_reject(reject)
     assert reject_key not in tb.stats["mug_order_requests"]
     assert all(order["user_id"] != reject_uid for order in tb.stats["mug_orders"])
 
+    # Requests created by the old view-on-select flow cannot be approved until the user taps
+    # the new explicit confirmation button.
+    legacy_uid = random.randint(10_000_000, 99_999_999)
+    legacy_key = tb.get_mug_order_request_key("1", legacy_uid)
+    tb.stats["mug_order_requests"][legacy_key] = {
+        "request_key": legacy_key,
+        "model_id": "1",
+        "model_name": "Модель 1",
+        "user_id": legacy_uid,
+        "username": "legacybuyer",
+        "full_name": "Legacy Buyer",
+        "requested_at": 1,
+    }
+    legacy_confirm = FakeCallback(f"admin_mug_confirm:1:{legacy_uid}", uid=ADMIN_ID)
+    await tb.cb_admin_mug_confirm(legacy_confirm)
+    assert legacy_key in tb.stats["mug_order_requests"]
+    assert all(order["user_id"] != legacy_uid for order in tb.stats["mug_orders"])
+    assert legacy_confirm.answers and "ещё не подтвердил" in legacy_confirm.answers[-1][0]
+
     # Announcement: admin gets a three-photo preview; only the explicit second tap broadcasts it.
     announcement_text = tb.get_mug_announcement_text()
     assert "ЛИМИТИРОВАННАЯ КОЛЛЕКЦИЯ" in announcement_text
     assert all(spec["title"] in announcement_text for spec in tb.MUG_MODELS.values())
-    assert "50" in announcement_text
+    assert all(str(spec["price_rub"]) in announcement_text for spec in tb.MUG_MODELS.values())
+    assert "50" in announcement_text and "Подтвердить оплату и заказать" in announcement_text
     preview = FakeCallback("admin_announce_mugs_confirm", uid=ADMIN_ID)
     albums_before_preview = len(sent_albums)
     await tb.cb_admin_announce_mugs_confirm(preview)
