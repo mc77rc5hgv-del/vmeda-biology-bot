@@ -6,12 +6,14 @@ model never makes a user appear in the admin order register; only an admin/payme
 confirmation moves the immutable request snapshot into the confirmed list. Nothing here writes to
 subscriptions, payments, temporary access, or other user-entitlement data.
 """
+import asyncio
 import html
 import time
 import urllib.parse
+from pathlib import Path
 
 from aiogram import F, Router
-from aiogram.types import CallbackQuery, InlineKeyboardButton
+from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton, InputMediaPhoto
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 import telegram_bot as tb
@@ -21,10 +23,68 @@ router = Router()
 MUG_SALES_TARGET = 50
 MUG_ADMIN_PAGE_SIZE = 20
 MUG_MODELS = {
-    "1": "Модель 1",
-    "2": "Модель 2",
-    "3": "Модель 3",
+    "1": {
+        "title": "Классика ВМедА",
+        "image": "images/mugs/vmeda-classic.png",
+        "description": "Герб, надпись «ВМедА · Санкт-Петербург · 1798» и фасад Академии.",
+    },
+    "2": {
+        "title": "Наследие Академии",
+        "image": "images/mugs/academy-heritage.png",
+        "description": "Парадная композиция с гербом, полным названием Академии, историческим фасадом и латинским девизом.",
+    },
+    "3": {
+        "title": "Там, где растут врачи",
+        "image": "images/mugs/where-doctors-grow.png",
+        "description": "Двусторонний дизайн: герб и девиз — с одной стороны, памятник и фасад Академии — с другой.",
+    },
 }
+
+
+def get_mug_model(model_id: str) -> dict:
+    return MUG_MODELS[model_id]
+
+
+def get_mug_model_title(model_id: str) -> str:
+    return get_mug_model(model_id)["title"]
+
+
+def get_mug_image_path(model_id: str) -> Path:
+    return Path(__file__).resolve().parents[1] / get_mug_model(model_id)["image"]
+
+
+def get_mug_photo(model_id: str):
+    return tb.stats.get("mug_file_ids", {}).get(model_id) or FSInputFile(get_mug_image_path(model_id))
+
+
+def cache_mug_photo(model_id: str, sent_message) -> bool:
+    photo_sizes = getattr(sent_message, "photo", None)
+    if not photo_sizes:
+        return False
+    file_id = photo_sizes[-1].file_id
+    if tb.stats["mug_file_ids"].get(model_id) == file_id:
+        return False
+    tb.stats["mug_file_ids"][model_id] = file_id
+    return True
+
+
+def build_mug_album():
+    return [
+        InputMediaPhoto(
+            media=get_mug_photo(model_id),
+            caption=f"<b>{position}/3 · {html.escape(spec['title'])}</b>\n{html.escape(spec['description'])}",
+            parse_mode="HTML",
+        )
+        for position, (model_id, spec) in enumerate(MUG_MODELS.items(), start=1)
+    ]
+
+
+def cache_mug_album(sent_messages) -> None:
+    changed = False
+    for model_id, message in zip(MUG_MODELS, sent_messages or []):
+        changed = cache_mug_photo(model_id, message) or changed
+    if changed:
+        tb.save_stats()
 
 
 def get_mug_order_request_key(model_id: str, user_id: int) -> str:
@@ -46,9 +106,9 @@ def get_mugs_menu_text() -> str:
     confirmed = get_confirmed_mug_order_count()
     return (
         f"☕ <b>Кружки VMEDA — предзаказ</b>\n{tb.DIVIDER}\n\n"
-        "Мы готовим три авторские модели кружек VMEDA. Сейчас можно оставить предзаказ и "
+        "Три авторские модели лимитированной коллекции VMEDA. Сейчас можно оставить предзаказ и "
         "связаться с менеджером для получения реквизитов.\n\n"
-        "📸 Фотографии и 💳 цены добавим позже.\n\n"
+        "Фотография откроется после выбора модели. Стоимость добавим позже.\n\n"
         f"Подтверждено заказов: <b>{confirmed}</b> из <b>{MUG_SALES_TARGET}</b>\n\n"
         "Выбери модель:"
     )
@@ -56,15 +116,16 @@ def get_mugs_menu_text() -> str:
 
 def get_mugs_menu_keyboard():
     builder = InlineKeyboardBuilder()
-    for model_id, title in MUG_MODELS.items():
-        builder.button(text=f"☕ {title}", callback_data=f"mugs_model:{model_id}")
+    for model_id, spec in MUG_MODELS.items():
+        builder.button(text=f"{model_id}. {spec['title']}", callback_data=f"mugs_model:{model_id}")
     builder.adjust(1)
     builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
     return builder.as_markup()
 
 
 def get_mug_model_text(model_id: str, request_exists: bool, already_confirmed: bool) -> str:
-    title = MUG_MODELS[model_id]
+    model = get_mug_model(model_id)
+    title = model["title"]
     if already_confirmed:
         status = "✅ <b>Оплата этого заказа уже подтверждена.</b>"
     elif request_exists:
@@ -76,14 +137,14 @@ def get_mug_model_text(model_id: str, request_exists: bool, already_confirmed: b
         status = "Нажми кнопку ниже, чтобы получить реквизиты у менеджера."
     return (
         f"☕ <b>{title}</b>\n{tb.DIVIDER}\n\n"
-        "📸 Фото модели: <b>скоро</b>\n"
-        "💳 Цена: <b>будет добавлена позже</b>\n\n"
+        f"{html.escape(model['description'])}\n\n"
+        "Стоимость: <b>будет добавлена позже</b>\n\n"
         f"{status}"
     )
 
 
 def get_mug_model_keyboard(model_id: str, user_id: int):
-    title = MUG_MODELS[model_id]
+    title = get_mug_model_title(model_id)
     template = (
         f"Здравствуйте! Хочу заказать кружку VMEDA — {title}. "
         "Пришлите, пожалуйста, реквизиты для перевода. После оплаты отправлю подтверждение. "
@@ -123,7 +184,15 @@ async def notify_mug_order_admins(request: dict) -> None:
     keyboard = get_admin_mug_request_keyboard(str(request["model_id"]), request["user_id"])
     for recipient_id in tb.ADMIN_IDS | set(tb.stats["payment_admins"]):
         try:
-            await tb.bot.send_message(recipient_id, text, parse_mode="HTML", reply_markup=keyboard)
+            sent = await tb.bot.send_photo(
+                recipient_id,
+                get_mug_photo(str(request["model_id"])),
+                caption=text,
+                parse_mode="HTML",
+                reply_markup=keyboard,
+            )
+            if cache_mug_photo(str(request["model_id"]), sent):
+                tb.save_stats()
         except Exception:
             tb.logger.exception("Не удалось уведомить админа %s о заявке на кружку", recipient_id)
 
@@ -145,7 +214,8 @@ def get_admin_mug_orders_text(page: int = 0) -> str:
         lines.append("")
         for offset, order in enumerate(page_orders, start=start + 1):
             label = tb.format_admin_target_label(order.get("username"), order["user_id"])
-            lines.append(f"{offset}. <b>{html.escape(order['model_name'])}</b> — {label}")
+            title = MUG_MODELS.get(str(order.get("model_id")), {}).get("title", order["model_name"])
+            lines.append(f"{offset}. <b>{html.escape(title)}</b> — {label}")
     if max_page:
         lines.append(f"\nСтраница <b>{page + 1}</b> из <b>{max_page + 1}</b>")
     return "\n".join(lines)
@@ -199,7 +269,7 @@ async def cb_mugs_model(callback: CallbackQuery):
         request = {
             "request_key": request_key,
             "model_id": model_id,
-            "model_name": MUG_MODELS[model_id],
+            "model_name": get_mug_model_title(model_id),
             "user_id": user.id,
             "username": user.username,
             "full_name": user.full_name,
@@ -209,13 +279,15 @@ async def cb_mugs_model(callback: CallbackQuery):
         tb.save_stats()
         await notify_mug_order_admins(request)
     await callback.answer("Заявка уже подтверждена" if already_confirmed else "Заявка сохранена ✅")
-    await tb.safe_edit_text(
-        callback.message,
-        get_mug_model_text(model_id, request is not None, already_confirmed),
+    await callback.message.delete()
+    sent = await callback.message.answer_photo(
+        get_mug_photo(model_id),
+        caption=get_mug_model_text(model_id, request is not None, already_confirmed),
         parse_mode="HTML",
         reply_markup=get_mug_model_keyboard(model_id, user.id),
-        disable_web_page_preview=True,
     )
+    if cache_mug_photo(model_id, sent):
+        tb.save_stats()
 
 
 def _parse_admin_order_callback(callback_data: str):
@@ -237,7 +309,7 @@ async def cb_admin_mug_confirm(callback: CallbackQuery):
             await tb.safe_edit_text(
                 callback.message,
                 f"✅ Заказ уже подтверждён — {tb.get_known_admin_target_label(user_id)}, "
-                f"{html.escape(MUG_MODELS.get(model_id, 'модель не найдена'))}.",
+                f"{html.escape(MUG_MODELS.get(model_id, {}).get('title', 'модель не найдена'))}.",
                 parse_mode="HTML",
             )
         else:
@@ -245,6 +317,7 @@ async def cb_admin_mug_confirm(callback: CallbackQuery):
         return
 
     order = dict(request)
+    order["model_name"] = get_mug_model_title(model_id)
     order["confirmed_at"] = time.time()
     order["confirmed_by"] = callback.from_user.id
     tb.stats["mug_orders"].append(order)
@@ -304,4 +377,102 @@ async def cb_admin_mug_orders(callback: CallbackQuery):
         get_admin_mug_orders_text(page),
         parse_mode="HTML",
         reply_markup=get_admin_mug_orders_keyboard(page, back_callback),
+    )
+
+
+def get_mug_announcement_text() -> str:
+    confirmed = get_confirmed_mug_order_count()
+    return (
+        f"☕ <b>ЛИМИТИРОВАННАЯ КОЛЛЕКЦИЯ VMEDA</b>\n{tb.DIVIDER}\n\n"
+        "Три авторских дизайна, в которых узнаётся Академия: её герб, история, фасад и слова, "
+        "понятные каждому, кто здесь учится.\n\n"
+        "<b>1 · Классика ВМедА</b> — лаконичный герб и фасад Академии.\n"
+        "<b>2 · Наследие Академии</b> — парадная историческая композиция.\n"
+        "<b>3 · Там, где растут врачи</b> — двусторонний дизайн с символами ВМедА.\n\n"
+        "Это ограниченный первый выпуск. Для запуска партии нужно минимум <b>50 подтверждённых "
+        f"заказов</b>; уже подтверждено: <b>{confirmed}</b>.\n\n"
+        "Выбери свой дизайн в боте и оставь предзаказ. Фотографии уже доступны в карточках "
+        "моделей; стоимость будет добавлена отдельно."
+    )
+
+
+def get_mug_announcement_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="Посмотреть коллекцию", callback_data="mugs_menu")
+    return builder.as_markup()
+
+
+def get_admin_mug_announcement_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Отправить всем", callback_data="admin_announce_mugs_go")
+    builder.button(text="❌ Отмена", callback_data="admin_announcements_menu")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+async def send_mug_album_to_chat(chat_id: int) -> None:
+    sent_messages = await tb.bot.send_media_group(chat_id, media=build_mug_album())
+    cache_mug_album(sent_messages)
+
+
+async def broadcast_mug_announcement() -> tuple[int, int]:
+    sent_count = 0
+    failed_count = 0
+    text = get_mug_announcement_text()
+    keyboard = get_mug_announcement_keyboard()
+    for user_id in list(tb.stats["total_users"]):
+        try:
+            await send_mug_album_to_chat(user_id)
+            await tb.bot.send_message(
+                user_id,
+                text,
+                parse_mode="HTML",
+                reply_markup=keyboard,
+                disable_web_page_preview=True,
+            )
+            sent_count += 1
+        except Exception:
+            failed_count += 1
+            tb.logger.exception("Не удалось отправить анонс кружек пользователю %s", user_id)
+        await asyncio.sleep(0.05)
+    return sent_count, failed_count
+
+
+@router.callback_query(F.data == "admin_announce_mugs_confirm")
+async def cb_admin_announce_mugs_confirm(callback: CallbackQuery):
+    if not (tb.is_admin(callback.from_user.id) or tb.is_payment_admin(callback.from_user.id)):
+        await callback.answer()
+        return
+    await callback.answer()
+    try:
+        sent_messages = await callback.message.answer_media_group(media=build_mug_album())
+        cache_mug_album(sent_messages)
+    except Exception:
+        tb.logger.exception("Не удалось показать альбом кружек в предпросмотре анонса")
+    await tb.safe_edit_text(
+        callback.message,
+        f"👀 <b>Предпросмотр анонса</b>\n{tb.DIVIDER}\n\n"
+        f"{get_mug_announcement_text()}\n\n{tb.DIVIDER}\n"
+        f"Отправить этот альбом и текст всем {len(tb.stats['total_users'])} пользователям?",
+        parse_mode="HTML",
+        reply_markup=get_admin_mug_announcement_keyboard(),
+    )
+
+
+@router.callback_query(F.data == "admin_announce_mugs_go")
+async def cb_admin_announce_mugs_go(callback: CallbackQuery):
+    if not (tb.is_admin(callback.from_user.id) or tb.is_payment_admin(callback.from_user.id)):
+        await callback.answer()
+        return
+    await callback.answer("Рассылка запущена", show_alert=True)
+    tb.stats["broadcast_count"] = tb.stats.get("broadcast_count", 0) + 1
+    tb.save_stats()
+    sent_count, failed_count = await broadcast_mug_announcement()
+    back_callback = "admin_panel" if tb.is_admin(callback.from_user.id) else "payment_admin_panel"
+    await tb.safe_edit_text(
+        callback.message,
+        f"✅ <b>Анонс коллекции отправлен</b>\n{tb.DIVIDER}\n\n"
+        f"Доставлено: <b>{sent_count}</b>\nНе доставлено: <b>{failed_count}</b>",
+        parse_mode="HTML",
+        reply_markup=tb.get_admin_announcements_keyboard(back_callback),
     )

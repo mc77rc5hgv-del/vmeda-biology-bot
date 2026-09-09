@@ -230,6 +230,7 @@ def load_stats() -> dict:
             data.setdefault("rollcall_confirmed", {})
             data.setdefault("mug_order_requests", {})
             data.setdefault("mug_orders", [])
+            data.setdefault("mug_file_ids", {})
             data.setdefault("anatomy_latin_scores", {})
             data.setdefault("anatomy_exam_test_scores", {})
             data.setdefault("anatomy_exam_test_mode", {})
@@ -284,6 +285,7 @@ def load_stats() -> dict:
         "rollcall_confirmed": {},
         "mug_order_requests": {},
         "mug_orders": [],
+        "mug_file_ids": {},
         "anatomy_latin_scores": {},
         "anatomy_exam_test_scores": {},
         "anatomy_exam_test_mode": {},
@@ -5769,6 +5771,10 @@ cb_mugs_model = mugs_handlers.cb_mugs_model
 cb_admin_mug_confirm = mugs_handlers.cb_admin_mug_confirm
 cb_admin_mug_reject = mugs_handlers.cb_admin_mug_reject
 cb_admin_mug_orders = mugs_handlers.cb_admin_mug_orders
+get_mug_announcement_text = mugs_handlers.get_mug_announcement_text
+get_mug_announcement_keyboard = mugs_handlers.get_mug_announcement_keyboard
+cb_admin_announce_mugs_confirm = mugs_handlers.cb_admin_announce_mugs_confirm
+cb_admin_announce_mugs_go = mugs_handlers.cb_admin_announce_mugs_go
 
 get_phys_topic = physiology_handlers.get_phys_topic
 phys_topic_ids_in_order = physiology_handlers.phys_topic_ids_in_order
