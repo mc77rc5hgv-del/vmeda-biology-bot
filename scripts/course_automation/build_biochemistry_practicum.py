@@ -12,6 +12,7 @@ import html
 import json
 import re
 from collections import Counter
+from copy import deepcopy
 from pathlib import Path
 
 from docx import Document
@@ -125,6 +126,80 @@ def make_lessons(prefix: str, title: str, records: list[dict], heading_index: in
             "sources": [locator(lesson_records, heading_index)],
         })
     return lessons
+
+
+def lesson_pages(lesson: dict) -> list[str]:
+    return lesson.get("content_pages") or [lesson["content"]]
+
+
+def pack_lesson_pages(lessons: list[dict]) -> list[str]:
+    """Pack complete lesson fragments into Telegram-safe pages without rewriting them."""
+    pages: list[str] = []
+    current: list[str] = []
+    current_length = 0
+    for lesson in lessons:
+        for content in lesson_pages(lesson):
+            addition = len(content) + (2 if current else 0)
+            if current and current_length + addition > MAX_CONTENT:
+                pages.append("\n\n".join(current))
+                current = []
+                current_length = 0
+            current.append(content)
+            current_length += len(content) + (2 if len(current) > 1 else 0)
+    if current:
+        pages.append("\n\n".join(current))
+    return pages
+
+
+def merged_sources(lessons: list[dict]) -> list[str]:
+    return list(dict.fromkeys(source for lesson in lessons for source in lesson.get("sources", [])))
+
+
+def compact_group_navigation(group: dict) -> dict:
+    """Remove heading-only stops and merge every admission-control bank into one item.
+
+    Heading text is folded into the first real child, so the source remains complete.  Long
+    controls are exposed as one menu item with internal Telegram-safe content pages.
+    """
+    lessons = group["lessons"]
+    compacted: list[dict] = []
+    position = 0
+    while position < len(lessons):
+        marker = lessons[position]
+        prefix = f"{marker['title']} · "
+        child_end = position + 1
+        while child_end < len(lessons) and lessons[child_end]["title"].startswith(prefix):
+            child_end += 1
+        children = lessons[position + 1:child_end]
+        if not children:
+            compacted.append(marker)
+            position += 1
+            continue
+
+        if marker["title"] == "Контроль к допуску":
+            pages = pack_lesson_pages([marker, *children])
+            merged = {
+                "id": marker["id"],
+                "title": f"Контроль к допуску · {len(children)} вопросов",
+                "content": pages[0],
+                "content_pages": pages,
+                "sources": merged_sources([marker, *children]),
+                "question_count": len(children),
+            }
+            compacted.append(merged)
+        else:
+            # A Heading 2 card such as "Ходы определения" is not useful as a separate stop.
+            # Preserve its complete text by folding it into the first substantive child.
+            first_child = deepcopy(children[0])
+            pages = pack_lesson_pages([marker, first_child])
+            first_child["content"] = pages[0]
+            if len(pages) > 1:
+                first_child["content_pages"] = pages
+            first_child["sources"] = merged_sources([marker, first_child])
+            compacted.extend([first_child, *children[1:]])
+        position = child_end
+
+    return {**group, "lessons": compacted}
 
 
 def paragraph_records(document: Document) -> list[dict]:
@@ -262,7 +337,7 @@ def main() -> None:
         heading = records[start_position]
         body = records[start_position + 1:end_position]
         group, group_mapping = records_to_group(block_number, heading, body)
-        groups[block_number] = group
+        groups[block_number] = compact_group_navigation(group)
         mapped.update(group_mapping)
 
     course = {
@@ -297,10 +372,11 @@ def main() -> None:
     }
 
     rendered_plain = clean_text("\n".join(
-        html.unescape(re.sub(r"<[^>]+>", "", lesson["content"]))
+        html.unescape(re.sub(r"<[^>]+>", "", page))
         for section in course["sections"]
         for group in section["groups"]
         for lesson in group["lessons"]
+        for page in lesson_pages(lesson)
     ))
     missing_verbatim = [record["index"] for record in records if clean_text(record["text"]) not in rendered_plain]
     if missing_verbatim:

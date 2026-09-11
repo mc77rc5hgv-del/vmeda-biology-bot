@@ -45,9 +45,19 @@ async def main():
         for group in section["groups"]
         for lesson in group["lessons"]
     ]
-    assert len(lessons) == report["lesson_count"] >= 400
+    assert len(lessons) == report["lesson_count"] >= 280
     assert all(len(lesson["content"]) <= 3500 for lesson in lessons)
+    assert all(
+        len(page) <= 3500
+        for lesson in lessons
+        for page in lesson.get("content_pages", [lesson["content"]])
+    )
     assert len({lesson["id"] for lesson in lessons}) == len(lessons)
+    assert not any(lesson["title"] in {"Ходы определения", "Контроль к допуску"} for lesson in lessons)
+    controls = [lesson for lesson in lessons if lesson.get("question_count")]
+    assert len(controls) == 13
+    assert sum(lesson["question_count"] for lesson in controls) == 107
+    assert all(lesson["title"].endswith(f"{lesson['question_count']} вопросов") for lesson in controls)
     assert report["source_exclusive"] is True
     assert report["practical_class_count"] == 19
     assert report["source_nonempty_paragraphs"] == report["mapped_nonempty_paragraphs"] == 2120
@@ -62,7 +72,9 @@ async def main():
     # Every non-empty DOCX paragraph survives verbatim after harmless whitespace normalization.
     # Titles shortened for Telegram buttons remain complete inside lesson content.
     rendered = _norm("\n".join(
-        html.unescape(re.sub(r"<[^>]+>", "", lesson["content"])) for lesson in lessons
+        html.unescape(re.sub(r"<[^>]+>", "", page))
+        for lesson in lessons
+        for page in lesson.get("content_pages", [lesson["content"]])
     ))
     source_paragraphs = [_norm(p.text) for p in Document(source_path).paragraphs if p.text.strip()]
     assert len(source_paragraphs) == 2120
@@ -108,10 +120,16 @@ async def main():
     assert class_1_labels[:4] == [
         "Обзор занятия",
         "Допуск к занятию",
-        "Лабораторные определения",
         "Опыт · Биуретовая реакция",
+        "Опыт · Нингидриновая реакция",
     ]
     assert all(not label.startswith("Ходы определения ·") for label in class_1_labels)
+    class_1_second_page = tb.dynamic_course_handlers.get_dynamic_group_keyboard(course_index, 1, 0, 1)
+    assert any(
+        button.text == "Контроль · 6 вопросов"
+        for row in class_1_second_page.inline_keyboard
+        for button in row
+    )
     first_lesson_callbacks = [
         button.callback_data
         for row in tb.dynamic_course_handlers.get_dynamic_group_lesson_keyboard(course_index, 3, 3, 0).inline_keyboard
@@ -121,8 +139,24 @@ async def main():
     assert f"dyn_gl:{course_index}:3:3:1" in first_lesson_callbacks
     assert f"dyn_gl:{course_index}:3:3:-1" not in first_lesson_callbacks
 
+    class_17 = groups["class_17"]
+    control_index = next(i for i, lesson in enumerate(class_17["lessons"]) if lesson.get("question_count"))
+    assert len(class_17["lessons"][control_index]["content_pages"]) > 1
+    control_keyboard = tb.dynamic_course_handlers.get_dynamic_group_lesson_keyboard(
+        course_index, 4, 2, control_index, 0,
+    )
+    control_callbacks = [
+        button.callback_data
+        for row in control_keyboard.inline_keyboard
+        for button in row
+        if button.callback_data
+    ]
+    assert "noop" in control_callbacks
+    assert f"dyn_glp:{course_index}:4:2:{control_index}:1" in control_callbacks
+    assert all(len(row) <= 4 for row in control_keyboard.inline_keyboard)
+
     entries = knowledge["entries"]
-    assert knowledge["visibility"] == "ai_only" and len(entries) >= 500
+    assert knowledge["visibility"] == "ai_only" and len(entries) >= 450
     assert knowledge["quality"]["source_exclusive"] is True
     assert all(entry["subject"] == "биохимия" for entry in entries)
     assert len([entry for entry in tb.ai_rag._index if entry["subject"] == "биохимия"]) == len(entries)

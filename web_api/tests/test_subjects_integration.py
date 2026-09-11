@@ -62,7 +62,7 @@ def test_biochemistry_subject_detail_has_real_sections():
     section_ids = {s["id"] for s in body["sections"]}
     assert section_ids == {"guide", "foundations", "metabolism", "regulation", "clinical", "reference"}
     assert all(section["kind"] == "grouped" for section in body["sections"])
-    assert sum(section["item_count"] for section in body["sections"]) >= 400
+    assert sum(section["item_count"] for section in body["sections"]) >= 280
 
 
 def test_biochemistry_guide_and_material_round_trip():
@@ -110,6 +110,22 @@ def test_biochemistry_practical_class_and_material_round_trip():
     assert "Белки — высокомолекулярные" in material["content_html"]
     assert material["group_id"] == "class_1"
     assert material["next_id"] == group["items"][1]["id"]
+
+
+def test_biochemistry_control_is_one_complete_material_in_mini_app():
+    headers = _auth_headers()
+    group = client.get(
+        "/api/v1/subjects/biochemistry/sections/clinical/groups/class_17", headers=headers
+    ).json()
+    controls = [item for item in group["items"] if item["title"].startswith("Контроль к допуску ·")]
+    assert len(controls) == 1
+    assert controls[0]["title"] == "Контроль к допуску · 15 вопросов"
+
+    material = client.get(
+        f"/api/v1/materials/biochemistry/clinical/{controls[0]['id']}", headers=headers
+    ).json()
+    assert material["content_html"].count("Контроль к допуску · Вопрос") == 15
+    assert len(material["content_html"]) > 20_000
 
 
 def test_pharmacology_grouped_section_and_material_round_trip():

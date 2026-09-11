@@ -123,6 +123,22 @@ def validate_course(course: dict) -> list[str]:
                 errors.append(f"{lp}.content exceeds 3500 characters; split it into smaller lessons")
             if isinstance(lesson.get("content"), str):
                 errors.extend(f"{lp}.content: {error}" for error in validate_telegram_html(lesson["content"]))
+            content_pages = lesson.get("content_pages")
+            if content_pages is not None:
+                if not isinstance(content_pages, list) or not content_pages or not all(
+                    isinstance(page, str) and page.strip() for page in content_pages
+                ):
+                    errors.append(f"{lp}.content_pages must be a non-empty array of strings")
+                else:
+                    if lesson.get("content") != content_pages[0]:
+                        errors.append(f"{lp}.content must equal the first content page")
+                    for page_index, page in enumerate(content_pages):
+                        if len(page) > 3500:
+                            errors.append(f"{lp}.content_pages[{page_index}] exceeds 3500 characters")
+                        errors.extend(
+                            f"{lp}.content_pages[{page_index}]: {error}"
+                            for error in validate_telegram_html(page)
+                        )
             sources = lesson.get("sources", [])
             if not isinstance(sources, list) or not all(isinstance(item, str) for item in sources):
                 errors.append(f"{lp}.sources must be an array of strings")

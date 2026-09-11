@@ -147,9 +147,36 @@ def get_dynamic_group_keyboard(course_index: int, section_index: int, group_inde
     return builder.as_markup()
 
 
-def get_dynamic_group_lesson_keyboard(course_index: int, section_index: int, group_index: int, lesson_index: int):
+def get_dynamic_group_lesson_keyboard(
+    course_index: int,
+    section_index: int,
+    group_index: int,
+    lesson_index: int,
+    content_page: int = 0,
+):
     lessons = tb.DYNAMIC_COURSES[course_index]["sections"][section_index]["groups"][group_index]["lessons"]
     builder = InlineKeyboardBuilder()
+    pages = lessons[lesson_index].get("content_pages") or [lessons[lesson_index]["content"]]
+    if len(pages) > 1:
+        page_buttons = [
+            InlineKeyboardButton(
+                text=f"• {page_number + 1} •" if page_number == content_page else str(page_number + 1),
+                callback_data=(
+                    "noop" if page_number == content_page
+                    else f"dyn_glp:{course_index}:{section_index}:{group_index}:{lesson_index}:{page_number}"
+                ),
+            )
+            for page_number in range(len(pages))
+        ]
+        for start in range(0, len(page_buttons), 4):
+            builder.row(*page_buttons[start:start + 4])
+        page = lesson_index // _lessons_per_page(course_index)
+        builder.row(InlineKeyboardButton(
+            text="🔙 К темам",
+            callback_data=f"dyn_g:{course_index}:{section_index}:{group_index}:{page}",
+        ))
+        return builder.as_markup()
+
     nav = []
     if lesson_index > 0:
         nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"dyn_gl:{course_index}:{section_index}:{group_index}:{lesson_index - 1}"))
@@ -160,6 +187,15 @@ def get_dynamic_group_lesson_keyboard(course_index: int, section_index: int, gro
     page = lesson_index // _lessons_per_page(course_index)
     builder.row(InlineKeyboardButton(text="🔙 К темам", callback_data=f"dyn_g:{course_index}:{section_index}:{group_index}:{page}"))
     return builder.as_markup()
+
+
+def _group_lesson_message(lesson: dict, content_page: int = 0) -> str:
+    pages = lesson.get("content_pages") or [lesson["content"]]
+    page_suffix = f" · страница {content_page + 1}/{len(pages)}" if len(pages) > 1 else ""
+    return (
+        f"📖 <b>{html.escape(lesson['title'])}{page_suffix}</b>\n"
+        f"{tb.DIVIDER}\n\n{pages[content_page]}"
+    )
 
 
 def get_dynamic_lesson_keyboard(course_index: int, section_index: int, lesson_index: int):
@@ -281,13 +317,45 @@ async def cb_dynamic_group_lesson(callback: CallbackQuery):
     if await deny_maintenance_course(callback, course_index):
         return
     await callback.answer()
-    await tb.safe_edit_text(callback.message, f"📖 <b>{html.escape(lesson['title'])}</b>\n{tb.DIVIDER}\n\n{lesson['content']}", parse_mode="HTML", reply_markup=get_dynamic_group_lesson_keyboard(course_index, section_index, group_index, lesson_index))
+    await tb.safe_edit_text(
+        callback.message,
+        _group_lesson_message(lesson),
+        parse_mode="HTML",
+        reply_markup=get_dynamic_group_lesson_keyboard(
+            course_index, section_index, group_index, lesson_index,
+        ),
+    )
     for media in lesson.get("media", []):
         media_path = Path(media["path"])
         if not media_path.is_absolute():
             media_path = Path(__file__).resolve().parents[1] / media_path
         if media_path.is_file():
             await callback.message.answer_photo(FSInputFile(media_path), caption=html.escape(media.get("caption", "")), parse_mode="HTML")
+
+
+@router.callback_query(F.data.startswith("dyn_glp:"))
+async def cb_dynamic_group_lesson_page(callback: CallbackQuery):
+    try:
+        _, c, s, g, l, p = callback.data.split(":")
+        course_index, section_index, group_index, lesson_index, content_page = map(int, (c, s, g, l, p))
+        lesson = tb.DYNAMIC_COURSES[course_index]["sections"][section_index]["groups"][group_index]["lessons"][lesson_index]
+        pages = lesson.get("content_pages") or [lesson["content"]]
+        if content_page < 0 or content_page >= len(pages):
+            raise IndexError
+    except (ValueError, IndexError, KeyError, TypeError):
+        await callback.answer("Страница не найдена", show_alert=True)
+        return
+    if await deny_maintenance_course(callback, course_index):
+        return
+    await callback.answer()
+    await tb.safe_edit_text(
+        callback.message,
+        _group_lesson_message(lesson, content_page),
+        parse_mode="HTML",
+        reply_markup=get_dynamic_group_lesson_keyboard(
+            course_index, section_index, group_index, lesson_index, content_page,
+        ),
+    )
 
 
 @router.callback_query(F.data.startswith("dyn_l:"))

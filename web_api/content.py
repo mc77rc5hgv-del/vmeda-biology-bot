@@ -123,7 +123,9 @@ def _lesson_to_material(
     return {
         "id": lesson["id"],
         "title": lesson["title"],
-        "content_html": lesson["content"],
+        # Telegram opens long consolidated controls page-by-page.  The Mini App has no message
+        # size limit, so it renders the same source-faithful pages as one continuous material.
+        "content_html": "\n\n".join(lesson.get("content_pages") or [lesson["content"]]),
         "sources": lesson.get("sources", []) if show_sources else [],
         "order": order,
         "total": total,

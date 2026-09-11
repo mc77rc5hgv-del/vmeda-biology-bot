@@ -39,7 +39,7 @@ def main() -> None:
         groups = section.get("groups") or [{"id": None, "title": section["title"], "lessons": section.get("lessons", [])}]
         for group in groups:
             for item in group["lessons"]:
-                text = clean_html(item["content"])
+                text = clean_html("\n\n".join(item.get("content_pages") or [item["content"]]))
                 if len(text) < 20:
                     continue
                 for part, fragment in enumerate(chunks(text), 1):
