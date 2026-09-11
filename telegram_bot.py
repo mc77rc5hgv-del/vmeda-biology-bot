@@ -165,8 +165,9 @@ def load_dynamic_courses() -> list[dict]:
 
 DYNAMIC_COURSES = load_dynamic_courses()
 
-# Биохимия и Фармакология временно полностью закрыты на период переработки материалов.
-DYNAMIC_COURSE_MAINTENANCE_IDS = frozenset({"biochemistry", "pharmacology"})
+# Фармакология остаётся закрыта до завершения отдельной переработки. Биохимия прошла повторную
+# проверку полноты по новому практикуму и снова доступна пользователям.
+DYNAMIC_COURSE_MAINTENANCE_IDS = frozenset({"pharmacology"})
 
 
 def dynamic_course_under_maintenance(course_or_id) -> bool:

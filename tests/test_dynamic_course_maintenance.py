@@ -32,11 +32,17 @@ def button_texts(markup):
 
 
 async def main():
-    maintenance = {"biochemistry", "pharmacology"}
+    maintenance = {"pharmacology"}
     assert tb.DYNAMIC_COURSE_MAINTENANCE_IDS == maintenance
     menu_text = button_texts(tb.get_course_menu_keyboard(2, 777))
-    assert any("Биохимия — техобслуживание" in text for text in menu_text)
+    assert any(text == "🧬 Биохимия" for text in menu_text)
     assert any("Фармакология — техобслуживание" in text for text in menu_text)
+
+    biochemistry_index = next(i for i, course in enumerate(tb.DYNAMIC_COURSES) if course["id"] == "biochemistry")
+    biochemistry = FakeCallback(f"dyn_c:{biochemistry_index}")
+    await tb.cb_dynamic_course(biochemistry)
+    assert biochemistry.answers[-1][1].get("show_alert") is not True
+    assert "Полный практикум ВМедА" in biochemistry.message.edits[-1][0]
 
     for course_id in maintenance:
         index = next(i for i, course in enumerate(tb.DYNAMIC_COURSES) if course["id"] == course_id)

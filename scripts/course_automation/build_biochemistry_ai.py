@@ -10,12 +10,6 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 COURSE = REPO / "generated_courses" / "biochemistry.json"
 OUTPUT = REPO / "generated_knowledge" / "biochemistry_ai.json"
-INCLUDED = {
-    "introduction", "core_course", "complete_notes", "practicum", "control_1",
-    "control_2", "control_2_boundary", "control_3", "credit", "exam_tickets",
-}
-
-
 def clean_html(value: str) -> str:
     value = re.sub(r"<[^>]+>", "", value)
     return re.sub(r"\n{3,}", "\n\n", html.unescape(value)).strip()
@@ -42,31 +36,35 @@ def main() -> None:
     course = json.loads(COURSE.read_text(encoding="utf-8"))
     entries, seen = [], set()
     for section in course["sections"]:
-        if section["id"] not in INCLUDED:
-            continue
-        for item in section["lessons"]:
-            text = clean_html(item["content"])
-            if len(text) < 80:
-                continue
-            for part, fragment in enumerate(chunks(text), 1):
-                fingerprint = re.sub(r"\W+", "", fragment).casefold()
-                if fingerprint in seen:
+        groups = section.get("groups") or [{"id": None, "title": section["title"], "lessons": section.get("lessons", [])}]
+        for group in groups:
+            for item in group["lessons"]:
+                text = clean_html(item["content"])
+                if len(text) < 20:
                     continue
-                seen.add(fingerprint)
-                source = item.get("sources", ["Биохимия"])[0]
-                entries.append({
-                    "subject": "биохимия",
-                    "title": f"{section['title']}: {item['title']}, фрагмент {part}",
-                    "text": fragment,
-                    "source": source.split(",")[0],
-                    "locator": source.partition(",")[2].strip() or "раздел курса",
-                    "method": "verified_course_text",
-                })
-    if len(entries) < 300:
+                for part, fragment in enumerate(chunks(text), 1):
+                    fingerprint = re.sub(r"\W+", "", fragment).casefold()
+                    if fingerprint in seen:
+                        continue
+                    seen.add(fingerprint)
+                    source = item.get("sources", ["Практикум по биохимии ВМедА"])[0]
+                    entries.append({
+                        "subject": "биохимия",
+                        "title": f"{group['title']}: {item['title']}, фрагмент {part}",
+                        "text": fragment,
+                        "source": source.split(",")[0],
+                        "locator": source.partition(",")[2].strip() or "раздел практикума",
+                        "method": "verified_course_text",
+                    })
+    if len(entries) < 400:
         raise RuntimeError(f"Biochemistry corpus unexpectedly small: {len(entries)}")
     OUTPUT.write_text(json.dumps({
         "subject": "biochemistry", "visibility": "ai_only", "entries": entries,
-        "quality": {"deduplicated": True, "assessment_without_answers_excluded": True},
+        "quality": {
+            "deduplicated": True,
+            "source_exclusive": True,
+            "all_course_sections_included": True,
+        },
     }, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps({"entries": len(entries), "characters": sum(len(e["text"]) for e in entries)}, ensure_ascii=False))
 

@@ -98,6 +98,19 @@ course screens render the identical label for the same user without duplicating 
 one menu should follow this same shared-label-function pattern rather than recomputing its label inline at each
 call site.
 
+### Biochemistry: approved single-source practicum
+
+`course_sources/biochemistry/Biokhimia_VMedA_praktikum_zanyatia.docx` is the only source of
+student-facing Biochemistry content. `scripts/course_automation/build_biochemistry_practicum.py` preserves every
+non-empty DOCX paragraph and generates `generated_courses/biochemistry.json` as six compact top-level blocks,
+23 groups (guide, all 19 classes, appendix, sources), and paginated lesson cards. It never summarizes or rewrites
+medical text; navigation labels may be shortened to Telegram's practical size, but their complete headings remain
+inside lesson content. `generated_reports/biochemistry/` stores the source manifest, extraction report, and a
+100%-coverage gate. The compatibility entry point `build_biochemistry.py` delegates to this builder, so the former
+15-source exam/credit/test build cannot accidentally restore obsolete content. After rebuilding the course, run
+`build_biochemistry_ai.py` to replace the Biochemistry VMedA AI corpus from the same exclusive source.
+Biochemistry is intentionally absent from `DYNAMIC_COURSE_MAINTENANCE_IDS`; Pharmacology remains closed.
+
 ### Content data model
 
 Each subject has its own top-level JSON loaded once at import (`TICKETS`, `QUESTIONS`, `PHYSICS_QUESTIONS`,

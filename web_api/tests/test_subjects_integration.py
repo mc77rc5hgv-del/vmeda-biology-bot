@@ -54,61 +54,62 @@ def test_list_subjects_requires_auth():
 
 
 def test_biochemistry_subject_detail_has_real_sections():
-    """Биохимия v2 (см. commit message) -- раздел сведён только к экзамену/зачёту/тестам,
-    убраны неструктурированные конспект/практикум/введение (были источником "сдвинутого"
-    текста с потерей пробелов между словами, реальная жалоба пользователя)."""
+    """The approved practicum is exposed as six grouped navigation blocks."""
     resp = client.get("/api/v1/subjects/biochemistry", headers=_auth_headers())
     assert resp.status_code == 200
     body = resp.json()
     assert body["title"] == "Биохимия"
     section_ids = {s["id"] for s in body["sections"]}
-    assert section_ids == {"exam", "credit", "tests_and_controls"}
-    credit = next(s for s in body["sections"] if s["id"] == "credit")
-    assert credit["kind"] == "flat"
-    assert credit["item_count"] == 109  # см. отчёт аудита
-    exam = next(s for s in body["sections"] if s["id"] == "exam")
-    assert exam["kind"] == "grouped"
+    assert section_ids == {"guide", "foundations", "metabolism", "regulation", "clinical", "reference"}
+    assert all(section["kind"] == "grouped" for section in body["sections"])
+    assert sum(section["item_count"] for section in body["sections"]) >= 400
 
 
-def test_biochemistry_flat_section_and_material_round_trip():
+def test_biochemistry_guide_and_material_round_trip():
     headers = _auth_headers()
-    section = client.get("/api/v1/subjects/biochemistry/sections/credit", headers=headers).json()
-    assert section["kind"] == "flat"
-    first_item = section["items"][0]
-    assert first_item["id"] == "credit_p1_1"
-    assert first_item["order"] == 1
-    assert first_item["title"] == "Стр. 1"  # короткая метка списка, не всё содержимое урока
-
-    material = client.get(
-        f"/api/v1/materials/biochemistry/credit/{first_item['id']}", headers=headers
-    ).json()
-    assert material["title"] == first_item["title"]
-    assert "Аминокислотный состав белковой молекулы" in material["content_html"]  # реальный текст источника
-    assert material["sources"] == ["c_биохимия зачет все вопросы.pdf, стр. 1"]
-    assert material["group_id"] is None
-    assert material["prev_id"] is None  # первый урок раздела
-    assert material["next_id"] == section["items"][1]["id"]
-
-
-def test_biochemistry_grouped_exam_section_and_material_round_trip():
-    headers = _auth_headers()
-    section = client.get("/api/v1/subjects/biochemistry/sections/exam", headers=headers).json()
+    section = client.get("/api/v1/subjects/biochemistry/sections/guide", headers=headers).json()
     assert section["kind"] == "grouped"
-    group_ids = {g["id"] for g in section["groups"]}
-    assert group_ids == {"exam_tickets", "exam_questions", "exam_practical"}
-
+    assert {group["id"] for group in section["groups"]} == {"about", "contents"}
     group = client.get(
-        "/api/v1/subjects/biochemistry/sections/exam/groups/exam_tickets", headers=headers
+        "/api/v1/subjects/biochemistry/sections/guide/groups/about", headers=headers
     ).json()
     first_item = group["items"][0]
-    assert first_item["id"] == "exam_ticket_1_1"
-    assert first_item["title"] == "Билет 1"  # короткая метка, не дублирует содержимое билета
+    assert first_item["id"] == "guide_about_p1"
+    assert first_item["order"] == 1
+    assert first_item["title"] == "О практикуме и как с ним работать"
 
     material = client.get(
-        f"/api/v1/materials/biochemistry/exam/{first_item['id']}", headers=headers
+        f"/api/v1/materials/biochemistry/guide/{first_item['id']}", headers=headers
     ).json()
     assert material["title"] == first_item["title"]
-    assert material["group_id"] == "exam_tickets"
+    assert "ВОЕННО-МЕДИЦИНСКАЯ АКАДЕМИЯ" in material["content_html"]
+    assert "все 19 занятий" in material["content_html"]
+    assert material["sources"] == []  # source locators are retained internally but hidden in student UI
+    assert material["group_id"] == "about"
+    assert material["prev_id"] is None and material["next_id"] is None
+
+
+def test_biochemistry_practical_class_and_material_round_trip():
+    headers = _auth_headers()
+    section = client.get("/api/v1/subjects/biochemistry/sections/foundations", headers=headers).json()
+    assert section["kind"] == "grouped"
+    group_ids = {g["id"] for g in section["groups"]}
+    assert group_ids == {f"class_{number}" for number in range(1, 7)}
+
+    group = client.get(
+        "/api/v1/subjects/biochemistry/sections/foundations/groups/class_1", headers=headers
+    ).json()
+    first_item = group["items"][0]
+    assert first_item["id"] == "b1_u1_p1"
+    assert first_item["title"] == "Занятие 1. Биохимия белков. Структура и функции белков"
+
+    material = client.get(
+        f"/api/v1/materials/biochemistry/foundations/{first_item['id']}", headers=headers
+    ).json()
+    assert material["title"] == first_item["title"]
+    assert "Белки — высокомолекулярные" in material["content_html"]
+    assert material["group_id"] == "class_1"
+    assert material["next_id"] == group["items"][1]["id"]
 
 
 def test_pharmacology_grouped_section_and_material_round_trip():

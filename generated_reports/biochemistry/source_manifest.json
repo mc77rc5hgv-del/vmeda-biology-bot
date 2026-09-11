@@ -1,0 +1,16 @@
+{
+  "subject": "biochemistry",
+  "collection": "user_provided_attachment",
+  "sources": [
+    {
+      "original_filename": "Biokhimia_VMedA_praktikum_zanyatia (3).docx",
+      "stored_path": "course_sources/biochemistry/Biokhimia_VMedA_praktikum_zanyatia.docx",
+      "mime_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "bytes": 314531,
+      "sha256": "3e756a1002fc3b44a519abba42f5fa949bf02f86f0f80d30f9aadc71c903dd73",
+      "telegram_chat_id": null,
+      "telegram_topic_id": null,
+      "telegram_message_id": null
+    }
+  ]
+}
