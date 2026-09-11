@@ -24,6 +24,20 @@ REPORT_DIR = REPO / "generated_reports" / "biochemistry"
 SOURCE_LABEL = "Практикум по биохимии ВМедА"
 MAX_CONTENT = 3200
 MAX_NAV_TITLE = 64
+CONTENT_SEPARATOR = "\n\n────────\n\n"
+
+READING_MARKERS = {
+    "Принцип.": "◆",
+    "Ход.": "→",
+    "Результат.": "✓",
+    "В протокол.": "▣",
+    "Зачем врачу.": "⚕",
+    "Суть.": "◆",
+    "Разбор.": "→",
+    "Клиника.": "⚕",
+    "Норма.": "✓",
+    "Вывод.": "✓",
+}
 
 
 def clean_text(value: str) -> str:
@@ -39,6 +53,30 @@ def nav_title(value: str, limit: int = MAX_NAV_TITLE) -> str:
         return value
     shortened = value[: limit - 1].rsplit(" ", 1)[0]
     return (shortened or value[: limit - 1]).rstrip(" .,:;–—-") + "…"
+
+
+def semantic_plain_html(value: str) -> str:
+    """Emphasise structural terms without changing a single source character."""
+    bullet = re.match(r"^(•\s*)([^:=—–]{1,69}\S)(\s*(?:=|:|—|–)\s*)(.+)$", value)
+    if bullet:
+        lead, term, separator, rest = bullet.groups()
+        return f"{html.escape(lead)}<b>{html.escape(term)}</b>{html.escape(separator)}{html.escape(rest)}"
+
+    definition = re.match(r"^([^.!?;:]{1,69}\S)(\s+[—–]\s+)(.+)$", value)
+    if definition:
+        term, separator, rest = definition.groups()
+        return f"<b>{html.escape(term)}</b>{html.escape(separator)}{html.escape(rest)}"
+
+    lead_in = re.match(r"^([^.!?;:]{2,60}:)(\s+)(.+)$", value)
+    if lead_in:
+        lead, spacing, rest = lead_in.groups()
+        return f"<b>{html.escape(lead)}</b>{html.escape(spacing)}{html.escape(rest)}"
+
+    numbered = re.match(r"^(\d+[.)])(\s+)(.+)$", value)
+    if numbered:
+        number, spacing, rest = numbered.groups()
+        return f"<b>{html.escape(number)}</b>{html.escape(spacing)}{html.escape(rest)}"
+    return html.escape(value, quote=False)
 
 
 def paragraph_html(paragraph) -> str:
@@ -57,7 +95,16 @@ def paragraph_html(paragraph) -> str:
         if run.font.strike:
             value = f"<s>{value}</s>"
         rendered.append(value)
-    return "".join(rendered).strip() or html.escape(clean_text(paragraph.text), quote=False)
+    rendered_html = "".join(rendered).strip()
+    plain = clean_text(paragraph.text)
+    if not rendered_html:
+        rendered_html = html.escape(plain, quote=False)
+    if not any(run.bold or run.italic or run.underline or run.font.strike for run in paragraph.runs):
+        rendered_html = semantic_plain_html(plain)
+    for label, marker in READING_MARKERS.items():
+        if plain.startswith(label):
+            return f"{marker} {rendered_html}"
+    return rendered_html
 
 
 def split_plain_text(value: str, limit: int) -> list[str]:
@@ -139,15 +186,15 @@ def pack_lesson_pages(lessons: list[dict]) -> list[str]:
     current_length = 0
     for lesson in lessons:
         for content in lesson_pages(lesson):
-            addition = len(content) + (2 if current else 0)
+            addition = len(content) + (len(CONTENT_SEPARATOR) if current else 0)
             if current and current_length + addition > MAX_CONTENT:
-                pages.append("\n\n".join(current))
+                pages.append(CONTENT_SEPARATOR.join(current))
                 current = []
                 current_length = 0
             current.append(content)
-            current_length += len(content) + (2 if len(current) > 1 else 0)
+            current_length += len(content) + (len(CONTENT_SEPARATOR) if len(current) > 1 else 0)
     if current:
-        pages.append("\n\n".join(current))
+        pages.append(CONTENT_SEPARATOR.join(current))
     return pages
 
 
@@ -209,11 +256,18 @@ def paragraph_records(document: Document) -> list[dict]:
         if not text:
             continue
         style = paragraph.style.name if paragraph.style else "Normal"
+        source_formatted = any(
+            run.bold or run.italic or run.underline or run.font.strike for run in paragraph.runs
+        )
+        rendered_html = paragraph_html(paragraph)
         records.append({
             "index": index,
             "style": style,
             "text": text,
-            "html": paragraph_html(paragraph),
+            "html": rendered_html,
+            "source_formatted": source_formatted,
+            "reading_marker": any(text.startswith(label) for label in READING_MARKERS),
+            "semantic_key_term": not source_formatted and "<b>" in rendered_html,
         })
     return records
 
@@ -424,6 +478,12 @@ def main() -> None:
         "group_count": sum(len(section["groups"]) for section in course["sections"]),
         "lesson_count": lesson_count,
         "media_count": 0,
+        "formatting": {
+            "source_formatted_paragraphs": sum(record["source_formatted"] for record in records),
+            "reading_marker_paragraphs": sum(record["reading_marker"] for record in records),
+            "semantic_key_term_paragraphs": sum(record["semantic_key_term"] for record in records),
+            "control_question_dividers": True,
+        },
         "exclusions": [
             {
                 "item": "repeating_footer",

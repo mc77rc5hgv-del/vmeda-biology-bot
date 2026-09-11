@@ -17,6 +17,12 @@
   "group_count": 23,
   "lesson_count": 300,
   "media_count": 0,
+  "formatting": {
+    "source_formatted_paragraphs": 1463,
+    "reading_marker_paragraphs": 981,
+    "semantic_key_term_paragraphs": 432,
+    "control_question_dividers": true
+  },
   "exclusions": [
     {
       "item": "repeating_footer",

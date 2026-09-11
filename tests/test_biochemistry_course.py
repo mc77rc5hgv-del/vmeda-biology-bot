@@ -63,6 +63,10 @@ async def main():
     assert report["source_nonempty_paragraphs"] == report["mapped_nonempty_paragraphs"] == 2120
     assert report["verbatim_coverage_percent"] == 100
     assert report["media_count"] == 0
+    assert report["formatting"]["source_formatted_paragraphs"] >= 1400
+    assert report["formatting"]["reading_marker_paragraphs"] >= 900
+    assert report["formatting"]["semantic_key_term_paragraphs"] >= 100
+    assert report["formatting"]["control_question_dividers"] is True
     assert extraction["readable"] is True and extraction["failures"] == []
     assert extraction["tables"] == extraction["embedded_media"] == 0
     assert source_path.is_file() and manifest["sources"][0]["sha256"] == (
@@ -81,6 +85,19 @@ async def main():
     assert all(paragraph in rendered for paragraph in source_paragraphs)
     assert "Пируватдегидрогеназный комплекс" in rendered
     assert "Приложение. Цифры, которые спрашивают" in rendered
+    rendered_html = "\n".join(
+        page
+        for lesson in lessons
+        for page in lesson.get("content_pages", [lesson["content"]])
+    )
+    assert "<b>Белки</b> — высокомолекулярные" in rendered_html
+    assert "• <b>Белок</b> = полимер" in rendered_html
+    assert "◆ <i><b>Принцип.</b></i>" in rendered_html
+    assert "→ <i><b>Ход.</b></i>" in rendered_html
+    assert "✓ <i><b>Результат.</b></i>" in rendered_html
+    assert "▣ <i><b>В протокол.</b></i>" in rendered_html
+    assert "⚕ <i><b>Зачем врачу.</b></i>" in rendered_html
+    assert "────────" in rendered_html
     course_index = next(i for i, item in enumerate(tb.DYNAMIC_COURSES) if item["id"] == "biochemistry")
     assert not tb.dynamic_course_under_maintenance("biochemistry")
 

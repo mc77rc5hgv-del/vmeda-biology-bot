@@ -107,7 +107,7 @@ def test_biochemistry_practical_class_and_material_round_trip():
         f"/api/v1/materials/biochemistry/foundations/{first_item['id']}", headers=headers
     ).json()
     assert material["title"] == first_item["title"]
-    assert "Белки — высокомолекулярные" in material["content_html"]
+    assert "<b>Белки</b> — высокомолекулярные" in material["content_html"]
     assert material["group_id"] == "class_1"
     assert material["next_id"] == group["items"][1]["id"]
 
