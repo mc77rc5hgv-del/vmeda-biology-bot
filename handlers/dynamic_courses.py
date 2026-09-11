@@ -10,6 +10,47 @@ import telegram_bot as tb
 
 router = Router()
 LESSONS_PER_PAGE = 12
+BIOCHEMISTRY_LESSONS_PER_PAGE = 8
+
+
+def _lessons_per_page(course_index: int) -> int:
+    course = tb.DYNAMIC_COURSES[course_index]
+    if course.get("id") == "biochemistry":
+        return BIOCHEMISTRY_LESSONS_PER_PAGE
+    return LESSONS_PER_PAGE
+
+
+def _biochemistry_button_title(title: str, group_title: str) -> str:
+    """Make dense practicum headings distinguishable on narrow Telegram screens."""
+    if title == group_title:
+        return "Обзор занятия"
+
+    standalone = {
+        "Допуск": "Допуск к занятию",
+        "Ходы определения": "Лабораторные определения",
+        "Контроль к допуску": "Контроль допуска",
+        "Вопросы для самоподготовки": "Самоподготовка",
+    }
+    if title in standalone:
+        return standalone[title]
+
+    if " · " not in title:
+        return title
+
+    category, detail = title.split(" · ", 1)
+    if category == "Ходы определения":
+        return f"Опыт · {detail}"
+    if category == "Контроль к допуску":
+        return f"Контроль · {detail.removeprefix('Вопрос ')}"
+    if category == "Вопросы для самоподготовки":
+        return f"Вопрос · {detail.removeprefix('Вопрос ')}"
+    return f"{category} · {detail.removeprefix('Вопрос ')}"
+
+
+def _group_button_title(course_index: int, group: dict, lesson: dict) -> str:
+    if tb.DYNAMIC_COURSES[course_index].get("id") == "biochemistry":
+        return _biochemistry_button_title(lesson["title"], group["title"])
+    return lesson["title"]
 
 
 def get_maintenance_keyboard(course: dict):
@@ -82,12 +123,19 @@ def get_dynamic_section_keyboard(course_index: int, section_index: int):
 
 def get_dynamic_group_keyboard(course_index: int, section_index: int, group_index: int, page: int):
     builder = InlineKeyboardBuilder()
-    lessons = tb.DYNAMIC_COURSES[course_index]["sections"][section_index]["groups"][group_index]["lessons"]
-    page_count = max(1, (len(lessons) + LESSONS_PER_PAGE - 1) // LESSONS_PER_PAGE)
+    group = tb.DYNAMIC_COURSES[course_index]["sections"][section_index]["groups"][group_index]
+    lessons = group["lessons"]
+    page_size = _lessons_per_page(course_index)
+    page_count = max(1, (len(lessons) + page_size - 1) // page_size)
     page = min(max(page, 0), page_count - 1)
-    start = page * LESSONS_PER_PAGE
-    for lesson_index in range(start, min(start + LESSONS_PER_PAGE, len(lessons))):
-        builder.button(text=lessons[lesson_index]["title"], callback_data=f"dyn_gl:{course_index}:{section_index}:{group_index}:{lesson_index}")
+    start = page * page_size
+    for lesson_index in range(start, min(start + page_size, len(lessons))):
+        builder.button(
+            text=_group_button_title(course_index, group, lessons[lesson_index]),
+            callback_data=f"dyn_gl:{course_index}:{section_index}:{group_index}:{lesson_index}",
+        )
+    # Long educational labels must occupy the full Telegram message width.
+    builder.adjust(1)
     nav = []
     if page > 0:
         nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"dyn_g:{course_index}:{section_index}:{group_index}:{page - 1}"))
@@ -109,7 +157,7 @@ def get_dynamic_group_lesson_keyboard(course_index: int, section_index: int, gro
         nav.append(InlineKeyboardButton(text="➡️", callback_data=f"dyn_gl:{course_index}:{section_index}:{group_index}:{lesson_index + 1}"))
     if nav:
         builder.row(*nav)
-    page = lesson_index // LESSONS_PER_PAGE
+    page = lesson_index // _lessons_per_page(course_index)
     builder.row(InlineKeyboardButton(text="🔙 К темам", callback_data=f"dyn_g:{course_index}:{section_index}:{group_index}:{page}"))
     return builder.as_markup()
 
@@ -202,12 +250,22 @@ async def cb_dynamic_group(callback: CallbackQuery):
         return
     if await deny_maintenance_course(callback, course_index):
         return
-    page_count = max(1, (len(group["lessons"]) + LESSONS_PER_PAGE - 1) // LESSONS_PER_PAGE)
+    page_size = _lessons_per_page(course_index)
+    page_count = max(1, (len(group["lessons"]) + page_size - 1) // page_size)
     if page < 0 or page >= page_count:
         await callback.answer("Страница не найдена", show_alert=True)
         return
     await callback.answer()
-    await tb.safe_edit_text(callback.message, f"📚 <b>{html.escape(group['title'])}</b>\n{tb.DIVIDER}\n\nВыберите тему:", parse_mode="HTML", reply_markup=get_dynamic_group_keyboard(course_index, section_index, group_index, page))
+    start = page * page_size + 1
+    end = min((page + 1) * page_size, len(group["lessons"]))
+    page_hint = f"Темы {start}–{end} из {len(group['lessons'])}"
+    await tb.safe_edit_text(
+        callback.message,
+        f"📚 <b>{html.escape(group['title'])}</b>\n{tb.DIVIDER}\n\n"
+        f"{page_hint}. Выберите нужную тему:",
+        parse_mode="HTML",
+        reply_markup=get_dynamic_group_keyboard(course_index, section_index, group_index, page),
+    )
 
 
 @router.callback_query(F.data.startswith("dyn_gl:"))

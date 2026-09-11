@@ -95,9 +95,23 @@ async def main():
         for button in row
         if button.callback_data
     ]
-    assert sum(value.startswith(f"dyn_gl:{course_index}:3:3:") for value in class_14_callbacks) == 12
+    assert sum(value.startswith(f"dyn_gl:{course_index}:3:3:") for value in class_14_callbacks) == 8
     assert f"dyn_g:{course_index}:3:3:1" in class_14_callbacks
     assert "noop" in class_14_callbacks
+    lesson_rows = [
+        row for row in class_14_keyboard.inline_keyboard
+        if row and row[0].callback_data.startswith(f"dyn_gl:{course_index}:3:3:")
+    ]
+    assert len(lesson_rows) == 8 and all(len(row) == 1 for row in lesson_rows)
+    class_1_keyboard = tb.dynamic_course_handlers.get_dynamic_group_keyboard(course_index, 1, 0, 0)
+    class_1_labels = [row[0].text for row in class_1_keyboard.inline_keyboard[:8]]
+    assert class_1_labels[:4] == [
+        "Обзор занятия",
+        "Допуск к занятию",
+        "Лабораторные определения",
+        "Опыт · Биуретовая реакция",
+    ]
+    assert all(not label.startswith("Ходы определения ·") for label in class_1_labels)
     first_lesson_callbacks = [
         button.callback_data
         for row in tb.dynamic_course_handlers.get_dynamic_group_lesson_keyboard(course_index, 3, 3, 0).inline_keyboard
