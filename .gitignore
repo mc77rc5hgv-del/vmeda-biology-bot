@@ -13,3 +13,4 @@ stats.json.tmp
 scripts/ai_model_compare_results.txt
 miniapp/node_modules/
 miniapp/dist/
+/conversion_preview/
