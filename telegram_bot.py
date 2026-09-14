@@ -171,7 +171,7 @@ DYNAMIC_COURSES = load_dynamic_courses()
 # Эти два курса временно полностью скрыты за техэкраном на время переработки. Константа стоит
 # рядом с источником динамических курсов, чтобы бот, web_api и тесты ссылались на один явный
 # список, а не на разрозненные проверки названий.
-DYNAMIC_COURSE_MAINTENANCE_IDS = frozenset({"biochemistry", "pharmacology"})
+DYNAMIC_COURSE_MAINTENANCE_IDS = frozenset({"pharmacology"})
 
 
 def dynamic_course_under_maintenance(course_or_id) -> bool:

@@ -61,7 +61,7 @@ async def ai_solve(
     user_id: int = Depends(get_current_user_id),
     tb=Depends(get_fresh_bot_module),
 ) -> AiSolveResponse:
-    if payload.subject_id in {"biochemistry", "pharmacology"}:
+    if payload.subject_id == "pharmacology":
         raise HTTPException(
             status_code=503,
             detail="AI по этому предмету временно закрыт вместе с разделом на переработку.",

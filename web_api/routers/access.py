@@ -22,7 +22,7 @@ SUBJECT_IDS = {
     "pharmacology",
 }
 GATED_SUBJECT_IDS = {"physics", "chemistry", "biology"}
-MAINTENANCE_SUBJECT_IDS = {"biochemistry", "pharmacology"}
+MAINTENANCE_SUBJECT_IDS = {"pharmacology"}
 MAINTENANCE_REASON = "Раздел временно закрыт на полную переработку материалов и структуры."
 
 

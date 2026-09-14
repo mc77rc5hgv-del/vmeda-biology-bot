@@ -66,9 +66,9 @@ def test_list_subjects_requires_auth():
     assert resp.status_code == 401
 
 
-@pytest.mark.parametrize("subject_id", ["biochemistry", "pharmacology"])
-def test_reworked_subjects_are_closed_at_every_api_depth(monkeypatch, subject_id):
-    monkeypatch.setattr(tb, "DYNAMIC_COURSE_MAINTENANCE_IDS", frozenset({"biochemistry", "pharmacology"}))
+def test_pharmacology_is_closed_at_every_api_depth(monkeypatch):
+    subject_id = "pharmacology"
+    monkeypatch.setattr(tb, "DYNAMIC_COURSE_MAINTENANCE_IDS", frozenset({"pharmacology"}))
     headers = _auth_headers()
     listing = client.get("/api/v1/subjects", headers=headers).json()
     card = next(item for item in listing if item["id"] == subject_id)
@@ -79,68 +79,46 @@ def test_reworked_subjects_are_closed_at_every_api_depth(monkeypatch, subject_id
     assert detail.status_code == 200
     assert detail.json()["maintenance"] is True
 
-    section_id = "credit" if subject_id == "biochemistry" else "course"
+    section_id = "course"
     section = client.get(f"/api/v1/subjects/{subject_id}/sections/{section_id}", headers=headers)
     assert section.status_code == 503
     assert "переработ" in section.json()["detail"]
 
 
 def test_biochemistry_subject_detail_has_real_sections():
-    """Биохимия v2 (см. commit message) -- раздел сведён только к экзамену/зачёту/тестам,
-    убраны неструктурированные конспект/практикум/введение (были источником "сдвинутого"
-    текста с потерей пробелов между словами, реальная жалоба пользователя)."""
+    """API exposes the approved single-source practicum and its 19-class hierarchy."""
     resp = client.get("/api/v1/subjects/biochemistry", headers=_auth_headers())
     assert resp.status_code == 200
     body = resp.json()
     assert body["title"] == "Биохимия"
     section_ids = {s["id"] for s in body["sections"]}
-    assert section_ids == {"exam", "credit", "tests_and_controls"}
-    credit = next(s for s in body["sections"] if s["id"] == "credit")
-    assert credit["kind"] == "flat"
-    assert credit["item_count"] == 109  # см. отчёт аудита
-    exam = next(s for s in body["sections"] if s["id"] == "exam")
-    assert exam["kind"] == "grouped"
+    assert section_ids == {"guide", "foundations", "metabolism", "regulation", "clinical", "reference"}
+    assert all(section["kind"] == "grouped" for section in body["sections"])
+    assert sum(section["item_count"] for section in body["sections"]) == 300
 
 
-def test_biochemistry_flat_section_and_material_round_trip():
+def test_biochemistry_practicum_material_round_trip():
     headers = _auth_headers()
-    section = client.get("/api/v1/subjects/biochemistry/sections/credit", headers=headers).json()
-    assert section["kind"] == "flat"
-    first_item = section["items"][0]
-    assert first_item["id"] == "credit_p1_1"
-    assert first_item["order"] == 1
-    assert first_item["title"] == "Стр. 1"  # короткая метка списка, не всё содержимое урока
-
-    material = client.get(
-        f"/api/v1/materials/biochemistry/credit/{first_item['id']}", headers=headers
-    ).json()
-    assert material["title"] == first_item["title"]
-    assert "Аминокислотный состав белковой молекулы" in material["content_html"]  # реальный текст источника
-    assert material["sources"] == ["c_биохимия зачет все вопросы.pdf, стр. 1"]
-    assert material["group_id"] is None
-    assert material["prev_id"] is None  # первый урок раздела
-    assert material["next_id"] == section["items"][1]["id"]
-
-
-def test_biochemistry_grouped_exam_section_and_material_round_trip():
-    headers = _auth_headers()
-    section = client.get("/api/v1/subjects/biochemistry/sections/exam", headers=headers).json()
+    section = client.get("/api/v1/subjects/biochemistry/sections/foundations", headers=headers).json()
     assert section["kind"] == "grouped"
-    group_ids = {g["id"] for g in section["groups"]}
-    assert group_ids == {"exam_tickets", "exam_questions", "exam_practical"}
-
+    assert {group["id"] for group in section["groups"]} == {f"class_{number}" for number in range(1, 7)}
     group = client.get(
-        "/api/v1/subjects/biochemistry/sections/exam/groups/exam_tickets", headers=headers
+        "/api/v1/subjects/biochemistry/sections/foundations/groups/class_1", headers=headers
     ).json()
     first_item = group["items"][0]
-    assert first_item["id"] == "exam_ticket_1_1"
-    assert first_item["title"] == "Билет 1"  # короткая метка, не дублирует содержимое билета
+    assert first_item["id"] == "b1_u1_p1"
+    assert first_item["order"] == 1
+    assert first_item["title"] == "Занятие 1. Биохимия белков. Структура и функции белков"
 
     material = client.get(
-        f"/api/v1/materials/biochemistry/exam/{first_item['id']}", headers=headers
+        f"/api/v1/materials/biochemistry/foundations/{first_item['id']}", headers=headers
     ).json()
     assert material["title"] == first_item["title"]
-    assert material["group_id"] == "exam_tickets"
+    assert "Мономерными единицами белков являются" in material["content_html"]
+    assert material["sources"] == []  # show_sources=False: internal source labels stay out of the student UI
+    assert material["group_id"] == "class_1"
+    assert material["prev_id"] is None  # первый урок раздела
+    assert material["next_id"] == group["items"][1]["id"]
 
 
 def test_pharmacology_grouped_section_and_material_round_trip():
@@ -178,7 +156,7 @@ def test_unknown_section_returns_404():
 
 def test_unknown_material_returns_404():
     resp = client.get(
-        "/api/v1/materials/biochemistry/credit/does-not-exist", headers=_auth_headers()
+        "/api/v1/materials/biochemistry/foundations/does-not-exist", headers=_auth_headers()
     )
     assert resp.status_code == 404
 
@@ -854,11 +832,7 @@ def test_physics_unknown_task_group_and_test_ticket_group_are_not_found_not_lock
 
 
 def test_media_endpoint_serves_real_file_when_present():
-    """Реальный урок с media -- Биохимия v2 (см. commit message) убрала свой единственный
-    раздел с картинками ("Введение", вместе с остальным неструктурированным конспектом), так
-    что теперь единственный предмет с media -- Фармакология, причём внутри ГРУППИРОВАННОГО
-    раздела (course/drug_comparison, 455 уроков). Обход поэтому заходит и в groups, а не
-    только в плоские секции, как раньше, когда единственный известный пример был плоским."""
+    """Serve the first real media attachment found in grouped course content."""
     headers = _auth_headers()
     for subject_id in ("pharmacology", "biochemistry"):
         subject = client.get(f"/api/v1/subjects/{subject_id}", headers=headers).json()
@@ -891,12 +865,23 @@ def test_media_endpoint_serves_real_file_when_present():
     pytest.fail("expected at least one lesson with media, found none")
 
 
-def test_biochemistry_quiz_material_exposes_options_never_correct_index():
-    """test_1 is one of the batch-1 manually-verified MCQ tests (see commit message) -- real
-    data, real correct answer, checked below via the actual endpoint chain end to end."""
+def _first_biochemistry_lesson() -> tuple[dict, str, str]:
+    course = next(course for course in tb.DYNAMIC_COURSES if course["id"] == "biochemistry")
+    section = next(section for section in course["sections"] if section["id"] == "foundations")
+    group = next(group for group in section["groups"] if group["id"] == "class_1")
+    return group["lessons"][0], section["id"], group["lessons"][0]["id"]
+
+
+def test_quiz_material_exposes_options_never_correct_index(monkeypatch):
+    """The generic quiz contract stays covered without restoring obsolete biochemistry data."""
+    lesson, section_id, lesson_id = _first_biochemistry_lesson()
+    monkeypatch.setitem(lesson, "quiz", {
+        "options": ["глюкоза", "аминокислоты", "пептон", "нуклеозид"],
+        "correct_index": 1,
+    })
     headers = _auth_headers()
     material = client.get(
-        "/api/v1/materials/biochemistry/tests_and_controls/test_1", headers=headers
+        f"/api/v1/materials/biochemistry/{section_id}/{lesson_id}", headers=headers
     ).json()
     assert material["quiz"] == {
         "options": ["глюкоза", "аминокислоты", "пептон", "нуклеозид"],
@@ -904,17 +889,22 @@ def test_biochemistry_quiz_material_exposes_options_never_correct_index():
     assert "correct_index" not in material["quiz"]
 
 
-def test_biochemistry_quiz_answer_endpoint_reveals_correctness_only_after_answering():
+def test_quiz_answer_endpoint_reveals_correctness_only_after_answering(monkeypatch):
+    lesson, section_id, lesson_id = _first_biochemistry_lesson()
+    monkeypatch.setitem(lesson, "quiz", {
+        "options": ["глюкоза", "аминокислоты", "пептон", "нуклеозид"],
+        "correct_index": 1,
+    })
     headers = _auth_headers()
     correct = client.post(
-        "/api/v1/materials/biochemistry/tests_and_controls/test_1/answer",
+        f"/api/v1/materials/biochemistry/{section_id}/{lesson_id}/answer",
         headers=headers, json={"selected_index": 1},
     )
     assert correct.status_code == 200
     assert correct.json() == {"correct": True, "correct_index": 1}
 
     wrong = client.post(
-        "/api/v1/materials/biochemistry/tests_and_controls/test_1/answer",
+        f"/api/v1/materials/biochemistry/{section_id}/{lesson_id}/answer",
         headers=headers, json={"selected_index": 0},
     )
     assert wrong.status_code == 200
@@ -922,25 +912,27 @@ def test_biochemistry_quiz_answer_endpoint_reveals_correctness_only_after_answer
 
 
 def test_biochemistry_non_quiz_lesson_has_null_quiz_and_rejects_answer():
-    """test_2 is a deliberately-skipped ambiguous question (see commit message) -- no quiz data,
-    renders as plain text, answering it is a 400 not a crash."""
+    lesson, section_id, lesson_id = _first_biochemistry_lesson()
+    assert "quiz" not in lesson
     headers = _auth_headers()
     material = client.get(
-        "/api/v1/materials/biochemistry/tests_and_controls/test_2", headers=headers
+        f"/api/v1/materials/biochemistry/{section_id}/{lesson_id}", headers=headers
     ).json()
     assert material["quiz"] is None
 
     resp = client.post(
-        "/api/v1/materials/biochemistry/tests_and_controls/test_2/answer",
+        f"/api/v1/materials/biochemistry/{section_id}/{lesson_id}/answer",
         headers=headers, json={"selected_index": 0},
     )
     assert resp.status_code == 400
 
 
-def test_biochemistry_quiz_answer_out_of_range_index_rejected():
+def test_biochemistry_quiz_answer_out_of_range_index_rejected(monkeypatch):
+    lesson, section_id, lesson_id = _first_biochemistry_lesson()
+    monkeypatch.setitem(lesson, "quiz", {"options": ["а", "б"], "correct_index": 0})
     headers = _auth_headers()
     resp = client.post(
-        "/api/v1/materials/biochemistry/tests_and_controls/test_1/answer",
+        f"/api/v1/materials/biochemistry/{section_id}/{lesson_id}/answer",
         headers=headers, json={"selected_index": 99},
     )
     assert resp.status_code == 400
@@ -948,7 +940,7 @@ def test_biochemistry_quiz_answer_out_of_range_index_rejected():
 
 def test_quiz_answer_requires_auth():
     resp = client.post(
-        "/api/v1/materials/biochemistry/tests_and_controls/test_1/answer",
+        "/api/v1/materials/biochemistry/foundations/b1_u1_p1/answer",
         json={"selected_index": 1},
     )
     assert resp.status_code == 401

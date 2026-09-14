@@ -73,13 +73,16 @@ def test_open_course_remains_open_but_ai_reflects_provider_state():
     assert response.json()["ai_requests_left"] == 4
 
 
-def test_biochemistry_and_pharmacology_are_closed_for_maintenance():
+def test_only_pharmacology_is_closed_for_maintenance():
     client = _client(FakeBot())
-    for subject_id in ("biochemistry", "pharmacology"):
-        response = client.get(f"/api/v1/access/{subject_id}")
-        assert response.status_code == 200
-        assert response.json()["can_open_subject"] is False
-        assert "переработ" in response.json()["locked_reason"]
+    pharmacology = client.get("/api/v1/access/pharmacology")
+    assert pharmacology.status_code == 200
+    assert pharmacology.json()["can_open_subject"] is False
+    assert "переработ" in pharmacology.json()["locked_reason"]
+
+    biochemistry = client.get("/api/v1/access/biochemistry")
+    assert biochemistry.status_code == 200
+    assert biochemistry.json()["can_open_subject"] is True
 
 
 def test_subscription_summary_contains_real_tier_and_utc_expiry():

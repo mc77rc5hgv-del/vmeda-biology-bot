@@ -41,10 +41,10 @@ export const mockDashboard: DashboardStats = {
 export const mockContinue: ContinueItem = {
   subjectId: "biochemistry",
   subjectTitle: "Биохимия",
-  sectionTitle: "Зачёт",
-  materialTitle: "Тема 12",
-  order: 12,
-  totalInSection: 18,
+  sectionTitle: "Занятия 1–6 · основы",
+  materialTitle: "Занятие 1. Биохимия белков",
+  order: 1,
+  totalInSection: 11,
 };
 
 export const mockSubjects: SubjectSummary[] = [
@@ -60,7 +60,7 @@ export const mockSubjects: SubjectSummary[] = [
   { id: "physiology", title: "Нормальная физиология", accent: "physiology", tag: "Рубежные", course: 2, readiness: 55, locked: false, hasAi: true },
   { id: "operative_surgery", title: "Оперативная хирургия", accent: "operative-surgery", tag: "4 тома", course: 2, readiness: 18, locked: false, hasAi: true },
   { id: "biochemistry", title: "Биохимия", accent: "biochemistry", tag: "68%", course: 2, readiness: 68, locked: false, hasAi: true },
-  { id: "pharmacology", title: "Фармакология", accent: "pharmacology", tag: "Контрольные", course: 2, readiness: 8, locked: false, hasAi: true },
+  { id: "pharmacology", title: "Фармакология", accent: "pharmacology", tag: "Техобслуживание", course: 2, readiness: 8, locked: true, lockedReason: "Раздел перерабатывается", hasAi: true },
 ];
 
 const subjectSections: Record<string, SubjectDetail["sections"]> = {
@@ -114,9 +114,12 @@ const subjectSections: Record<string, SubjectDetail["sections"]> = {
     { id: "volumes", title: "Тома", itemCount: 61, kind: "grouped" },
   ],
   biochemistry: [
-    { id: "tests_and_controls", title: "Тесты и контрольные", itemCount: 1653, kind: "grouped" },
-    { id: "credit", title: "Зачёт", itemCount: 109, kind: "flat" },
-    { id: "exam", title: "Экзамен", itemCount: 230, kind: "grouped" },
+    { id: "guide", title: "О практикуме и навигация", itemCount: 2, kind: "grouped" },
+    { id: "foundations", title: "Занятия 1–6 · основы", itemCount: 73, kind: "grouped" },
+    { id: "metabolism", title: "Занятия 7–10 · обмен веществ", itemCount: 51, kind: "grouped" },
+    { id: "regulation", title: "Занятия 11–14 · регуляция", itemCount: 126, kind: "grouped" },
+    { id: "clinical", title: "Занятия 15–19 · клиническая биохимия", itemCount: 46, kind: "grouped" },
+    { id: "reference", title: "Приложения и литература", itemCount: 2, kind: "grouped" },
   ],
   pharmacology: [
     { id: "course", title: "Курс", itemCount: 1174, kind: "grouped" },

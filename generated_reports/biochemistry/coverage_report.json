@@ -1,0 +1,33 @@
+{
+  "subject": "Биохимия",
+  "source_exclusive": true,
+  "source_count": 1,
+  "source_nonempty_paragraphs": 2120,
+  "mapped_nonempty_paragraphs": 2120,
+  "verbatim_paragraphs_after_whitespace_normalization": 2120,
+  "verbatim_coverage_percent": 100,
+  "unmapped_paragraphs": [],
+  "heading_counts": {
+    "Heading 1": 22,
+    "Heading 2": 57,
+    "Heading 3": 346
+  },
+  "practical_class_count": 19,
+  "section_count": 6,
+  "group_count": 23,
+  "lesson_count": 300,
+  "media_count": 0,
+  "formatting": {
+    "source_formatted_paragraphs": 1463,
+    "reading_marker_paragraphs": 981,
+    "semantic_key_term_paragraphs": 432,
+    "control_question_dividers": true
+  },
+  "exclusions": [
+    {
+      "item": "repeating_footer",
+      "text": "ВМедА · практикум по биохимии · [номер страницы]",
+      "reason": "Повторяющийся колонтитул, не учебный материал"
+    }
+  ]
+}

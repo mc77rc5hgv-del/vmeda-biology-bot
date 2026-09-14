@@ -112,7 +112,7 @@ export interface MaterialDetail extends MaterialRef {
    * mock-материалов — там навигация считается через order/totalInSection на самой странице. */
   prevId?: string | null;
   nextId?: string | null;
-  /** Только у реальных тестовых уроков (сегодня — Биохимия, tests_and_controls/tests, см.
+  /** Только у материалов, где в контенте действительно сохранён проверенный тест (см.
    * web_api/content.py::_lesson_to_material) -- options без correctIndex: backend никогда не
    * присылает правильный вариант заранее, тот же принцип, что ANATOMY_LATIN_SESSIONS в боте.
    * Проверка ответа -- через apiClient.checkQuizAnswer(), отдельным запросом ПОСЛЕ выбора. */

@@ -10,6 +10,47 @@ import telegram_bot as tb
 
 router = Router()
 LESSONS_PER_PAGE = 12
+BIOCHEMISTRY_LESSONS_PER_PAGE = 8
+
+
+def _lessons_per_page(course_index: int) -> int:
+    course = tb.DYNAMIC_COURSES[course_index]
+    if course.get("id") == "biochemistry":
+        return BIOCHEMISTRY_LESSONS_PER_PAGE
+    return LESSONS_PER_PAGE
+
+
+def _biochemistry_button_title(title: str, group_title: str) -> str:
+    """Make dense practicum headings distinguishable on narrow Telegram screens."""
+    if title == group_title:
+        return "Обзор занятия"
+
+    standalone = {
+        "Допуск": "Допуск к занятию",
+        "Ходы определения": "Лабораторные определения",
+        "Контроль к допуску": "Контроль допуска",
+        "Вопросы для самоподготовки": "Самоподготовка",
+    }
+    if title in standalone:
+        return standalone[title]
+
+    if " · " not in title:
+        return title
+
+    category, detail = title.split(" · ", 1)
+    if category == "Ходы определения":
+        return f"Опыт · {detail}"
+    if category == "Контроль к допуску":
+        return f"Контроль · {detail.removeprefix('Вопрос ')}"
+    if category == "Вопросы для самоподготовки":
+        return f"Вопрос · {detail.removeprefix('Вопрос ')}"
+    return f"{category} · {detail.removeprefix('Вопрос ')}"
+
+
+def _group_button_title(course_index: int, group: dict, lesson: dict) -> str:
+    if tb.DYNAMIC_COURSES[course_index].get("id") == "biochemistry":
+        return _biochemistry_button_title(lesson["title"], group["title"])
+    return lesson["title"]
 
 
 def get_maintenance_keyboard(course: dict):
@@ -20,7 +61,6 @@ def get_maintenance_keyboard(course: dict):
 
 
 async def deny_maintenance_course(callback: CallbackQuery, course_index: int) -> bool:
-    """Server-side gate shared by every dynamic-course callback, including old deep links."""
     course = get_dynamic_item(course_index)
     if not course or not tb.dynamic_course_under_maintenance(course):
         return False
@@ -83,12 +123,19 @@ def get_dynamic_section_keyboard(course_index: int, section_index: int):
 
 def get_dynamic_group_keyboard(course_index: int, section_index: int, group_index: int, page: int):
     builder = InlineKeyboardBuilder()
-    lessons = tb.DYNAMIC_COURSES[course_index]["sections"][section_index]["groups"][group_index]["lessons"]
-    page_count = max(1, (len(lessons) + LESSONS_PER_PAGE - 1) // LESSONS_PER_PAGE)
+    group = tb.DYNAMIC_COURSES[course_index]["sections"][section_index]["groups"][group_index]
+    lessons = group["lessons"]
+    page_size = _lessons_per_page(course_index)
+    page_count = max(1, (len(lessons) + page_size - 1) // page_size)
     page = min(max(page, 0), page_count - 1)
-    start = page * LESSONS_PER_PAGE
-    for lesson_index in range(start, min(start + LESSONS_PER_PAGE, len(lessons))):
-        builder.button(text=lessons[lesson_index]["title"], callback_data=f"dyn_gl:{course_index}:{section_index}:{group_index}:{lesson_index}")
+    start = page * page_size
+    for lesson_index in range(start, min(start + page_size, len(lessons))):
+        builder.button(
+            text=_group_button_title(course_index, group, lessons[lesson_index]),
+            callback_data=f"dyn_gl:{course_index}:{section_index}:{group_index}:{lesson_index}",
+        )
+    # Long educational labels must occupy the full Telegram message width.
+    builder.adjust(1)
     nav = []
     if page > 0:
         nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"dyn_g:{course_index}:{section_index}:{group_index}:{page - 1}"))
@@ -100,30 +147,36 @@ def get_dynamic_group_keyboard(course_index: int, section_index: int, group_inde
     return builder.as_markup()
 
 
-OPTION_LETTERS = "абвгдежзик"
-
-
-def get_dynamic_group_quiz_keyboard(course_index: int, section_index: int, group_index: int, lesson_index: int, quiz: dict):
-    """Тестовый урок с вариантами ответа (lesson["quiz"], см. content.py/handlers/
-    dynamic_courses.py::cb_dynamic_group_quiz_answer) -- вместо prev/next сразу показывает
-    варианты как кнопки; правильный ответ никогда не попадает в callback_data (сравнение — на
-    сервере при нажатии, см. обработчик), тем же принципом, что и ANATOMY_LATIN_SESSIONS."""
-    builder = InlineKeyboardBuilder()
-    for opt_index, option_text in enumerate(quiz["options"]):
-        letter = OPTION_LETTERS[opt_index] if opt_index < len(OPTION_LETTERS) else str(opt_index + 1)
-        builder.button(
-            text=f"{letter}) {option_text}",
-            callback_data=f"dyn_gqa:{course_index}:{section_index}:{group_index}:{lesson_index}:{opt_index}",
-        )
-    builder.adjust(1)
-    page = lesson_index // LESSONS_PER_PAGE
-    builder.row(InlineKeyboardButton(text="🔙 К темам", callback_data=f"dyn_g:{course_index}:{section_index}:{group_index}:{page}"))
-    return builder.as_markup()
-
-
-def get_dynamic_group_lesson_keyboard(course_index: int, section_index: int, group_index: int, lesson_index: int):
+def get_dynamic_group_lesson_keyboard(
+    course_index: int,
+    section_index: int,
+    group_index: int,
+    lesson_index: int,
+    content_page: int = 0,
+):
     lessons = tb.DYNAMIC_COURSES[course_index]["sections"][section_index]["groups"][group_index]["lessons"]
     builder = InlineKeyboardBuilder()
+    pages = lessons[lesson_index].get("content_pages") or [lessons[lesson_index]["content"]]
+    if len(pages) > 1:
+        page_buttons = [
+            InlineKeyboardButton(
+                text=f"• {page_number + 1} •" if page_number == content_page else str(page_number + 1),
+                callback_data=(
+                    "noop" if page_number == content_page
+                    else f"dyn_glp:{course_index}:{section_index}:{group_index}:{lesson_index}:{page_number}"
+                ),
+            )
+            for page_number in range(len(pages))
+        ]
+        for start in range(0, len(page_buttons), 4):
+            builder.row(*page_buttons[start:start + 4])
+        page = lesson_index // _lessons_per_page(course_index)
+        builder.row(InlineKeyboardButton(
+            text="🔙 К темам",
+            callback_data=f"dyn_g:{course_index}:{section_index}:{group_index}:{page}",
+        ))
+        return builder.as_markup()
+
     nav = []
     if lesson_index > 0:
         nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"dyn_gl:{course_index}:{section_index}:{group_index}:{lesson_index - 1}"))
@@ -131,24 +184,18 @@ def get_dynamic_group_lesson_keyboard(course_index: int, section_index: int, gro
         nav.append(InlineKeyboardButton(text="➡️", callback_data=f"dyn_gl:{course_index}:{section_index}:{group_index}:{lesson_index + 1}"))
     if nav:
         builder.row(*nav)
-    page = lesson_index // LESSONS_PER_PAGE
+    page = lesson_index // _lessons_per_page(course_index)
     builder.row(InlineKeyboardButton(text="🔙 К темам", callback_data=f"dyn_g:{course_index}:{section_index}:{group_index}:{page}"))
     return builder.as_markup()
 
 
-def render_dynamic_quiz_result_text(lesson: dict, chosen_index: int) -> str:
-    quiz = lesson["quiz"]
-    correct_index = quiz["correct_index"]
-    correct = chosen_index == correct_index
-    verdict = "✅ Верно!" if correct else "❌ Неверно."
-    lines = [
-        f"📖 <b>{html.escape(lesson['title'])}</b>\n{tb.DIVIDER}\n\n{lesson['content']}\n",
-        f"{verdict}",
-        f"Правильный ответ: <b>{html.escape(quiz['options'][correct_index])}</b>",
-    ]
-    if not correct:
-        lines.append(f"Твой ответ: {html.escape(quiz['options'][chosen_index])}")
-    return "\n".join(lines)
+def _group_lesson_message(lesson: dict, content_page: int = 0) -> str:
+    pages = lesson.get("content_pages") or [lesson["content"]]
+    page_suffix = f" · страница {content_page + 1}/{len(pages)}" if len(pages) > 1 else ""
+    return (
+        f"📖 <b>{html.escape(lesson['title'])}{page_suffix}</b>\n"
+        f"{tb.DIVIDER}\n\n{pages[content_page]}"
+    )
 
 
 def get_dynamic_lesson_keyboard(course_index: int, section_index: int, lesson_index: int):
@@ -239,19 +286,29 @@ async def cb_dynamic_group(callback: CallbackQuery):
         return
     if await deny_maintenance_course(callback, course_index):
         return
-    page_count = max(1, (len(group["lessons"]) + LESSONS_PER_PAGE - 1) // LESSONS_PER_PAGE)
+    page_size = _lessons_per_page(course_index)
+    page_count = max(1, (len(group["lessons"]) + page_size - 1) // page_size)
     if page < 0 or page >= page_count:
         await callback.answer("Страница не найдена", show_alert=True)
         return
     await callback.answer()
-    await tb.safe_edit_text(callback.message, f"📚 <b>{html.escape(group['title'])}</b>\n{tb.DIVIDER}\n\nВыберите тему:", parse_mode="HTML", reply_markup=get_dynamic_group_keyboard(course_index, section_index, group_index, page))
+    start = page * page_size + 1
+    end = min((page + 1) * page_size, len(group["lessons"]))
+    page_hint = f"Темы {start}–{end} из {len(group['lessons'])}"
+    await tb.safe_edit_text(
+        callback.message,
+        f"📚 <b>{html.escape(group['title'])}</b>\n{tb.DIVIDER}\n\n"
+        f"{page_hint}. Выберите нужную тему:",
+        parse_mode="HTML",
+        reply_markup=get_dynamic_group_keyboard(course_index, section_index, group_index, page),
+    )
 
 
 @router.callback_query(F.data.startswith("dyn_gl:"))
 async def cb_dynamic_group_lesson(callback: CallbackQuery):
     try:
-        _, c, s, g, ls = callback.data.split(":")
-        course_index, section_index, group_index, lesson_index = map(int, (c, s, g, ls))
+        _, c, s, g, l = callback.data.split(":")
+        course_index, section_index, group_index, lesson_index = map(int, (c, s, g, l))
         course = tb.DYNAMIC_COURSES[course_index]
         lesson = course["sections"][section_index]["groups"][group_index]["lessons"][lesson_index]
     except (ValueError, IndexError, KeyError, TypeError):
@@ -260,12 +317,14 @@ async def cb_dynamic_group_lesson(callback: CallbackQuery):
     if await deny_maintenance_course(callback, course_index):
         return
     await callback.answer()
-    quiz = lesson.get("quiz")
-    if quiz:
-        keyboard = get_dynamic_group_quiz_keyboard(course_index, section_index, group_index, lesson_index, quiz)
-    else:
-        keyboard = get_dynamic_group_lesson_keyboard(course_index, section_index, group_index, lesson_index)
-    await tb.safe_edit_text(callback.message, f"📖 <b>{html.escape(lesson['title'])}</b>\n{tb.DIVIDER}\n\n{lesson['content']}", parse_mode="HTML", reply_markup=keyboard)
+    await tb.safe_edit_text(
+        callback.message,
+        _group_lesson_message(lesson),
+        parse_mode="HTML",
+        reply_markup=get_dynamic_group_lesson_keyboard(
+            course_index, section_index, group_index, lesson_index,
+        ),
+    )
     for media in lesson.get("media", []):
         media_path = Path(media["path"])
         if not media_path.is_absolute():
@@ -274,31 +333,28 @@ async def cb_dynamic_group_lesson(callback: CallbackQuery):
             await callback.message.answer_photo(FSInputFile(media_path), caption=html.escape(media.get("caption", "")), parse_mode="HTML")
 
 
-@router.callback_query(F.data.startswith("dyn_gqa:"))
-async def cb_dynamic_group_quiz_answer(callback: CallbackQuery):
-    """Ответ на тестовый урок (lesson["quiz"]) -- правильный вариант сравнивается только здесь,
-    на сервере, никогда не был в callback_data кнопок (см. get_dynamic_group_quiz_keyboard)."""
+@router.callback_query(F.data.startswith("dyn_glp:"))
+async def cb_dynamic_group_lesson_page(callback: CallbackQuery):
     try:
-        _, c, s, g, ls, o = callback.data.split(":")
-        course_index, section_index, group_index, lesson_index, chosen_index = map(int, (c, s, g, ls, o))
-        course = tb.DYNAMIC_COURSES[course_index]
-        lesson = course["sections"][section_index]["groups"][group_index]["lessons"][lesson_index]
-        quiz = lesson["quiz"]
+        _, c, s, g, l, p = callback.data.split(":")
+        course_index, section_index, group_index, lesson_index, content_page = map(int, (c, s, g, l, p))
+        lesson = tb.DYNAMIC_COURSES[course_index]["sections"][section_index]["groups"][group_index]["lessons"][lesson_index]
+        pages = lesson.get("content_pages") or [lesson["content"]]
+        if content_page < 0 or content_page >= len(pages):
+            raise IndexError
     except (ValueError, IndexError, KeyError, TypeError):
-        await callback.answer("Тест не найден", show_alert=True)
+        await callback.answer("Страница не найдена", show_alert=True)
         return
     if await deny_maintenance_course(callback, course_index):
         return
-    if not (0 <= chosen_index < len(quiz["options"])):
-        await callback.answer("Вариант не найден", show_alert=True)
-        return
-    correct = chosen_index == quiz["correct_index"]
-    await callback.answer("✅ Верно!" if correct else "❌ Неверно", show_alert=False)
+    await callback.answer()
     await tb.safe_edit_text(
         callback.message,
-        render_dynamic_quiz_result_text(lesson, chosen_index),
+        _group_lesson_message(lesson, content_page),
         parse_mode="HTML",
-        reply_markup=get_dynamic_group_lesson_keyboard(course_index, section_index, group_index, lesson_index),
+        reply_markup=get_dynamic_group_lesson_keyboard(
+            course_index, section_index, group_index, lesson_index, content_page,
+        ),
     )
 
 

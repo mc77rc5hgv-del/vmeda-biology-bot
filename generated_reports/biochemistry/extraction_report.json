@@ -1,0 +1,17 @@
+{
+  "source": "course_sources/biochemistry/Biokhimia_VMedA_praktikum_zanyatia.docx",
+  "readable": true,
+  "paragraphs_total": 2144,
+  "paragraphs_nonempty": 2120,
+  "tables": 0,
+  "inline_shapes": 0,
+  "embedded_media": 0,
+  "headers": 0,
+  "footers": 1,
+  "tracked_insertions": 0,
+  "tracked_deletions": 0,
+  "failures": [],
+  "warnings": [
+    "В источнике одновременно приведены кафедральные классические и современные коэффициенты P/O; формулировка сохранена дословно."
+  ]
+}

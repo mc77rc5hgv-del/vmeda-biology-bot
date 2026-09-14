@@ -154,13 +154,12 @@ def test_invalid_mode_returns_400():
 def test_maintenance_subject_ai_is_closed_before_provider_call():
     fake_bot = FakeBot()
     client = _client(fake_bot)
-    for subject_id in ("biochemistry", "pharmacology"):
-        resp = client.post(
-            "/api/v1/ai/solve",
-            json={"subject_id": subject_id, "mode": "text", "text": "вопрос"},
-        )
-        assert resp.status_code == 503
-        assert fake_bot.first_message_calls == []
+    resp = client.post(
+        "/api/v1/ai/solve",
+        json={"subject_id": "pharmacology", "mode": "text", "text": "вопрос"},
+    )
+    assert resp.status_code == 503
+    assert fake_bot.first_message_calls == []
 
 
 def test_text_mode_without_text_returns_400():
