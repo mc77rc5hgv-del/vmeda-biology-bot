@@ -179,6 +179,10 @@ def get_admin_announcements_keyboard(back_callback: str = "admin_panel"):
     builder.button(text="📣 Анонс VMedA AI", callback_data="admin_announce_ai_confirm")
     builder.button(text="📋 Анонс переклички первого курса", callback_data="admin_announce_rollcall_confirm")
     builder.button(text="☕ Анонс лимитированной коллекции", callback_data="admin_announce_mugs_confirm")
+    builder.button(
+        text="🎁 Анонс «Подарок преподавателю»",
+        callback_data="admin_announce_teacher_mug_confirm",
+    )
     builder.button(text="🔙 Назад", callback_data=back_callback)
     builder.adjust(1)
     return builder.as_markup()

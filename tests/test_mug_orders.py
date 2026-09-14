@@ -66,14 +66,16 @@ async def main():
     subscriptions_before = copy.deepcopy(tb.stats["subscriptions"])
 
     menu = tb.get_mugs_menu_keyboard()
-    assert callback_data(menu) == ["mugs_model:1", "mugs_model:2", "mugs_model:3", "back_to_main"]
+    assert callback_data(menu) == [
+        "mugs_model:1", "mugs_model:2", "mugs_model:3", "mugs_model:4", "back_to_main",
+    ]
     assert "0" in tb.get_mugs_menu_text() and str(tb.MUG_SALES_TARGET) in tb.get_mugs_menu_text()
     assert "mugs_menu" in callback_data(tb.get_main_menu())
     assert "admin_mug_orders:0" in callback_data(tb.get_admin_menu())
     assert {spec["title"] for spec in tb.MUG_MODELS.values()} == {
-        "Классика ВМедА", "Наследие Академии", "Штаб ВМедА",
+        "Классика ВМедА", "Наследие Академии", "Штаб ВМедА", "ПОДАРОК ПРЕПОДАВАТЕЛЮ",
     }
-    assert [spec["price_rub"] for spec in tb.MUG_MODELS.values()] == [799, 849, 999]
+    assert [spec["price_rub"] for spec in tb.MUG_MODELS.values()] == [799, 849, 999, 999]
     assert all(tb.mugs_handlers.get_mug_image_path(model_id).is_file() for model_id in tb.MUG_MODELS)
     tb.stats["mug_file_ids"]["1"] = "stale-classic-photo"
     assert isinstance(tb.mugs_handlers.get_mug_photo("1"), FSInputFile)
@@ -244,7 +246,7 @@ async def main():
     assert all(order["user_id"] != legacy_uid for order in tb.stats["mug_orders"])
     assert legacy_confirm.answers and "ещё не подтвердил" in legacy_confirm.answers[-1][0]
 
-    # Announcement: admin gets a three-photo preview; only the explicit second tap broadcasts it.
+    # Collection announcement: admin gets a four-photo preview; only the second tap broadcasts it.
     announcement_text = tb.get_mug_announcement_text()
     assert "ЛИМИТИРОВАННАЯ КОЛЛЕКЦИЯ" in announcement_text
     assert all(spec["title"] in announcement_text for spec in tb.MUG_MODELS.values())
@@ -255,7 +257,7 @@ async def main():
     preview = FakeCallback("admin_announce_mugs_confirm", uid=ADMIN_ID)
     albums_before_preview = len(sent_albums)
     await tb.cb_admin_announce_mugs_confirm(preview)
-    assert len(preview.message.albums) == 1 and len(preview.message.albums[0][0]) == 3
+    assert len(preview.message.albums) == 1 and len(preview.message.albums[0][0]) == 4
     assert len(sent_albums) == albums_before_preview, "preview must not broadcast"
     assert "admin_announce_mugs_go" in callback_data(preview.message.edits[-1][1]["reply_markup"])
 
@@ -264,8 +266,32 @@ async def main():
     go = FakeCallback("admin_announce_mugs_go", uid=ADMIN_ID)
     await tb.cb_admin_announce_mugs_go(go)
     assert len(sent_albums) == 2
-    assert all(len(media) == 3 for _, media, _ in sent_albums)
+    assert all(len(media) == 4 for _, media, _ in sent_albums)
     assert len([row for row in sent if row[0] in tb.stats["total_users"] and "ЛИМИТИРОВАННАЯ" in row[1]]) == 2
+    assert tb.stats["broadcast_count"] == broadcasts_before + 1
+
+    # The dedicated announcement opens model 4 directly and uses only its own photo.
+    teacher_text = tb.get_teacher_gift_announcement_text()
+    assert "ПОДАРОК ПРЕПОДАВАТЕЛЮ" in teacher_text and "999 ₽" in teacher_text
+    assert callback_data(tb.get_teacher_gift_announcement_keyboard()) == ["mugs_model:4"]
+    assert "admin_announce_teacher_mug_confirm" in callback_data(tb.get_admin_announcements_keyboard())
+    teacher_preview = FakeCallback("admin_announce_teacher_mug_confirm", uid=ADMIN_ID)
+    photos_before_preview = len(sent_photos)
+    await tb.cb_admin_announce_teacher_mug_confirm(teacher_preview)
+    assert len(teacher_preview.message.photos) == 1
+    assert len(sent_photos) == photos_before_preview, "preview must not broadcast"
+    assert "admin_announce_teacher_mug_go" in callback_data(
+        teacher_preview.message.edits[-1][1]["reply_markup"]
+    )
+
+    photos_before_broadcast = len(sent_photos)
+    broadcasts_before = tb.stats.get("broadcast_count", 0)
+    teacher_go = FakeCallback("admin_announce_teacher_mug_go", uid=ADMIN_ID)
+    await tb.cb_admin_announce_teacher_mug_go(teacher_go)
+    teacher_broadcasts = sent_photos[photos_before_broadcast:]
+    assert len(teacher_broadcasts) == len(tb.stats["total_users"])
+    assert all("ПОДАРОК ПРЕПОДАВАТЕЛЮ" in row[2]["caption"] for row in teacher_broadcasts)
+    assert all(callback_data(row[2]["reply_markup"]) == ["mugs_model:4"] for row in teacher_broadcasts)
     assert tb.stats["broadcast_count"] == broadcasts_before + 1
 
     assert tb.stats["subscriptions"] == subscriptions_before, "mug flow must never touch subscriptions"

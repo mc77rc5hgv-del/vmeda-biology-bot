@@ -43,6 +43,12 @@ MUG_MODELS = {
         "image": "images/mugs/where-doctors-grow.png",
         "description": "Двусторонний дизайн: герб и девиз — с одной стороны, памятник и фасад Академии — с другой.",
     },
+    "4": {
+        "title": "ПОДАРОК ПРЕПОДАВАТЕЛЮ",
+        "price_rub": 999,
+        "image": "images/mugs/teacher-gift.jpg",
+        "description": "Особая подарочная модель для преподавателя ВМедА.",
+    },
 }
 
 
@@ -85,7 +91,7 @@ def build_mug_album():
         InputMediaPhoto(
             media=get_mug_photo(model_id),
             caption=(
-                f"<b>{position}/3 · {html.escape(spec['title'])}</b>\n"
+                f"<b>{position}/{len(MUG_MODELS)} · {html.escape(spec['title'])}</b>\n"
                 f"{html.escape(spec['description'])}\n\n<b>{spec['price_rub']} ₽</b>"
             ),
             parse_mode="HTML",
@@ -121,7 +127,7 @@ def get_mugs_menu_text() -> str:
     confirmed = get_confirmed_mug_order_count()
     return (
         f"☕ <b>Кружки VMEDA — предзаказ</b>\n{tb.DIVIDER}\n\n"
-        "Три авторские модели лимитированной коллекции VMEDA. Сейчас можно оставить предзаказ и "
+        "Четыре авторские модели лимитированной коллекции VMEDA. Сейчас можно оставить предзаказ и "
         "связаться с менеджером для получения реквизитов.\n\n"
         "🎁 <b>Идеальный подарок ко Дню учителя.</b>\n\n"
         "Обрати внимание: к сожалению, после подтверждения оплаты заказ отменить нельзя. Сроки доставки "
@@ -573,12 +579,13 @@ def get_mug_announcement_text() -> str:
     confirmed = get_confirmed_mug_order_count()
     return (
         f"☕ <b>ЛИМИТИРОВАННАЯ КОЛЛЕКЦИЯ VMEDA</b>\n{tb.DIVIDER}\n\n"
-        "Три авторских дизайна, в которых узнаётся Академия: её герб, история, фасад и слова, "
+        "Четыре авторских дизайна, в которых узнаётся Академия: её герб, история, фасад и слова, "
         "понятные каждому, кто здесь учится.\n\n"
         "🎁 <b>Идеальный подарок ко Дню учителя.</b>\n\n"
         "<b>1 · Классика ВМедА — 799 ₽</b>\nЛаконичный герб и фасад Академии.\n\n"
         "<b>2 · Наследие Академии — 849 ₽</b>\nПарадная историческая композиция.\n\n"
         "<b>3 · Штаб ВМедА — 999 ₽</b>\nДвусторонний дизайн с символами ВМедА.\n\n"
+        "<b>4 · ПОДАРОК ПРЕПОДАВАТЕЛЮ — 999 ₽</b>\nОсобая подарочная модель для преподавателя ВМедА.\n\n"
         "Это ограниченный первый выпуск. Для запуска партии нужно минимум <b>50 подтверждённых "
         f"кружек</b>; уже подтверждено: <b>{confirmed}</b>.\n\n"
         "К сожалению, после подтверждения оплаты заказ отменить нельзя. Сроки доставки уточняйте у "
@@ -597,6 +604,32 @@ def get_mug_announcement_keyboard():
 def get_admin_mug_announcement_keyboard():
     builder = InlineKeyboardBuilder()
     builder.button(text="✅ Отправить всем", callback_data="admin_announce_mugs_go")
+    builder.button(text="❌ Отмена", callback_data="admin_announcements_menu")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def get_teacher_gift_announcement_text() -> str:
+    return (
+        f"🎁 <b>ПОДАРОК ПРЕПОДАВАТЕЛЮ</b>\n{tb.DIVIDER}\n\n"
+        "Особая кружка VMEDA для преподавателя — памятный и практичный подарок от студентов.\n\n"
+        "Стоимость: <b>999 ₽</b>.\n\n"
+        "Выберите количество, получите реквизиты у менеджера и после перевода нажмите "
+        "«Подтвердить оплату и заказать».\n\n"
+        "К сожалению, после подтверждения оплаты заказ отменить нельзя. Сроки доставки уточняйте у "
+        "менеджера @vmeda_helper."
+    )
+
+
+def get_teacher_gift_announcement_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🎁 Заказать кружку", callback_data="mugs_model:4")
+    return builder.as_markup()
+
+
+def get_admin_teacher_gift_announcement_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Отправить всем", callback_data="admin_announce_teacher_mug_go")
     builder.button(text="❌ Отмена", callback_data="admin_announcements_menu")
     builder.adjust(1)
     return builder.as_markup()
@@ -626,6 +659,30 @@ async def broadcast_mug_announcement() -> tuple[int, int]:
         except Exception:
             failed_count += 1
             tb.logger.exception("Не удалось отправить анонс кружек пользователю %s", user_id)
+        await asyncio.sleep(0.05)
+    return sent_count, failed_count
+
+
+async def broadcast_teacher_gift_announcement() -> tuple[int, int]:
+    sent_count = 0
+    failed_count = 0
+    text = get_teacher_gift_announcement_text()
+    keyboard = get_teacher_gift_announcement_keyboard()
+    for user_id in list(tb.stats["total_users"]):
+        try:
+            sent = await tb.bot.send_photo(
+                user_id,
+                get_mug_photo("4"),
+                caption=text,
+                parse_mode="HTML",
+                reply_markup=keyboard,
+            )
+            if cache_mug_photo("4", sent):
+                tb.save_stats()
+            sent_count += 1
+        except Exception:
+            failed_count += 1
+            tb.logger.exception("Не удалось отправить анонс подарочной кружки пользователю %s", user_id)
         await asyncio.sleep(0.05)
     return sent_count, failed_count
 
@@ -664,6 +721,52 @@ async def cb_admin_announce_mugs_go(callback: CallbackQuery):
     await tb.safe_edit_text(
         callback.message,
         f"✅ <b>Анонс коллекции отправлен</b>\n{tb.DIVIDER}\n\n"
+        f"Доставлено: <b>{sent_count}</b>\nНе доставлено: <b>{failed_count}</b>",
+        parse_mode="HTML",
+        reply_markup=tb.get_admin_announcements_keyboard(back_callback),
+    )
+
+
+@router.callback_query(F.data == "admin_announce_teacher_mug_confirm")
+async def cb_admin_announce_teacher_mug_confirm(callback: CallbackQuery):
+    if not (tb.is_admin(callback.from_user.id) or tb.is_payment_admin(callback.from_user.id)):
+        await callback.answer()
+        return
+    await callback.answer()
+    try:
+        sent = await callback.message.answer_photo(
+            get_mug_photo("4"),
+            caption=get_teacher_gift_announcement_text(),
+            parse_mode="HTML",
+            reply_markup=get_teacher_gift_announcement_keyboard(),
+        )
+        if cache_mug_photo("4", sent):
+            tb.save_stats()
+    except Exception:
+        tb.logger.exception("Не удалось показать подарочную кружку в предпросмотре анонса")
+    await tb.safe_edit_text(
+        callback.message,
+        f"👀 <b>Предпросмотр отдельного анонса</b>\n{tb.DIVIDER}\n\n"
+        f"Отправить фото и текст «ПОДАРОК ПРЕПОДАВАТЕЛЮ» всем "
+        f"{len(tb.stats['total_users'])} пользователям?",
+        parse_mode="HTML",
+        reply_markup=get_admin_teacher_gift_announcement_keyboard(),
+    )
+
+
+@router.callback_query(F.data == "admin_announce_teacher_mug_go")
+async def cb_admin_announce_teacher_mug_go(callback: CallbackQuery):
+    if not (tb.is_admin(callback.from_user.id) or tb.is_payment_admin(callback.from_user.id)):
+        await callback.answer()
+        return
+    await callback.answer("Рассылка запущена", show_alert=True)
+    tb.stats["broadcast_count"] = tb.stats.get("broadcast_count", 0) + 1
+    tb.save_stats()
+    sent_count, failed_count = await broadcast_teacher_gift_announcement()
+    back_callback = "admin_panel" if tb.is_admin(callback.from_user.id) else "payment_admin_panel"
+    await tb.safe_edit_text(
+        callback.message,
+        f"✅ <b>Анонс подарочной кружки отправлен</b>\n{tb.DIVIDER}\n\n"
         f"Доставлено: <b>{sent_count}</b>\nНе доставлено: <b>{failed_count}</b>",
         parse_mode="HTML",
         reply_markup=tb.get_admin_announcements_keyboard(back_callback),
