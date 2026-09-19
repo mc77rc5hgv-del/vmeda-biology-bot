@@ -15,7 +15,7 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.types import (
     Message, CallbackQuery, InlineKeyboardButton, FSInputFile, BufferedInputFile, Update,
     BotCommand, BotCommandScopeDefault, BotCommandScopeChat, LabeledPrice,
-    ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove,
+    ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, WebAppInfo,
 )
 from aiogram.filters import CommandStart, Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -70,6 +70,10 @@ ADMIN_IDS = {1326779223, 8601892147}
 STATS_DIR = os.getenv("STATS_DIR", ".")
 STATS_FILE = os.path.join(STATS_DIR, "stats.json")
 MUG_PREORDER_ENABLED = os.environ.get("MUG_PREORDER_ENABLED", "1") != "0"
+MINIAPP_URL = os.getenv(
+    "MINIAPP_URL",
+    "https://vmeda-miniapp-preview-production.up.railway.app/",
+).strip()
 
 # Все студенты и админы бота — в России, но контейнер (Railway) по умолчанию работает в UTC,
 # так что "новый день"/"новый месяц" по системному времени наступает на 3 часа позже реального
@@ -1967,6 +1971,15 @@ def _histology_menu_label(user_id: int = None) -> str:
 
 def get_main_menu(user_id: int = None):
     builder = InlineKeyboardBuilder()
+    # Пока backend Mini App закрыт серверным admin_only-гейтом, точку входа показываем только
+    # полным администраторам. Это не заменяет серверную проверку initData, а лишь не ведёт
+    # студентов к заведомо закрытому preview. Кнопка открывает приложение внутри Telegram,
+    # поэтому initData будет подписана тем же ботом и сможет пройти web_api/auth.py.
+    if user_id is not None and is_admin(user_id) and MINIAPP_URL:
+        builder.row(InlineKeyboardButton(
+            text="🎓 Открыть VMEDA App",
+            web_app=WebAppInfo(url=MINIAPP_URL),
+        ))
     builder.button(text="🤖 VMedA AI (бета)", callback_data="ai_menu")
     builder.button(text="1️⃣ Первый курс", callback_data="course_menu:1")
     builder.button(text="2️⃣ Второй курс", callback_data="course_menu:2")

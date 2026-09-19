@@ -46,6 +46,10 @@ def kb_texts(markup):
     return [b.text for row in markup.inline_keyboard for b in row]
 
 
+def kb_buttons(markup):
+    return [button for row in markup.inline_keyboard for button in row]
+
+
 async def main():
     non_admin = 88_112_233
 
@@ -57,7 +61,16 @@ async def main():
     assert "course_menu:1" in main_data and "course_menu:2" in main_data
     assert any("Первый курс" in t for t in kb_texts(main_menu))
     assert any("Второй курс" in t for t in kb_texts(main_menu))
+    assert all(button.web_app is None for button in kb_buttons(main_menu))
     print("1. main menu exposes only the two course entry points, no direct subject buttons: OK")
+
+    # ---- 1b. production Mini App entry is visible only to a full admin while API is admin_only ----
+    admin_app_buttons = [button for button in kb_buttons(tb.get_main_menu(user_id=ADMIN_ID)) if button.web_app]
+    assert len(admin_app_buttons) == 1
+    assert admin_app_buttons[0].text == "🎓 Открыть VMEDA App"
+    assert admin_app_buttons[0].web_app.url == tb.MINIAPP_URL
+    assert tb.MINIAPP_URL.startswith("https://")
+    print("1b. admin gets one signed Telegram Mini App launch button; ordinary users get none: OK")
 
     # ---- 2. 1st course: Физика, Химия, Биология, Анатомия, Гистология, in that order ----
     course1 = tb.get_course_menu_keyboard(1, user_id=non_admin)
