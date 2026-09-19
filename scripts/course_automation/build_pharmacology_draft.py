@@ -63,7 +63,40 @@ def paginate(blocks: list[dict]) -> list[str]:
     return pages
 
 
-def compile_draft(lessons: list[dict], curriculum: dict) -> tuple[dict, dict, str]:
+def assessment_blocks(bank: dict, lesson_number: int, source_sha256: str) -> dict:
+    """Preserve source numbering/options without inventing keys or table cells."""
+    if bank.get("lesson_number") != lesson_number or bank.get("source_sha256") != source_sha256:
+        raise ValueError("Assessment source or class mismatch")
+    if bank.get("transcription_status") != "visually_checked" or bank.get("answer_key") is not None:
+        raise ValueError("Only visually checked question-only banks are supported")
+    questions, tasks = bank["questions"], bank["practical_tasks"]
+    for items in (questions, tasks):
+        if not items or [x["number"] for x in items] != list(range(1, len(items) + 1)):
+            raise ValueError("Source numbering must be consecutive and unique")
+        for item in items:
+            if not item.get("text") or not item.get("pdf_pages") or set(item["pdf_pages"]) - set(bank["pdf_pages"]):
+                raise ValueError("Missing assessment text or source locator")
+    result = {"practice": [], "recall": []}
+    for key, items, label in (("practice", tasks, "Задание"), ("recall", questions, "Вопрос")):
+        result[key].append({"title": "Оригинальные задания практикума", "text": bank["notice"]})
+        for item in items:
+            parts = [item["text"]]
+            parts.extend(item.get("match_items", []))
+            parts.extend(item.get("options", []))
+            if "table" in item:
+                table = item["table"]
+                parts += ["Сравните: " + "; ".join(table["columns"]) + ".",
+                          "Критерии (заполните самостоятельно для каждого пути):"]
+                parts.extend(f"• {row}" for row in table["rows"])
+            if item.get("note"):
+                parts.append(item["note"])
+            parts.append("Источник: PDF, стр. " + ", ".join(map(str, item["pdf_pages"])))
+            result[key].append({"title": f"Практикум · {label} {item['number']}", "text": "\n".join(parts)})
+    return result
+
+
+def compile_draft(lessons: list[dict], curriculum: dict, banks: dict | None = None) -> tuple[dict, dict, str]:
+    banks = banks or {}
     lessons = sorted(lessons, key=lambda item: item["number"])
     allowed = {l["number"] for m in curriculum["modules"] for l in m["lessons"]}
     groups, seen, markdown = [], set(), [
@@ -76,19 +109,25 @@ def compile_draft(lessons: list[dict], curriculum: dict) -> tuple[dict, dict, st
         if lesson["number"] in seen:
             raise ValueError("Duplicate class number")
         seen.add(lesson["number"])
+        extra = {}
+        if lesson.get("assessment_file"):
+            if lesson["assessment_file"] not in banks:
+                raise ValueError("Referenced assessment bank is missing")
+            extra = assessment_blocks(banks[lesson["assessment_file"]], lesson["number"], curriculum["source"]["sha256"])
         group = {"id": lesson["id"], "title": f"{lesson['number']}. {lesson['title']}", "lessons": []}
         markdown += [f"## Занятие {lesson['number']}. {lesson['title']}",
                      "### Ещё предстоит проверить и дополнить",
                      "\n".join(f"- {item}" for item in lesson["outstanding"])]
         for section in lesson["sections"]:
-            pages = paginate(section["blocks"])
+            blocks = extra.get(section["id"], []) + section["blocks"]
+            pages = paginate(blocks)
             group["lessons"].append({
                 "id": f"{lesson['id']}_{section['id']}", "title": section["title"],
                 "content": pages[0], "content_pages": pages,
                 "sources": [r.get("file", r.get("url", "")) for r in lesson["source_refs"]],
             })
             markdown.append(f"### {section['title']}")
-            for block in section["blocks"]:
+            for block in blocks:
                 markdown += [f"#### {block['title']}", block["text"]]
         markdown.append("### Источники и границы проверки")
         for ref in lesson["source_refs"]:
@@ -114,6 +153,8 @@ def compile_draft(lessons: list[dict], curriculum: dict) -> tuple[dict, dict, st
         "partial_classes": [l["number"] for l in lessons if l["coverage"] == "partial"],
         "review_required": {str(l["number"]): l["outstanding"] for l in lessons},
         "navigation_items_per_class": 4,
+        "source_questions": sum(len(banks[l["assessment_file"]]["questions"]) for l in lessons if l.get("assessment_file")),
+        "source_practical_tasks": sum(len(banks[l["assessment_file"]]["practical_tasks"]) for l in lessons if l.get("assessment_file")),
         "self_check_mode": "static_questions_then_explanations_not_interactive_scoring",
     }
     return course, report, "\n\n".join(markdown) + "\n"
@@ -122,7 +163,8 @@ def compile_draft(lessons: list[dict], curriculum: dict) -> tuple[dict, dict, st
 def main() -> None:
     curriculum = json.loads((AUTHORING / "curriculum.json").read_text(encoding="utf-8"))
     lessons = [json.loads(p.read_text(encoding="utf-8")) for p in sorted((AUTHORING / "lessons").glob("*.json"))]
-    course, report, markdown = compile_draft(lessons, curriculum)
+    banks = {p.name: json.loads(p.read_text(encoding="utf-8")) for p in sorted((AUTHORING / "assessments").glob("*.json"))}
+    course, report, markdown = compile_draft(lessons, curriculum, banks)
     OUTPUT.mkdir(parents=True, exist_ok=True)
     for name, data in (("course.json", course), ("coverage.json", report)):
         (OUTPUT / name).write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
