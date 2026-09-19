@@ -98,7 +98,7 @@ def assessment_blocks(bank: dict, lesson_number: int, source_sha256: str) -> dic
 def compile_draft(lessons: list[dict], curriculum: dict, banks: dict | None = None) -> tuple[dict, dict, str]:
     banks = banks or {}
     lessons = sorted(lessons, key=lambda item: item["number"])
-    allowed = {l["number"] for m in curriculum["modules"] for l in m["lessons"]}
+    allowed = {lesson["number"] for module in curriculum["modules"] for lesson in module["lessons"]}
     groups, seen, markdown = [], set(), [
         "# Фармакология — редакционный просмотр",
         "Не опубликовано. Неполный учебный черновик, не официальный ключ кафедры. "
@@ -150,11 +150,11 @@ def compile_draft(lessons: list[dict], curriculum: dict, banks: dict | None = No
         "publication_ready": False, "ai_eligible": False, "runtime_files_changed": False,
         "authored_classes": sorted(seen), "curriculum_classes": len(allowed),
         "not_authored": sorted(allowed - seen),
-        "partial_classes": [l["number"] for l in lessons if l["coverage"] == "partial"],
-        "review_required": {str(l["number"]): l["outstanding"] for l in lessons},
+        "partial_classes": [lesson["number"] for lesson in lessons if lesson["coverage"] == "partial"],
+        "review_required": {str(lesson["number"]): lesson["outstanding"] for lesson in lessons},
         "navigation_items_per_class": 4,
-        "source_questions": sum(len(banks[l["assessment_file"]]["questions"]) for l in lessons if l.get("assessment_file")),
-        "source_practical_tasks": sum(len(banks[l["assessment_file"]]["practical_tasks"]) for l in lessons if l.get("assessment_file")),
+        "source_questions": sum(len(banks[lesson["assessment_file"]]["questions"]) for lesson in lessons if lesson.get("assessment_file")),
+        "source_practical_tasks": sum(len(banks[lesson["assessment_file"]]["practical_tasks"]) for lesson in lessons if lesson.get("assessment_file")),
         "self_check_mode": "static_questions_then_explanations_not_interactive_scoring",
     }
     return course, report, "\n\n".join(markdown) + "\n"

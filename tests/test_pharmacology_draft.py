@@ -8,8 +8,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from scripts.course_automation.build_pharmacology_draft import compile_draft, paginate, PAGE_LIMIT
-from scripts.course_automation.schema import validate_telegram_html
+from scripts.course_automation.build_pharmacology_draft import compile_draft, paginate, PAGE_LIMIT  # noqa: E402
+from scripts.course_automation.schema import validate_telegram_html  # noqa: E402
 
 
 class DraftTests(unittest.TestCase):
@@ -72,7 +72,12 @@ class DraftTests(unittest.TestCase):
         self.assertEqual([len(q.get("options", [])) for q in bank["questions"]],
                          [10, 0, 0, 6, 4, 4, 10, 8, 7, 9, 4, 5, 4, 3, 6, 5, 7])
         self.assertEqual(len(bank["questions"][-1]["match_items"]), 7)
-        joined = "\n".join(p for g in course["sections"][0]["groups"] for l in g["lessons"] for p in l["content_pages"])
+        joined = "\n".join(
+            page
+            for group in course["sections"][0]["groups"]
+            for lesson in group["lessons"]
+            for page in lesson["content_pages"]
+        )
         for item in bank["questions"] + bank["practical_tasks"]:
             for text in [item["text"]] + item.get("options", []) + item.get("match_items", []):
                 self.assertIn(text, markdown)

@@ -7,9 +7,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from docx import Document
-from scripts.course_automation.source_text import docx_text
-from scripts.course_automation import build_pharmacology
+from docx import Document  # noqa: E402
+from scripts.course_automation.source_text import docx_text  # noqa: E402
+from scripts.course_automation import build_pharmacology  # noqa: E402
 
 
 def main():

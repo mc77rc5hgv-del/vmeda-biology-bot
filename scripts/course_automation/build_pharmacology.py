@@ -57,9 +57,12 @@ def main(repo: Path) -> None:
     ]
     for sid, title, filename, kind in controls:
         path = sources / filename
-        if kind == "pdf": lessons = page_lessons(sid, pdf_pages(path), filename, title)
-        elif kind == "docx_test": lessons = multiple_choice_lessons(sid, path, "Задание")
-        else: lessons = numbered_lessons(sid, docx_text(path), filename, "Вопрос")
+        if kind == "pdf":
+            lessons = page_lessons(sid, pdf_pages(path), filename, title)
+        elif kind == "docx_test":
+            lessons = multiple_choice_lessons(sid, path, "Задание")
+        else:
+            lessons = numbered_lessons(sid, docx_text(path), filename, "Вопрос")
         sections.append({"id": sid, "title": title, "lessons": lessons})
 
     sections.append({"id": "credit_tickets", "title": "Зачёт — билеты", "lessons": page_lessons("credit", pdf_pages(sources / "ЗАЧЕТ_ФАРМА_билеты_с_небольшой_редакцией.pdf"), "ЗАЧЕТ_ФАРМА_билеты_с_небольшой_редакцией.pdf", "Зачётный билет") + document_chunks("credit_11_20", sources / "зачет фарма билеты 11-20.docx", "Билеты 11–20")})
@@ -126,7 +129,8 @@ def main(repo: Path) -> None:
     originals = [p for p in sources.iterdir() if p.suffix.lower() in {".pdf", ".doc", ".docx"} and not (p.suffix.lower() == ".docx" and (sources / f"{p.stem}.doc").exists())]
     hashes = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in originals}
     groups = {}
-    for name, digest in hashes.items(): groups.setdefault(digest, []).append(name)
+    for name, digest in hashes.items():
+        groups.setdefault(digest, []).append(name)
     used = {src.split(",")[0] for section in sections for item in section["lessons"] for src in item.get("sources", [])}
     files = []
     for p in sorted(originals, key=lambda x: x.name.casefold()):
@@ -136,9 +140,10 @@ def main(repo: Path) -> None:
         derived_name = f"{p.stem}.docx" if p.suffix.lower() == ".doc" else None
         is_used = p.name in used or (derived_name in used if derived_name else False)
         files.append({"file": p.name, "sha256": hashes[p.name], "status": "duplicate" if duplicate else "processed", "same_as": canonical if duplicate else None, "coverage": "duplicate" if duplicate else ("course" if is_used else "reference")})
-    report = {"subject": "Фармакология", "source_count": len(originals), "section_count": len(student_sections), "internal_section_count": len(sections), "lesson_count": sum(len(g["lessons"]) for s in student_sections for g in s["groups"]), "media_count": sum(len(l.get("media", [])) for s in student_sections for g in s["groups"] for l in g["lessons"]), "files": files}
+    report = {"subject": "Фармакология", "source_count": len(originals), "section_count": len(student_sections), "internal_section_count": len(sections), "lesson_count": sum(len(group_item["lessons"]) for section in student_sections for group_item in section["groups"]), "media_count": sum(len(lesson_item.get("media", [])) for section in student_sections for group_item in section["groups"] for lesson_item in group_item["lessons"]), "files": files}
     (workspace / "coverage_report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps({k: report[k] for k in ("source_count", "section_count", "lesson_count", "media_count")}, ensure_ascii=False))
 
 
-if __name__ == "__main__": main(Path(sys.argv[1]).resolve())
+if __name__ == "__main__":
+    main(Path(sys.argv[1]).resolve())

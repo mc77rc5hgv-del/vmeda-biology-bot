@@ -4,7 +4,6 @@ import re
 from pathlib import Path
 
 from docx import Document
-from pypdf import PdfReader
 
 MAX_CONTENT = 3300
 
@@ -58,6 +57,11 @@ def docx_paragraphs(path: Path) -> list[str]:
 
 
 def pdf_pages(path: Path) -> list[str]:
+    # PDF tooling is an authoring-only dependency. Keep the import local so the
+    # production bot and its default CI can validate non-PDF course structures
+    # without installing the much larger automation dependency set.
+    from pypdf import PdfReader
+
     return [norm(page.extract_text() or "") for page in PdfReader(path).pages]
 
 
