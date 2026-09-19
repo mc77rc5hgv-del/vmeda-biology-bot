@@ -11,7 +11,7 @@ async def main():
     root = Path(__file__).resolve().parents[1]
     course = json.loads((root / "generated_courses" / "pharmacology.json").read_text(encoding="utf-8"))
     knowledge = json.loads((root / "generated_knowledge" / "pharmacology_ai.json").read_text(encoding="utf-8"))
-    report = json.loads((root / ".course-automation" / "pharmacology" / "coverage_report.json").read_text(encoding="utf-8"))
+    report = json.loads((root / "generated_reports" / "pharmacology" / "review_report.json").read_text(encoding="utf-8"))
     assert validate_course(course) == [] and course["course"] == 2
     sections = {section["id"]: section for section in course["sections"]}
     assert list(sections) == ["course", "controls", "credit", "exam"]
@@ -19,11 +19,12 @@ async def main():
     groups = {group["id"]: group for section in course["sections"] for group in section["groups"]}
     assert {"foundations", "course_theory", "drug_groups", "drug_comparison", "course_practice", "prescription", "control_one", "control_three", "control_four", "control_five", "control_six", "credit_questions", "credit_testing", "exam_theory", "exam_practice", "exam_tests"} == set(groups)
     assert len(groups["drug_comparison"]["lessons"]) >= 455
-    assert len({m["path"] for l in groups["drug_comparison"]["lessons"] for m in l.get("media", [])}) == 455
+    assert len({media["path"] for lesson in groups["drug_comparison"]["lessons"] for media in lesson.get("media", [])}) == 455
     assert len(groups["exam_tests"]["lessons"]) >= 400
-    assert report["source_count"] == 34
+    assert report["source_count"] == 36
     assert sum(f["status"] == "duplicate" for f in report["files"]) == 2
-    assert all(f["coverage"] in {"course", "reference", "duplicate"} for f in report["files"])
+    assert report["classes"] == 49 and report["modules"] == 5
+    assert report["publication_ready"] is False and report["blockers"]
     assert len(knowledge["entries"]) >= 2000
     assert len([e for e in tb.ai_rag._index if e["subject"] == "фармакология"]) == len(knowledge["entries"])
     snippets, usage = await tb.ai_rag.search_for_task(tb.TaskRepresentation(raw_text="фармакокинетика биодоступность период полувыведения"), subject_filter="фармакология")

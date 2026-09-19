@@ -74,8 +74,11 @@ async def extract_pdf(path: Path) -> list[dict]:
     records = []
     with tempfile.TemporaryDirectory(prefix="vmeda-latin-ocr-") as temp_dir:
         prefix = Path(temp_dir) / "page"
-        subprocess.run([str(PDFTOPPM), "-png", "-r", "280", str(path), str(prefix)],
-                       check=True, capture_output=True)  # noqa: S603
+        subprocess.run(  # noqa: S603
+            [str(PDFTOPPM), "-png", "-r", "280", str(path), str(prefix)],
+            check=True,
+            capture_output=True,
+        )
         images = sorted(Path(temp_dir).glob("page-*.png"))
         if len(images) != len(reader.pages):
             raise RuntimeError(f"Rendered {len(images)} of {len(reader.pages)} pages for {path.name}")

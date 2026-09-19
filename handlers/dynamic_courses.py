@@ -307,8 +307,8 @@ async def cb_dynamic_group(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("dyn_gl:"))
 async def cb_dynamic_group_lesson(callback: CallbackQuery):
     try:
-        _, c, s, g, l = callback.data.split(":")
-        course_index, section_index, group_index, lesson_index = map(int, (c, s, g, l))
+        _, c, s, g, lesson_value = callback.data.split(":")
+        course_index, section_index, group_index, lesson_index = map(int, (c, s, g, lesson_value))
         course = tb.DYNAMIC_COURSES[course_index]
         lesson = course["sections"][section_index]["groups"][group_index]["lessons"][lesson_index]
     except (ValueError, IndexError, KeyError, TypeError):
@@ -336,8 +336,10 @@ async def cb_dynamic_group_lesson(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("dyn_glp:"))
 async def cb_dynamic_group_lesson_page(callback: CallbackQuery):
     try:
-        _, c, s, g, l, p = callback.data.split(":")
-        course_index, section_index, group_index, lesson_index, content_page = map(int, (c, s, g, l, p))
+        _, c, s, g, lesson_value, p = callback.data.split(":")
+        course_index, section_index, group_index, lesson_index, content_page = map(
+            int, (c, s, g, lesson_value, p)
+        )
         lesson = tb.DYNAMIC_COURSES[course_index]["sections"][section_index]["groups"][group_index]["lessons"][lesson_index]
         pages = lesson.get("content_pages") or [lesson["content"]]
         if content_page < 0 or content_page >= len(pages):

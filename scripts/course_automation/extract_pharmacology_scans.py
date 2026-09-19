@@ -42,7 +42,9 @@ async def process(source: Path, output: Path, asset_dir: Path | None = None) -> 
     pdftoppm = Path(r"C:\Users\MSI-01\.cache\codex-runtimes\codex-primary-runtime\dependencies\native\poppler\Library\bin\pdftoppm.exe")
     with tempfile.TemporaryDirectory(prefix="vmeda-pharma-ocr-") as temp_dir:
         prefix = Path(temp_dir) / "page"
-        subprocess.run([str(pdftoppm), "-jpeg", "-r", "120", str(source), str(prefix)], check=True)
+        subprocess.run(  # noqa: S603
+            [str(pdftoppm), "-jpeg", "-r", "120", str(source), str(prefix)], check=True
+        )
         images = sorted(Path(temp_dir).glob("page-*.jpg"))
         if len(images) != page_count:
             raise RuntimeError(f"Rendered {len(images)} of {page_count} pages: {source.name}")
