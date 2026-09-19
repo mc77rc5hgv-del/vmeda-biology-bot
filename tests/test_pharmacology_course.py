@@ -33,7 +33,8 @@ async def main():
 
     course_index = next(i for i, item in enumerate(tb.DYNAMIC_COURSES) if item["id"] == "pharmacology")
     labels = [button.text for row in tb.get_dynamic_course_keyboard(course_index).inline_keyboard for button in row]
-    assert labels[:5] == ["📚 КУРС", "📝 КОНТРОЛЬНЫЕ", "✅ ЗАЧЁТ", "🎓 ЭКЗАМЕН", "🤖 VMedA AI по предмету"]
+    assert labels[:4] == ["📚 КУРС", "📝 КОНТРОЛЬНЫЕ", "✅ ЗАЧЁТ", "🎓 ЭКЗАМЕН"]
+    assert "🤖 VMedA AI по предмету" not in labels
     assert not any(".pdf" in label.lower() or ".doc" in label.lower() for label in labels)
     from handlers import dynamic_courses as dc
     first_page = dc.get_dynamic_group_keyboard(course_index, 0, 3, 0)

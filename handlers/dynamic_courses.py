@@ -60,9 +60,16 @@ def get_maintenance_keyboard(course: dict):
     return builder.as_markup()
 
 
-async def deny_maintenance_course(callback: CallbackQuery, course_index: int) -> bool:
+async def deny_maintenance_course(
+    callback: CallbackQuery, course_index: int, *, allow_admin_preview: bool = True
+) -> bool:
     course = get_dynamic_item(course_index)
     if not course or not tb.dynamic_course_under_maintenance(course):
+        return False
+    # During a rework, core admins can inspect the currently deployed material
+    # through the real Telegram navigation. Students remain hard-blocked until
+    # the publication gate is lifted. This changes no access/subscription data.
+    if allow_admin_preview and tb.is_admin(callback.from_user.id):
         return False
     await callback.answer("Раздел временно закрыт на переработку", show_alert=True)
     await tb.safe_edit_text(
@@ -81,7 +88,9 @@ def get_dynamic_course_keyboard(course_index: int):
     for section_index, section in enumerate(tb.DYNAMIC_COURSES[course_index]["sections"]):
         builder.button(text=section["title"], callback_data=f"dyn_s:{course_index}:{section_index}")
     course = tb.DYNAMIC_COURSES[course_index]
-    if course.get("ai_mode"):
+    # The content preview is useful to editors, but an unreviewed AI corpus must
+    # not be exposed merely because the editor can bypass maintenance.
+    if course.get("ai_mode") and not tb.dynamic_course_under_maintenance(course):
         builder.button(text="🤖 VMedA AI по предмету", callback_data=f"dyn_ai:{course_index}")
     course_number = course.get("course", 2)
     builder.button(text=f"🔙 К {course_number}-му курсу", callback_data=f"course_menu:{course_number}")
@@ -100,7 +109,7 @@ async def cb_dynamic_ai(callback: CallbackQuery):
     if not course or not course.get("ai_mode"):
         await callback.answer("AI для предмета не найден", show_alert=True)
         return
-    if await deny_maintenance_course(callback, course_index):
+    if await deny_maintenance_course(callback, course_index, allow_admin_preview=False):
         return
     await tb.begin_ai_session(callback, mode=course["ai_mode"])
 
@@ -243,10 +252,16 @@ async def cb_dynamic_course(callback: CallbackQuery):
     if await deny_maintenance_course(callback, course_index):
         return
     await callback.answer()
+    preview_notice = ""
+    if tb.dynamic_course_under_maintenance(course):
+        preview_notice = (
+            "\n\n🧪 <b>Админ-предпросмотр.</b> Студенты по-прежнему видят техобслуживание. "
+            "Материалы ещё проходят сверку; фармакологический VMedA AI скрыт."
+        )
     await tb.safe_edit_text(
         callback.message,
         f"{course.get('emoji', '📚')} <b>{html.escape(course['title'])}</b>\n{tb.DIVIDER}\n\n"
-        f"{html.escape(course.get('description', 'Выберите раздел:'))}",
+        f"{html.escape(course.get('description', 'Выберите раздел:'))}{preview_notice}",
         parse_mode="HTML",
         reply_markup=get_dynamic_course_keyboard(course_index),
     )

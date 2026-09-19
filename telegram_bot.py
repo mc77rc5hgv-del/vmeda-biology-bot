@@ -2028,7 +2028,10 @@ def get_course_menu_keyboard(course: int, user_id: int = None):
         builder.button(text=label, callback_data=callback_data)
     for course_index, dynamic_course in enumerate(DYNAMIC_COURSES):
         if dynamic_course.get("course", 2) == course:
-            maintenance_suffix = " — техобслуживание" if dynamic_course_under_maintenance(dynamic_course) else ""
+            if dynamic_course_under_maintenance(dynamic_course):
+                maintenance_suffix = " — админ-предпросмотр" if user_id is not None and is_admin(user_id) else " — техобслуживание"
+            else:
+                maintenance_suffix = ""
             builder.button(
                 text=f"{dynamic_course.get('emoji', '📚')} {dynamic_course['title']}{maintenance_suffix}",
                 callback_data=f"dyn_c:{course_index}",
