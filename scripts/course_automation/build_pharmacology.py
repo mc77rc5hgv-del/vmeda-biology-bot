@@ -6,7 +6,7 @@ import json
 import sys
 from pathlib import Path
 
-from scripts.course_automation.build_biochemistry import (
+from scripts.course_automation.source_text import (
     chunks, docx_text, lesson, multiple_choice_lessons, numbered_lessons, page_lessons, pdf_pages,
 )
 

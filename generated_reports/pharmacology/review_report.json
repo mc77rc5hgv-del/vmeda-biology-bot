@@ -1,0 +1,298 @@
+{
+  "subject": "pharmacology",
+  "files": [
+    {
+      "file": "29d9ccd763f5b9416427b5caae678382.pdf",
+      "sha256": "7b63430c3b96ac81a0b7509265e75e70c36dcd37cffc5791fdedd5faa64a1306",
+      "bytes": 2601709,
+      "pages": 279,
+      "weak_text_pages": 4,
+      "status": "needs_ocr_review"
+    },
+    {
+      "file": "c5db0f9b4e6e06d1fde6854b15adf12e.pdf",
+      "sha256": "b638ecf3fc9afd7ca11c315d191c8fb3e419de4c3ddc14496bf235fe94a644ab",
+      "bytes": 2190311,
+      "pages": 227,
+      "weak_text_pages": 1,
+      "status": "needs_ocr_review"
+    },
+    {
+      "file": "farma_testy_vse.docx",
+      "sha256": "9accfab2a083bc91946aa92e51a1176f11a3ab957c2c5668b615c37b9f24e866",
+      "bytes": 49562,
+      "status": "text_extracted_needs_review",
+      "blocks": 1562,
+      "images": 0
+    },
+    {
+      "file": "Kharkevich_D_A_-_Farmakologia_Uchebnik_12-e_izdanie.pdf",
+      "sha256": "41addf4994e5dcc1a28d95c50de771cab7725d0d18eeb27cc968a0724406d809",
+      "bytes": 140419195,
+      "pages": 762,
+      "weak_text_pages": 3,
+      "status": "needs_ocr_review"
+    },
+    {
+      "file": "билеты по фарме.docx",
+      "sha256": "544f34822bf3bf32c2d5d31d43ab3df9cc8beb595a765612bc9083ca68e61d25",
+      "bytes": 1108023,
+      "status": "text_extracted_needs_review",
+      "blocks": 925,
+      "images": 2
+    },
+    {
+      "file": "Все Рецепты.doc",
+      "sha256": "dbe9526119b631328a9f46961d096c9de6d3e1914957a7863b366ad05226bf30",
+      "bytes": 232448,
+      "status": "legacy_doc_requires_conversion"
+    },
+    {
+      "file": "Все Рецепты.docx",
+      "sha256": "295db5b25c00456df1de709ad7fdef452763cc94e0e9f6648266180fa3feca75",
+      "bytes": 105610,
+      "status": "text_extracted_needs_review",
+      "blocks": 632,
+      "images": 0
+    },
+    {
+      "file": "Занятие Nº 14.pdf",
+      "sha256": "a209652b1a87435d9da95cf4ac4ebb480657d25a6db84205a23143d5ad0da022",
+      "bytes": 8116999,
+      "pages": 24,
+      "weak_text_pages": 24,
+      "status": "needs_ocr_review"
+    },
+    {
+      "file": "зачет фарма билеты 11-20.docx",
+      "sha256": "8817ab86869658337a097285539dcdba02783cd98e5fe56baadcf2feab0addc0",
+      "bytes": 41010,
+      "status": "text_extracted_needs_review",
+      "blocks": 741,
+      "images": 0
+    },
+    {
+      "file": "ЗАЧЕТ_ФАРМА_билеты_с_небольшой_редакцией.pdf",
+      "sha256": "fa57e27287e0d662d9358d12dc629321735f3b04a9f34b8c3528317134767772",
+      "bytes": 782129,
+      "pages": 24,
+      "weak_text_pages": 0,
+      "status": "text_extracted_needs_review"
+    },
+    {
+      "file": "Кр3 фарма.pdf",
+      "sha256": "b3c2662b8dc1406928dce0e4bf6c88ed0ccec1eac3620f9120e5831220367cb7",
+      "bytes": 2840907,
+      "pages": 25,
+      "weak_text_pages": 1,
+      "status": "needs_ocr_review"
+    },
+    {
+      "file": "кр4.pdf",
+      "sha256": "5f6eed306a03318bf8d5168a3ccbb16236ed337f8eebfa3c1835f56b73955b14",
+      "bytes": 795617,
+      "pages": 19,
+      "weak_text_pages": 0,
+      "status": "text_extracted_needs_review"
+    },
+    {
+      "file": "кр6.pdf",
+      "sha256": "d281285a25d47caedacb4601e9fd392d192f6ec15ed435c873e496837067c0c1",
+      "bytes": 2005876,
+      "pages": 23,
+      "weak_text_pages": 0,
+      "status": "text_extracted_needs_review"
+    },
+    {
+      "file": "МегаСлобж_compressed.pdf",
+      "sha256": "5def8fb78b37b73ce0a9c0323683b62e5943eb874fdadd8d1d320411ca8dfc65",
+      "bytes": 34449294,
+      "pages": 558,
+      "weak_text_pages": 115,
+      "status": "needs_ocr_review"
+    },
+    {
+      "file": "Общая Фармакология.pdf",
+      "sha256": "a89c823ac2ee31aef63fb033ec2543b939c981a2d08e068490efd1815c51e81e",
+      "bytes": 3531967,
+      "pages": 17,
+      "weak_text_pages": 3,
+      "status": "needs_ocr_review"
+    },
+    {
+      "file": "РЕЦЕПТЫ С ИСПРАВЛЕНИЯМИ.pdf",
+      "sha256": "f041aaa86a95abbbed3d0365f5e95801889a0dbefc099932aa005c4c708e2354",
+      "bytes": 474071,
+      "pages": 15,
+      "weak_text_pages": 0,
+      "status": "text_extracted_needs_review"
+    },
+    {
+      "file": "рк5т.docx",
+      "sha256": "29900c4c2d5fd89a91889e1283547639aa0192632d7516bb7d41406321de02ad",
+      "bytes": 20726,
+      "status": "text_extracted_needs_review",
+      "blocks": 320,
+      "images": 0
+    },
+    {
+      "file": "теория фарма-1.docx",
+      "sha256": "425c9df031bbb42fa02edd5779004b0552ecca254d2b009109f4706b7d5b0dff",
+      "bytes": 291191,
+      "status": "text_extracted_needs_review",
+      "blocks": 781,
+      "images": 0
+    },
+    {
+      "file": "тесты по билетам фарма-2 (2).pdf",
+      "sha256": "314a6fec3d1a8171ab0d10fd7c380770b19ab637d66b44fb9ac8045d8856dbc6",
+      "bytes": 382517,
+      "pages": 25,
+      "weak_text_pages": 0,
+      "status": "text_extracted_needs_review"
+    },
+    {
+      "file": "тесты по билетам фарма-2.pdf",
+      "sha256": "314a6fec3d1a8171ab0d10fd7c380770b19ab637d66b44fb9ac8045d8856dbc6",
+      "bytes": 382517,
+      "status": "duplicate",
+      "same_as": "тесты по билетам фарма-2 (2).pdf"
+    },
+    {
+      "file": "тесты фармакология+ ответы .pdf",
+      "sha256": "64a1a3225642668a7510688ea48db7b295e169a791081b40fcc7b79aa21de564",
+      "bytes": 514051,
+      "pages": 70,
+      "weak_text_pages": 0,
+      "status": "text_extracted_needs_review"
+    },
+    {
+      "file": "Учебник_ФЛ_Виноградов_Каткова_2016.pdf",
+      "sha256": "001591bd042a35c42d2fe7775e6cef22ef1368b262b8af7475a0fc1ad70e1195",
+      "bytes": 6102775,
+      "pages": 649,
+      "weak_text_pages": 6,
+      "status": "needs_ocr_review"
+    },
+    {
+      "file": "Фарма Аляутдин (синяя книга).pdf",
+      "sha256": "c641b8be1fe48ca00204709158d55d8ade520f89d230ebd7b00b19f0425a2a3b",
+      "bytes": 19021713,
+      "pages": 1094,
+      "weak_text_pages": 3,
+      "status": "needs_ocr_review"
+    },
+    {
+      "file": "Фарма все таблицы.pdf",
+      "sha256": "611e331b53390fadd08abf0654a3867feb39ce028e4731742b60faef69d22ee4",
+      "bytes": 80634454,
+      "pages": 455,
+      "weak_text_pages": 455,
+      "status": "needs_ocr_review"
+    },
+    {
+      "file": "ФАРМА ЗАЧЕТ ТЕСТЫ.docx",
+      "sha256": "735d8fb4371a55fa4ead248fed55e4e69683a703fdb082cbe3d0195b73dd7303",
+      "bytes": 41634,
+      "status": "text_extracted_needs_review",
+      "blocks": 858,
+      "images": 0
+    },
+    {
+      "file": "фарма к кр 1.docx",
+      "sha256": "01217fef404b72e6e6c97e7ab32046c93343dc6ed40f7de5625adc774de3ce4e",
+      "bytes": 205438,
+      "status": "text_extracted_needs_review",
+      "blocks": 178,
+      "images": 1
+    },
+    {
+      "file": "Фарма.Теория кр 5.pdf",
+      "sha256": "ef2818e088b2ddf3cb1e8e899f9932ffdfbfff8aec7ba23c411e1a41141a4f33",
+      "bytes": 10727807,
+      "pages": 52,
+      "weak_text_pages": 1,
+      "status": "needs_ocr_review"
+    },
+    {
+      "file": "ФАРМА2.pdf",
+      "sha256": "39306da7eb75df2841cb40b6b6096e41d5f05a9c181f30f6ac89e41c1199e664",
+      "bytes": 662625,
+      "pages": 6,
+      "weak_text_pages": 0,
+      "status": "text_extracted_needs_review"
+    },
+    {
+      "file": "ФАРМАКОЛОГИЯ КР 3.pdf",
+      "sha256": "c78a208a9168e18a0f66505878b40f90ff6bcd5d2222ba1a7b7c956aaa33a372",
+      "bytes": 1076964,
+      "pages": 10,
+      "weak_text_pages": 0,
+      "status": "text_extracted_needs_review"
+    },
+    {
+      "file": "Фармакология на ладонях (2).pdf",
+      "sha256": "5334945bebe8c2d8f052c1b54c07c0ed0b956cee71a55605ed39b5fef9da48db",
+      "bytes": 1005927,
+      "pages": 90,
+      "weak_text_pages": 0,
+      "status": "text_extracted_needs_review"
+    },
+    {
+      "file": "Фармакология практикум.pdf",
+      "sha256": "9ec13c6a4d43f757a78fe710aa23f64d833eb24a998a80b2d5ec3a3459c8cc03",
+      "bytes": 833354557,
+      "pages": 350,
+      "weak_text_pages": 350,
+      "status": "needs_ocr_review"
+    },
+    {
+      "file": "ФЛ ПРАКТИКА ОТВЕТЫ (билеты).doc",
+      "sha256": "c1cdc88ad29aac4ab97fdc2e02607aea051913c35a1d2afe99bf9c3d2cfd3b89",
+      "bytes": 251904,
+      "status": "legacy_doc_requires_conversion"
+    },
+    {
+      "file": "ФЛ ПРАКТИКА ОТВЕТЫ (билеты).docx",
+      "sha256": "8f49b057c468995d356451f87d6cf8d6c71c4f835c3b21bf3c918a4be7db4163",
+      "bytes": 79582,
+      "status": "text_extracted_needs_review",
+      "blocks": 405,
+      "images": 0
+    },
+    {
+      "file": "ФЛ ТЕОРИЯ (ответы)-1 (2).pdf",
+      "sha256": "c0ed8d561bd5afc9230cd4bb107eff1d28d640820f4994b426a9238da5ff9742",
+      "bytes": 2098552,
+      "pages": 153,
+      "weak_text_pages": 4,
+      "status": "needs_ocr_review"
+    },
+    {
+      "file": "ФЛ ТЕОРИЯ (ответы)-1.pdf",
+      "sha256": "c0ed8d561bd5afc9230cd4bb107eff1d28d640820f4994b426a9238da5ff9742",
+      "bytes": 2098552,
+      "status": "duplicate",
+      "same_as": "ФЛ ТЕОРИЯ (ответы)-1 (2).pdf"
+    },
+    {
+      "file": "ФЛ ТЕСТЫ.pdf",
+      "sha256": "9efe91d7ff3baecea3908e78bc243ecb01a9924da321024220f9c00c9df40079",
+      "bytes": 457157,
+      "pages": 30,
+      "weak_text_pages": 0,
+      "status": "text_extracted_needs_review"
+    }
+  ],
+  "source_count": 36,
+  "practicum_pages_staged": 350,
+  "modules": 5,
+  "classes": 49,
+  "publication_ready": false,
+  "blockers": [
+    "Scan text and drug doses require visual review",
+    "Map source answers to the 49 classes",
+    "Verify assessment keys"
+  ],
+  "extraction_notice": "Извлечение текста не означает медицинскую проверку. Слабые текстовые страницы могут быть сканами, обложками или иллюстрациями."
+}
