@@ -28,6 +28,16 @@ class FakeMsg:
         return self
 
 
+class FakeCommandMsg:
+    def __init__(self, uid):
+        self.from_user = FakeUser(uid)
+        self.answers = []
+
+    async def answer(self, text, **kwargs):
+        self.answers.append((text, kwargs))
+        return self
+
+
 class FakeCB:
     def __init__(self, data, uid=ADMIN_ID):
         self.data = data
@@ -71,6 +81,50 @@ async def main():
     assert admin_app_buttons[0].web_app.url == tb.MINIAPP_URL
     assert tb.MINIAPP_URL.startswith("https://")
     print("1b. admin gets one signed Telegram Mini App launch button; ordinary users get none: OK")
+
+    # ---- 1c. /app is a second admin-only entry point for stale /start messages ----
+    admin_app_message = FakeCommandMsg(ADMIN_ID)
+    await tb.cmd_app(admin_app_message)
+    assert len(admin_app_message.answers) == 1
+    app_markup = admin_app_message.answers[0][1]["reply_markup"]
+    app_buttons = [button for button in kb_buttons(app_markup) if button.web_app]
+    assert len(app_buttons) == 1 and app_buttons[0].web_app.url == tb.MINIAPP_URL
+
+    ordinary_app_message = FakeCommandMsg(non_admin)
+    await tb.cmd_app(ordinary_app_message)
+    assert ordinary_app_message.answers == []
+    print("1c. /app gives admins a fresh launch button and stays hidden from ordinary users: OK")
+
+    # ---- 1d. startup configures Telegram's persistent chat-menu button per full admin ----
+    class FakeBot:
+        def __init__(self):
+            self.command_calls = []
+            self.menu_calls = []
+
+        async def set_my_commands(self, commands, scope):
+            self.command_calls.append((commands, scope))
+
+        async def set_chat_menu_button(self, *, chat_id, menu_button):
+            self.menu_calls.append((chat_id, menu_button))
+
+    fake_bot = FakeBot()
+    real_bot = tb.setup_bot_commands.__globals__["bot"]
+    tb.setup_bot_commands.__globals__["bot"] = fake_bot
+    try:
+        await tb.setup_bot_commands()
+    finally:
+        tb.setup_bot_commands.__globals__["bot"] = real_bot
+
+    assert {chat_id for chat_id, _ in fake_bot.menu_calls} == tb.ADMIN_IDS
+    assert all(menu_button.web_app.url == tb.MINIAPP_URL for _, menu_button in fake_bot.menu_calls)
+    admin_command_names = {
+        command.command
+        for commands, scope in fake_bot.command_calls
+        if getattr(scope, "chat_id", None) in tb.ADMIN_IDS
+        for command in commands
+    }
+    assert "app" in admin_command_names
+    print("1d. startup pins VMEDA App beside the Telegram input for every full admin: OK")
 
     # ---- 2. 1st course: Физика, Химия, Биология, Анатомия, Гистология, in that order ----
     course1 = tb.get_course_menu_keyboard(1, user_id=non_admin)

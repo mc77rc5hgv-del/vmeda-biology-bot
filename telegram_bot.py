@@ -15,7 +15,7 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.types import (
     Message, CallbackQuery, InlineKeyboardButton, FSInputFile, BufferedInputFile, Update,
     BotCommand, BotCommandScopeDefault, BotCommandScopeChat, LabeledPrice,
-    ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, WebAppInfo,
+    ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, WebAppInfo, MenuButtonWebApp,
 )
 from aiogram.filters import CommandStart, Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -2004,6 +2004,20 @@ def get_main_menu(user_id: int = None):
     return builder.as_markup()
 
 
+def get_miniapp_keyboard():
+    """Единая inline-точка входа в Mini App для команды /app и главного меню.
+
+    Серверный admin_only-гейт остаётся источником истины: клавиатура сама по себе не выдаёт
+    доступ и не затрагивает подписки/статистику.
+    """
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(
+        text="🎓 Открыть VMEDA App",
+        web_app=WebAppInfo(url=MINIAPP_URL),
+    ))
+    return builder.as_markup()
+
+
 # «1️⃣ Первый курс» / «2️⃣ Второй курс» — группировка предметов по году обучения на главном экране
 # (см. запрос пользователя). Анатомия и Гистология входят в оба курса — их динамические
 # (зависящие от подписки/рефералов/техобслуживания) подписи вынесены в _anatomy_menu_label()/
@@ -2612,6 +2626,23 @@ async def cmd_start(message: Message):
         parse_mode="HTML",
         reply_markup=get_main_menu(user_id)
     )
+
+
+@dp.message(Command("app"))
+async def cmd_app(message: Message):
+    """Резервная явная точка входа, если пользователь смотрит старое сообщение /start.
+
+    Команда намеренно доступна только полным администраторам, пока web_api работает в
+    admin_only-режиме. Сервер всё равно повторно проверит подписанный Telegram initData.
+    """
+    if not is_admin(message.from_user.id) or not MINIAPP_URL:
+        return
+    await message.answer(
+        "🎓 <b>VMEDA Mini App</b>\n\nОткройте приложение кнопкой ниже.",
+        parse_mode="HTML",
+        reply_markup=get_miniapp_keyboard(),
+    )
+
 
 @dp.message(Command("stats"))
 async def cmd_stats(message: Message):
@@ -5885,6 +5916,7 @@ async def setup_bot_commands() -> None:
     await bot.set_my_commands(default_commands, scope=BotCommandScopeDefault())
 
     admin_commands = default_commands + [
+        BotCommand(command="app", description="Открыть VMEDA Mini App"),
         BotCommand(command="admin", description="Админ-панель"),
     ]
     for admin_id in ADMIN_IDS:
@@ -5892,6 +5924,22 @@ async def setup_bot_commands() -> None:
             await bot.set_my_commands(admin_commands, scope=BotCommandScopeChat(chat_id=admin_id))
         except Exception:
             logger.exception("Не удалось установить админ-команды для %s", admin_id)
+        if MINIAPP_URL:
+            try:
+                # В отличие от inline-кнопки в сообщении /start, эта кнопка постоянно находится
+                # рядом с полем ввода Telegram и не зависит от того, насколько старое сообщение
+                # главного меню сейчас открыто у администратора.
+                await bot.set_chat_menu_button(
+                    chat_id=admin_id,
+                    menu_button=MenuButtonWebApp(
+                        text="VMEDA App",
+                        web_app=WebAppInfo(url=MINIAPP_URL),
+                    ),
+                )
+            except Exception:
+                # Не роняем production polling, если конкретный админ ещё ни разу не запускал
+                # бота или Telegram временно не принимает per-chat menu button.
+                logger.exception("Не удалось установить кнопку Mini App для админа %s", admin_id)
 
 # AI_BUILD_EMBEDDINGS_ON_START=0 полностью отключает пересчёт эмбеддингов на старте (RAG падает
 # на чистый keyword/IDF-поиск, как без ключа OpenAI вообще) — аварийный рубильник на случай, если
