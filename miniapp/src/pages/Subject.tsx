@@ -1,4 +1,4 @@
-import { ChevronRight, Lock, Sparkles, SquareCheckBig } from "lucide-react";
+import { BookOpenCheck, ChevronRight, Lock, Sparkles, SquareCheckBig } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { fetchAccessStatus, fetchLearningState, fetchSubjectDetail, isRealBackedSubject } from "../lib/api";
@@ -69,6 +69,26 @@ export function SubjectPage() {
           </div>
         )}
       </div>
+
+      {subject.id === "anatomy" && (
+        <PressableCard
+          className={[styles.sectionRow, styles.anatomyExamRow].join(" ")}
+          aria-label="Открыть экзаменационные тесты по анатомии"
+          onClick={() => {
+            hapticSelection();
+            navigate("/tests/anatomy");
+          }}
+        >
+          <span className={styles.anatomyExamIcon} aria-hidden="true">
+            <Icon icon={BookOpenCheck} size={20} />
+          </span>
+          <div className={styles.anatomyExamContent}>
+            <div className={styles.anatomyExamTitle}>Экзаменационный тест</div>
+            <div className={styles.anatomyExamDescription}>1 040 вопросов · пояснения · работа над ошибками</div>
+          </div>
+          <Icon icon={ChevronRight} size={18} color="currentColor" />
+        </PressableCard>
+      )}
 
       {!locked && (
         <>

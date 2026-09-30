@@ -336,6 +336,66 @@ def test_anatomy_unknown_module_is_not_found_not_locked():
     assert resp.status_code == 404
 
 
+def test_anatomy_exam_exposes_all_parts_without_leaking_answer_keys():
+    """Exam tests stay available independently from the course maintenance/subscription gate."""
+    _set_anatomy_maintenance_override(None)
+    headers = _auth_headers()
+    parts = client.get("/api/v1/anatomy/exam/parts", headers=headers)
+    assert parts.status_code == 200, parts.text
+    assert len(parts.json()) == 10
+    assert sum(part["question_count"] for part in parts.json()) == 1040
+
+    first_part = parts.json()[0]
+    questions = client.get(
+        f"/api/v1/anatomy/exam/parts/{first_part['id']}/questions", headers=headers
+    )
+    assert questions.status_code == 200, questions.text
+    assert len(questions.json()) == first_part["question_count"]
+    first_question = questions.json()[0]
+    assert set(first_question) == {"id", "num", "question", "option_letters", "options"}
+    assert "correct" not in first_question and "correct_index" not in first_question
+    assert len(first_question["options"]) in (4, 5)
+
+
+def test_anatomy_exam_answer_returns_verified_key_and_explanation_only_after_choice():
+    headers = _auth_headers()
+    questions = client.get("/api/v1/anatomy/exam/parts/1/questions", headers=headers).json()
+    first_question = questions[0]
+    with open("anatomy_exam_test.json", encoding="utf-8") as stream:
+        source = json.load(stream)
+    source_question = source["parts"][0]["questions"][0]
+    letters = first_question["option_letters"]
+    correct_index = letters.index(source_question["correct"])
+
+    answer = client.post(
+        f"/api/v1/anatomy/exam/questions/{first_question['num']}/answer",
+        headers=headers,
+        json={"selected_index": correct_index},
+    )
+    assert answer.status_code == 200, answer.text
+    body = answer.json()
+    assert body["correct"] is True
+    assert body["correct_index"] == correct_index
+    assert body["correct_letter"] == source_question["correct"]
+    assert body["correct_text"] == source_question["options"][source_question["correct"]]
+    assert body["explanation"] == tb.ANATOMY_EXAM_TEST_EXPLANATIONS[str(first_question["num"])]
+
+    invalid = client.post(
+        f"/api/v1/anatomy/exam/questions/{first_question['num']}/answer",
+        headers=headers,
+        json={"selected_index": 99},
+    )
+    assert invalid.status_code == 400
+
+
+def test_anatomy_exam_flash_returns_fifty_unique_questions():
+    response = client.get("/api/v1/anatomy/exam/flash", headers=_auth_headers())
+    assert response.status_code == 200, response.text
+    ids = [question["id"] for question in response.json()]
+    assert len(ids) == 50
+    assert len(set(ids)) == 50
+
+
 def test_histology_default_locked_for_user_with_no_trial_no_subscription_no_referrals():
     """Свежий тестовый пользователь никогда не открывал раздел в самом боте -- значит, пробный
     период (выдаётся только стейтфул-версией гейта, histology_gate_ok, побочным эффектом визита в

@@ -30,6 +30,18 @@ class QuizAnswerResponse(BaseModel):
     correct_index: int
 
 
+class AnatomyExamAnswerRequest(BaseModel):
+    selected_index: int
+
+
+class AnatomyExamAnswerResponse(BaseModel):
+    correct: bool
+    correct_index: int
+    correct_letter: str
+    correct_text: str
+    explanation: str
+
+
 class LearningFlagRequest(BaseModel):
     value: bool
 

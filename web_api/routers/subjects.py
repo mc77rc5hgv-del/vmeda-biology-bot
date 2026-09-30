@@ -1,4 +1,5 @@
 import os
+import random
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
@@ -34,6 +35,97 @@ def _not_found(exc: content.ContentNotFoundError) -> HTTPException:
 
 def _bad_quiz_answer(exc: content.InvalidQuizAnswerError) -> HTTPException:
     return HTTPException(status_code=400, detail=str(exc))
+
+
+ANATOMY_EXAM_OPTION_LETTERS = "абвгд"
+
+
+def _anatomy_exam_question_by_num(tb, question_num: int) -> dict | None:
+    for part in tb.ANATOMY_EXAM_TEST_PARTS:
+        for question in part.get("questions", []):
+            if question.get("num") == question_num:
+                return question
+    return None
+
+
+def _anatomy_exam_public_question(question: dict) -> dict:
+    """Question payload without the answer key; the key is disclosed only after an answer."""
+    letters = [letter for letter in ANATOMY_EXAM_OPTION_LETTERS if letter in question["options"]]
+    return {
+        "id": str(question["num"]),
+        "num": question["num"],
+        "question": question["question"],
+        "option_letters": letters,
+        "options": [question["options"][letter] for letter in letters],
+    }
+
+
+@router.get("/anatomy/exam/parts")
+def get_anatomy_exam_parts(
+    _user_id: int = Depends(get_current_user_id),
+    tb=Depends(get_fresh_bot_module),
+) -> list[dict]:
+    """The exam bank is free, mirroring the Telegram bot's dedicated exam section."""
+    return [
+        {
+            "id": part["id"],
+            "title": part["title"],
+            "topics": part.get("topics", ""),
+            "question_count": len(part.get("questions", [])),
+        }
+        for part in tb.ANATOMY_EXAM_TEST_PARTS
+    ]
+
+
+@router.get("/anatomy/exam/parts/{part_id}/questions")
+def get_anatomy_exam_part_questions(
+    part_id: int,
+    _user_id: int = Depends(get_current_user_id),
+    tb=Depends(get_fresh_bot_module),
+) -> list[dict]:
+    part = next((part for part in tb.ANATOMY_EXAM_TEST_PARTS if part["id"] == part_id), None)
+    if part is None:
+        raise HTTPException(status_code=404, detail="часть теста не найдена")
+    return [_anatomy_exam_public_question(question) for question in part["questions"]]
+
+
+@router.get("/anatomy/exam/flash")
+def get_anatomy_exam_flash_questions(
+    limit: int = 50,
+    _user_id: int = Depends(get_current_user_id),
+    tb=Depends(get_fresh_bot_module),
+) -> list[dict]:
+    if not 1 <= limit <= 100:
+        raise HTTPException(status_code=400, detail="число вопросов должно быть от 1 до 100")
+    questions = [question for part in tb.ANATOMY_EXAM_TEST_PARTS for question in part["questions"]]
+    picked = random.sample(questions, min(limit, len(questions)))
+    return [_anatomy_exam_public_question(question) for question in picked]
+
+
+@router.post("/anatomy/exam/questions/{question_num}/answer")
+def answer_anatomy_exam_question(
+    question_num: int,
+    body: schemas.AnatomyExamAnswerRequest,
+    _user_id: int = Depends(get_current_user_id),
+    tb=Depends(get_fresh_bot_module),
+) -> schemas.AnatomyExamAnswerResponse:
+    question = _anatomy_exam_question_by_num(tb, question_num)
+    if question is None:
+        raise HTTPException(status_code=404, detail="вопрос не найден")
+    letters = [letter for letter in ANATOMY_EXAM_OPTION_LETTERS if letter in question["options"]]
+    if not 0 <= body.selected_index < len(letters):
+        raise HTTPException(status_code=400, detail="некорректный вариант ответа")
+    correct_letter = question["correct"]
+    correct_index = letters.index(correct_letter)
+    return schemas.AnatomyExamAnswerResponse(
+        correct=body.selected_index == correct_index,
+        correct_index=correct_index,
+        correct_letter=correct_letter,
+        correct_text=question["options"][correct_letter],
+        explanation=tb.ANATOMY_EXAM_TEST_EXPLANATIONS.get(
+            str(question_num), "Правильный вариант соответствует ключу тестового банка."
+        ),
+    )
 
 
 # ==================== Гейт Анатомии ====================

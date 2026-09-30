@@ -128,6 +128,29 @@ export interface TestQuestion {
   correctIndex: number;
 }
 
+export interface AnatomyExamPart {
+  id: number;
+  title: string;
+  topics: string;
+  questionCount: number;
+}
+
+export interface AnatomyExamQuestion {
+  id: string;
+  num: number;
+  question: string;
+  optionLetters: string[];
+  options: string[];
+}
+
+export interface AnatomyExamAnswerResult {
+  correct: boolean;
+  correctIndex: number;
+  correctLetter: string;
+  correctText: string;
+  explanation: string;
+}
+
 export interface TestSummary {
   id: string;
   subjectId: string;

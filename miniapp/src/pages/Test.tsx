@@ -8,9 +8,15 @@ import { ProgressBar } from "../components/ProgressBar";
 import { Skeleton } from "../components/Skeleton";
 import { StateMessage } from "../components/StateMessage";
 import styles from "./Test.module.css";
+import { AnatomyExamPage } from "./AnatomyExam";
 
 export function TestPage() {
   const { subjectId = "" } = useParams();
+  if (subjectId === "anatomy") return <AnatomyExamPage />;
+  return <GenericTestPage subjectId={subjectId} />;
+}
+
+function GenericTestPage({ subjectId }: { subjectId: string }) {
   const navigate = useNavigate();
   useTelegramBackButton(() => navigate(`/subjects/${subjectId}`));
 

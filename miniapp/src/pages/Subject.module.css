@@ -84,3 +84,41 @@
   font-size: 12px;
   line-height: 1.4;
 }
+
+.anatomyExamRow {
+  color: #fff;
+  border-color: transparent;
+  background:
+    radial-gradient(circle at 90% 10%, rgb(255 255 255 / 17%), transparent 32%),
+    linear-gradient(135deg, var(--navy-surface), var(--academic-blue));
+  box-shadow: var(--shadow-pop);
+}
+
+.anatomyExamIcon {
+  display: grid;
+  flex: 0 0 42px;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border: 1px solid rgb(255 255 255 / 22%);
+  border-radius: var(--radius-md);
+  background: rgb(255 255 255 / 13%);
+}
+
+.anatomyExamContent {
+  min-width: 0;
+  flex: 1;
+  text-align: left;
+}
+
+.anatomyExamTitle {
+  font-size: 15px;
+  font-weight: 750;
+}
+
+.anatomyExamDescription {
+  margin-top: 3px;
+  color: rgb(255 255 255 / 72%);
+  font-size: 11px;
+  line-height: 1.35;
+}

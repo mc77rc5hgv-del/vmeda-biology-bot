@@ -9,6 +9,9 @@ import * as mock from "./mockData";
 import { useAuthStore } from "./store";
 import type {
   AccessStatus,
+  AnatomyExamAnswerResult,
+  AnatomyExamPart,
+  AnatomyExamQuestion,
   ContinueItem,
   DashboardStats,
   MaterialDetail,
@@ -142,6 +145,25 @@ export function fetchTestSummary(subjectId: string): Promise<TestSummary> {
 
 export function fetchTestQuestions(subjectId: string): Promise<TestQuestion[]> {
   return resolveAfterDelay(mock.getTestQuestions(subjectId));
+}
+
+export function fetchAnatomyExamParts(): Promise<AnatomyExamPart[]> {
+  return apiClient.fetchAnatomyExamParts();
+}
+
+export function fetchAnatomyExamPartQuestions(partId: number): Promise<AnatomyExamQuestion[]> {
+  return apiClient.fetchAnatomyExamPartQuestions(partId);
+}
+
+export function fetchAnatomyExamFlashQuestions(): Promise<AnatomyExamQuestion[]> {
+  return apiClient.fetchAnatomyExamFlashQuestions();
+}
+
+export function checkAnatomyExamAnswer(
+  questionNum: number,
+  selectedIndex: number,
+): Promise<AnatomyExamAnswerResult> {
+  return apiClient.checkAnatomyExamAnswer(questionNum, selectedIndex);
 }
 
 export async function fetchAccessStatus(subjectId: string): Promise<AccessStatus> {

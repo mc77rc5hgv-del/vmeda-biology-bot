@@ -4,6 +4,9 @@
 // вызов) — единственный, кто это импортирует; компоненты про существование этого файла не знают.
 import type {
   AccessStatus,
+  AnatomyExamAnswerResult,
+  AnatomyExamPart,
+  AnatomyExamQuestion,
   ContentSection,
   MaterialDetail,
   LearningState,
@@ -338,6 +341,78 @@ export async function checkQuizAnswer(
     { method: "POST", body: JSON.stringify({ selected_index: selectedIndex }) }
   );
   return { correct: wire.correct, correctIndex: wire.correct_index };
+}
+
+// ==================== экзаменационный тест по анатомии ====================
+
+interface AnatomyExamPartWire {
+  id: number;
+  title: string;
+  topics: string;
+  question_count: number;
+}
+
+interface AnatomyExamQuestionWire {
+  id: string;
+  num: number;
+  question: string;
+  option_letters: string[];
+  options: string[];
+}
+
+interface AnatomyExamAnswerWire {
+  correct: boolean;
+  correct_index: number;
+  correct_letter: string;
+  correct_text: string;
+  explanation: string;
+}
+
+function toAnatomyExamQuestion(wire: AnatomyExamQuestionWire): AnatomyExamQuestion {
+  return {
+    id: wire.id,
+    num: wire.num,
+    question: wire.question,
+    optionLetters: wire.option_letters,
+    options: wire.options,
+  };
+}
+
+export async function fetchAnatomyExamParts(): Promise<AnatomyExamPart[]> {
+  const wire = await apiFetch<AnatomyExamPartWire[]>("/api/v1/anatomy/exam/parts");
+  return wire.map((part) => ({
+    id: part.id,
+    title: part.title,
+    topics: part.topics,
+    questionCount: part.question_count,
+  }));
+}
+
+export async function fetchAnatomyExamPartQuestions(partId: number): Promise<AnatomyExamQuestion[]> {
+  const wire = await apiFetch<AnatomyExamQuestionWire[]>(`/api/v1/anatomy/exam/parts/${partId}/questions`);
+  return wire.map(toAnatomyExamQuestion);
+}
+
+export async function fetchAnatomyExamFlashQuestions(): Promise<AnatomyExamQuestion[]> {
+  const wire = await apiFetch<AnatomyExamQuestionWire[]>("/api/v1/anatomy/exam/flash?limit=50");
+  return wire.map(toAnatomyExamQuestion);
+}
+
+export async function checkAnatomyExamAnswer(
+  questionNum: number,
+  selectedIndex: number,
+): Promise<AnatomyExamAnswerResult> {
+  const wire = await apiFetch<AnatomyExamAnswerWire>(
+    `/api/v1/anatomy/exam/questions/${questionNum}/answer`,
+    { method: "POST", body: JSON.stringify({ selected_index: selectedIndex }) },
+  );
+  return {
+    correct: wire.correct,
+    correctIndex: wire.correct_index,
+    correctLetter: wire.correct_letter,
+    correctText: wire.correct_text,
+    explanation: wire.explanation,
+  };
 }
 
 // ==================== VMedA AI ====================
