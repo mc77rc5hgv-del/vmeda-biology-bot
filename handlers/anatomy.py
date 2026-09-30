@@ -6,13 +6,15 @@ telegram_bot как tb вместо `from telegram_bot import ...`, потому
 safe_edit_text, ACTIVE_SUBSCRIPTION_TIERS, RANK_MEDALS, donor_display_name,
 is_admin_or_assistant, has_subscription_anatomy_access, cheapest_anatomy_tier, STATS_DIR,
 CAPTION_LIMIT, _stats_executor, _log_stats_write_result, ANATOMY, ANATOMY_IMAGES_DIR,
-ANATOMY_EXAM_TEST_PARTS, ANATOMY_EXAM_THEORY_SECTIONS, ANATOMY_EXAM_PRACTICE_SECTIONS) уже
+ANATOMY_EXAM_TEST_PARTS, ANATOMY_EXAM_TEST_EXPLANATIONS, ANATOMY_EXAM_THEORY_SECTIONS,
+ANATOMY_EXAM_PRACTICE_SECTIONS) уже
 определены в его модульном пространстве имён — обращения к ним разрешаются во время вызова
 хендлера или при импорте этого модуля (модульные константы вроде ANATOMY_FILE_ID_CACHE_PATH),
 никогда раньше."""
 import json
 import os
 import random
+from html import escape
 
 from aiogram import F, Router
 from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton, InputMediaPhoto
@@ -1565,9 +1567,9 @@ async def cb_anatomy_exam_theory_question(callback: CallbackQuery):
 # (Гайворонский и др., 2021), разбитые на 10 частей — 5 по «Базовой части», 5 по
 # «Лечебному делу». Прохождение — полный последовательный прогон всех вопросов части
 # (не случайная выборка, в отличие от ANATOMY_LATIN_SESSIONS), с возможностью закончить
-# досрочно и посмотреть разбор своих ошибок после завершения.
+# досрочно, посмотреть разбор ошибок и повторно пройти только ошибочные вопросы.
 ANATOMY_EXAM_TEST_SESSIONS: dict[int, dict] = {}
-ANATOMY_EXAM_TEST_MISTAKES: dict[int, list] = {}
+ANATOMY_EXAM_TEST_MISTAKES: dict[int, dict] = {}
 ANATOMY_EXAM_TEST_OPTION_LETTERS = "абвгд"
 ANATOMY_EXAM_FLASH_SIZE = 50
 ANATOMY_EXAM_TEST_ALL_QUESTIONS = [q for p in tb.ANATOMY_EXAM_TEST_PARTS for q in p["questions"]]
@@ -1792,6 +1794,7 @@ def start_anatomy_exam_test_session(user_id: int, part_id: int) -> bool:
     part = get_anatomy_exam_test_part(part_id)
     if not part:
         return False
+    ANATOMY_EXAM_TEST_MISTAKES.pop(user_id, None)
     ANATOMY_EXAM_TEST_SESSIONS[user_id] = {
         "part_id": part_id,
         "queue": part["questions"],
@@ -1801,6 +1804,7 @@ def start_anatomy_exam_test_session(user_id: int, part_id: int) -> bool:
         "mistakes": [],
         "is_rating": get_anatomy_exam_test_mode(user_id) == "rating",
         "is_flash": False,
+        "is_mistake_work": False,
     }
     return True
 
@@ -1808,6 +1812,7 @@ def start_anatomy_exam_flash_session(user_id: int) -> bool:
     if not ANATOMY_EXAM_TEST_ALL_QUESTIONS:
         return False
     size = min(ANATOMY_EXAM_FLASH_SIZE, len(ANATOMY_EXAM_TEST_ALL_QUESTIONS))
+    ANATOMY_EXAM_TEST_MISTAKES.pop(user_id, None)
     ANATOMY_EXAM_TEST_SESSIONS[user_id] = {
         "part_id": None,
         "queue": random.sample(ANATOMY_EXAM_TEST_ALL_QUESTIONS, size),
@@ -1817,6 +1822,36 @@ def start_anatomy_exam_flash_session(user_id: int) -> bool:
         "mistakes": [],
         "is_rating": False,
         "is_flash": True,
+        "is_mistake_work": False,
+    }
+    return True
+
+def start_anatomy_exam_mistake_work_session(user_id: int) -> bool:
+    """Start a focused pass containing only the user's latest wrong answers."""
+    record = ANATOMY_EXAM_TEST_MISTAKES.get(user_id)
+    if not record or not record.get("mistakes"):
+        return False
+    queue = [
+        {
+            "num": mistake["num"],
+            "question": mistake["question"],
+            "options": mistake["options"],
+            "correct": mistake["correct"],
+        }
+        for mistake in record["mistakes"]
+    ]
+    ANATOMY_EXAM_TEST_SESSIONS[user_id] = {
+        "part_id": record.get("part_id"),
+        "queue": queue,
+        "index": 0,
+        "correct": 0,
+        "wrong": 0,
+        "mistakes": [],
+        "is_rating": False,
+        "is_flash": False,
+        "is_mistake_work": True,
+        "origin_is_flash": record.get("is_flash", False),
+        "awaiting_explanation_next": False,
     }
     return True
 
@@ -1832,7 +1867,9 @@ def get_anatomy_exam_test_keyboard(question: dict):
 async def render_anatomy_exam_test_question(message, user_id: int):
     session = ANATOMY_EXAM_TEST_SESSIONS[user_id]
     question = session["queue"][session["index"]]
-    if session.get("is_flash"):
+    if session.get("is_mistake_work"):
+        icon, label = "🧠", "РАБОТА НАД ОШИБКАМИ"
+    elif session.get("is_flash"):
         icon, label = "⚡", "ФЛЭШ-ТЕСТ"
     elif session.get("is_rating"):
         icon, label = "🏆", "ТЕСТ"
@@ -1849,6 +1886,33 @@ async def render_anatomy_exam_test_question(message, user_id: int):
         message, "\n".join(lines), parse_mode="HTML",
         reply_markup=get_anatomy_exam_test_keyboard(question)
     )
+
+def get_anatomy_exam_mistake_explanation_text(question: dict, chosen: str) -> str:
+    correct = question["correct"]
+    correct_text = question["options"].get(correct, "")
+    chosen_text = question["options"].get(chosen, "")
+    explanation = tb.ANATOMY_EXAM_TEST_EXPLANATIONS.get(
+        str(question["num"]),
+        "Правильный вариант соответствует ключу тестового банка.",
+    )
+    return (
+        "❌ <b>Ответ снова неверный</b>\n"
+        f"{tb.DIVIDER}\n\n"
+        f"<b>Вопрос №{question['num']}:</b> {escape(question['question'])}\n\n"
+        f"Твой ответ: <b>{escape(chosen)}) {escape(chosen_text)}</b>\n"
+        f"Правильный ответ: <b>{escape(correct)}) {escape(correct_text)}</b>\n\n"
+        f"📖 <b>Пояснение по Гайворонскому:</b>\n{escape(explanation)}"
+    )
+
+def get_anatomy_exam_mistake_explanation_keyboard(is_last: bool):
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="📊 Завершить" if is_last else "➡️ Следующий вопрос",
+        callback_data="anatomy_exam_mistake_work_next",
+    )
+    builder.button(text="🛑 Закончить", callback_data="anatomy_exam_test_stop")
+    builder.adjust(1)
+    return builder.as_markup()
 
 def get_anatomy_exam_test_mistake_text(mistake: dict, idx: int, total: int) -> str:
     lines = [
@@ -1875,6 +1939,10 @@ def get_anatomy_exam_test_mistake_keyboard(part_id: int, idx: int, total: int, i
         nav.append(InlineKeyboardButton(text="➡️ Следующая", callback_data=f"anatomy_exam_test_mistakes:{idx + 1}"))
     if nav:
         builder.row(*nav)
+    builder.row(InlineKeyboardButton(
+        text="🧠 Начать работу над ошибками",
+        callback_data="anatomy_exam_mistake_work_start",
+    ))
     if is_flash:
         builder.row(InlineKeyboardButton(text="🔁 Пройти ещё раз", callback_data="anatomy_exam_test_flash_start"))
     else:
@@ -1886,10 +1954,24 @@ async def render_anatomy_exam_test_summary(message, user_id: int, aborted: bool 
     session = ANATOMY_EXAM_TEST_SESSIONS.pop(user_id, None)
     if not session:
         return
+    is_mistake_work = session.get("is_mistake_work", False)
+    if is_mistake_work and aborted:
+        # Questions not reached before an early stop remain in the next correction pass.
+        for question in session["queue"][session["index"]:]:
+            session["mistakes"].append({
+                "num": question["num"],
+                "question": question["question"],
+                "options": question["options"],
+                "correct": question["correct"],
+                "chosen": None,
+            })
     answered = session["correct"] + session["wrong"]
     total = len(session["queue"])
     percent = round(100 * session["correct"] / answered) if answered else 0
-    title = "🛑 <b>Тест прерван</b>" if aborted else "🏁 <b>Тест завершён!</b>"
+    if is_mistake_work:
+        title = "🛑 <b>Работа над ошибками прервана</b>" if aborted else "🧠 <b>Работа над ошибками завершена!</b>"
+    else:
+        title = "🛑 <b>Тест прерван</b>" if aborted else "🏁 <b>Тест завершён!</b>"
     text = (
         f"{title}\n{tb.DIVIDER}\n\n"
         f"Отвечено: <b>{answered}</b> из {total}\n"
@@ -1899,7 +1981,13 @@ async def render_anatomy_exam_test_summary(message, user_id: int, aborted: bool 
     )
     is_rating = session.get("is_rating", False)
     is_flash = session.get("is_flash", False)
-    if is_flash:
+    if is_mistake_work:
+        remaining = len(session["mistakes"])
+        if remaining:
+            text += f"\n\nОсталось повторить: <b>{remaining}</b>"
+        else:
+            text += "\n\n🎉 Все ошибки исправлены!"
+    elif is_flash:
         if not aborted and answered:
             is_new_best = record_anatomy_exam_flash_score(user_id, session["correct"], answered)
             text += "\n\n⚡ Результат добавлен в рейтинг флэш-теста." + (
@@ -1917,14 +2005,32 @@ async def render_anatomy_exam_test_summary(message, user_id: int, aborted: bool 
         )
     builder = InlineKeyboardBuilder()
     part_id = session["part_id"]
-    if is_flash:
+    if is_mistake_work:
+        pass
+    elif is_flash:
         builder.button(text="🔁 Пройти ещё раз", callback_data="anatomy_exam_test_flash_start")
     else:
         builder.button(text="🔁 Пройти ещё раз", callback_data=f"anatomy_exam_test_start:{part_id}")
     if session["mistakes"]:
-        ANATOMY_EXAM_TEST_MISTAKES[user_id] = {"part_id": part_id, "is_flash": is_flash, "mistakes": session["mistakes"]}
-        builder.button(text=f"❌ Разбор ошибок ({len(session['mistakes'])})", callback_data="anatomy_exam_test_mistakes:0")
-    if is_flash:
+        origin_is_flash = session.get("origin_is_flash", is_flash)
+        ANATOMY_EXAM_TEST_MISTAKES[user_id] = {
+            "part_id": part_id,
+            "is_flash": origin_is_flash,
+            "mistakes": session["mistakes"],
+        }
+        builder.button(
+            text=f"🧠 Работа над ошибками ({len(session['mistakes'])})",
+            callback_data="anatomy_exam_mistake_work_start",
+        )
+        builder.button(
+            text=f"📋 Посмотреть ошибки ({len(session['mistakes'])})",
+            callback_data="anatomy_exam_test_mistakes:0",
+        )
+    else:
+        ANATOMY_EXAM_TEST_MISTAKES.pop(user_id, None)
+    if is_mistake_work:
+        pass
+    elif is_flash:
         builder.button(text="🏆 Рейтинг флэш-теста", callback_data="anatomy_exam_flash_leaderboard")
     elif is_rating:
         builder.button(text="🏆 Рейтинг", callback_data="anatomy_exam_test_leaderboard")
@@ -1956,6 +2062,9 @@ async def cb_anatomy_exam_test_answer(callback: CallbackQuery):
     if not session:
         await callback.answer("Сессия истекла, начни заново", show_alert=True)
         return
+    if session.get("awaiting_explanation_next"):
+        await callback.answer("Сначала нажми «Следующий вопрос»", show_alert=True)
+        return
     chosen = callback.data.split(":")[1]
     question = session["queue"][session["index"]]
     correct = question["correct"]
@@ -1965,11 +2074,25 @@ async def cb_anatomy_exam_test_answer(callback: CallbackQuery):
     else:
         session["wrong"] += 1
         session["mistakes"].append({
+            "num": question["num"],
             "question": question["question"],
             "options": question["options"],
             "correct": correct,
             "chosen": chosen,
         })
+        if session.get("is_mistake_work"):
+            session["index"] += 1
+            session["awaiting_explanation_next"] = True
+            await callback.answer()
+            await tb.safe_edit_text(
+                callback.message,
+                get_anatomy_exam_mistake_explanation_text(question, chosen),
+                parse_mode="HTML",
+                reply_markup=get_anatomy_exam_mistake_explanation_keyboard(
+                    session["index"] >= len(session["queue"])
+                ),
+            )
+            return
         correct_text = question["options"].get(correct, "")
         await callback.answer(f"❌ Неверно. Правильно: {correct}) {correct_text}", show_alert=True)
     session["index"] += 1
@@ -2006,3 +2129,24 @@ async def cb_anatomy_exam_test_mistakes(callback: CallbackQuery):
         )
     )
 
+@router.callback_query(F.data == "anatomy_exam_mistake_work_start")
+async def cb_anatomy_exam_mistake_work_start(callback: CallbackQuery):
+    if not start_anatomy_exam_mistake_work_session(callback.from_user.id):
+        await callback.answer("Ошибок для повторения нет или список устарел", show_alert=True)
+        return
+    await callback.answer()
+    await render_anatomy_exam_test_question(callback.message, callback.from_user.id)
+
+@router.callback_query(F.data == "anatomy_exam_mistake_work_next")
+async def cb_anatomy_exam_mistake_work_next(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    session = ANATOMY_EXAM_TEST_SESSIONS.get(user_id)
+    if not session or not session.get("is_mistake_work") or not session.get("awaiting_explanation_next"):
+        await callback.answer("Сессия истекла, начни заново", show_alert=True)
+        return
+    session["awaiting_explanation_next"] = False
+    await callback.answer()
+    if session["index"] >= len(session["queue"]):
+        await render_anatomy_exam_test_summary(callback.message, user_id)
+    else:
+        await render_anatomy_exam_test_question(callback.message, user_id)

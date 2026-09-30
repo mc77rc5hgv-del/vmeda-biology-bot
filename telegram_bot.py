@@ -138,6 +138,7 @@ PHYSICS_TASK_TICKETS = knowledge.PHYSICS_TASK_TICKETS
 PHYSICS_THEORY_TICKETS = knowledge.PHYSICS_THEORY_TICKETS
 ANATOMY = knowledge.ANATOMY
 ANATOMY_EXAM_TEST_PARTS = knowledge.ANATOMY_EXAM_TEST_PARTS
+ANATOMY_EXAM_TEST_EXPLANATIONS = knowledge.ANATOMY_EXAM_TEST_EXPLANATIONS
 ANATOMY_EXAM_THEORY_SECTIONS = knowledge.ANATOMY_EXAM_THEORY_SECTIONS
 ANATOMY_EXAM_PRACTICE_SECTIONS = knowledge.ANATOMY_EXAM_PRACTICE_SECTIONS
 HISTOLOGY = knowledge.HISTOLOGY
@@ -5665,8 +5666,11 @@ cb_anatomy_exam_test_menu = anatomy_handlers.cb_anatomy_exam_test_menu
 cb_anatomy_exam_test_mode_toggle = anatomy_handlers.cb_anatomy_exam_test_mode_toggle
 start_anatomy_exam_test_session = anatomy_handlers.start_anatomy_exam_test_session
 start_anatomy_exam_flash_session = anatomy_handlers.start_anatomy_exam_flash_session
+start_anatomy_exam_mistake_work_session = anatomy_handlers.start_anatomy_exam_mistake_work_session
 get_anatomy_exam_test_keyboard = anatomy_handlers.get_anatomy_exam_test_keyboard
 render_anatomy_exam_test_question = anatomy_handlers.render_anatomy_exam_test_question
+get_anatomy_exam_mistake_explanation_text = anatomy_handlers.get_anatomy_exam_mistake_explanation_text
+get_anatomy_exam_mistake_explanation_keyboard = anatomy_handlers.get_anatomy_exam_mistake_explanation_keyboard
 get_anatomy_exam_test_mistake_text = anatomy_handlers.get_anatomy_exam_test_mistake_text
 get_anatomy_exam_test_mistake_keyboard = anatomy_handlers.get_anatomy_exam_test_mistake_keyboard
 render_anatomy_exam_test_summary = anatomy_handlers.render_anatomy_exam_test_summary
@@ -5675,6 +5679,8 @@ cb_anatomy_exam_test_flash_start = anatomy_handlers.cb_anatomy_exam_test_flash_s
 cb_anatomy_exam_test_answer = anatomy_handlers.cb_anatomy_exam_test_answer
 cb_anatomy_exam_test_stop = anatomy_handlers.cb_anatomy_exam_test_stop
 cb_anatomy_exam_test_mistakes = anatomy_handlers.cb_anatomy_exam_test_mistakes
+cb_anatomy_exam_mistake_work_start = anatomy_handlers.cb_anatomy_exam_mistake_work_start
+cb_anatomy_exam_mistake_work_next = anatomy_handlers.cb_anatomy_exam_mistake_work_next
 
 # ==================== ГИСТОЛОГИЯ ====================
 # Хендлеры и вся логика раздела вынесены в handlers/histology.py (свой Router) — здесь только

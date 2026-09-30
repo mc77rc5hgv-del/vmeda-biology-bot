@@ -60,6 +60,9 @@ with open("anatomy.json", "r", encoding="utf-8") as f:
 with open("anatomy_exam_test.json", "r", encoding="utf-8") as f:
     ANATOMY_EXAM_TEST_PARTS = json.load(f)["parts"]
 
+with open("anatomy_explanations_draft.json", "r", encoding="utf-8") as f:
+    ANATOMY_EXAM_TEST_EXPLANATIONS = json.load(f)["explanations"]
+
 with open("anatomy_exam_theory.json", "r", encoding="utf-8") as f:
     ANATOMY_EXAM_THEORY_SECTIONS = json.load(f)["sections"]
 

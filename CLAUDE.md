@@ -535,9 +535,12 @@ requested for it and the acceptance criteria only ever describe browsing/reading
    with no gate check at all, independent of `ANATOMY_FREE_SECTIONS`/subscriptions, same reasoning as the global
    Latin quiz. A part is answered as one full sequential pass in source order (`ANATOMY_EXAM_TEST_SESSIONS`, not a
    random sample like `ANATOMY_LATIN_SESSIONS`), with an early-stop button and, after finishing (or stopping
-   early), a "❌ Разбор ошибок" review screen (`ANATOMY_EXAM_TEST_MISTAKES`, paginated one mistake at a time,
-   marking both the correct option and — if different — the one the user picked) for every question answered
-   wrong. `anatomy.json`'s bone/topic gate machinery (`anatomy_section_access_ok`, `get_topic_section_key`, etc.)
+   early), a paginated review screen (`ANATOMY_EXAM_TEST_MISTAKES`, one mistake at a time, marking both the
+   correct option and — if different — the one the user picked), and a separate "🧠 Работа над ошибками" pass
+   containing only the questions answered incorrectly. A repeated wrong answer pauses the pass on a full
+   explanation screen sourced by question number from `anatomy_explanations_draft.json`; after completing the
+   pass, only still-wrong questions remain available for another correction round. `anatomy.json`'s bone/topic
+   gate machinery (`anatomy_section_access_ok`, `get_topic_section_key`, etc.)
    is untouched by any of this — ТЕСТ questions aren't tied to `ANATOMY` topics/sections at all, just to their own
    flat `anatomy_exam_test.json` part list.
 

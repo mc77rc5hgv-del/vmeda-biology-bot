@@ -74,6 +74,11 @@ async def main():
             assert q["num"] not in seen_nums, q["num"]
             seen_nums.add(q["num"])
     assert seen_nums == set(range(1, 1041))
+    assert set(tb.ANATOMY_EXAM_TEST_EXPLANATIONS) == {str(i) for i in range(1, 1041)}
+    assert all(text.strip() for text in tb.ANATOMY_EXAM_TEST_EXPLANATIONS.values())
+    for question in tb.ANATOMY_EXAM_TEST_ALL_QUESTIONS:
+        wrong = next(letter for letter in question["options"] if letter != question["correct"])
+        check_html(tb.get_anatomy_exam_mistake_explanation_text(question, wrong))
     print(f"data integrity: 10 parts, {total} questions, all numbered 1..1040 with a valid answer key: OK")
 
     # 1. anatomy_root is the new top-level split (ВЕСЬ КУРС АНАТОМИИ / ЭКЗАМЕН)
@@ -201,6 +206,7 @@ async def main():
     assert f"{n_wrong}" in summary_text
     summary_data = kb_data(summary_kb)
     assert "anatomy_exam_test_mistakes:0" in summary_data
+    assert "anatomy_exam_mistake_work_start" in summary_data
     assert "anatomy_exam_test_start:1" in summary_data
     assert "anatomy_exam_test_menu" in summary_data
     print(f"full sequential run ({n_questions} q, {n_wrong} deliberate mistakes) -> correct summary: OK")
@@ -214,6 +220,7 @@ async def main():
     m0_data = kb_data(m0_kb)
     assert not any(d and "mistakes:-1" in d for d in m0_data if d)
     assert "anatomy_exam_test_mistakes:1" in m0_data
+    assert "anatomy_exam_mistake_work_start" in m0_data
     assert "anatomy_exam_test_start:1" in m0_data
 
     cb_m_last = FakeCB(f"anatomy_exam_test_mistakes:{n_wrong - 1}", uid=uid)
@@ -233,6 +240,84 @@ async def main():
     assert not cb_no_mistakes.message.edits
     assert cb_no_mistakes._answers and cb_no_mistakes._answers[0][1] is True
     print("mistake review for a user with none -> alert: OK")
+
+    # 12b. focused mistake work contains only the wrong questions. A repeated wrong answer
+    # pauses on the full Gaivoronsky explanation; only questions still wrong survive into
+    # the next correction round, and the record disappears once all are answered correctly.
+    cb_work_start = FakeCB("anatomy_exam_mistake_work_start", uid=uid)
+    await tb.cb_anatomy_exam_mistake_work_start(cb_work_start)
+    work_session = tb.ANATOMY_EXAM_TEST_SESSIONS[uid]
+    assert work_session["is_mistake_work"] is True
+    assert len(work_session["queue"]) == n_wrong
+    work_text, _ = cb_work_start.message.edits[-1]
+    assert work_text.startswith("🧠") and "РАБОТА НАД ОШИБКАМИ" in work_text
+
+    repeated_question = work_session["queue"][0]
+    repeated_wrong = next(
+        letter for letter in repeated_question["options"] if letter != repeated_question["correct"]
+    )
+    cb_work_wrong = FakeCB(f"anatomy_exam_test_answer:{repeated_wrong}", uid=uid)
+    await tb.cb_anatomy_exam_test_answer(cb_work_wrong)
+    explanation_text, explanation_kb = cb_work_wrong.message.edits[-1]
+    check_html(explanation_text)
+    assert "Ответ снова неверный" in explanation_text
+    assert "Пояснение по Гайворонскому" in explanation_text
+    assert tb.ANATOMY_EXAM_TEST_EXPLANATIONS[str(repeated_question["num"])] in explanation_text
+    assert "anatomy_exam_mistake_work_next" in kb_data(explanation_kb)
+    assert work_session["awaiting_explanation_next"] is True
+
+    cb_work_next = FakeCB("anatomy_exam_mistake_work_next", uid=uid)
+    await tb.cb_anatomy_exam_mistake_work_next(cb_work_next)
+    assert work_session["index"] == 1
+    for question in work_session["queue"][1:]:
+        cb_work_correct = FakeCB(f"anatomy_exam_test_answer:{question['correct']}", uid=uid)
+        await tb.cb_anatomy_exam_test_answer(cb_work_correct)
+    first_work_summary, first_work_kb = cb_work_correct.message.edits[-1]
+    assert "Работа над ошибками завершена" in first_work_summary
+    assert "Осталось повторить: <b>1</b>" in first_work_summary
+    assert "anatomy_exam_mistake_work_start" in kb_data(first_work_kb)
+    assert len(tb.ANATOMY_EXAM_TEST_MISTAKES[uid]["mistakes"]) == 1
+
+    cb_work_again = FakeCB("anatomy_exam_mistake_work_start", uid=uid)
+    await tb.cb_anatomy_exam_mistake_work_start(cb_work_again)
+    final_question = tb.ANATOMY_EXAM_TEST_SESSIONS[uid]["queue"][0]
+    cb_work_final = FakeCB(f"anatomy_exam_test_answer:{final_question['correct']}", uid=uid)
+    await tb.cb_anatomy_exam_test_answer(cb_work_final)
+    final_work_summary, final_work_kb = cb_work_final.message.edits[-1]
+    assert "Все ошибки исправлены" in final_work_summary
+    assert "anatomy_exam_mistake_work_start" not in kb_data(final_work_kb)
+    assert uid not in tb.ANATOMY_EXAM_TEST_MISTAKES
+    print("focused mistake work repeats only errors, shows explanations, and clears corrected items: OK")
+
+    # Stopping a correction pass must not lose unanswered mistakes.
+    stop_work_uid = 700100299
+    source_mistakes = []
+    for question in part1["questions"][:3]:
+        source_mistakes.append({
+            "num": question["num"],
+            "question": question["question"],
+            "options": question["options"],
+            "correct": question["correct"],
+            "chosen": next(letter for letter in question["options"] if letter != question["correct"]),
+        })
+    tb.ANATOMY_EXAM_TEST_MISTAKES[stop_work_uid] = {
+        "part_id": 1, "is_flash": False, "mistakes": source_mistakes,
+    }
+    cb_stop_work_start = FakeCB("anatomy_exam_mistake_work_start", uid=stop_work_uid)
+    await tb.cb_anatomy_exam_mistake_work_start(cb_stop_work_start)
+    first_stop_question = tb.ANATOMY_EXAM_TEST_SESSIONS[stop_work_uid]["queue"][0]
+    cb_stop_work_correct = FakeCB(
+        f"anatomy_exam_test_answer:{first_stop_question['correct']}", uid=stop_work_uid
+    )
+    await tb.cb_anatomy_exam_test_answer(cb_stop_work_correct)
+    cb_stop_work = FakeCB("anatomy_exam_test_stop", uid=stop_work_uid)
+    await tb.cb_anatomy_exam_test_stop(cb_stop_work)
+    stop_work_text, stop_work_kb = cb_stop_work.message.edits[-1]
+    assert "Работа над ошибками прервана" in stop_work_text
+    assert "Осталось повторить: <b>2</b>" in stop_work_text
+    assert len(tb.ANATOMY_EXAM_TEST_MISTAKES[stop_work_uid]["mistakes"]) == 2
+    assert "anatomy_exam_mistake_work_start" in kb_data(stop_work_kb)
+    print("stopping mistake work preserves every unanswered question: OK")
 
     # 13. early stop mid-test renders an aborted summary and clears the session
     uid2 = 700100201
