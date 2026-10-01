@@ -23,6 +23,7 @@ COMPLEXITY_LEVELS = ("simple", "complex")  # применимо только к 
 # заданию" был реальной проблемой, эта классификация её устраняет).
 
 _WORD_RE = re.compile(r"[a-zа-яё0-9]+", re.IGNORECASE)
+AI_CACHE_FINGERPRINT_VERSION = "v2-full-subject-aware"
 
 
 @dataclass
@@ -52,6 +53,15 @@ class TaskRepresentation:
         """Текстовое представление задания для отправки модели — единственное, что solver
         когда-либо видит после первого прохода парсера (фото НЕ пересылается повторно)."""
         lines = [self.question_text()]
+        raw = self.raw_text.strip()
+        # Парсер вправе переформулировать вопрос, но не вправе терять требования пользователя
+        # («подробно», «на латыни», «для ответа у доски»). Поэтому исходную формулировку передаём
+        # solver'у отдельно, если она отличается от разобранного вопроса.
+        if raw and raw != self.question_text():
+            lines.append(
+                "Исходная формулировка пользователя (соблюдай все требования к объёму, формату "
+                f"и терминологии): {raw}"
+            )
         if self.values:
             values_line = ", ".join(
                 f"{k} = {v}{(' ' + self.units[k]) if k in self.units else ''}"
@@ -101,5 +111,13 @@ class TaskRepresentation:
         values_words = []
         for k, v in sorted(self.values.items()):
             values_words.extend(_WORD_RE.findall(f"{k}{v}".lower()))
-        payload = " ".join(normalized_words) + "|" + " ".join(values_words)
+        raw_words = _WORD_RE.findall(self.raw_text.lower().replace("ё", "е"))
+        payload = "|".join([
+            AI_CACHE_FINGERPRINT_VERSION,
+            self.subject or "",
+            self.type or "",
+            " ".join(normalized_words),
+            " ".join(raw_words),
+            " ".join(values_words),
+        ])
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:24]

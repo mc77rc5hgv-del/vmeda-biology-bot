@@ -9,10 +9,10 @@ ANSWER_CHUNK_CHARS = 3500  # с запасом от лимита Telegram в 409
 # ОДНОГО куска при разбиении длинного ответа на несколько сообщений (см. split_answer_into_chunks
 # ниже и telegram_bot.get_ai_result_chunks), а не потолок физической обрезки — раньше ответ
 # длиннее этого резался с потерей конца решения, теперь просто уходит вторым/третьим сообщением
-QUICK_MAX_TOKENS = 1200  # первый ответ: полноценная теория/список; тесты и расчёты остаются компактными
+QUICK_MAX_TOKENS = 1800  # первый ответ: полноценная теория/список; тесты и расчёты остаются компактными
 # Лимит не заставляет модель расходовать все токены, но не обрывает содержательный ответ по теме.
 # Длинный результат безопасно разбивается на несколько Telegram-сообщений ниже.
-DETAILED_MAX_TOKENS = 2400
+DETAILED_MAX_TOKENS = 3200
 HISTORY_MAX_MESSAGES = 6  # сколько последних сообщений истории берём как основу перед сжатием
 # (см. _compact_history) — без этого потолка стоимость каждого следующего сообщения в долгой
 # сессии растёт почти квадратично
@@ -85,7 +85,7 @@ def clean_answer(answer: str) -> str:
 
 async def solve(
     *, task=None, text: str = None, history: list = None, quick: bool = False,
-    bucket: str = None, rag_context: str = None,
+    bucket: str = None, rag_context: str = None, subject: str = None,
 ) -> tuple:
     """task — TaskRepresentation (см. ai.task), передаётся ТОЛЬКО на первом ходу новой сессии
     (сразу после ai.vision_parser.parse_task) — его text-представление (to_prompt_text()) и
@@ -127,7 +127,7 @@ async def solve(
 
     trimmed_history = _compact_history(history)
     messages = [
-        {"role": "system", "content": prompts.SYSTEM_PROMPT},
+        {"role": "system", "content": prompts.system_prompt_for(getattr(task, "subject", None) or subject)},
         *trimmed_history,
         {"role": "user", "content": sent_content},
     ]

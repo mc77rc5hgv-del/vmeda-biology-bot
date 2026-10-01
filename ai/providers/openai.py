@@ -5,9 +5,11 @@ Grok/Gemini fail or refuse (see ai.router)."""
 import os
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")  # без него AI-раздел показывает "временно недоступен"
-MODEL = "gpt-4o-mini"
-PRICE_INPUT_PER_1M = 0.15   # $/1M input tokens — держать в синхроне с реальным прайсом OpenAI
-PRICE_OUTPUT_PER_1M = 0.60  # $/1M output tokens
+MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
+FALLBACK_MODEL = os.getenv("OPENAI_FALLBACK_MODEL", "gpt-4o-mini")
+VISION_MODEL = os.getenv("OPENAI_VISION_MODEL", "gpt-4o-mini")
+PRICE_INPUT_PER_1M = 0.40   # $/1M input tokens — держать в синхроне с реальным прайсом OpenAI
+PRICE_OUTPUT_PER_1M = 1.60  # $/1M output tokens
 REQUEST_TIMEOUT_SECONDS = 30  # без этого SDK по умолчанию ждёт до 10 минут — зависший запрос
                                # держал бы AI_USER_LOCKS/concurrency-слот, а ai.router.try_providers
                                # не переходил бы к следующему провайдеру
@@ -30,9 +32,19 @@ async def call(messages: list, max_tokens: int, model: str = None) -> tuple:
     client = get_client()
     if client is None:
         raise RuntimeError("OpenAI недоступен: не задан OPENAI_API_KEY")
-    response = await client.chat.completions.create(
-        model=model or MODEL, messages=messages, max_tokens=max_tokens, temperature=0,
-    )
+    selected_model = model or MODEL
+    try:
+        response = await client.chat.completions.create(
+            model=selected_model, messages=messages, max_tokens=max_tokens, temperature=0,
+        )
+    except Exception:
+        # Если аккаунту ещё недоступна основная модель, сохраняем работоспособность сервиса на
+        # прежней модели. Явно переданную модель не подменяем.
+        if model is not None or not FALLBACK_MODEL or selected_model == FALLBACK_MODEL:
+            raise
+        response = await client.chat.completions.create(
+            model=FALLBACK_MODEL, messages=messages, max_tokens=max_tokens, temperature=0,
+        )
     answer = response.choices[0].message.content or "Не удалось получить ответ от AI."
     usage = {
         "input_tokens": getattr(response.usage, "prompt_tokens", 0) if response.usage else 0,
