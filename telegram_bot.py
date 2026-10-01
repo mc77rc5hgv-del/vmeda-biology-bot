@@ -4815,7 +4815,9 @@ async def ensure_rag_context(session: dict) -> str:
         "biochemistry": "биохимия",
         "pharmacology": "фармакология",
     }
-    subject_filter = subject_filters.get(session.get("mode"))
+    subject_filter = subject_filters.get(
+        session.get("mode") or getattr(session.get("task"), "subject", None)
+    )
     if subject_filter:
         snippets, rag_usage = await ai_rag.search_for_task(session["task"], subject_filter=subject_filter)
     else:
@@ -4890,6 +4892,35 @@ async def get_first_message_ai_answer(user_id: int, session: dict, task) -> tupl
         task=task, history=session["messages"], quick=True,
         bucket=session["bucket"], rag_context=rag_context,
     )
+
+    # Quality gate: если теоретический ответ объективно слишком короток (особенно при явном
+    # «подробно»), один раз автоматически просим модель переписать его полноценно. Для пользователя
+    # это всё ещё один запрос и одно списание квоты; стоимость обеих AI-попыток учитывается.
+    if ai_validator.needs_expansion(task, answer):
+        repair_history = [
+            *session["messages"],
+            user_turn,
+            {"role": "assistant", "content": answer},
+        ]
+        try:
+            expanded, _repair_turn, _repair_usage, repair_attempts = await solve_ai_request(
+                text=ai_prompts.expansion_followup_text(task),
+                history=repair_history,
+                quick=False,
+                bucket=session["bucket"],
+                rag_context=rag_context,
+                subject=getattr(task, "subject", None),
+            )
+            attempts_log.extend(repair_attempts)
+            answer = expanded
+        except Exception as exc:
+            attempts_log.extend(getattr(exc, "ai_attempts_log", []))
+            logger.warning(
+                "Не удалось автоматически расширить слишком короткий AI-ответ; "
+                "отдаю исходный ответ: %s",
+                exc,
+            )
+
     increment_ai_usage(user_id)
     record_ai_attempts_cost(attempts_log)
 
@@ -5114,6 +5145,8 @@ async def cb_ai_show_explanation(callback: CallbackQuery):
             answer, user_turn, usage, attempts_log = await solve_ai_request(
                 text=followup_text, history=session["messages"], quick=False,
                 bucket=session.get("bucket"), rag_context=rag_context,
+
+                subject=getattr(session.get("task"), "subject", None),
             )
             increment_ai_usage(user_id)
             record_ai_attempts_cost(attempts_log)
@@ -5188,6 +5221,8 @@ async def handle_ai_photo_input(message: Message):
                 answer, user_turn, usage, attempts_log = await solve_ai_request(
                     text=task_repr.to_prompt_text(), history=session["messages"], quick=False,
                     bucket=session.get("bucket"), rag_context=rag_context,
+
+                    subject=getattr(session.get("task"), "subject", None),
                 )
                 increment_ai_usage(user_id)
                 record_ai_attempts_cost(attempts_log)
@@ -5271,6 +5306,8 @@ async def handle_ai_text_input(message: Message):
                 answer, user_turn, usage, attempts_log = await solve_ai_request(
                     text=message.text, history=session["messages"], quick=False,
                     bucket=session.get("bucket"), rag_context=rag_context,
+
+                    subject=getattr(session.get("task"), "subject", None),
                 )
                 increment_ai_usage(user_id)
                 record_ai_attempts_cost(attempts_log)

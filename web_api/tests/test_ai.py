@@ -259,6 +259,7 @@ def test_selected_subject_is_passed_to_ai_session_and_skips_global_precache():
     assert vision_parser.calls == [{"image_bytes": None, "text": "вопрос"}]
     assert fake_bot.first_message_calls == [(123, task)]
     assert fake_bot.first_message_sessions[0]["mode"] == "physiology"
+    assert task.subject == "physiology"
 
 
 def test_photo_mode_decodes_base64_and_calls_pipeline():

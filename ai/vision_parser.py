@@ -52,7 +52,10 @@ def _parse_json_response(raw: str) -> TaskRepresentation:
     cleaned = _JSON_FENCE_RE.sub("", raw.strip())
     data = json.loads(cleaned)
     subject = data.get("subject")
-    if subject not in ("biology", "physics", "chemistry", "anatomy"):
+    if subject not in (
+        "biology", "physics", "chemistry", "anatomy", "histology", "latin",
+        "physiology", "operative_surgery", "biochemistry", "pharmacology", "law",
+    ):
         subject = None
     task_type = data.get("type")
     if task_type not in TASK_TYPES:
@@ -79,7 +82,7 @@ async def _call_openai_vision(messages: list) -> tuple:
     if client is None:
         raise RuntimeError("OpenAI недоступен: не задан OPENAI_API_KEY")
     response = await client.chat.completions.create(
-        model=openai_provider.MODEL, messages=messages, max_tokens=PARSE_MAX_TOKENS,
+        model=openai_provider.VISION_MODEL, messages=messages, max_tokens=PARSE_MAX_TOKENS,
         temperature=0, response_format={"type": "json_object"},
     )
     raw = response.choices[0].message.content or "{}"

@@ -16,6 +16,12 @@ from ai.router import looks_like_refusal
 from ai.task import TaskRepresentation
 
 _NUMBER_RE = re.compile(r"\d")
+_DETAIL_REQUEST_RE = re.compile(
+    r"\b(подробно|подробнее|развернуто|развёрнуто|полно|для ответа у доски|"
+    r"с латинскими терминами|на латыни|по пунктам)\b",
+    re.IGNORECASE,
+)
+_SHORT_REQUEST_RE = re.compile(r"\b(кратко|коротко|только ответ|без объяснения)\b", re.IGNORECASE)
 
 
 @dataclass
@@ -70,3 +76,33 @@ def validate_answer(task: TaskRepresentation, answer: str) -> ValidationResult:
             )
 
     return result
+
+def needs_expansion(task: TaskRepresentation, answer: str) -> bool:
+    """True, если первый теоретический ответ объективно слишком беден и нужен один repair-pass.
+
+    Это не проверка фактической правильности. Она ловит ровно класс ошибки со скриншота: просьба
+    «подробно, с латинскими терминами», а в ответе одна короткая строка. Тесты и расчёты не
+    расширяем: для них компактность часто правильна.
+    """
+    if task.type not in ("theory", "list"):
+        return False
+    text = (answer or "").strip()
+    request_text = f"{task.question_text()}\n{task.raw_text}"
+    if _SHORT_REQUEST_RE.search(request_text):
+        return False
+
+    detailed = bool(_DETAIL_REQUEST_RE.search(request_text))
+    min_chars = 700 if detailed else 420
+    if task.type == "list" and task.subquestions:
+        min_chars = max(min_chars, min(1400, 140 * len(task.subquestions)))
+
+    content_lines = [
+        line for line in text.splitlines()
+        if line.strip() and not line.strip().startswith(("#", "---"))
+    ]
+    if len(text) < min_chars:
+        return True
+    if detailed and len(content_lines) < 5:
+        return True
+    return False
+

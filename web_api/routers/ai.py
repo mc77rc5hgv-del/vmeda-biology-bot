@@ -145,6 +145,10 @@ async def _solve_first_message(
     возвращённый display_answer с ним не совпал, значит пометка низкой уверенности была дописана
     -- сравнение строк вместо повторной реализации confidence-логики, которая уже целиком прожита
     внутри get_first_message_ai_answer (см. её собственный докстринг про ai.confidence.decide)."""
+    # Явный выбор предмета в Mini App надёжнее догадки vision-парсера и должен влиять сразу
+    # на предметный промпт, RAG-фильтр и ключ кэша.
+    if subject_id:
+        task_repr.subject = subject_id
     session = {
         "task": task_repr, "messages": [], "rag_context": None, "bucket": tb.ai_router.route_bucket(task_repr),
         "quick_answer": None, "mode": subject_id,
