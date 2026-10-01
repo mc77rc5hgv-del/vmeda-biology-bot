@@ -1277,7 +1277,7 @@ def _chemistry_labs_material(labs_data: dict, item_id: str) -> dict:
             "media": [
                 {
                     "path": f"images/chemistry/lab_reviews/lab_{lab['number']}_author_review.png",
-                    "caption": f"Авторский разбор лабораторной работы №{lab['number']}",
+                    "caption": "Авторский разбор лабораторной работы от Лилии",
                 }
             ],
         }

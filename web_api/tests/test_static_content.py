@@ -819,7 +819,7 @@ def test_chemistry_lab_material_renders_experiments_and_trusts_summary(chemistry
     assert material["next_id"] == "2"
     assert material["media"] == [{
         "path": "images/chemistry/lab_reviews/lab_1_author_review.png",
-        "caption": "Авторский разбор лабораторной работы №1",
+        "caption": "Авторский разбор лабораторной работы от Лилии",
     }]
 
 
