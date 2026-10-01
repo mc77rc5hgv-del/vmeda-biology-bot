@@ -817,6 +817,10 @@ def test_chemistry_lab_material_renders_experiments_and_trusts_summary(chemistry
     assert "<b>Вывод:</b> метод сработал." in material["content_html"]  # summary -- уже HTML
     assert material["prev_id"] is None
     assert material["next_id"] == "2"
+    assert material["media"] == [{
+        "path": "images/chemistry/lab_reviews/lab_1_author_review.png",
+        "caption": "Авторский разбор лабораторной работы №1",
+    }]
 
 
 def test_chemistry_lab_without_experiments_still_renders(chemistry_labs):
@@ -825,6 +829,7 @@ def test_chemistry_lab_without_experiments_still_renders(chemistry_labs):
     assert "Методика титрования." in material["content_html"]
     assert material["prev_id"] == "1"
     assert material["next_id"] is None
+    assert material["media"][0]["path"].endswith("lab_2_author_review.png")
 
 
 def test_chemistry_theory_ticket_group_and_material(chemistry_theory, chemistry_theory_tickets):

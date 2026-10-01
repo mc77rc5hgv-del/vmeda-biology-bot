@@ -1274,7 +1274,12 @@ def _chemistry_labs_material(labs_data: dict, item_id: str) -> dict:
             "group_id": None,
             "prev_id": str(labs[index - 1]["number"]) if index > 0 else None,
             "next_id": str(labs[index + 1]["number"]) if index + 1 < len(labs) else None,
-            "media": [],
+            "media": [
+                {
+                    "path": f"images/chemistry/lab_reviews/lab_{lab['number']}_author_review.png",
+                    "caption": f"Авторский разбор лабораторной работы №{lab['number']}",
+                }
+            ],
         }
     raise ContentNotFoundError(f"лабораторная {item_id!r} не найдена в химии")
 
