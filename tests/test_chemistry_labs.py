@@ -82,6 +82,7 @@ async def main():
         assert cb.message.documents, f"lab {n} review was not sent"
         document, kwargs = cb.message.documents[-1]
         assert str(document.path).endswith(f"lab_{n}_author_review.png")
+        assert "Авторский разбор лабораторной работы от Лилии" in kwargs["caption"]
         assert "300 dpi без сжатия" in kwargs["caption"]
     print("all 6 author reviews are available as lossless PNG documents: OK")
 

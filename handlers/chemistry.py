@@ -295,8 +295,8 @@ async def cb_lab_review(callback: CallbackQuery):
     await callback.message.answer_document(
         FSInputFile(image_path, filename=f"Авторский разбор — лабораторная работа {lab_num}.png"),
         caption=(
-            f"🖼 Авторский разбор — лабораторная работа {lab_num}\n"
-            f"{lab.get('theme', '')}\n\n"
+            "🖼 Авторский разбор лабораторной работы от Лилии\n"
+            f"Лабораторная работа {lab_num}: {lab.get('theme', '')}\n\n"
             "PNG 300 dpi без сжатия."
         ),
     )
