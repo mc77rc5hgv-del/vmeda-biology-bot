@@ -994,7 +994,7 @@ GATED_CALLBACKS_CHEMISTRY = {
 }
 GATED_PREFIXES_CHEMISTRY = (
     "chem_theory:", "chemtask_topic:", "chemtask_formulas:", "chemtask_list:", "chemtask_show:",
-    "lab:", "lab_exp:", "lab_calc:", "lab_summary:",
+    "lab:", "lab_exp:", "lab_calc:", "lab_summary:", "lab_review:",
     "chem_theory_ticket:", "chem_theory_q:", "chem_practice_ticket:",
 )
 

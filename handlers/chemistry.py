@@ -9,13 +9,17 @@ telegram_bot как tb — циклическая связь разрешает�
 начале telegram_bot.py) и файловые билдеры (build_chemistry_labs_file и т.д., секция "ВЫГРУЗКА
 РАЗДЕЛОВ В WORD-ФАЙЛ") НЕ перенесены — используются в основном другими, неперемещёнными частями
 файла, так что их разумнее оставить на месте и обращаться к ним как tb.*."""
+import os
+
 from aiogram import F, Router
-from aiogram.types import CallbackQuery
+from aiogram.types import CallbackQuery, FSInputFile
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 import telegram_bot as tb
 
 router = Router()
+
+CHEMISTRY_LAB_REVIEWS_DIR = os.path.join(tb.IMAGES_DIR, "chemistry", "lab_reviews")
 
 # ==================== ХИМИЯ - ТЕОРИЯ (С НАВИГАЦИЕЙ) ====================
 @router.callback_query(F.data == "chemistry_theory")
@@ -268,9 +272,35 @@ async def cb_show_lab(callback: CallbackQuery):
         builder.button(text="📐 Расчёты", callback_data=f"lab_calc:{lab_num}")
     if lab.get("summary"):
         builder.button(text="📝 Кратко (конспект)", callback_data=f"lab_summary:{lab_num}")
+    builder.button(text="🖼 Авторский разбор", callback_data=f"lab_review:{lab_num}")
     builder.button(text="🔙 Назад к лабам", callback_data="chemistry_labs")
     builder.adjust(1)
     await tb.safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=builder.as_markup())
+
+@router.callback_query(F.data.startswith("lab_review:"))
+async def cb_lab_review(callback: CallbackQuery):
+    try:
+        lab_num = int(callback.data.split(":")[1])
+    except (IndexError, ValueError):
+        await callback.answer("Некорректный номер лабораторной работы", show_alert=True)
+        return
+
+    lab = next((entry for entry in tb.CHEMISTRY_LABS["labs"] if entry["number"] == lab_num), None)
+    image_path = os.path.join(CHEMISTRY_LAB_REVIEWS_DIR, f"lab_{lab_num}_author_review.png")
+    if not lab or not os.path.isfile(image_path):
+        await callback.answer("Авторский разбор не найден", show_alert=True)
+        return
+
+    await callback.answer()
+    await callback.message.answer_document(
+        FSInputFile(image_path, filename=f"Авторский разбор — лабораторная работа {lab_num}.png"),
+        caption=(
+            f"🖼 Авторский разбор — лабораторная работа {lab_num}\n"
+            f"{lab.get('theme', '')}\n\n"
+            "PNG 300 dpi без сжатия."
+        ),
+    )
+
 
 @router.callback_query(F.data.startswith("lab_summary:"))
 async def cb_lab_summary(callback: CallbackQuery):
