@@ -1,0 +1,78 @@
+.examScreen { --histo: #d07ae8; --histo-deep: #6c2c86; gap: 16px; }
+.eyebrow { color: var(--histo); font-size: 10px; font-weight: 850; letter-spacing: .16em; text-transform: uppercase; }
+
+.hero {
+  position: relative;
+  overflow: hidden;
+  padding: 22px;
+  color: #fff;
+  border: 1px solid rgb(255 255 255 / 13%);
+  border-radius: 25px;
+  background:
+    radial-gradient(circle at 90% 0%, rgb(249 184 255 / 32%), transparent 35%),
+    radial-gradient(circle at 8% 100%, rgb(77 125 255 / 24%), transparent 38%),
+    linear-gradient(145deg, #24112d, #100f22 72%);
+  box-shadow: 0 22px 60px rgb(13 6 25 / 32%);
+}
+.hero::after { content: ""; position: absolute; width: 170px; height: 170px; right: -68px; bottom: -92px; border: 1px solid rgb(255 255 255 / 10%); border-radius: 50%; }
+.heroTop { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+.heroIcon { display: grid; width: 47px; height: 47px; place-items: center; border: 1px solid rgb(255 255 255 / 15%); border-radius: 16px; background: rgb(255 255 255 / 9%); }
+.heroBadge { padding: 7px 10px; color: rgb(255 255 255 / 70%); font-size: 11px; font-weight: 750; border: 1px solid rgb(255 255 255 / 11%); border-radius: 999px; background: rgb(255 255 255 / 6%); }
+.hero h1 { margin-top: 5px; font-size: 36px; font-weight: 900; letter-spacing: -.055em; }
+.hero > p:last-of-type { max-width: 38ch; margin-top: 7px; color: rgb(255 255 255 / 62%); font-size: 12px; line-height: 1.5; }
+.statsGrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 19px; }
+.statsGrid div { padding: 11px 10px; border: 1px solid rgb(255 255 255 / 9%); border-radius: 14px; background: rgb(255 255 255 / 6%); }
+.statsGrid strong, .statsGrid span { display: block; }
+.statsGrid strong { font-size: 17px; }
+.statsGrid span { margin-top: 2px; color: rgb(255 255 255 / 48%); font-size: 9px; }
+
+.actions { display: grid; gap: 9px; }
+.actions > button { display: grid; grid-template-columns: 44px 1fr auto; align-items: center; gap: 12px; width: 100%; padding: 14px; color: var(--ink); text-align: left; border: 1px solid var(--border); border-radius: 18px; background: var(--surface-raised); box-shadow: var(--shadow-card); }
+.actions > button > span { display: grid; width: 44px; height: 44px; place-items: center; color: #fff; border-radius: 14px; background: linear-gradient(145deg, #ad55ca, #683681); }
+.actions > button > span.mistakeIcon { color: #f0b5ff; background: #2b1a32; }
+.actions strong, .actions small { display: block; }
+.actions strong { font-size: 14px; }
+.actions small { margin-top: 3px; color: var(--ink-secondary); font-size: 10px; }
+
+.catalogHead { display: flex; align-items: end; justify-content: space-between; margin-top: 5px; }
+.catalogHead h2 { margin-top: 3px; font-size: 21px; letter-spacing: -.025em; }
+.catalogHead > span { color: var(--ink-secondary); font-size: 12px; font-weight: 750; }
+.searchBox { display: flex; align-items: center; gap: 9px; padding: 0 14px; color: var(--ink-secondary); border: 1px solid var(--border); border-radius: 15px; background: var(--surface-raised); }
+.searchBox input { width: 100%; height: 48px; padding: 0; color: var(--ink); font: inherit; font-size: 13px; border: 0; outline: 0; background: transparent; }
+.catalog { display: grid; gap: 13px; }
+.group { overflow: hidden; border: 1px solid var(--border); border-radius: 19px; background: var(--surface-raised); box-shadow: var(--shadow-card); }
+.groupHead { display: flex; align-items: center; justify-content: space-between; padding: 14px 15px 11px; border-bottom: 1px solid var(--border); background: linear-gradient(120deg, rgb(181 80 208 / 8%), transparent); }
+.groupHead h3 { font-size: 13px; font-weight: 800; }
+.groupHead span { min-width: 27px; padding: 4px 7px; color: var(--histo); font-size: 10px; font-weight: 800; text-align: center; border-radius: 999px; background: rgb(181 80 208 / 10%); }
+.group > button { display: grid; grid-template-columns: 29px 1fr auto; align-items: center; gap: 10px; width: 100%; padding: 12px 14px; color: var(--ink); text-align: left; border-bottom: 1px solid var(--border); background: transparent; }
+.group > button:last-child { border-bottom: 0; }
+.specimenNumber { display: grid; width: 29px; height: 29px; place-items: center; color: var(--histo); font-size: 10px; font-weight: 850; border-radius: 10px; background: rgb(181 80 208 / 10%); }
+.group strong, .group small { display: block; }
+.group strong { font-size: 12px; line-height: 1.35; }
+.group small { margin-top: 3px; color: var(--ink-secondary); font-size: 9px; line-height: 1.3; }
+
+.backButton { display: flex; align-items: center; align-self: flex-start; gap: 6px; padding: 8px 10px; color: var(--ink-secondary); font-size: 12px; font-weight: 700; border-radius: 11px; background: var(--surface-raised); }
+.examHead { display: flex; align-items: end; justify-content: space-between; }
+.examHead h1 { margin-top: 4px; font-size: 24px; }
+.examHead > span { color: var(--histo); font-size: 12px; font-weight: 850; }
+.progressTrack { height: 4px; overflow: hidden; border-radius: 999px; background: rgb(181 80 208 / 12%); }
+.progressTrack i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #9451c7, #ec91e9); transition: width 260ms ease; }
+.practicalImage { width: 100%; aspect-ratio: 1 / 1; object-fit: contain; color: var(--ink-secondary); border-radius: 21px; background: #080910; }
+.primaryButton, .resultCard > button { width: 100%; min-height: 52px; color: #fff; font-size: 13px; font-weight: 800; border-radius: 16px; background: linear-gradient(135deg, #833aa4, #c25ecf); box-shadow: 0 12px 28px rgb(145 60 170 / 24%); }
+.answerCard, .resultCard { padding: 20px; border: 1px solid var(--border); border-radius: 21px; background: var(--surface-raised); box-shadow: var(--shadow-card); }
+.answerCard h2 { margin-top: 5px; font-size: 20px; line-height: 1.2; }
+.metaLine { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.metaLine span { padding: 5px 8px; color: var(--ink-secondary); font-size: 9px; border-radius: 999px; background: var(--surface); }
+.protocolPreview { margin-top: 13px; color: var(--ink-secondary); font-size: 11px; line-height: 1.5; }
+.selfGrade { margin-top: 17px; font-size: 11px; font-weight: 750; }
+.gradeGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 9px; }
+.gradeGrid button { display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 46px; color: var(--ink); font-size: 11px; font-weight: 800; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
+.gradeGrid button:last-child { color: #fff; border-color: transparent; background: #31845c; }
+.resultCard { margin-top: 18vh; text-align: center; }
+.resultIcon { display: grid; width: 58px; height: 58px; margin: 0 auto 14px; place-items: center; color: #fff; border-radius: 18px; background: linear-gradient(145deg, #ad55ca, #683681); }
+.resultCard h1 { margin-top: 5px; font-size: 34px; }
+.resultCard > p:not(.eyebrow) { margin: 8px auto 18px; color: var(--ink-secondary); font-size: 12px; line-height: 1.5; }
+.resultCard > button { margin-top: 8px; }
+.resultCard > button.secondaryButton { color: var(--ink); box-shadow: none; border: 1px solid var(--border); background: var(--surface); }
+
+@media (hover: hover) { .group > button:hover, .actions > button:hover { transform: translateY(-1px); } }

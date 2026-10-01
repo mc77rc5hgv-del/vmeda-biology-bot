@@ -42,6 +42,18 @@ class AnatomyExamAnswerResponse(BaseModel):
     explanation: str
 
 
+class HistologyPracticalGradeRequest(BaseModel):
+    """Самооценка после показа ответа в практическом зачёте.
+
+    В гистологии ответ вводится не строкой: студент сначала рассматривает препарат, затем
+    открывает эталон и честно отмечает, узнал ли его. Поэтому сервер хранит ``known`` и на его
+    основе формирует устойчивый список ошибок для повторения.
+    """
+
+    known: bool
+    scope: str = "all"
+
+
 class LearningFlagRequest(BaseModel):
     value: bool
 

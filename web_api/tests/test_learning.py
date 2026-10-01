@@ -44,6 +44,26 @@ def test_learning_state_is_isolated_per_user(monkeypatch, tmp_path):
     assert learning.get_state(2)["last_material"] is None
 
 
+def test_histology_practical_stats_and_mistakes_follow_latest_answer(monkeypatch, tmp_path):
+    monkeypatch.setenv("MINIAPP_LEARNING_DB", str(tmp_path / "learning.sqlite3"))
+    learning.record_histology_attempt(42, "d1_01", False, "all")
+    learning.record_histology_attempt(42, "d1_02", True, "all")
+
+    stats = learning.get_histology_stats(42, 71)
+    assert stats["attempts"] == 2
+    assert stats["known"] == 1
+    assert stats["wrong"] == 1
+    assert stats["accuracy_percent"] == 50
+    assert stats["mastered_specimens"] == 1
+    assert stats["mistake_ids"] == ["d1_01"]
+
+    learning.record_histology_attempt(42, "d1_01", True, "mistakes")
+    repeated = learning.get_histology_stats(42, 71)
+    assert repeated["active_mistakes"] == 0
+    assert repeated["mastered_specimens"] == 2
+    assert repeated["accuracy_percent"] == 67
+
+
 def test_learning_http_flow(monkeypatch, tmp_path):
     monkeypatch.setenv("MINIAPP_LEARNING_DB", str(tmp_path / "learning.sqlite3"))
     app.dependency_overrides[get_current_user_id] = lambda: 77

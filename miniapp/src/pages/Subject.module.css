@@ -137,3 +137,23 @@
   font-size: 11px;
   line-height: 1.35;
 }
+
+.histologyExamRow {
+  color: #fff;
+  border-color: transparent;
+  background:
+    radial-gradient(circle at 88% 10%, rgb(249 184 255 / 25%), transparent 34%),
+    linear-gradient(138deg, #26122e, #6d3084 76%, #b55ccc);
+  box-shadow: 0 16px 38px rgb(79 28 95 / 26%);
+}
+
+.histologyExamIcon {
+  display: grid;
+  flex: 0 0 42px;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border: 1px solid rgb(255 255 255 / 20%);
+  border-radius: var(--radius-md);
+  background: rgb(255 255 255 / 11%);
+}

@@ -453,6 +453,50 @@ def test_histology_specimen_material_round_trip_once_referral_threshold_is_met()
     assert body["next_id"] == group["items"][1]["id"]
 
 
+def test_histology_exam_catalog_practical_reveal_and_grade():
+    unlocked_user_id = 900_444_555_777
+    tb.stats["total_users"].add(unlocked_user_id)
+    current_month = tb.local_today().strftime("%Y-%m")
+    tb.stats["referral_monthly"][str(unlocked_user_id)] = {"month": current_month, "count": 2}
+    tb.save_stats()
+    headers = _auth_headers(unlocked_user_id)
+
+    catalog = client.get("/api/v1/histology/exam/catalog", headers=headers)
+    assert catalog.status_code == 200, catalog.text
+    body = catalog.json()
+    assert body["title"] == "ЭКЗАМЕН"
+    assert body["total_specimens"] == 71
+    assert len(body["groups"]) == 5
+
+    practical = client.get("/api/v1/histology/exam/practical?limit=10", headers=headers)
+    assert practical.status_code == 200, practical.text
+    questions = practical.json()
+    assert len(questions) == 10
+    assert all("title" not in question for question in questions)
+
+    specimen_id = questions[0]["id"]
+    detail = client.get(f"/api/v1/histology/exam/specimens/{specimen_id}", headers=headers)
+    assert detail.status_code == 200
+    assert detail.json()["protocol"]
+    assert detail.json()["images"]
+
+    reveal = client.post(f"/api/v1/histology/exam/specimens/{specimen_id}/reveal", headers=headers)
+    assert reveal.status_code == 200
+    assert reveal.json()["title"]
+
+    grade = client.post(
+        f"/api/v1/histology/exam/specimens/{specimen_id}/grade",
+        headers=headers,
+        json={"known": False, "scope": "all"},
+    )
+    assert grade.status_code == 200
+    assert specimen_id in grade.json()["mistake_ids"]
+
+    repeated = client.get("/api/v1/histology/exam/practical?scope=mistakes&limit=10", headers=headers)
+    assert repeated.status_code == 200
+    assert {item["id"] for item in repeated.json()} == {specimen_id}
+
+
 def test_histology_unknown_diagnostic_is_not_found_not_locked():
     headers = _auth_headers(900_444_555_666)  # уже разблокирован предыдущим тестом
     resp = client.get(

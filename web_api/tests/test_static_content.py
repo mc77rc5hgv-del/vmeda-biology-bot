@@ -406,7 +406,7 @@ def test_histology_summary_and_sections(histology):
     detail = static_content.get_subject_detail(tb, "histology")
     assert detail["title"] == "Гистология"
     assert detail["sections"] == [
-        {"id": "specimens", "title": "Препараты", "item_count": 3, "kind": "grouped"},
+        {"id": "specimens", "title": "ЭКЗАМЕН", "item_count": 3, "kind": "grouped"},
     ]
 
 

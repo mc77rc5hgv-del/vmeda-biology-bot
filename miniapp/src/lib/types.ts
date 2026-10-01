@@ -151,6 +151,60 @@ export interface AnatomyExamAnswerResult {
   explanation: string;
 }
 
+export interface HistologyMarker {
+  x: number;
+  y: number;
+  label: string;
+}
+
+export interface HistologySpecimenSummary {
+  id: string;
+  number: number;
+  title: string;
+  stain: string | null;
+  magnification: string | null;
+  groupId: string;
+  groupTitle: string;
+  imageCount: number;
+  practicalAvailable: boolean;
+}
+
+export interface HistologySpecimen extends HistologySpecimenSummary {
+  protocol: string;
+  images: string[];
+  markers: HistologyMarker[];
+}
+
+export interface HistologyCatalogGroup {
+  id: string;
+  title: string;
+  menuTitle: string;
+  specimens: HistologySpecimenSummary[];
+}
+
+export interface HistologyCatalog {
+  title: string;
+  totalSpecimens: number;
+  groups: HistologyCatalogGroup[];
+}
+
+export interface HistologyStats {
+  totalSpecimens: number;
+  attempts: number;
+  known: number;
+  wrong: number;
+  accuracy: number;
+  mastered: number;
+  activeMistakes: number;
+  mistakeIds: string[];
+}
+
+export interface HistologyPracticalQuestion {
+  id: string;
+  position: number;
+  imageUrl: string;
+}
+
 export interface TestSummary {
   id: string;
   subjectId: string;

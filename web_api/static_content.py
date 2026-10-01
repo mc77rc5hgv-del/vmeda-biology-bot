@@ -188,7 +188,7 @@ def get_subject_detail(tb, subject_id: str) -> dict:
     if subject_id == HISTOLOGY_ID:
         total_specimens = sum(len(group.get("specimens", [])) for group in tb.HISTOLOGY.values())
         summary["sections"] = [
-            {"id": HISTOLOGY_SECTION_ID, "title": "Препараты", "item_count": total_specimens, "kind": "grouped"},
+            {"id": HISTOLOGY_SECTION_ID, "title": "ЭКЗАМЕН", "item_count": total_specimens, "kind": "grouped"},
         ]
         return summary
 
@@ -344,7 +344,7 @@ def get_section_detail(tb, subject_id: str, section_id: str) -> dict:
             raise ContentNotFoundError(f"раздел {section_id!r} не найден в гистологии")
         return {
             "id": section_id,
-            "title": "Препараты",
+            "title": "ЭКЗАМЕН",
             "kind": "grouped",
             "groups": [
                 {"id": group_key, "title": group["title"], "item_count": len(group.get("specimens", []))}

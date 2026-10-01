@@ -233,6 +233,7 @@ def load_stats() -> dict:
             data.setdefault("section_promos", {})
             data.setdefault("histology_warnings", {})
             data.setdefault("histology_temp_access", {})
+            data.setdefault("histology_learning", {})
             data.setdefault("rollcall_confirmed", {})
             data.setdefault("anatomy_latin_scores", {})
             data.setdefault("anatomy_exam_test_scores", {})
@@ -285,6 +286,7 @@ def load_stats() -> dict:
         "section_promos": {},
         "histology_warnings": {},
         "histology_temp_access": {},
+        "histology_learning": {},
         "rollcall_confirmed": {},
         "anatomy_latin_scores": {},
         "anatomy_exam_test_scores": {},
@@ -5680,6 +5682,9 @@ get_histology_specimen_keyboard = histology_handlers.get_histology_specimen_keyb
 get_histology_image_keyboard = histology_handlers.get_histology_image_keyboard
 render_histology_image = histology_handlers.render_histology_image
 get_histology_guess_pool = histology_handlers.get_histology_guess_pool
+get_histology_learning = histology_handlers.get_histology_learning
+record_histology_result = histology_handlers.record_histology_result
+get_histology_stats_text = histology_handlers.get_histology_stats_text
 start_histology_guess_session = histology_handlers.start_histology_guess_session
 get_histology_guess_question_keyboard = histology_handlers.get_histology_guess_question_keyboard
 get_histology_guess_answer_keyboard = histology_handlers.get_histology_guess_answer_keyboard
@@ -5695,6 +5700,7 @@ cb_histology_guess_start = histology_handlers.cb_histology_guess_start
 cb_histology_guess_show_answer = histology_handlers.cb_histology_guess_show_answer
 cb_histology_guess_answer = histology_handlers.cb_histology_guess_answer
 cb_histology_guess_stop = histology_handlers.cb_histology_guess_stop
+cb_histology_stats = histology_handlers.cb_histology_stats
 
 # ==================== ОПЕРАТИВНАЯ ХИРУРГИЯ ====================
 # Тот же паттерн, что ГИСТОЛОГИЯ выше — свой Router, импортируется в самом конце файла, когда

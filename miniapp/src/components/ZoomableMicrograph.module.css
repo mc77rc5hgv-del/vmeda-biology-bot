@@ -1,0 +1,95 @@
+.shell {
+  overflow: hidden;
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 22px;
+  background: #070912;
+  box-shadow: 0 20px 55px rgb(4 6 15 / 35%);
+}
+
+.viewport {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  overflow: hidden;
+  touch-action: none;
+  cursor: grab;
+  background: radial-gradient(circle, #171927, #06070d 72%);
+}
+
+.viewport:active { cursor: grabbing; }
+
+.canvas {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  transform-origin: center;
+  transition: transform 120ms ease-out;
+  will-change: transform;
+}
+
+.canvas img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.marker {
+  position: absolute;
+  display: grid;
+  width: 25px;
+  height: 25px;
+  transform: translate(-50%, -50%);
+  place-items: center;
+  color: #16081b;
+  font-size: 11px;
+  font-weight: 900;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: #f3a8ff;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 50%);
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 10px 12px 7px;
+  color: rgb(255 255 255 / 80%);
+}
+
+.controls button {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  place-items: center;
+  color: #fff;
+  border: 1px solid rgb(255 255 255 / 13%);
+  border-radius: 12px;
+  background: rgb(255 255 255 / 8%);
+}
+
+.controls button:disabled { opacity: .32; }
+.controls button.active { color: #f3a8ff; border-color: rgb(243 168 255 / 45%); }
+.controls span { min-width: 48px; text-align: center; font-size: 12px; font-weight: 750; }
+
+.hint {
+  padding: 0 16px 12px;
+  color: rgb(255 255 255 / 45%);
+  font-size: 10px;
+  line-height: 1.35;
+  text-align: center;
+}
+
+.state {
+  display: grid;
+  min-height: 280px;
+  place-items: center;
+  color: var(--ink-secondary);
+  border-radius: 22px;
+  background: var(--surface-raised);
+}

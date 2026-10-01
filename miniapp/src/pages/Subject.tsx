@@ -1,4 +1,4 @@
-import { BookOpenCheck, ChevronRight, Lock, Sparkles, SquareCheckBig } from "lucide-react";
+import { BookOpenCheck, ChevronRight, Lock, Microscope, Sparkles, SquareCheckBig } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { fetchAccessStatus, fetchLearningState, fetchSubjectDetail, isRealBackedSubject } from "../lib/api";
@@ -90,10 +90,30 @@ export function SubjectPage() {
         </PressableCard>
       )}
 
+      {subject.id === "histology" && !locked && (
+        <PressableCard
+          className={[styles.sectionRow, styles.histologyExamRow].join(" ")}
+          aria-label="Открыть каталог и практический зачёт по гистологии"
+          onClick={() => {
+            hapticSelection();
+            navigate("/histology/exam");
+          }}
+        >
+          <span className={styles.histologyExamIcon} aria-hidden="true">
+            <Icon icon={Microscope} size={21} />
+          </span>
+          <div className={styles.anatomyExamContent}>
+            <div className={styles.anatomyExamTitle}>ЭКЗАМЕН</div>
+            <div className={styles.anatomyExamDescription}>71 препарат · атлас · зачёт · работа над ошибками</div>
+          </div>
+          <Icon icon={ChevronRight} size={18} color="currentColor" />
+        </PressableCard>
+      )}
+
       {!locked && (
         <>
           <div className={styles.sectionList}>
-            {subject.sections.map((section) => (
+            {subject.sections.filter((section) => !(subject.id === "histology" && section.id === "specimens")).map((section) => (
               <PressableCard
                 key={section.id}
                 className={styles.sectionRow}

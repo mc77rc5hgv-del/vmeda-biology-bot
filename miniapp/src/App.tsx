@@ -12,6 +12,8 @@ import { ReferralPage } from "./pages/Referral";
 import { FavoritesPage } from "./pages/Favorites";
 import { ProgressPage } from "./pages/Progress";
 import { NotFoundPage } from "./pages/NotFound";
+import { HistologyExamPage } from "./pages/HistologyExam";
+import { HistologySpecimenPage } from "./pages/HistologySpecimen";
 
 export function App() {
   return (
@@ -23,6 +25,8 @@ export function App() {
         <Route path="/subjects/:subjectId/sections/:sectionId/groups/:groupId" element={<GroupPage />} />
         <Route path="/materials/:subjectId/:sectionId/:materialId" element={<MaterialPage />} />
         <Route path="/tests/:subjectId" element={<TestPage />} />
+        <Route path="/histology/exam" element={<HistologyExamPage />} />
+        <Route path="/histology/specimens/:specimenId" element={<HistologySpecimenPage />} />
         <Route path="/ai" element={<AiPage />} />
         <Route path="/progress" element={<ProgressPage />} />
         <Route path="/profile" element={<ProfilePage />} />

@@ -9,6 +9,11 @@ import type {
   AnatomyExamQuestion,
   ContentSection,
   DashboardStats,
+  HistologyCatalog,
+  HistologyPracticalQuestion,
+  HistologySpecimen,
+  HistologySpecimenSummary,
+  HistologyStats,
   MaterialDetail,
   LearningState,
   SectionContents,
@@ -20,6 +25,10 @@ import type {
 import { clearStoredSessionToken, getStoredSessionToken, storeSessionToken } from "./session";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+
+function absoluteApiUrl(path: string): string {
+  return path.startsWith("http://") || path.startsWith("https://") ? path : `${API_BASE_URL}${path}`;
+}
 
 export class ApiError extends Error {
   status: number;
@@ -433,6 +442,124 @@ export async function checkAnatomyExamAnswer(
     correctText: wire.correct_text,
     explanation: wire.explanation,
   };
+}
+
+// ==================== гистология · ЭКЗАМЕН ====================
+
+interface HistologySpecimenWire {
+  id: string;
+  number: number;
+  title: string;
+  stain: string | null;
+  magnification: string | null;
+  group_id: string;
+  group_title: string;
+  image_count: number;
+  practical_available: boolean;
+}
+
+interface HistologyStatsWire {
+  total_specimens: number;
+  attempts: number;
+  known: number;
+  wrong: number;
+  accuracy_percent: number;
+  mastered_specimens: number;
+  active_mistakes: number;
+  mistake_ids: string[];
+}
+
+function toHistologySummary(wire: HistologySpecimenWire): HistologySpecimenSummary {
+  return {
+    id: wire.id,
+    number: wire.number,
+    title: wire.title,
+    stain: wire.stain,
+    magnification: wire.magnification,
+    groupId: wire.group_id,
+    groupTitle: wire.group_title,
+    imageCount: wire.image_count,
+    practicalAvailable: wire.practical_available,
+  };
+}
+
+function toHistologyStats(wire: HistologyStatsWire): HistologyStats {
+  return {
+    totalSpecimens: wire.total_specimens,
+    attempts: wire.attempts,
+    known: wire.known,
+    wrong: wire.wrong,
+    accuracy: wire.accuracy_percent,
+    mastered: wire.mastered_specimens,
+    activeMistakes: wire.active_mistakes,
+    mistakeIds: wire.mistake_ids,
+  };
+}
+
+export async function fetchHistologyCatalog(): Promise<HistologyCatalog> {
+  const wire = await apiFetch<{
+    title: string;
+    total_specimens: number;
+    groups: Array<{ id: string; title: string; menu_title: string; specimens: HistologySpecimenWire[] }>;
+  }>("/api/v1/histology/exam/catalog");
+  return {
+    title: wire.title,
+    totalSpecimens: wire.total_specimens,
+    groups: wire.groups.map((group) => ({
+      id: group.id,
+      title: group.title,
+      menuTitle: group.menu_title,
+      specimens: group.specimens.map(toHistologySummary),
+    })),
+  };
+}
+
+export async function fetchHistologyStats(): Promise<HistologyStats> {
+  return toHistologyStats(await apiFetch<HistologyStatsWire>("/api/v1/histology/exam/stats"));
+}
+
+export async function fetchHistologySpecimen(specimenId: string): Promise<HistologySpecimen> {
+  const wire = await apiFetch<HistologySpecimenWire & {
+    protocol: string;
+    images: string[];
+    markers: Array<{ x: number; y: number; label: string }>;
+  }>(`/api/v1/histology/exam/specimens/${encodeURIComponent(specimenId)}`);
+  return {
+    ...toHistologySummary(wire),
+    protocol: wire.protocol,
+    images: wire.images.map(absoluteApiUrl),
+    markers: wire.markers,
+  };
+}
+
+export async function fetchHistologyPractical(
+  scope: "all" | "mistakes" | string = "all",
+  limit = 10,
+): Promise<HistologyPracticalQuestion[]> {
+  const wire = await apiFetch<Array<{ id: string; position: number; image_url: string }>>(
+    `/api/v1/histology/exam/practical?scope=${encodeURIComponent(scope)}&limit=${limit}`,
+  );
+  return wire.map((item) => ({ id: item.id, position: item.position, imageUrl: absoluteApiUrl(item.image_url) }));
+}
+
+export async function revealHistologyAnswer(specimenId: string): Promise<HistologySpecimenSummary & { protocol: string }> {
+  const wire = await apiFetch<HistologySpecimenWire & { protocol: string }>(
+    `/api/v1/histology/exam/specimens/${encodeURIComponent(specimenId)}/reveal`,
+    { method: "POST" },
+  );
+  return { ...toHistologySummary(wire), protocol: wire.protocol };
+}
+
+export async function gradeHistologyAnswer(
+  specimenId: string,
+  known: boolean,
+  scope: string,
+): Promise<HistologyStats> {
+  const wire = await apiFetch<HistologyStatsWire>(
+    `/api/v1/histology/exam/specimens/${encodeURIComponent(specimenId)}/grade`,
+    { method: "POST", body: JSON.stringify({ known, scope }) },
+  );
+  return toHistologyStats(wire);
 }
 
 // ==================== VMedA AI ====================

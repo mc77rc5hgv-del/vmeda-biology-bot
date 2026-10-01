@@ -61,6 +61,19 @@ def _connect() -> sqlite3.Connection:
         );
         CREATE INDEX IF NOT EXISTS learning_quiz_user
             ON learning_quiz_attempts(user_id, answered_at DESC);
+
+        CREATE TABLE IF NOT EXISTS histology_practical_attempts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            specimen_id TEXT NOT NULL,
+            scope TEXT NOT NULL DEFAULT 'all',
+            known INTEGER NOT NULL CHECK (known IN (0, 1)),
+            answered_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS histology_practical_user
+            ON histology_practical_attempts(user_id, answered_at DESC);
+        CREATE INDEX IF NOT EXISTS histology_practical_user_specimen
+            ON histology_practical_attempts(user_id, specimen_id, answered_at DESC);
         """
     )
     return connection
@@ -129,6 +142,66 @@ def record_quiz_attempt(user_id: int, subject_id: str, section_id: str, material
                VALUES (?, ?, ?, ?, ?, ?)""",
             (user_id, subject_id, section_id, material_id, int(correct), _now()),
         )
+
+
+def record_histology_attempt(user_id: int, specimen_id: str, known: bool, scope: str = "all") -> None:
+    with closing(_connect()) as connection, connection:
+        connection.execute(
+            """INSERT INTO histology_practical_attempts
+               (user_id, specimen_id, scope, known, answered_at)
+               VALUES (?, ?, ?, ?, ?)""",
+            (user_id, specimen_id, scope, int(known), _now()),
+        )
+
+
+def get_histology_mistake_ids(user_id: int) -> list[str]:
+    """Препараты, последний ответ по которым был ошибочным.
+
+    Успешное повторение автоматически убирает препарат из активной работы над ошибками, но
+    вся история попыток остаётся в БД и продолжает участвовать в общей статистике.
+    """
+    with closing(_connect()) as connection:
+        rows = connection.execute(
+            """SELECT h.specimen_id, h.known
+               FROM histology_practical_attempts h
+               JOIN (
+                   SELECT specimen_id, MAX(id) AS last_id
+                   FROM histology_practical_attempts
+                   WHERE user_id=?
+                   GROUP BY specimen_id
+               ) latest ON latest.last_id=h.id
+               WHERE h.user_id=? AND h.known=0
+               ORDER BY h.answered_at DESC""",
+            (user_id, user_id),
+        ).fetchall()
+    return [row["specimen_id"] for row in rows]
+
+
+def get_histology_stats(user_id: int, total_specimens: int = 71) -> dict:
+    with closing(_connect()) as connection:
+        totals = connection.execute(
+            """SELECT COUNT(*) AS attempts, COALESCE(SUM(known), 0) AS known
+               FROM histology_practical_attempts WHERE user_id=?""",
+            (user_id,),
+        ).fetchone()
+        mastered = connection.execute(
+            """SELECT COUNT(DISTINCT specimen_id) AS count
+               FROM histology_practical_attempts WHERE user_id=? AND known=1""",
+            (user_id,),
+        ).fetchone()["count"]
+    attempts = int(totals["attempts"])
+    known = int(totals["known"])
+    mistakes = get_histology_mistake_ids(user_id)
+    return {
+        "total_specimens": total_specimens,
+        "attempts": attempts,
+        "known": known,
+        "wrong": attempts - known,
+        "accuracy_percent": round(known / attempts * 100) if attempts else 0,
+        "mastered_specimens": int(mastered),
+        "active_mistakes": len(mistakes),
+        "mistake_ids": mistakes,
+    }
 
 
 def get_state(user_id: int) -> dict:
