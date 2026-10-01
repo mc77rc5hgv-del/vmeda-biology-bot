@@ -297,7 +297,8 @@ async def cb_lab_review(callback: CallbackQuery):
         caption=(
             "🖼 Авторский разбор лабораторной работы от Лилии\n"
             f"Лабораторная работа {lab_num}: {lab.get('theme', '')}\n\n"
-            "PNG 300 dpi без сжатия."
+            "PNG 300 dpi без сжатия.\n\n"
+            "@vmeda_examen_bot"
         ),
     )
 
