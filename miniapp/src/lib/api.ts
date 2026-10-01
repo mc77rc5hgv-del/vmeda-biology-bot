@@ -64,9 +64,7 @@ export async function fetchMe(): Promise<UserProfile> {
 }
 
 export function fetchDashboard(): Promise<DashboardStats> {
-  // Готовность/серия/XP считаются backend'ом по формуле §13 ТЗ -- эндпоинта для них ещё нет
-  // (см. web_api/README.md "Что дальше"), поэтому пока всегда mock, вне зависимости от сессии.
-  return resolveAfterDelay(mock.mockDashboard);
+  return hasSession() ? apiClient.fetchRealDashboard() : resolveAfterDelay(mock.mockDashboard);
 }
 
 export function fetchContinueItem(): Promise<ContinueItem | null> {

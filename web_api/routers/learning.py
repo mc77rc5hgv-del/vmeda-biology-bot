@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends
 
 from .. import learning
 from ..deps import get_current_user_id
-from ..schemas import LearningFlagRequest, LearningMaterialTouchRequest
+from ..schemas import DashboardStatsResponse, LearningFlagRequest, LearningMaterialTouchRequest
 
 router = APIRouter(prefix="/api/v1/learning", tags=["learning"])
 
@@ -10,6 +10,11 @@ router = APIRouter(prefix="/api/v1/learning", tags=["learning"])
 @router.get("/state")
 def state(user_id: int = Depends(get_current_user_id)) -> dict:
     return learning.get_state(user_id)
+
+
+@router.get("/dashboard", response_model=DashboardStatsResponse)
+def dashboard(user_id: int = Depends(get_current_user_id)) -> DashboardStatsResponse:
+    return DashboardStatsResponse(**learning.get_dashboard(user_id))
 
 
 @router.post("/materials/touch")

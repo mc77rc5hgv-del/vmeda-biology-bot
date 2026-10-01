@@ -93,3 +93,19 @@
   padding: 17px 18px;
   font-weight: 680;
 }
+
+
+.avatarImage {
+  width: 80px;
+  height: 80px;
+  border-radius: var(--radius-pill);
+  object-fit: cover;
+  border: 2px solid rgb(255 255 255 / 34%);
+  box-shadow: 0 12px 26px rgb(0 0 0 / 24%);
+}
+.statButton { width: 100%; text-align: left; color: var(--ink); }
+.queryError { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--ink-secondary); font-size: 13px; }
+.queryError button { min-height: 36px; padding: 0 13px; border: 0; border-radius: 11px; color: #fff; background: var(--academic-blue); font-weight: 760; }
+.subCard { width: 100%; padding: 18px; text-align: left; color: var(--ink); }
+.subAction { flex: 0 0 auto; color: var(--academic-blue); font-size: 12px; font-weight: 780; }
+.linkRow { width: 100%; }

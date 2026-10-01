@@ -82,7 +82,7 @@ JSON контентного контракта ТЗ §14. **Статичные �
 `GET /api/v1/subjects/{id}`, `GET /api/v1/subjects/{id}/sections/{id}`,
 `GET /api/v1/subjects/{id}/sections/{id}/groups/{id}`,
 `GET /api/v1/materials/{subject}/{section}/{item}` (+ `/media/{index}`),
-`GET /api/v1/learning/state` и команды изученного/избранного. `web_api/tests/test_content.py`
+`GET /api/v1/learning/state`, `GET /api/v1/learning/dashboard` и команды изученного/избранного. `web_api/tests/test_content.py`
 проверяет `content.py` на маленькой ручной фикстуре (без импорта бота);
 `web_api/tests/test_subjects_integration.py` гоняет тот же путь через настоящий HTTP-запрос на
 реальных файлах Биохимии, Фармакологии и Физиологии — включая изображения, отданные через

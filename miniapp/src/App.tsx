@@ -8,6 +8,8 @@ import { MaterialPage } from "./pages/Material";
 import { TestPage } from "./pages/Test";
 import { AiPage } from "./pages/Ai";
 import { ProfilePage } from "./pages/Profile";
+import { ReferralPage } from "./pages/Referral";
+import { FavoritesPage } from "./pages/Favorites";
 import { ProgressPage } from "./pages/Progress";
 import { NotFoundPage } from "./pages/NotFound";
 
@@ -24,6 +26,8 @@ export function App() {
         <Route path="/ai" element={<AiPage />} />
         <Route path="/progress" element={<ProgressPage />} />
         <Route path="/profile" element={<ProfilePage />} />
+        <Route path="/profile/referrals" element={<ReferralPage />} />
+        <Route path="/profile/favorites" element={<FavoritesPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
       <BottomNav />

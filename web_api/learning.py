@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 import sqlite3
 from contextlib import closing
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 
 def _db_path() -> str:
@@ -158,4 +158,63 @@ def get_state(user_id: int) -> dict:
         "completed_total": len(completed),
         "quiz_attempts": quiz["attempts"],
         "quiz_correct": quiz["correct"],
+    }
+
+
+
+def _activity_date(value: str | None) -> date | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).date()
+    except (TypeError, ValueError):
+        return None
+
+
+def get_dashboard(user_id: int) -> dict:
+    """Real profile metrics derived only from persisted Mini App activity."""
+    with closing(_connect()) as connection:
+        materials = connection.execute(
+            """SELECT completed, last_opened_at FROM learning_materials WHERE user_id=?""",
+            (user_id,),
+        ).fetchall()
+        attempts = connection.execute(
+            """SELECT correct, answered_at FROM learning_quiz_attempts WHERE user_id=?""",
+            (user_id,),
+        ).fetchall()
+
+    completed = sum(int(row["completed"]) for row in materials)
+    correct = sum(int(row["correct"]) for row in attempts)
+    wrong = len(attempts) - correct
+    xp = completed * 40 + correct * 20 + wrong * 5
+
+    completion_percent = round(completed / len(materials) * 100) if materials else None
+    accuracy_percent = round(correct / len(attempts) * 100) if attempts else None
+    if completion_percent is not None and accuracy_percent is not None:
+        readiness = round(completion_percent * 0.4 + accuracy_percent * 0.6)
+    elif completion_percent is not None:
+        readiness = completion_percent
+    elif accuracy_percent is not None:
+        readiness = accuracy_percent
+    else:
+        readiness = 0
+
+    material_dates = [_activity_date(row["last_opened_at"]) for row in materials]
+    attempt_dates = [_activity_date(row["answered_at"]) for row in attempts]
+    activity_dates = {day for day in material_dates + attempt_dates if day is not None}
+    today = datetime.now(timezone.utc).date()
+    cursor = today if today in activity_dates else today - timedelta(days=1)
+    streak = 0
+    while cursor in activity_dates:
+        streak += 1
+        cursor -= timedelta(days=1)
+
+    today_actions = sum(day == today for day in material_dates + attempt_dates if day is not None)
+    daily_goal = 30
+    return {
+        "streak_days": streak,
+        "xp": xp,
+        "readiness_percent": max(0, min(100, readiness)),
+        "daily_goal_minutes": daily_goal,
+        "minutes_left_today": max(0, daily_goal - today_actions * 5),
     }

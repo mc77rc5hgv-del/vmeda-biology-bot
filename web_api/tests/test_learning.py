@@ -30,6 +30,12 @@ def test_learning_state_persists_progress_favorites_and_quiz(monkeypatch, tmp_pa
     assert state["quiz_attempts"] == 1
     assert state["quiz_correct"] == 1
 
+    dashboard = learning.get_dashboard(42)
+    assert dashboard["streak_days"] == 1
+    assert dashboard["xp"] == 60
+    assert dashboard["readiness_percent"] == 100
+    assert dashboard["minutes_left_today"] == 20
+
 
 def test_learning_state_is_isolated_per_user(monkeypatch, tmp_path):
     monkeypatch.setenv("MINIAPP_LEARNING_DB", str(tmp_path / "learning.sqlite3"))
@@ -56,6 +62,9 @@ def test_learning_http_flow(monkeypatch, tmp_path):
         assert completed.status_code == 200
         assert completed.json()["completed_total"] == 1
         assert client.get("/api/v1/learning/state").json()["last_material"]["material_title"] == "Билет 1"
+        dashboard = client.get("/api/v1/learning/dashboard")
+        assert dashboard.status_code == 200
+        assert dashboard.json()["xp"] == 40
     finally:
         app.dependency_overrides.clear()
 

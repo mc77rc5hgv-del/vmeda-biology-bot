@@ -32,6 +32,8 @@ interface TelegramWebApp {
   ready: () => void;
   expand: () => void;
   close: () => void;
+  openTelegramLink?: (url: string) => void;
+  openLink?: (url: string) => void;
   setBackgroundColor?: (color: string) => void;
   setHeaderColor?: (color: string) => void;
   onEvent: (event: string, handler: () => void) => void;
@@ -133,6 +135,20 @@ export function getRawInitData(): string {
 
 export function hapticSelection(): void {
   webApp?.HapticFeedback?.selectionChanged();
+}
+
+/** Открывает Telegram-ссылку нативно внутри Mini App; в обычном браузере использует новую вкладку. */
+export function openTelegramLink(url: string): void {
+  if (webApp?.openTelegramLink) {
+    webApp.openTelegramLink(url);
+    return;
+  }
+  if (webApp?.openLink) {
+    webApp.openLink(url);
+    return;
+  }
+  const popup = window.open(url, "_blank", "noopener,noreferrer");
+  if (!popup) window.location.assign(url);
 }
 
 export function hapticImpact(style: "light" | "medium" | "heavy" = "light"): void {

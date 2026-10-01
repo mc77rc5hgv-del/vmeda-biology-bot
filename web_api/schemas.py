@@ -71,6 +71,14 @@ class MeResponse(BaseModel):
     is_admin: bool
 
 
+class DashboardStatsResponse(BaseModel):
+    streak_days: int
+    xp: int
+    readiness_percent: int
+    daily_goal_minutes: int
+    minutes_left_today: int
+
+
 class AccessStatusResponse(BaseModel):
     """Права и лимиты уже рассчитаны сервером; клиент не выводит их из названия тарифа."""
     can_open_subject: bool

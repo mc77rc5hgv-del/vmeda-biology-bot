@@ -8,6 +8,7 @@ import type {
   AnatomyExamPart,
   AnatomyExamQuestion,
   ContentSection,
+  DashboardStats,
   MaterialDetail,
   LearningState,
   SectionContents,
@@ -142,6 +143,25 @@ export async function fetchRealMe(): Promise<RealMe> {
     hasActiveSubscription: body.has_active_subscription,
     subscriptionTierTitle: body.subscription_tier_title,
     isAdmin: body.is_admin,
+  };
+}
+
+interface DashboardStatsWire {
+  streak_days: number;
+  xp: number;
+  readiness_percent: number;
+  daily_goal_minutes: number;
+  minutes_left_today: number;
+}
+
+export async function fetchRealDashboard(): Promise<DashboardStats> {
+  const body: DashboardStatsWire = await apiFetch("/api/v1/learning/dashboard");
+  return {
+    streakDays: body.streak_days,
+    xp: body.xp,
+    readinessPercent: body.readiness_percent,
+    dailyGoalMinutes: body.daily_goal_minutes,
+    minutesLeftToday: body.minutes_left_today,
   };
 }
 
