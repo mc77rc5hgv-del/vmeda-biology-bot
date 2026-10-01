@@ -5,8 +5,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { App } from "./App";
 import { ApiError, authenticateWithTelegram } from "./lib/apiClient";
 import { useAuthStore } from "./lib/store";
-import { getRawInitData, initTelegramApp, isInsideTelegram } from "./lib/telegram";
+import { getRawInitData, initTelegramApp, isInsideTelegram, normalizeTelegramLaunchHash } from "./lib/telegram";
 import "./styles/global.css";
+
+normalizeTelegramLaunchHash();
 
 // HashRouter, не BrowserRouter — Mini App отдаётся статическим хостингом без серверного
 // перенаправления неизвестных путей на index.html; hash-роутинг работает при прямом обновлении

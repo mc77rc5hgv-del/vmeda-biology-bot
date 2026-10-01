@@ -61,6 +61,24 @@ const webApp = typeof window !== "undefined" ? window.Telegram?.WebApp : undefin
 /** true только внутри настоящего Telegram-клиента; false в обычном браузере при разработке. */
 export const isInsideTelegram = Boolean(webApp);
 
+/** Telegram на iOS/Android добавляет initData и параметры темы в URL-фрагмент вида
+ * #tgWebAppData=... . HashRouter использует тот же фрагмент как путь и без нормализации
+ * ошибочно открывает NotFound вместо главной. SDK Telegram считывает параметры ещё до запуска
+ * React и хранит их в WebApp.initData, поэтому после этого служебный hash можно безопасно
+ * заменить стартовым маршрутом приложения. Настоящие маршруты #/... не трогаем. */
+export function normalizeTelegramLaunchHash(): void {
+  if (typeof window === "undefined") return;
+  const hash = window.location.hash;
+  if (!hash || hash.startsWith("#/")) return;
+  const launchParams = new URLSearchParams(hash.slice(1));
+  if (!launchParams.has("tgWebAppData") && !launchParams.has("tgWebAppVersion")) return;
+  window.history.replaceState(
+    null,
+    "",
+    `${window.location.pathname}${window.location.search}#/`,
+  );
+}
+
 export function initTelegramApp(): void {
   if (!webApp) return;
   webApp.ready();
