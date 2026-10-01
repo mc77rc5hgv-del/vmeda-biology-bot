@@ -1,14 +1,26 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { ChangeEvent, CSSProperties } from "react";
 import DOMPurify from "dompurify";
-import { AlertTriangle, Camera, CheckCircle2, Sparkles, Type, X } from "lucide-react";
+import {
+  AlertTriangle,
+  BookOpen,
+  Brain,
+  Camera,
+  Check,
+  CheckCircle2,
+  Clipboard,
+  RefreshCw,
+  ShieldCheck,
+  Sparkles,
+  Type,
+  X,
+} from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { fetchSubscriptionSummary, solveAiTask } from "../lib/api";
 import { ApiError } from "../lib/apiClient";
 import { hapticImpact, useTelegramBackButton } from "../lib/telegram";
 import { mockSubjects } from "../lib/mockData";
-import { Card } from "../components/Card";
 import { Icon } from "../components/Icon";
-import { Skeleton } from "../components/Skeleton";
 import styles from "./Ai.module.css";
 
 type Mode = "photo" | "text";
@@ -20,13 +32,18 @@ interface SolveResult {
 }
 
 const TEXT_SUGGESTIONS = [
-  "Объясни термин: ",
-  "Реши задачу пошагово: ",
-  "Составь план ответа: ",
+  { label: "Объяснить тему", value: "Объясни подробно и понятно: " },
+  { label: "Ответ у доски", value: "Подготовь структурированный ответ у доски по теме: " },
+  { label: "Решить задачу", value: "Реши задачу пошагово с объяснением: " },
 ];
 
-/** dataURL вида "data:image/jpeg;base64,/9j/4AAQ..." -> голый base64 без префикса — ровно то,
- * что ждёт web_api/routers/ai.py (см. AiSolveRequest.image_base64). */
+const THINKING_STAGES = [
+  "Изучаю формулировку",
+  "Сверяюсь с материалами ВМедА",
+  "Собираю полный ответ",
+  "Проверяю структуру и термины",
+];
+
 function readFileAsBareBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -40,9 +57,6 @@ function readFileAsBareBase64(file: File): Promise<string> {
   });
 }
 
-/** Единая точка перевода ошибки запроса в понятный студенту текст — статусы отражают ровно то,
- * что реально возвращает web_api/routers/ai.py (429 квота/занято, 503 автовыключатель/перегрузка,
- * 422 отказ модели, 400 некорректный запрос), а не общее "что-то пошло не так". */
 function describeError(err: unknown): string {
   if (err instanceof ApiError) {
     if (err.status === 401) return "Сессия истекла — закрой мини-приложение и открой его заново из бота.";
@@ -52,13 +66,14 @@ function describeError(err: unknown): string {
 }
 
 export function AiPage() {
-  useTelegramBackButton(null); // раздел нижней навигации — своей кнопки "Назад" нет
+  useTelegramBackButton(null);
 
   const [searchParams] = useSearchParams();
   const initialMode: Mode = searchParams.get("mode") === "photo" ? "photo" : "text";
   const requestedSubjectId = searchParams.get("subject");
-  const initialSubjectId = mockSubjects.find((subject) => !subject.locked && subject.id === requestedSubjectId)?.id
-    ?? mockSubjects.find((subject) => !subject.locked)?.id
+  const availableSubjects = useMemo(() => mockSubjects.filter((subject) => !subject.locked), []);
+  const initialSubjectId = availableSubjects.find((subject) => subject.id === requestedSubjectId)?.id
+    ?? availableSubjects[0]?.id
     ?? "";
 
   const [subjectId, setSubjectId] = useState(initialSubjectId);
@@ -67,15 +82,23 @@ export function AiPage() {
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
   const [isThinking, setIsThinking] = useState(false);
+  const [thinkingStage, setThinkingStage] = useState(0);
   const [result, setResult] = useState<SolveResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [requestsLeft, setRequestsLeft] = useState<number | null>(null);
+  const [copied, setCopied] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const activeSubjectRef = useRef<HTMLButtonElement>(null);
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
+  const resultRef = useRef<HTMLElement>(null);
+
+  const activeSubject = availableSubjects.find((subject) => subject.id === subjectId) ?? availableSubjects[0];
+  const subjectStyle = activeSubject
+    ? ({ "--subject-accent": `var(--subject-${activeSubject.accent})` } as CSSProperties)
+    : undefined;
 
   useEffect(() => {
-    activeSubjectRef.current?.scrollIntoView({ behavior: "auto", block: "nearest", inline: "center" });
+    activeSubjectRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
   }, [subjectId]);
 
   useEffect(() => {
@@ -84,9 +107,7 @@ export function AiPage() {
       .then((status) => {
         if (!cancelled) setRequestsLeft(status.aiRequestsLeft);
       })
-      .catch(() => {
-        // квота — не критичная для экрана информация, тихо остаёмся без неё
-      });
+      .catch(() => undefined);
     return () => {
       cancelled = true;
     };
@@ -98,19 +119,42 @@ export function AiPage() {
     };
   }, [photoPreviewUrl]);
 
+  useEffect(() => {
+    if (!isThinking) {
+      setThinkingStage(0);
+      return;
+    }
+    const timer = window.setInterval(() => {
+      setThinkingStage((current) => Math.min(current + 1, THINKING_STAGES.length - 1));
+    }, 2100);
+    return () => window.clearInterval(timer);
+  }, [isThinking]);
+
+  useEffect(() => {
+    if (!result) return;
+    requestAnimationFrame(() => resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  }, [result]);
+
   const canSubmit = mode === "text" ? text.trim().length > 0 : photoFile !== null;
 
   function resetOutcome() {
     setResult(null);
     setError(null);
+    setCopied(false);
+  }
+
+  function selectMode(nextMode: Mode) {
+    setMode(nextMode);
+    resetOutcome();
+    hapticImpact("light");
   }
 
   function handlePickPhoto() {
     fileInputRef.current?.click();
   }
 
-  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0] ?? null;
+  function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0] ?? null;
     if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
     setPhotoFile(file);
     setPhotoPreviewUrl(file ? URL.createObjectURL(file) : null);
@@ -122,6 +166,29 @@ export function AiPage() {
     setPhotoFile(null);
     setPhotoPreviewUrl(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
+    resetOutcome();
+  }
+
+  function handleNewQuestion() {
+    setText("");
+    handleClearPhoto();
+    resetOutcome();
+    requestAnimationFrame(() => {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      if (mode === "text") textAreaRef.current?.focus();
+    });
+  }
+
+  async function handleCopyAnswer(safeHtml: string) {
+    const plainText = new DOMParser().parseFromString(safeHtml, "text/html").body.textContent ?? "";
+    try {
+      await navigator.clipboard.writeText(plainText);
+      setCopied(true);
+      hapticImpact("light");
+      window.setTimeout(() => setCopied(false), 1800);
+    } catch {
+      setCopied(false);
+    }
   }
 
   async function handleSubmit() {
@@ -148,191 +215,214 @@ export function AiPage() {
   }
 
   const safeAnswerHtml = result
-    ? DOMPurify.sanitize(result.html, { ALLOWED_TAGS: ["b", "i", "br"], ALLOWED_ATTR: [] })
+    ? DOMPurify.sanitize(result.html, { ALLOWED_TAGS: ["b", "strong", "i", "em", "br"], ALLOWED_ATTR: [] })
     : "";
 
   return (
-    <div className="screen">
-      <section className={styles.hero}>
+    <div className={["screen", styles.aiScreen].join(" ")} style={subjectStyle}>
+      <section className={styles.hero} aria-labelledby="ai-title">
+        <div className={styles.heroGlow} aria-hidden="true" />
         <div className={styles.heroTop}>
-          <span className={styles.heroIcon}><Icon icon={Sparkles} size={22} /></span>
+          <div className={styles.brandLockup}>
+            <span className={styles.brandIcon}><Icon icon={Brain} size={23} /></span>
+            <div>
+              <span className={styles.heroEyebrow}>VMEDA AI</span>
+              <small><i /> учебный ассистент</small>
+            </div>
+          </div>
           <span className={styles.quotaPill}>
-            {requestsLeft === null ? "Учебный помощник" : `${requestsLeft} запросов`}
+            <Icon icon={Sparkles} size={13} />
+            {requestsLeft === null ? "AI доступен" : `${requestsLeft} запросов`}
           </span>
         </div>
-        <span className={styles.heroEyebrow}>VMEDA AI</span>
-        <h1>Разберём задание вместе</h1>
-        <p>Выбери предмет и отправь фото или текст. Материалы ВМедА будут приоритетом, а недостающие сведения AI дополнит проверенными общими знаниями.</p>
+
+        <div className={styles.heroCopy}>
+          <h1 id="ai-title">Сложная тема.<br /><span>Понятный разбор.</span></h1>
+          <p>Задай вопрос — получишь полный ответ в формате, удобном для подготовки и ответа у доски.</p>
+        </div>
+
+        <div className={styles.trustRow} aria-label="Преимущества VMEDA AI">
+          <span><Icon icon={BookOpen} size={14} /> Материалы ВМедА</span>
+          <span><Icon icon={ShieldCheck} size={14} /> Проверка полноты</span>
+        </div>
       </section>
 
-      <section className={styles.controlSection}>
-        <div className={styles.sectionLabel}><span>1</span> Предмет</div>
-        <div className={styles.subjectRail}>
-          <div className={styles.subjectRow} role="tablist" aria-label="Предмет">
-            {mockSubjects
-              .filter((s) => !s.locked)
-              .map((s) => (
-                <button
-                  key={s.id}
-                  ref={s.id === subjectId ? activeSubjectRef : undefined}
-                  type="button"
-                  role="tab"
-                  aria-selected={s.id === subjectId}
-                  className={[styles.subjectChip, s.id === subjectId ? styles.subjectChipActive : ""].join(" ")}
-                  onClick={() => {
-                    setSubjectId(s.id);
-                    resetOutcome();
-                  }}
-                >
-                  {s.title}
-                </button>
-              ))}
+      <section className={styles.composer} aria-label="Новый запрос к VMEDA AI">
+        <div className={styles.composerHeader}>
+          <div>
+            <span className={styles.stepDot}>1</span>
+            <div><strong>Выбери предмет</strong><small>AI подстроит структуру и терминологию</small></div>
           </div>
         </div>
-      </section>
 
-      <section className={styles.controlSection}>
-        <div className={styles.sectionLabel}><span>2</span> Формат задания</div>
-        <div className={styles.modeRow}>
-          <button
-            type="button"
-            aria-pressed={mode === "photo"}
-            className={[styles.modeButton, mode === "photo" ? styles.modeButtonActive : ""].join(" ")}
-            onClick={() => {
-              setMode("photo");
-              resetOutcome();
-            }}
-          >
-            <Icon icon={Camera} size={17} />
-            Фото
-          </button>
-          <button
-            type="button"
-            aria-pressed={mode === "text"}
-            className={[styles.modeButton, mode === "text" ? styles.modeButtonActive : ""].join(" ")}
-            onClick={() => {
-              setMode("text");
-              resetOutcome();
-            }}
-          >
-            <Icon icon={Type} size={17} />
-            Текст
-          </button>
-        </div>
-      </section>
-
-      {mode === "photo" ? (
-        <>
-          {/* Без capture="environment" -- этот атрибут на большинстве мобильных браузеров/WebView
-              (в т.ч. внутри Telegram) заставляет input сразу открывать камеру в обход системного
-              выбора источника, так что "выбрать фото из галереи" тут было физически недостижимо
-              (реальная жалоба пользователя со скриншотом — вместо пикера открывалась только
-              камера). Без capture браузер показывает свой обычный диалог выбора файла, который
-              на iOS/Android сам предлагает и камеру, и галерею -- ровно то, что уже обещано
-              текстом кнопки ниже ("Открыть камеру или выбрать фото"). */}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            hidden
-            onChange={handleFileChange}
-          />
-          {photoPreviewUrl ? (
-            <div className={styles.photoPreviewWrap}>
-              <img src={photoPreviewUrl} alt="Прикреплённое фото задания" className={styles.photoPreview} />
-              <button type="button" className={styles.photoClear} onClick={handleClearPhoto} aria-label="Убрать фото">
-                <Icon icon={X} size={16} />
+        <div className={styles.subjectRail}>
+          <div className={styles.subjectRow} role="tablist" aria-label="Предмет">
+            {availableSubjects.map((subject) => (
+              <button
+                key={subject.id}
+                ref={subject.id === subjectId ? activeSubjectRef : undefined}
+                type="button"
+                role="tab"
+                aria-selected={subject.id === subjectId}
+                className={[styles.subjectChip, subject.id === subjectId ? styles.subjectChipActive : ""].join(" ")}
+                style={{ "--chip-accent": `var(--subject-${subject.accent})` } as CSSProperties}
+                onClick={() => {
+                  setSubjectId(subject.id);
+                  resetOutcome();
+                  hapticImpact("light");
+                }}
+              >
+                <span>{subject.title.slice(0, 1)}</span>
+                {subject.title}
+                {subject.id === subjectId && <Icon icon={Check} size={14} />}
               </button>
-            </div>
-          ) : (
-            <button type="button" className={styles.dropZone} onClick={handlePickPhoto}>
-              <span className={styles.dropIcon}><Icon icon={Camera} size={26} /></span>
-              <strong>Добавить фотографию</strong>
-              <small>Камера или изображение из галереи</small>
+            ))}
+          </div>
+        </div>
+
+        <div className={styles.composerDivider} />
+
+        <div className={styles.inputHeading}>
+          <div>
+            <span className={styles.stepDot}>2</span>
+            <div><strong>Добавь задание</strong><small>{activeSubject?.title ?? "Выбранный предмет"}</small></div>
+          </div>
+          <div className={styles.modeRow}>
+            <button
+              type="button"
+              aria-pressed={mode === "text"}
+              className={mode === "text" ? styles.modeButtonActive : ""}
+              onClick={() => selectMode("text")}
+            >
+              <Icon icon={Type} size={15} /> Текст
             </button>
-          )}
-        </>
-      ) : (
-        <>
-          <label className="visually-hidden" htmlFor="ai-task-text">Текст задания</label>
-          <div className={styles.textInputWrap}>
+            <button
+              type="button"
+              aria-pressed={mode === "photo"}
+              className={mode === "photo" ? styles.modeButtonActive : ""}
+              onClick={() => selectMode("photo")}
+            >
+              <Icon icon={Camera} size={15} /> Фото
+            </button>
+          </div>
+        </div>
+
+        {mode === "photo" ? (
+          <>
+            <input ref={fileInputRef} type="file" accept="image/*" hidden onChange={handleFileChange} />
+            {photoPreviewUrl ? (
+              <div className={styles.photoPreviewWrap}>
+                <img src={photoPreviewUrl} alt="Прикреплённое фото задания" className={styles.photoPreview} />
+                <div className={styles.photoReady}><Icon icon={CheckCircle2} size={15} /> Фото готово к разбору</div>
+                <button type="button" className={styles.photoClear} onClick={handleClearPhoto} aria-label="Убрать фото">
+                  <Icon icon={X} size={17} />
+                </button>
+              </div>
+            ) : (
+              <button type="button" className={styles.dropZone} onClick={handlePickPhoto}>
+                <span className={styles.dropIcon}><Icon icon={Camera} size={25} /></span>
+                <span><strong>Добавить фотографию</strong><small>Сделай снимок или выбери из галереи</small></span>
+              </button>
+            )}
+          </>
+        ) : (
+          <div className={styles.textComposer}>
+            <label className="visually-hidden" htmlFor="ai-task-text">Текст задания</label>
             <textarea
               ref={textAreaRef}
               id="ai-task-text"
               className={styles.textArea}
-              placeholder="Вставь вопрос или опиши задание…"
+              placeholder="Например: шейное сплетение — образование, топография и ветви. Подробно, с терминами на латыни…"
               value={text}
               maxLength={4000}
-              onChange={(e) => {
-                setText(e.target.value);
+              onChange={(event) => {
+                setText(event.target.value);
                 resetOutcome();
               }}
             />
             <div className={styles.textMeta}>
               <span>{text.length.toLocaleString("ru-RU")} / 4 000</span>
-              {text && (
-                <button type="button" onClick={() => { setText(""); resetOutcome(); }}>
-                  Очистить
-                </button>
-              )}
+              {text && <button type="button" onClick={() => { setText(""); resetOutcome(); }}>Очистить</button>}
             </div>
           </div>
-          {!text && (
-            <div className={styles.suggestions} aria-label="Примеры запросов">
-              {TEXT_SUGGESTIONS.map((suggestion) => (
-                <button
-                  key={suggestion}
-                  type="button"
-                  onClick={() => {
-                    setText(suggestion);
-                    resetOutcome();
-                    requestAnimationFrame(() => textAreaRef.current?.focus());
-                  }}
-                >
-                  {suggestion.trim()}
-                </button>
-              ))}
-            </div>
-          )}
-        </>
-      )}
+        )}
 
-      <button type="button" className={styles.submit} disabled={!canSubmit || isThinking} onClick={handleSubmit}>
-        <Icon icon={Sparkles} size={18} />
-        {isThinking ? "Анализирую задание…" : "Разобрать задание"}
-      </button>
+        {mode === "text" && !text && (
+          <div className={styles.suggestions} aria-label="Шаблоны запроса">
+            {TEXT_SUGGESTIONS.map((suggestion) => (
+              <button
+                key={suggestion.label}
+                type="button"
+                onClick={() => {
+                  setText(suggestion.value);
+                  resetOutcome();
+                  requestAnimationFrame(() => textAreaRef.current?.focus());
+                }}
+              >
+                <Icon icon={Sparkles} size={13} /> {suggestion.label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <button type="button" className={styles.submit} disabled={!canSubmit || isThinking} onClick={handleSubmit}>
+          <span><Icon icon={Sparkles} size={19} /></span>
+          <strong>{isThinking ? "Готовлю ответ…" : "Разобрать задание"}</strong>
+          <small>{isThinking ? "Это может занять несколько секунд" : "Подробно и по существу"}</small>
+        </button>
+      </section>
 
       {isThinking && (
-        <Card>
-          <Skeleton height={14} width="40%" />
-          <div style={{ height: 8 }} />
-          <Skeleton height={60} />
-        </Card>
+        <section className={styles.thinkingCard} aria-live="polite" aria-label="VMEDA AI анализирует задание">
+          <div className={styles.thinkingOrb}><Icon icon={Brain} size={23} /></div>
+          <div className={styles.thinkingCopy}>
+            <span>VMEDA AI работает</span>
+            <strong>{THINKING_STAGES[thinkingStage]}</strong>
+            <div className={styles.progressTrack}><i style={{ width: `${25 + thinkingStage * 24}%` }} /></div>
+          </div>
+        </section>
       )}
 
       {error && (
-        <Card className={styles.errorCard}>
-          <span className={styles.errorIcon}><Icon icon={AlertTriangle} size={18} /></span>
+        <section className={styles.errorCard} role="alert">
+          <span className={styles.errorIcon}><Icon icon={AlertTriangle} size={19} /></span>
           <div><strong>Не удалось выполнить запрос</strong><p>{error}</p></div>
-        </Card>
+          <button type="button" onClick={handleSubmit} disabled={!canSubmit}><Icon icon={RefreshCw} size={16} /> Повторить</button>
+        </section>
       )}
 
       {result && (
-        <Card className={styles.resultCard}>
-          <div className={styles.resultHeader}>
-            <span><Icon icon={CheckCircle2} size={17} /></span>
-            <div><strong>Ответ VMEDA AI</strong><small>Проверяй формулировки перед сдачей</small></div>
-          </div>
-          {/* Ответ модели проходит DOMPurify так же, как обычный материал (см. Material.tsx) —
-              внешний, не полностью доверенный текст, даже если это наш собственный backend. */}
+        <section ref={resultRef} className={styles.resultCard} aria-labelledby="ai-answer-title">
+          <div className={styles.resultAccent} />
+          <header className={styles.resultHeader}>
+            <div className={styles.resultIdentity}>
+              <span><Icon icon={Sparkles} size={19} /></span>
+              <div><small>ГОТОВЫЙ РАЗБОР</small><strong id="ai-answer-title">Ответ VMEDA AI</strong></div>
+            </div>
+            <span className={styles.resultSubject}>{activeSubject?.title ?? "Предмет"}</span>
+          </header>
+
           <div className={styles.answerBody} dangerouslySetInnerHTML={{ __html: safeAnswerHtml }} />
+
           {result.note && (
             <div className={styles.confidenceNote}>
-              <Icon icon={AlertTriangle} size={16} />
+              <Icon icon={AlertTriangle} size={17} />
               <span>{result.note}</span>
             </div>
           )}
-        </Card>
+
+          <footer className={styles.resultFooter}>
+            <div className={styles.sourceNote}><Icon icon={ShieldCheck} size={15} /> Материалы ВМедА в приоритете</div>
+            <div className={styles.resultActions}>
+              <button type="button" onClick={() => handleCopyAnswer(safeAnswerHtml)}>
+                <Icon icon={copied ? Check : Clipboard} size={16} /> {copied ? "Скопировано" : "Копировать"}
+              </button>
+              <button type="button" className={styles.newQuestion} onClick={handleNewQuestion}>
+                <Icon icon={RefreshCw} size={16} /> Новый вопрос
+              </button>
+            </div>
+          </footer>
+        </section>
       )}
     </div>
   );
