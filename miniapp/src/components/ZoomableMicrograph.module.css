@@ -6,6 +6,18 @@
   box-shadow: 0 20px 55px rgb(4 6 15 / 35%);
 }
 
+.shell.fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  flex-direction: column;
+  padding: max(10px, env(safe-area-inset-top)) 10px max(10px, env(safe-area-inset-bottom));
+  border: 0;
+  border-radius: 0;
+  background: #030611;
+}
+
 .viewport {
   position: relative;
   width: 100%;
@@ -16,6 +28,13 @@
   background: radial-gradient(circle, #171927, #06070d 72%);
 }
 
+.fullscreen .viewport {
+  flex: 1;
+  min-height: 0;
+  aspect-ratio: auto;
+  border-radius: 18px;
+}
+
 .viewport:active { cursor: grabbing; }
 
 .canvas {
@@ -24,9 +43,10 @@
   display: grid;
   place-items: center;
   transform-origin: center;
-  transition: transform 120ms ease-out;
   will-change: transform;
 }
+
+.canvas:not(:active) { transition: transform 90ms ease-out; }
 
 .canvas img {
   width: 100%;
@@ -84,6 +104,8 @@
   line-height: 1.35;
   text-align: center;
 }
+
+.fullscreen .hint { padding-bottom: 2px; }
 
 .state {
   display: grid;

@@ -2,10 +2,10 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Check, ChevronRight, GraduationCap, Microscope, RotateCcw, Search, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { AuthenticatedImage } from "../components/AuthenticatedImage";
 import { Icon } from "../components/Icon";
 import { Skeleton } from "../components/Skeleton";
 import { StateMessage } from "../components/StateMessage";
+import { ZoomableMicrograph } from "../components/ZoomableMicrograph";
 import {
   fetchHistologyCatalog,
   fetchHistologyPractical,
@@ -125,7 +125,11 @@ export function HistologyExamPage() {
               <span>{index + 1}/{session.items.length}</span>
             </div>
             <div className={styles.progressTrack}><i style={{ width: `${((index + 1) / session.items.length) * 100}%` }} /></div>
-            <AuthenticatedImage src={current.imageUrl} alt="Микрофотография для определения препарата" className={styles.practicalImage} />
+            <ZoomableMicrograph
+              key={current.id}
+              src={current.imageUrl}
+              alt="Микрофотография для определения препарата"
+            />
 
             {!answer ? (
               <button type="button" className={styles.primaryButton} disabled={loadingAction} onClick={reveal}>

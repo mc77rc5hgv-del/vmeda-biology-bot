@@ -1,4 +1,4 @@
-import { LocateFixed, Minus, Plus, RotateCcw } from "lucide-react";
+import { LocateFixed, Maximize2, Minimize2, Minus, Plus, RotateCcw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { fetchAuthorizedBlob } from "../lib/apiClient";
 import type { HistologyMarker } from "../lib/types";
@@ -17,7 +17,12 @@ export function ZoomableMicrograph({ src, alt, markers = [] }: Props) {
   const [scale, setScale] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [showMarkers, setShowMarkers] = useState(true);
+  const [fullscreen, setFullscreen] = useState(false);
+  const scaleRef = useRef(1);
+  const offsetRef = useRef({ x: 0, y: 0 });
+  const pointers = useRef(new Map<number, { x: number; y: number }>());
   const dragging = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
+  const pinching = useRef<{ distance: number; scale: number } | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -35,17 +40,58 @@ export function ZoomableMicrograph({ src, alt, markers = [] }: Props) {
     };
   }, [src]);
 
-  const zoom = (next: number) => setScale(Math.max(1, Math.min(5, Number(next.toFixed(2)))));
+  useEffect(() => {
+    if (!fullscreen) return;
+    const previousOverflow = document.body.style.overflow;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setFullscreen(false);
+    };
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [fullscreen]);
+
+  const zoom = (next: number) => {
+    const bounded = Math.max(1, Math.min(5, Number(next.toFixed(2))));
+    scaleRef.current = bounded;
+    setScale(bounded);
+    if (bounded === 1) {
+      offsetRef.current = { x: 0, y: 0 };
+      setOffset(offsetRef.current);
+    }
+  };
+  const move = (next: { x: number; y: number }) => {
+    offsetRef.current = next;
+    setOffset(next);
+  };
   const reset = () => {
+    scaleRef.current = 1;
+    offsetRef.current = { x: 0, y: 0 };
     setScale(1);
-    setOffset({ x: 0, y: 0 });
+    setOffset(offsetRef.current);
+  };
+
+  const startPinch = () => {
+    const points = [...pointers.current.values()];
+    if (points.length < 2) {
+      pinching.current = null;
+      return;
+    }
+    pinching.current = {
+      distance: Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y),
+      scale: scaleRef.current,
+    };
+    dragging.current = null;
   };
 
   if (failed) return <div className={styles.state}>Микрофотография недоступна</div>;
   if (!objectUrl) return <div className={styles.state}>Загружаем микрофотографию…</div>;
 
   return (
-    <div className={styles.shell}>
+    <div className={[styles.shell, fullscreen ? styles.fullscreen : ""].filter(Boolean).join(" ")}>
       <div
         className={styles.viewport}
         onWheel={(event) => {
@@ -53,19 +99,47 @@ export function ZoomableMicrograph({ src, alt, markers = [] }: Props) {
           zoom(scale + (event.deltaY < 0 ? .25 : -.25));
         }}
         onPointerDown={(event) => {
-          if (scale <= 1) return;
           event.currentTarget.setPointerCapture(event.pointerId);
-          dragging.current = { x: event.clientX, y: event.clientY, ox: offset.x, oy: offset.y };
+          pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+          if (pointers.current.size >= 2) {
+            startPinch();
+          } else if (scaleRef.current > 1) {
+            dragging.current = {
+              x: event.clientX,
+              y: event.clientY,
+              ox: offsetRef.current.x,
+              oy: offsetRef.current.y,
+            };
+          }
         }}
         onPointerMove={(event) => {
+          if (!pointers.current.has(event.pointerId)) return;
+          pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+          if (pointers.current.size >= 2 && pinching.current) {
+            const points = [...pointers.current.values()];
+            const distance = Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
+            if (pinching.current.distance > 0) {
+              zoom(pinching.current.scale * distance / pinching.current.distance);
+            }
+            return;
+          }
           if (!dragging.current) return;
-          setOffset({
+          move({
             x: dragging.current.ox + event.clientX - dragging.current.x,
             y: dragging.current.oy + event.clientY - dragging.current.y,
           });
         }}
-        onPointerUp={() => { dragging.current = null; }}
-        onPointerCancel={() => { dragging.current = null; }}
+        onPointerUp={(event) => {
+          pointers.current.delete(event.pointerId);
+          dragging.current = null;
+          startPinch();
+        }}
+        onPointerCancel={(event) => {
+          pointers.current.delete(event.pointerId);
+          dragging.current = null;
+          startPinch();
+        }}
+        onDoubleClick={() => scaleRef.current > 1 ? reset() : zoom(2)}
       >
         <div
           className={styles.canvas}
@@ -95,6 +169,13 @@ export function ZoomableMicrograph({ src, alt, markers = [] }: Props) {
         <button type="button" onClick={reset} aria-label="Сбросить масштаб">
           <Icon icon={RotateCcw} size={17} />
         </button>
+        <button
+          type="button"
+          onClick={() => setFullscreen((value) => !value)}
+          aria-label={fullscreen ? "Выйти из полноэкранного режима" : "Открыть на весь экран"}
+        >
+          <Icon icon={fullscreen ? Minimize2 : Maximize2} size={17} />
+        </button>
         {markers.length > 0 && (
           <button
             type="button"
@@ -106,7 +187,7 @@ export function ZoomableMicrograph({ src, alt, markers = [] }: Props) {
           </button>
         )}
       </div>
-      <div className={styles.hint}>Используйте кнопки масштабирования · при увеличении изображение можно двигать</div>
+      <div className={styles.hint}>Разведите два пальца или используйте кнопки · увеличенное изображение можно двигать</div>
     </div>
   );
 }
