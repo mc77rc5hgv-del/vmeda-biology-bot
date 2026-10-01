@@ -156,9 +156,11 @@ async def announce_histology_promo_start() -> None:
 
 def get_histology_menu_keyboard():
     builder = InlineKeyboardBuilder()
+    builder.button(text="🎓 Практический зачёт · 10", callback_data="histology_guess_start:all")
+    builder.button(text="🩺 Работа над ошибками", callback_data="histology_guess_start:mistakes")
+    builder.button(text="📊 Моя статистика", callback_data="histology_stats")
     for diag_key, diag in tb.HISTOLOGY.items():
         builder.button(text=diag.get("menu_title", diag["title"]), callback_data=f"histology_topic:{diag_key}")
-    builder.button(text="🎯 Угадай препарат (все разделы)", callback_data="histology_guess_start:all")
     builder.adjust(1)
     builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
     return builder.as_markup()
@@ -234,7 +236,9 @@ async def cb_histology_menu(callback: CallbackQuery):
     await callback.answer()
     await tb.safe_edit_text(
         callback.message,
-        f"🔬 <b>Гистология</b>\n{tb.DIVIDER}\n\nВыбери диагностику:",
+        f"🔬 <b>Гистология · ЭКЗАМЕН</b>\n{tb.DIVIDER}\n\n"
+        "Здесь связаны протоколы, микрофотографии, практический зачёт, работа над ошибками и статистика.\n\n"
+        "Выбери режим или раздел каталога:",
         parse_mode="HTML",
         reply_markup=get_histology_menu_keyboard()
     )
@@ -286,9 +290,52 @@ async def cb_histology_img(callback: CallbackQuery):
     await callback.answer()
     await render_histology_image(callback, diag_key, spec_id, idx)
 
-# ---- Угадай препарат ----
+# ---- ЭКЗАМЕН: практический зачёт, ошибки и статистика ----
 HISTOLOGY_GUESS_SESSION_SIZE = 10
 HISTOLOGY_GUESS_SESSIONS: dict[int, dict] = {}
+
+
+def get_histology_learning(user_id: int) -> dict:
+    key = str(user_id)
+    entry = tb.stats.setdefault("histology_learning", {}).setdefault(key, {})
+    entry.setdefault("attempts", 0)
+    entry.setdefault("known", 0)
+    entry.setdefault("wrong", 0)
+    entry.setdefault("mistakes", [])
+    entry.setdefault("mastered", [])
+    return entry
+
+
+def record_histology_result(user_id: int, specimen_id: str, known: bool) -> dict:
+    entry = get_histology_learning(user_id)
+    entry["attempts"] += 1
+    if known:
+        entry["known"] += 1
+        if specimen_id in entry["mistakes"]:
+            entry["mistakes"].remove(specimen_id)
+        if specimen_id not in entry["mastered"]:
+            entry["mastered"].append(specimen_id)
+    else:
+        entry["wrong"] += 1
+        if specimen_id not in entry["mistakes"]:
+            entry["mistakes"].append(specimen_id)
+    tb.save_stats()
+    return entry
+
+
+def get_histology_stats_text(user_id: int) -> str:
+    entry = get_histology_learning(user_id)
+    attempts = entry["attempts"]
+    accuracy = round(entry["known"] / attempts * 100) if attempts else 0
+    return (
+        f"📊 <b>Статистика · Гистология</b>\n{tb.DIVIDER}\n\n"
+        f"Всего попыток: <b>{attempts}</b>\n"
+        f"Узнано правильно: <b>{entry['known']}</b>\n"
+        f"Ошибок: <b>{entry['wrong']}</b>\n"
+        f"Точность: <b>{accuracy}%</b>\n"
+        f"Освоено препаратов: <b>{len(entry['mastered'])} из 71</b>\n"
+        f"В активной работе над ошибками: <b>{len(entry['mistakes'])}</b>"
+    )
 
 def get_histology_guess_pool(scope: str):
     # only specimens with a verified label-free "guess_image" are eligible --
@@ -297,6 +344,10 @@ def get_histology_guess_pool(scope: str):
     if scope == "all":
         return [(diag_key, spec["id"]) for diag_key, diag in tb.HISTOLOGY.items()
                  for spec in diag["specimens"] if spec.get("guess_image")]
+    if scope == "mistakes":
+        # user-specific filtering is done in start_histology_guess_session, where user_id exists.
+        return [(diag_key, spec["id"]) for diag_key, diag in tb.HISTOLOGY.items()
+                for spec in diag["specimens"] if spec.get("guess_image")]
     diag = tb.HISTOLOGY.get(scope)
     if not diag:
         return []
@@ -304,6 +355,9 @@ def get_histology_guess_pool(scope: str):
 
 def start_histology_guess_session(user_id: int, scope: str) -> bool:
     pool = get_histology_guess_pool(scope)
+    if scope == "mistakes":
+        mistake_ids = set(get_histology_learning(user_id)["mistakes"])
+        pool = [(diag_key, spec_id) for diag_key, spec_id in pool if spec_id in mistake_ids]
     if not pool:
         return False
     size = min(HISTOLOGY_GUESS_SESSION_SIZE, len(pool))
@@ -334,7 +388,7 @@ def get_histology_guess_answer_keyboard():
 def get_histology_guess_summary_keyboard(scope: str):
     builder = InlineKeyboardBuilder()
     builder.button(text="🔁 Пройти ещё раз", callback_data=f"histology_guess_start:{scope}")
-    if scope == "all":
+    if scope in {"all", "mistakes"}:
         builder.button(text="🔙 К разделу", callback_data="histology_menu")
     else:
         builder.button(text="🔙 К разделу", callback_data=f"histology_topic:{scope}")
@@ -346,7 +400,8 @@ async def render_histology_guess_question(callback: CallbackQuery, user_id: int)
     total = len(session["items"])
     diag_key, spec_id = session["items"][session["index"]]
     spec = get_histology_specimen(diag_key, spec_id)
-    caption = f"🎯 Угадай препарат — {session['index'] + 1}/{total}\n\nЧто это за препарат?"
+    mode = "Работа над ошибками" if session["scope"] == "mistakes" else "Практический зачёт"
+    caption = f"🎓 {mode} — {session['index'] + 1}/{total}\n\nЧто это за препарат?"
     photo = FSInputFile(os.path.join(tb.HISTOLOGY_IMAGES_DIR, spec["guess_image"]))
     await callback.message.delete()
     sent = await callback.message.answer_photo(photo, caption=caption, reply_markup=get_histology_guess_question_keyboard())
@@ -357,7 +412,7 @@ async def render_histology_guess_answer(user_id: int):
     total = len(session["items"])
     diag_key, spec_id = session["items"][session["index"]]
     spec = get_histology_specimen(diag_key, spec_id)
-    lines = [f"🎯 Угадай препарат — {session['index'] + 1}/{total}", "", f"№{spec['number']}. {spec['title']}"]
+    lines = [f"🎓 Практический зачёт — {session['index'] + 1}/{total}", "", f"№{spec['number']}. {spec['title']}"]
     if spec.get("stain"):
         lines.append(f"Окраска: {spec['stain']}")
     if spec.get("magnification"):
@@ -386,7 +441,8 @@ async def cb_histology_guess_start(callback: CallbackQuery):
     scope = callback.data.split(":", 1)[1]
     user_id = callback.from_user.id
     if not start_histology_guess_session(user_id, scope):
-        await callback.answer("Препаратов пока нет", show_alert=True)
+        message = "Ошибок для повторения пока нет" if scope == "mistakes" else "Препаратов пока нет"
+        await callback.answer(message, show_alert=True)
         return
     await callback.answer()
     await render_histology_guess_question(callback, user_id)
@@ -408,7 +464,10 @@ async def cb_histology_guess_answer(callback: CallbackQuery):
         await callback.answer("Сессия истекла, начни заново", show_alert=True)
         return
     await callback.answer()
-    if callback.data == "histology_guess_know":
+    diag_key, spec_id = session["items"][session["index"]]
+    known = callback.data == "histology_guess_know"
+    record_histology_result(user_id, spec_id, known)
+    if known:
         session["know"] += 1
     else:
         session["dont_know"] += 1
@@ -423,3 +482,22 @@ async def cb_histology_guess_stop(callback: CallbackQuery):
     await callback.answer()
     if callback.from_user.id in HISTOLOGY_GUESS_SESSIONS:
         await render_histology_guess_summary(callback.from_user.id, aborted=True)
+
+
+@router.callback_query(F.data == "histology_stats")
+async def cb_histology_stats(callback: CallbackQuery):
+    if not await histology_gate_ok(callback):
+        return
+    await callback.answer()
+    builder = InlineKeyboardBuilder()
+    if get_histology_learning(callback.from_user.id)["mistakes"]:
+        builder.button(text="🩺 Повторить ошибки", callback_data="histology_guess_start:mistakes")
+    builder.button(text="🎓 Практический зачёт", callback_data="histology_guess_start:all")
+    builder.button(text="🔙 К экзамену", callback_data="histology_menu")
+    builder.adjust(1)
+    await tb.safe_edit_text(
+        callback.message,
+        get_histology_stats_text(callback.from_user.id),
+        parse_mode="HTML",
+        reply_markup=builder.as_markup(),
+    )

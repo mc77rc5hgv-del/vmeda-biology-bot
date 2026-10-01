@@ -127,7 +127,7 @@ async def main():
     await tb.cb_histology_menu(cb)
     assert cb.message.edits, "expected menu render, not locked screen, on first-ever visit"
     first_text, first_kb = cb.message.edits[0]
-    assert "Выбери диагностику" in first_text
+    assert "Выбери режим или раздел каталога" in first_text
     assert tb.has_histology_temp_access(non_admin), "first visit should silently grant a trial"
     assert str(non_admin) not in tb.stats["histology_warnings"], "no warning yet on the granting visit"
     days_left = (tb.get_histology_temp_expiry(non_admin) - tb.time.time()) / 86400
@@ -142,7 +142,7 @@ async def main():
     warn_sent_text = cb2.message.edits[0][0]
     check_html(warn_sent_text)
     assert "Гистология скоро закроется" in warn_sent_text
-    assert "Выбери диагностику" in cb2.message.edits[-1][0], "content should still render during the trial"
+    assert "Выбери режим или раздел каталога" in cb2.message.edits[-1][0], "content should still render during the trial"
     warn_entry = tb.stats["histology_warnings"][str(non_admin)]
     assert warn_entry["count"] == 1
     print("second visit fires warning 1/3 but still lets content through: OK")
@@ -176,7 +176,7 @@ async def main():
     assert tb.histology_access_ok(referral_uid)
     cb_ref = FakeCB("histology_menu", uid=referral_uid)
     await tb.cb_histology_menu(cb_ref)
-    assert "Выбери диагностику" in cb_ref.message.edits[0][0]
+    assert "Выбери режим или раздел каталога" in cb_ref.message.edits[0][0]
     assert str(referral_uid) not in tb.stats["histology_temp_access"], "referral access shouldn't touch the trial"
     tb.stats["referrals"].pop(str(referral_uid), None)
     tb.stats["referral_monthly"].pop(str(referral_uid), None)
@@ -193,7 +193,7 @@ async def main():
     cb_promo = FakeCB("histology_menu", uid=promo_uid)
     await tb.cb_histology_menu(cb_promo)
     promo_text, promo_kb = cb_promo.message.edits[0]
-    assert "Гистология" in promo_text and "Выбери диагностику" in promo_text
+    assert "Гистология" in promo_text and "Выбери режим или раздел каталога" in promo_text
     # expire it (simulate time passing) -> access reverts to referral/subscription rule
     tb.stats["section_promos"]["histology"] = tb.time.time() - 1
     assert not tb.is_section_promo_active("histology")
@@ -338,7 +338,7 @@ async def main():
     q_photo, q_caption, q_kb = cb_g1.message.photos[0]
     assert isinstance(q_photo, FSInputFile)
     assert "1/10" in q_caption
-    assert "Угадай препарат" in q_caption
+    assert "Практический зачёт" in q_caption
     # question caption must not leak the answer (title)
     diag_key0, spec_id0 = session["items"][0]
     spec0 = tb.get_histology_specimen(diag_key0, spec_id0)
