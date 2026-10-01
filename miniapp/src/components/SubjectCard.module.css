@@ -8,6 +8,25 @@
      схлопывает, и без overflow: hidden прямые углы полосы торчали бы за скруглённый край
      карточки, унаследованный от Card.module.css. */
   overflow: hidden;
+  min-height: 154px;
+  padding: 18px;
+  background:
+    linear-gradient(145deg, var(--border-highlight), transparent 45%),
+    var(--surface-glass);
+}
+
+.card::before {
+  content: "";
+  position: absolute;
+  top: -42px;
+  right: -42px;
+  width: 126px;
+  height: 126px;
+  border-radius: 50%;
+  background: var(--subject-accent, var(--academic-blue));
+  opacity: .1;
+  filter: blur(4px);
+  pointer-events: none;
 }
 
 .card.locked {
@@ -24,8 +43,11 @@
   position: absolute;
   top: 0;
   left: 0;
-  right: 0;
-  height: 3px;
+  right: auto;
+  width: 54px;
+  height: 4px;
+  left: 18px;
+  border-radius: 0 0 var(--radius-pill) var(--radius-pill);
 }
 
 .top {
@@ -35,9 +57,10 @@
 }
 
 .iconWrap {
-  width: 40px;
-  height: 40px;
-  border-radius: var(--radius-md);
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--border-highlight);
+  border-radius: 15px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -45,15 +68,17 @@
 
 .tag {
   font-size: 11px;
-  font-weight: 600;
-  padding: 3px var(--space-2);
+  font-weight: 720;
+  padding: 4px 9px;
   border-radius: var(--radius-pill);
   color: var(--ink);
 }
 
 .title {
   font-size: 15px;
-  font-weight: 700;
+  font-weight: 760;
+  line-height: 1.25;
+  letter-spacing: -.01em;
   color: var(--ink);
 }
 
@@ -65,7 +90,7 @@
 
 .readinessValue {
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 700;
   color: var(--ink-secondary);
   min-width: 32px;
   text-align: right;

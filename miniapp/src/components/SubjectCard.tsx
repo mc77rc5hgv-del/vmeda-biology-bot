@@ -54,6 +54,7 @@ export function SubjectCard({ subject }: SubjectCardProps) {
       className={[styles.card, subject.locked ? styles.locked : ""].join(" ")}
       onClick={handleOpen}
       aria-label={subject.locked ? `${subject.title} — заблокировано` : subject.title}
+      style={{ "--subject-accent": accentVar } as React.CSSProperties}
     >
       <span className={styles.accentBar} style={{ background: accentVar }} aria-hidden="true" />
       <div className={styles.top}>

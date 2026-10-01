@@ -1,13 +1,15 @@
 .hero {
   position: relative;
   overflow: hidden;
-  padding: var(--space-5);
+  padding: 24px;
   border-radius: var(--radius-lg);
   color: #fff;
   background:
-    radial-gradient(circle at 92% 8%, rgb(255 255 255 / 18%), transparent 32%),
-    linear-gradient(145deg, var(--navy-surface), #263d70 72%, var(--academic-blue));
-  box-shadow: var(--shadow-pop);
+    radial-gradient(circle at 92% 8%, rgb(56 199 232 / 40%), transparent 33%),
+    radial-gradient(circle at 4% 108%, rgb(240 79 104 / 28%), transparent 34%),
+    linear-gradient(145deg, #071a38, #214ba8 68%, #7367f7);
+  border: 1px solid rgb(255 255 255 / 14%);
+  box-shadow: var(--shadow-brand);
 }
 
 .heroIcon {
@@ -18,7 +20,8 @@
   place-items: center;
   border: 1px solid rgb(255 255 255 / 24%);
   border-radius: var(--radius-md);
-  background: rgb(255 255 255 / 13%);
+  background: rgb(255 255 255 / 15%);
+  box-shadow: inset 0 1px rgb(255 255 255 / 16%);
 }
 
 .heroOverline,
@@ -30,7 +33,7 @@
 }
 
 .heroOverline { color: rgb(255 255 255 / 68%); }
-.hero h1 { margin: 5px 0 var(--space-2); font-size: 25px; line-height: 1.15; }
+.hero h1 { margin: 5px 0 var(--space-2); font-size: 29px; font-weight: 820; line-height: 1.12; letter-spacing: -.035em; }
 .hero p { max-width: 38ch; margin: 0; color: rgb(255 255 255 / 76%); font-size: 13px; line-height: 1.5; }
 
 .metrics {
@@ -47,7 +50,8 @@
   padding: var(--space-2) var(--space-3);
   border: 1px solid rgb(255 255 255 / 13%);
   border-radius: var(--radius-sm);
-  background: rgb(255 255 255 / 9%);
+  background: rgb(255 255 255 / 10%);
+  backdrop-filter: blur(8px);
 }
 
 .metrics strong { font-size: 17px; }
@@ -64,7 +68,10 @@
 .flashCard {
   color: var(--academic-blue);
   border-color: rgb(49 87 164 / 25%);
-  background: linear-gradient(120deg, var(--academic-blue-tint), var(--surface));
+  background:
+    radial-gradient(circle at 100% 0%, var(--academic-blue-tint), transparent 42%),
+    var(--surface-glass);
+  box-shadow: var(--shadow-brand);
 }
 
 .flashCard > div,
@@ -82,7 +89,7 @@
   border-radius: var(--radius-md);
 }
 
-.flashIcon { color: #fff; background: var(--academic-blue); }
+.flashIcon { color: #fff; background: linear-gradient(135deg, var(--academic-blue), var(--brand-violet)); box-shadow: 0 8px 18px rgb(57 107 238 / 24%); }
 
 .sectionHeading {
   display: flex;
@@ -98,10 +105,11 @@
 .partsList { display: flex; flex-direction: column; gap: var(--space-2); }
 
 .partNumber {
-  color: var(--academic-blue);
+  color: #fff;
   font-size: 14px;
   font-weight: 800;
-  background: var(--academic-blue-tint);
+  background: linear-gradient(135deg, var(--academic-blue), var(--brand-violet));
+  box-shadow: 0 7px 16px rgb(57 107 238 / 18%);
 }
 
 .partContent strong { font-size: 14px; }
@@ -131,7 +139,7 @@
 
 .questionCard { padding: var(--space-5); }
 .questionEyebrow { color: var(--academic-blue); }
-.questionCard h1 { margin: var(--space-2) 0 0; font-size: 18px; line-height: 1.42; }
+.questionCard h1 { margin: var(--space-2) 0 0; font-size: 19px; font-weight: 740; line-height: 1.46; letter-spacing: -.015em; }
 .options { display: flex; flex-direction: column; gap: var(--space-2); }
 
 .option {
@@ -143,8 +151,8 @@
   color: var(--ink);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  background: var(--surface);
-  box-shadow: 0 1px 2px rgb(17 24 39 / 3%);
+  background: var(--surface-glass);
+  box-shadow: var(--shadow-card);
   font-size: 14px;
   line-height: 1.35;
   text-align: left;
@@ -203,7 +211,7 @@
   font-weight: 700;
 }
 
-.primaryButton { color: #fff; background: var(--academy-red); box-shadow: 0 6px 16px rgb(196 59 69 / 20%); }
+.primaryButton { color: #fff; background: linear-gradient(135deg, var(--academic-blue), var(--brand-violet)); box-shadow: var(--shadow-brand); }
 .secondaryButton { color: var(--academic-blue); border: 1px solid var(--academic-blue); background: transparent; }
 .textButton { color: var(--ink-secondary); background: transparent; }
 .primaryButton:disabled,
@@ -221,9 +229,10 @@
   height: 118px;
   place-items: center;
   border-radius: 50%;
-  background: radial-gradient(circle, var(--surface) 58%, transparent 59%), conic-gradient(var(--academic-blue) var(--score), var(--surface-secondary) 0);
+  background: radial-gradient(circle, var(--surface) 58%, transparent 59%), conic-gradient(var(--brand-violet) var(--score), var(--surface-secondary) 0);
+  box-shadow: 0 14px 32px rgb(57 107 238 / 16%);
 }
-.scoreRing span { color: var(--academic-blue); font-size: 28px; font-weight: 850; }
+.scoreRing span { color: var(--brand-violet); font-size: 28px; font-weight: 850; }
 .resultHeading { display: flex; align-items: flex-start; gap: var(--space-3); text-align: left; }
 .resultHeading > span { font-size: 28px; }
 .resultHeading h1 { margin: 0; font-size: 20px; }

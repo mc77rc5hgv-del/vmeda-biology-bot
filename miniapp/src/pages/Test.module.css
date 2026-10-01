@@ -5,9 +5,14 @@
 }
 
 .question {
-  font-size: 17px;
-  font-weight: 600;
-  line-height: 1.4;
+  padding: var(--space-5);
+  border: 1px solid var(--border-highlight);
+  border-radius: var(--radius-lg);
+  background: var(--surface-glass);
+  box-shadow: var(--shadow-card);
+  font-size: 18px;
+  font-weight: 720;
+  line-height: 1.48;
 }
 
 .options {
@@ -24,19 +29,25 @@
   padding: var(--space-3) var(--space-4);
   border-radius: var(--radius-md);
   border: 1px solid var(--border);
-  background: var(--surface);
+  background: var(--surface-glass);
   font-size: 14px;
   text-align: left;
+  box-shadow: var(--shadow-card);
+  transition: transform 120ms ease, border-color 150ms ease, background 150ms ease;
 }
+
+.option:active { transform: scale(.985); }
 
 .optionCorrect {
   border-color: var(--success);
-  box-shadow: inset 0 0 0 2px var(--success);
+  background: var(--success-tint);
+  box-shadow: inset 0 0 0 1px var(--success);
 }
 
 .optionWrong {
   border-color: var(--danger);
-  box-shadow: inset 0 0 0 2px var(--danger);
+  background: var(--academy-red-tint);
+  box-shadow: inset 0 0 0 1px var(--danger);
 }
 
 .result {
@@ -51,14 +62,18 @@
 .resultScore {
   font-size: 36px;
   font-weight: 800;
-  color: var(--academic-blue);
+  color: transparent;
+  background: linear-gradient(135deg, var(--academic-blue), var(--brand-violet));
+  -webkit-background-clip: text;
+  background-clip: text;
 }
 
 .cta {
   min-height: var(--tap-min);
   padding: var(--space-3) var(--space-6);
   border-radius: var(--radius-pill);
-  background: var(--academy-red);
+  background: linear-gradient(135deg, var(--academic-blue), var(--brand-violet));
   color: #fff;
-  font-weight: 600;
+  font-weight: 720;
+  box-shadow: var(--shadow-brand);
 }

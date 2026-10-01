@@ -1,17 +1,24 @@
 .bar {
-  display: flex;
-  gap: var(--space-2);
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  overflow: hidden;
+  padding: 1px;
+  border: 1px solid var(--border-highlight);
+  border-radius: var(--radius-lg);
+  background: var(--border);
+  box-shadow: var(--shadow-card);
 }
 
 .pill {
   flex: 1;
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  background: var(--surface);
-  border-radius: var(--radius-md);
-  padding: var(--space-3) var(--space-3);
-  box-shadow: var(--shadow-card);
+  gap: 7px;
+  background: var(--surface-glass);
+  border-radius: 0;
+  padding: 12px 10px;
+  box-shadow: none;
   min-height: var(--tap-min);
   transition: transform 120ms ease;
 }
@@ -32,13 +39,13 @@
 
 .value {
   font-size: 14px;
-  font-weight: 700;
+  font-weight: 780;
   color: var(--ink);
   line-height: 1.1;
 }
 
 .label {
-  font-size: 10px;
+  font-size: 9px;
   color: var(--ink-secondary);
   line-height: 1.1;
 }

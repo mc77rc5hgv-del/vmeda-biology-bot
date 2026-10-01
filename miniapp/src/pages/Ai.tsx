@@ -146,7 +146,7 @@ export function AiPage() {
 
   return (
     <div className="screen">
-      <div>
+      <div className="page-intro">
         <h1 style={{ fontSize: 20, fontWeight: 700 }}>VMEDA AI</h1>
         <p style={{ fontSize: 13, color: "var(--ink-secondary)", marginTop: 4 }}>
           Разбор заданий по материалам курса

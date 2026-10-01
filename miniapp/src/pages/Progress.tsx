@@ -8,6 +8,7 @@ import { Icon } from "../components/Icon";
 import { ProgressBar } from "../components/ProgressBar";
 import { Skeleton } from "../components/Skeleton";
 import { StateMessage } from "../components/StateMessage";
+import styles from "./Progress.module.css";
 
 export function ProgressPage() {
   useTelegramBackButton(null);
@@ -37,36 +38,36 @@ export function ProgressPage() {
 
   return (
     <div className="screen">
-      <div>
+      <div className="page-intro">
         <h1 style={{ fontSize: 24, fontWeight: 760 }}>Моё обучение</h1>
         <p style={{ marginTop: 5, color: "var(--ink-secondary)", fontSize: 14 }}>Реальные результаты сохраняются между занятиями</p>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-        <Card style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div className={styles.statsGrid}>
+        <Card className={styles.statCard}>
           <Icon icon={CircleCheckBig} size={21} color="var(--success)" />
-          <strong style={{ fontSize: 24 }}>{learning.completedTotal}</strong>
-          <span style={{ color: "var(--ink-secondary)", fontSize: 12 }}>тем изучено</span>
+          <strong className={styles.statValue}>{learning.completedTotal}</strong>
+          <span className={styles.statLabel}>тем изучено</span>
         </Card>
-        <Card style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <Card className={styles.statCard}>
           <Icon icon={Target} size={21} color="var(--academic-blue)" />
-          <strong style={{ fontSize: 24 }}>{accuracy}%</strong>
-          <span style={{ color: "var(--ink-secondary)", fontSize: 12 }}>точность ответов</span>
+          <strong className={styles.statValue}>{accuracy}%</strong>
+          <span className={styles.statLabel}>точность ответов</span>
         </Card>
       </div>
 
       <section aria-labelledby="subjects-progress">
-        <h2 id="subjects-progress" style={{ fontSize: 16, marginBottom: 10 }}>По предметам</h2>
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <h2 id="subjects-progress" className={styles.sectionTitle}>По предметам</h2>
+        <div className={styles.list}>
           {subjectsQuery.data.map((subject) => {
             const completed = learning.completedBySubject[subject.id] ?? 0;
             const total = totals.get(subject.id) ?? 0;
             const percent = total ? Math.min(100, Math.round((completed / total) * 100)) : 0;
             return (
-              <PressableCard key={subject.id} onClick={() => navigate(`/subjects/${subject.id}`)} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-                  <strong style={{ fontSize: 14 }}>{subject.title}</strong>
-                  <span style={{ color: "var(--ink-secondary)", fontSize: 12 }}>{completed} из {total}</span>
+              <PressableCard key={subject.id} onClick={() => navigate(`/subjects/${subject.id}`)} className={styles.subjectCard}>
+                <div className={styles.subjectTop}>
+                  <strong className={styles.subjectName}>{subject.title}</strong>
+                  <span className={styles.subjectMeta}>{completed} из {total}</span>
                 </div>
                 <ProgressBar percent={percent} color={`var(--subject-${subject.accent})`} label={`Прогресс: ${percent}%`} />
               </PressableCard>
@@ -76,18 +77,18 @@ export function ProgressPage() {
       </section>
 
       <section aria-labelledby="favorites-title">
-        <h2 id="favorites-title" style={{ fontSize: 16, marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
+        <h2 id="favorites-title" className={styles.sectionTitle}>
           <Icon icon={Bookmark} size={18} /> Избранное
         </h2>
         {learning.favorites.length === 0 ? (
-          <Card><p style={{ color: "var(--ink-secondary)", fontSize: 14, lineHeight: 1.5 }}>Сохраняй важные темы во время чтения — они появятся здесь.</p></Card>
+          <Card className={styles.emptyCard}><p>Сохраняй важные темы во время чтения — они появятся здесь.</p></Card>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div className={styles.list}>
             {learning.favorites.map((item) => (
-              <PressableCard key={`${item.subjectId}/${item.sectionId}/${item.materialId}`} onClick={() => navigate(`/materials/${item.subjectId}/${item.sectionId}/${item.materialId}`)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+              <PressableCard key={`${item.subjectId}/${item.sectionId}/${item.materialId}`} onClick={() => navigate(`/materials/${item.subjectId}/${item.sectionId}/${item.materialId}`)} className={styles.favoriteRow}>
                 <div>
-                  <div style={{ fontWeight: 650, fontSize: 14 }}>{item.materialTitle || "Учебный материал"}</div>
-                  <div style={{ color: "var(--ink-secondary)", fontSize: 12, marginTop: 4 }}>{item.subjectTitle || item.subjectId}</div>
+                  <div className={styles.favoriteName}>{item.materialTitle || "Учебный материал"}</div>
+                  <div className={styles.favoriteMeta}>{item.subjectTitle || item.subjectId}</div>
                 </div>
                 <Icon icon={ChevronRight} size={18} color="var(--ink-secondary)" />
               </PressableCard>

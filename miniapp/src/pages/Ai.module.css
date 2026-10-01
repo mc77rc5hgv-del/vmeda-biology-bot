@@ -17,7 +17,7 @@
   padding: 0 var(--space-4);
   border-radius: var(--radius-pill);
   border: 1px solid var(--border);
-  background: var(--surface);
+  background: var(--surface-glass);
   font-size: 13px;
   font-weight: 600;
   color: var(--ink-secondary);
@@ -26,9 +26,10 @@
 }
 
 .subjectChipActive {
-  background: var(--navy-surface);
+  background: linear-gradient(135deg, var(--academic-blue), var(--brand-violet));
   color: #fff;
-  border-color: var(--navy-surface);
+  border-color: transparent;
+  box-shadow: 0 8px 18px rgb(57 107 238 / 22%);
 }
 
 .modeRow {
@@ -43,18 +44,19 @@
   justify-content: center;
   gap: var(--space-2);
   min-height: 48px;
-  border-radius: var(--radius-md);
+  border-radius: 16px;
   border: 1px solid var(--border);
-  background: var(--surface);
-  font-weight: 600;
+  background: var(--surface-glass);
+  font-weight: 680;
   font-size: 13px;
   color: var(--ink-secondary);
 }
 
 .modeButtonActive {
-  border-color: var(--academic-blue);
-  color: var(--academic-blue);
-  background: var(--surface);
+  border-color: transparent;
+  color: #fff;
+  background: linear-gradient(135deg, var(--academic-blue), var(--brand-violet));
+  box-shadow: var(--shadow-brand);
 }
 
 .dropZone {
@@ -62,19 +64,24 @@
   flex-direction: column;
   align-items: center;
   gap: var(--space-2);
+  min-height: 190px;
+  justify-content: center;
   padding: var(--space-8) var(--space-4);
   border: 2px dashed var(--border);
   border-radius: var(--radius-lg);
-  color: var(--ink-secondary);
+  color: var(--academic-blue);
+  background:
+    radial-gradient(circle at 50% 24%, var(--academic-blue-tint), transparent 42%),
+    var(--surface-glass);
   text-align: center;
 }
 
 .textArea {
   width: 100%;
-  min-height: 96px;
+  min-height: 142px;
   border-radius: var(--radius-md);
   border: 1px solid var(--border);
-  background: var(--surface);
+  background: var(--surface-glass);
   padding: var(--space-3);
   font: inherit;
   font-size: 14px;
@@ -85,9 +92,11 @@
 .submit {
   min-height: var(--tap-min);
   border-radius: var(--radius-pill);
-  background: var(--academy-red);
+  min-height: 50px;
+  background: linear-gradient(135deg, var(--academic-blue), var(--brand-violet));
   color: #fff;
-  font-weight: 600;
+  font-weight: 720;
+  box-shadow: var(--shadow-brand);
 }
 
 .submit:disabled {

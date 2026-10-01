@@ -75,7 +75,7 @@ export function HomePage() {
       )}
 
       {learning && meQuery.data && (
-        <div>
+        <div className="page-intro">
           <h1 style={{ fontSize: 20, fontWeight: 700 }}>{meQuery.data.firstName}, продолжаем?</h1>
           <p style={{ fontSize: 13, color: "var(--ink-secondary)", marginTop: 4 }}>
             {learning.completedTotal ? "продолжай в своём темпе" : greetingTime(15)}

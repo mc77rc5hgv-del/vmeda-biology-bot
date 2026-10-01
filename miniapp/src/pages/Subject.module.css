@@ -1,12 +1,24 @@
 .header {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-3);
+  padding: var(--space-5);
+  overflow: hidden;
+  border: 1px solid var(--border-highlight);
+  border-radius: var(--radius-lg);
+  background:
+    radial-gradient(circle at 92% 0%, var(--academic-blue-tint), transparent 38%),
+    linear-gradient(145deg, var(--border-highlight), transparent 55%),
+    var(--surface-glass);
+  box-shadow: var(--shadow-card);
+  backdrop-filter: blur(18px);
 }
 
 .title {
-  font-size: 22px;
-  font-weight: 700;
+  font-size: 27px;
+  font-weight: 820;
+  line-height: 1.12;
+  letter-spacing: -.035em;
 }
 
 .readinessRow {
@@ -27,16 +39,19 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
+  min-height: 72px;
+  padding: 17px 18px;
 }
 
 .sectionTitle {
   font-size: 15px;
-  font-weight: 600;
+  font-weight: 720;
 }
 
 .sectionCount {
   font-size: 12px;
   color: var(--ink-secondary);
+  margin-top: 4px;
 }
 
 .sectionList {
@@ -90,8 +105,8 @@
   border-color: transparent;
   background:
     radial-gradient(circle at 90% 10%, rgb(255 255 255 / 17%), transparent 32%),
-    linear-gradient(135deg, var(--navy-surface), var(--academic-blue));
-  box-shadow: var(--shadow-pop);
+    linear-gradient(135deg, #071a38, #244fb4 68%, var(--brand-violet));
+  box-shadow: var(--shadow-brand);
 }
 
 .anatomyExamIcon {
@@ -113,7 +128,7 @@
 
 .anatomyExamTitle {
   font-size: 15px;
-  font-weight: 750;
+  font-weight: 780;
 }
 
 .anatomyExamDescription {
