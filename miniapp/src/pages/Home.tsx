@@ -10,6 +10,7 @@ import { CourseTabs } from "../components/CourseTabs";
 import { SubjectCard } from "../components/SubjectCard";
 import { Skeleton } from "../components/Skeleton";
 import { StateMessage } from "../components/StateMessage";
+import styles from "./Home.module.css";
 
 function greetingTime(minutesLeft: number): string {
   if (minutesLeft <= 0) return "дневная цель уже выполнена";
@@ -89,25 +90,37 @@ export function HomePage() {
         continueItem && <ContinueCard item={continueItem} />
       )}
 
-      <QuickActions />
-
-      <CourseTabs value={selectedCourse} onChange={setSelectedCourse} />
-
-      {subjectsQuery.isLoading ? (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-          {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} height={120} radius="22px" />
-          ))}
+      <section className={styles.sectionBlock} aria-labelledby="quick-actions-title">
+        <div className={styles.sectionHeading}>
+          <h2 id="quick-actions-title">Быстрый доступ</h2>
+          <span>Всё нужное под рукой</span>
         </div>
-      ) : subjectsForCourse.length === 0 ? (
-        <StateMessage title="Пока пусто" body="Для этого курса ещё нет предметов." />
-      ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }} role="list" aria-label="Предметы">
-          {subjectsForCourse.map((subject) => (
-            <SubjectCard key={subject.id} subject={subject} />
-          ))}
+        <QuickActions />
+      </section>
+
+      <section className={styles.sectionBlock} aria-labelledby="subjects-title">
+        <div className={styles.sectionHeading}>
+          <h2 id="subjects-title">Предметы</h2>
+          <span>{subjectsForCourse.length} на курсе</span>
         </div>
-      )}
+        <CourseTabs value={selectedCourse} onChange={setSelectedCourse} />
+
+        {subjectsQuery.isLoading ? (
+          <div className={styles.skeletonGrid}>
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Skeleton key={i} height={120} radius="22px" />
+            ))}
+          </div>
+        ) : subjectsForCourse.length === 0 ? (
+          <StateMessage title="Пока пусто" body="Для этого курса ещё нет предметов." />
+        ) : (
+          <div className={styles.subjectGrid} role="list" aria-label="Предметы">
+            {subjectsForCourse.map((subject) => (
+              <SubjectCard key={subject.id} subject={subject} />
+            ))}
+          </div>
+        )}
+      </section>
     </div>
   );
 }

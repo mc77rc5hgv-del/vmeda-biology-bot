@@ -18,7 +18,7 @@ export function QuickActions() {
     {
       key: "test",
       icon: SquareCheckBig,
-      label: "Биохимия",
+      label: "Быстрый тест",
       accent: "var(--academic-blue-tint)",
       onClick: () => navigate("/subjects/biochemistry/sections/foundations"),
     },

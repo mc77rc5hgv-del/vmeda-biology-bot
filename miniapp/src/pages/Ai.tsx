@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import DOMPurify from "dompurify";
-import { AlertTriangle, Camera, Sparkles, Type, X } from "lucide-react";
+import { AlertTriangle, Camera, CheckCircle2, Sparkles, Type, X } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { fetchSubscriptionSummary, solveAiTask } from "../lib/api";
 import { ApiError } from "../lib/apiClient";
@@ -18,6 +18,12 @@ interface SolveResult {
   lowConfidence: boolean;
   note: string | null;
 }
+
+const TEXT_SUGGESTIONS = [
+  "Объясни термин: ",
+  "Реши задачу пошагово: ",
+  "Составь план ответа: ",
+];
 
 /** dataURL вида "data:image/jpeg;base64,/9j/4AAQ..." -> голый base64 без префикса — ровно то,
  * что ждёт web_api/routers/ai.py (см. AiSolveRequest.image_base64). */
@@ -66,6 +72,7 @@ export function AiPage() {
   const [requestsLeft, setRequestsLeft] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const activeSubjectRef = useRef<HTMLButtonElement>(null);
+  const textAreaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     activeSubjectRef.current?.scrollIntoView({ behavior: "auto", block: "nearest", inline: "center" });
@@ -146,58 +153,73 @@ export function AiPage() {
 
   return (
     <div className="screen">
-      <div className="page-intro">
-        <h1 style={{ fontSize: 20, fontWeight: 700 }}>VMEDA AI</h1>
-        <p style={{ fontSize: 13, color: "var(--ink-secondary)", marginTop: 4 }}>
-          Разбор заданий по материалам курса
-          {requestsLeft !== null && ` · осталось запросов сегодня: ${requestsLeft}`}
-        </p>
-      </div>
+      <section className={styles.hero}>
+        <div className={styles.heroTop}>
+          <span className={styles.heroIcon}><Icon icon={Sparkles} size={22} /></span>
+          <span className={styles.quotaPill}>
+            {requestsLeft === null ? "Учебный помощник" : `${requestsLeft} запросов`}
+          </span>
+        </div>
+        <span className={styles.heroEyebrow}>VMEDA AI</span>
+        <h1>Разберём задание вместе</h1>
+        <p>Выбери предмет и отправь фото или текст. Ответ будет основан на материалах курса.</p>
+      </section>
 
-      <div className={styles.subjectRow} role="tablist" aria-label="Предмет">
-        {mockSubjects
-          .filter((s) => !s.locked)
-          .map((s) => (
-            <button
-              key={s.id}
-              ref={s.id === subjectId ? activeSubjectRef : undefined}
-              type="button"
-              role="tab"
-              aria-selected={s.id === subjectId}
-              className={[styles.subjectChip, s.id === subjectId ? styles.subjectChipActive : ""].join(" ")}
-              onClick={() => setSubjectId(s.id)}
-            >
-              {s.title}
-            </button>
-          ))}
-      </div>
+      <section className={styles.controlSection}>
+        <div className={styles.sectionLabel}><span>1</span> Предмет</div>
+        <div className={styles.subjectRail}>
+          <div className={styles.subjectRow} role="tablist" aria-label="Предмет">
+            {mockSubjects
+              .filter((s) => !s.locked)
+              .map((s) => (
+                <button
+                  key={s.id}
+                  ref={s.id === subjectId ? activeSubjectRef : undefined}
+                  type="button"
+                  role="tab"
+                  aria-selected={s.id === subjectId}
+                  className={[styles.subjectChip, s.id === subjectId ? styles.subjectChipActive : ""].join(" ")}
+                  onClick={() => {
+                    setSubjectId(s.id);
+                    resetOutcome();
+                  }}
+                >
+                  {s.title}
+                </button>
+              ))}
+          </div>
+        </div>
+      </section>
 
-      <div className={styles.modeRow}>
-        <button
-          type="button"
-          aria-pressed={mode === "photo"}
-          className={[styles.modeButton, mode === "photo" ? styles.modeButtonActive : ""].join(" ")}
-          onClick={() => {
-            setMode("photo");
-            resetOutcome();
-          }}
-        >
-          <Icon icon={Camera} size={16} />
-          Фото
-        </button>
-        <button
-          type="button"
-          aria-pressed={mode === "text"}
-          className={[styles.modeButton, mode === "text" ? styles.modeButtonActive : ""].join(" ")}
-          onClick={() => {
-            setMode("text");
-            resetOutcome();
-          }}
-        >
-          <Icon icon={Type} size={16} />
-          Текст
-        </button>
-      </div>
+      <section className={styles.controlSection}>
+        <div className={styles.sectionLabel}><span>2</span> Формат задания</div>
+        <div className={styles.modeRow}>
+          <button
+            type="button"
+            aria-pressed={mode === "photo"}
+            className={[styles.modeButton, mode === "photo" ? styles.modeButtonActive : ""].join(" ")}
+            onClick={() => {
+              setMode("photo");
+              resetOutcome();
+            }}
+          >
+            <Icon icon={Camera} size={17} />
+            Фото
+          </button>
+          <button
+            type="button"
+            aria-pressed={mode === "text"}
+            className={[styles.modeButton, mode === "text" ? styles.modeButtonActive : ""].join(" ")}
+            onClick={() => {
+              setMode("text");
+              resetOutcome();
+            }}
+          >
+            <Icon icon={Type} size={17} />
+            Текст
+          </button>
+        </div>
+      </section>
 
       {mode === "photo" ? (
         <>
@@ -224,29 +246,60 @@ export function AiPage() {
             </div>
           ) : (
             <button type="button" className={styles.dropZone} onClick={handlePickPhoto}>
-              <Icon icon={Camera} size={28} />
-              <span>Открыть камеру или выбрать фото</span>
+              <span className={styles.dropIcon}><Icon icon={Camera} size={26} /></span>
+              <strong>Добавить фотографию</strong>
+              <small>Камера или изображение из галереи</small>
             </button>
           )}
         </>
       ) : (
         <>
           <label className="visually-hidden" htmlFor="ai-task-text">Текст задания</label>
-          <textarea
-            id="ai-task-text"
-            className={styles.textArea}
-            placeholder="Опиши задание или вставь вопрос текстом…"
-            value={text}
-            onChange={(e) => {
-              setText(e.target.value);
-              resetOutcome();
-            }}
-          />
+          <div className={styles.textInputWrap}>
+            <textarea
+              ref={textAreaRef}
+              id="ai-task-text"
+              className={styles.textArea}
+              placeholder="Вставь вопрос или опиши задание…"
+              value={text}
+              maxLength={4000}
+              onChange={(e) => {
+                setText(e.target.value);
+                resetOutcome();
+              }}
+            />
+            <div className={styles.textMeta}>
+              <span>{text.length.toLocaleString("ru-RU")} / 4 000</span>
+              {text && (
+                <button type="button" onClick={() => { setText(""); resetOutcome(); }}>
+                  Очистить
+                </button>
+              )}
+            </div>
+          </div>
+          {!text && (
+            <div className={styles.suggestions} aria-label="Примеры запросов">
+              {TEXT_SUGGESTIONS.map((suggestion) => (
+                <button
+                  key={suggestion}
+                  type="button"
+                  onClick={() => {
+                    setText(suggestion);
+                    resetOutcome();
+                    requestAnimationFrame(() => textAreaRef.current?.focus());
+                  }}
+                >
+                  {suggestion.trim()}
+                </button>
+              ))}
+            </div>
+          )}
         </>
       )}
 
       <button type="button" className={styles.submit} disabled={!canSubmit || isThinking} onClick={handleSubmit}>
-        {isThinking ? "Разбираю…" : "Разобрать задание"}
+        <Icon icon={Sparkles} size={18} />
+        {isThinking ? "Анализирую задание…" : "Разобрать задание"}
       </button>
 
       {isThinking && (
@@ -258,17 +311,17 @@ export function AiPage() {
       )}
 
       {error && (
-        <Card style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <Icon icon={AlertTriangle} size={16} color="var(--danger)" />
-          <span style={{ fontSize: 13, color: "var(--ink)" }}>{error}</span>
+        <Card className={styles.errorCard}>
+          <span className={styles.errorIcon}><Icon icon={AlertTriangle} size={18} /></span>
+          <div><strong>Не удалось выполнить запрос</strong><p>{error}</p></div>
         </Card>
       )}
 
       {result && (
-        <Card style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <Icon icon={Sparkles} size={16} color="var(--academic-blue)" />
-            <span style={{ fontSize: 12, fontWeight: 700, color: "var(--academic-blue)" }}>Ответ VMEDA AI</span>
+        <Card className={styles.resultCard}>
+          <div className={styles.resultHeader}>
+            <span><Icon icon={CheckCircle2} size={17} /></span>
+            <div><strong>Ответ VMEDA AI</strong><small>Проверяй формулировки перед сдачей</small></div>
           </div>
           {/* Ответ модели проходит DOMPurify так же, как обычный материал (см. Material.tsx) —
               внешний, не полностью доверенный текст, даже если это наш собственный backend. */}

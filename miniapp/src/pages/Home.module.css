@@ -1,0 +1,30 @@
+.sectionBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+
+.sectionHeading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sectionHeading h2 {
+  font-size: 17px;
+  font-weight: 770;
+  letter-spacing: -.02em;
+}
+
+.sectionHeading span {
+  color: var(--ink-secondary);
+  font-size: 11px;
+}
+
+.subjectGrid,
+.skeletonGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
