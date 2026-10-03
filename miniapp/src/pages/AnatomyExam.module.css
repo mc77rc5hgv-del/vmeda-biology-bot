@@ -38,7 +38,7 @@
 
 .metrics {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--space-2);
   margin-top: var(--space-5);
 }
@@ -237,7 +237,7 @@
 .resultHeading > span { font-size: 28px; }
 .resultHeading h1 { margin: 0; font-size: 20px; }
 .resultHeading p { margin: 4px 0 0; color: var(--ink-secondary); font-size: 13px; line-height: 1.4; }
-.resultStats { display: grid; width: 100%; grid-template-columns: repeat(3, 1fr); }
+.resultStats { display: grid; width: 100%; grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .resultStats div { display: flex; flex-direction: column; align-items: center; gap: 2px; border-right: 1px solid var(--border); }
 .resultStats div:last-child { border: 0; }
 .resultStats strong { font-size: 21px; }
@@ -250,3 +250,29 @@
   .partContent > span { max-width: 180px; }
   .liveStats { gap: var(--space-2); }
 }
+
+.menuContent { display: flex; flex-direction: column; gap: 18px; width: 100%; min-width: 0; }
+.settingsCard { display: flex; flex-direction: column; gap: 16px; padding: 18px; }
+.switchRow { position: relative; display: flex; align-items: center; gap: 12px; min-height: 44px; cursor: pointer; }
+.switchRow input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.switchTrack { display: flex; align-items: center; flex: 0 0 44px; height: 26px; padding: 3px; border-radius: 20px; background: var(--surface-secondary); border: 1px solid var(--border); }
+.switchTrack span { width: 18px; height: 18px; border-radius: 50%; background: var(--ink-secondary); transition: transform 150ms ease; }
+.switchRow input:checked + .switchTrack { background: var(--academic-blue); }
+.switchRow input:checked + .switchTrack span { background: #fff; transform: translateX(18px); }
+.switchRow input:focus-visible + .switchTrack { outline: 2px solid var(--academic-blue); outline-offset: 3px; }
+.switchRow input:disabled ~ span { opacity: .6; }
+.switchRow > span:last-child { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.switchRow strong { font-size: 14px; }
+.switchRow small { font-size: 12px; line-height: 1.4; color: var(--ink-secondary); }
+.ratingTabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; padding: 5px; border-radius: 16px; background: var(--surface-secondary); }
+.ratingTabs button { min-height: 44px; padding: 8px; border-radius: 12px; font-size: 12px; font-weight: 700; line-height: 1.3; color: var(--ink-secondary); background: transparent; }
+.ratingTabs .ratingTabActive { color: #fff; background: linear-gradient(135deg, var(--academic-blue), var(--brand-violet)); }
+.ranking { display: flex; flex-direction: column; gap: 12px; }
+.ranking h2 { font-size: 17px; }
+.ranking > p { font-size: 12px; line-height: 1.4; color: var(--ink-secondary); }
+.ranking ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.ranking li { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--border); }
+.rankNumber { flex: 0 0 28px; text-align: center; color: var(--academic-blue); font-weight: 750; }
+.ranking li div { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.ranking li strong { font-size: 13px; overflow-wrap: anywhere; }
+.ranking li small { color: var(--ink-secondary); font-size: 11px; }

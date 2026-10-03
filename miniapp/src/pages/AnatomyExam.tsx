@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowRight,
@@ -213,27 +213,35 @@ export function AnatomyExamPage() {
     }
     return (
       <div className="screen">
-        {activeQuery.isError && <StateMessage title="Не удалось проверить сохранённую попытку" onRetry={() => activeQuery.refetch()} />}
-        {activeQuery.data && <button type="button" className={styles.primaryButton} onClick={() => {setSource(null); applyRun(activeQuery.data!);}}>Продолжить · {activeQuery.data.answered} из {activeQuery.data.questions.length}</button>}
-        <label><input type="checkbox" checked={rating} disabled={!preferencesQuery.data || preferencesMutation.isPending} onChange={(event) => preferencesMutation.mutate(event.target.checked)} /> Учитывать полностью пройденную часть в общем рейтинге</label>
-        {(preferencesQuery.isError || preferencesMutation.isError) && <StateMessage title="Не удалось сохранить режим рейтинга" onRetry={() => preferencesQuery.refetch()} />}
-        <div><button type="button" onClick={() => setRatingKind('part')}>Рейтинг частей</button><button type="button" onClick={() => setRatingKind('flash')}>Рейтинг флэш-теста</button></div>
-        {ratingKind && <Card>
-          <h2>{ratingKind === 'part' ? 'Рейтинг частей' : 'Рейтинг флэш-теста'}</h2>
-          {ratingsQuery.isLoading && <p>Загрузка…</p>}
-          {ratingsQuery.isError && <StateMessage title="Рейтинг временно недоступен" onRetry={() => ratingsQuery.refetch()} />}
-          {ratingsQuery.data && <>
-            <p>{ratingsQuery.data.own_rank ? `Твоё место: ${ratingsQuery.data.own_rank}` : 'Заверши тест, чтобы попасть в рейтинг.'}</p>
-            <ol>{ratingsQuery.data.entries.map((entry) => <li key={entry.rank}>{entry.name} — {entry.correct ?? entry.best_correct} из {entry.total ?? entry.best_total}, попыток: {entry.attempts}</li>)}</ol>
-          </>}
-        </Card>}
-        <button type="button" className={styles.primaryButton} disabled={loadingRun} onClick={startMistakeWork}>Повторить сохранённые ошибки</button>
-      <AnatomyExamMenu
-        parts={partsQuery.data}
-        loading={loadingRun}
-        error={runError}
-        onStart={startRun}
-      />
+        <AnatomyExamMenu parts={partsQuery.data} loading={loadingRun} error={runError} onStart={startRun}>
+          {activeQuery.isError && <StateMessage title="Не удалось проверить сохранённую попытку" onRetry={() => activeQuery.refetch()} />}
+          {activeQuery.data && <button type="button" className={styles.primaryButton} onClick={() => {setSource(null); applyRun(activeQuery.data!);}}>Продолжить · {activeQuery.data.answered} из {activeQuery.data.questions.length}</button>}
+          <Card className={styles.settingsCard}>
+            <label className={styles.switchRow}>
+              <input type="checkbox" role="switch" aria-label="Участвовать в рейтинге" checked={rating} disabled={!preferencesQuery.data || preferencesMutation.isPending} onChange={(event) => preferencesMutation.mutate(event.target.checked)} />
+              <span className={styles.switchTrack} aria-hidden="true"><span /></span>
+              <span><strong>Участвовать в рейтинге</strong><small>Завершённые части учитываются в общем рейтинге</small></span>
+            </label>
+            {(preferencesQuery.isError || preferencesMutation.isError) && <StateMessage title="Не удалось сохранить режим рейтинга" onRetry={() => preferencesQuery.refetch()} />}
+            <div className={styles.ratingTabs} aria-label="Общие рейтинги">
+              <button type="button" aria-pressed={ratingKind === 'part'} className={ratingKind === 'part' ? styles.ratingTabActive : undefined} onClick={() => setRatingKind(ratingKind === 'part' ? null : 'part')}>Рейтинг частей</button>
+              <button type="button" aria-pressed={ratingKind === 'flash'} className={ratingKind === 'flash' ? styles.ratingTabActive : undefined} onClick={() => setRatingKind(ratingKind === 'flash' ? null : 'flash')}>Рейтинг флэш-теста</button>
+            </div>
+            {ratingKind && <section className={styles.ranking}>
+              <h2>{ratingKind === 'part' ? 'Рейтинг частей' : 'Рейтинг флэш-теста'}</h2>
+              {ratingsQuery.isLoading && <Skeleton height={60} />}
+              {ratingsQuery.isError && <StateMessage title="Рейтинг временно недоступен" onRetry={() => ratingsQuery.refetch()} />}
+              {ratingsQuery.data && <>
+                <p>{ratingsQuery.data.own_rank ? `Твоё место: ${ratingsQuery.data.own_rank}` : 'Заверши тест, чтобы попасть в рейтинг.'}</p>
+                <ol>{ratingsQuery.data.entries.map((entry) => <li key={entry.rank}>
+                  <span className={styles.rankNumber}>{entry.rank}</span>
+                  <div><strong>{entry.name}</strong><small>{entry.correct ?? entry.best_correct} из {entry.total ?? entry.best_total} · попыток: {entry.attempts}</small></div>
+                </li>)}</ol>
+              </>}
+            </section>}
+          </Card>
+          <button type="button" className={styles.secondaryButton} disabled={loadingRun} onClick={startMistakeWork}><Icon icon={Target} size={18} />Повторить сохранённые ошибки</button>
+        </AnatomyExamMenu>
       </div>
     );
   }
@@ -365,15 +373,17 @@ function AnatomyExamMenu({
   loading,
   error,
   onStart,
+  children,
 }: {
   parts: AnatomyExamPart[];
   loading: boolean;
   error: string | null;
   onStart: (source: RunSource) => void;
+  children?: ReactNode;
 }) {
   const total = parts.reduce((sum, part) => sum + part.questionCount, 0);
   return (
-    <div className="screen">
+    <div className={styles.menuContent}>
       <section className={styles.hero}>
         <div className={styles.heroIcon}><Icon icon={BookOpenCheck} size={22} /></div>
         <span className={styles.heroOverline}>Экзаменационная подготовка</span>
@@ -386,6 +396,7 @@ function AnatomyExamMenu({
         </div>
       </section>
 
+      {children}
       <PressableCard
         className={styles.flashCard}
         aria-label="Начать флеш-тест на 50 случайных вопросов"
