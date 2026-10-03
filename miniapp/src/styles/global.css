@@ -94,8 +94,8 @@ img, svg {
   isolation: isolate;
   padding-top: calc(var(--safe-top) + var(--space-5));
   padding-bottom: calc(var(--safe-bottom) + var(--bottom-nav-height) + var(--space-4));
-  padding-left: var(--space-4);
-  padding-right: var(--space-4);
+  padding-left: calc(var(--safe-left) + var(--space-4));
+  padding-right: calc(var(--safe-right) + var(--space-4));
   max-width: 560px;
   margin: 0 auto;
   display: flex;
