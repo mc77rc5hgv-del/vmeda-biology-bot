@@ -464,6 +464,7 @@ def test_histology_specimen_material_round_trip_once_referral_threshold_is_met()
     current_month = tb.local_today().strftime("%Y-%m")
     tb.stats["referral_monthly"][str(unlocked_user_id)] = {"month": current_month, "count": 2}
     tb.save_stats()
+    tb._stats_executor.submit(lambda: None).result()
 
     headers = _auth_headers(unlocked_user_id)
     section = client.get("/api/v1/subjects/histology/sections/specimens", headers=headers).json()
@@ -498,6 +499,7 @@ def test_histology_exam_catalog_practical_reveal_and_grade():
     current_month = tb.local_today().strftime("%Y-%m")
     tb.stats["referral_monthly"][str(unlocked_user_id)] = {"month": current_month, "count": 2}
     tb.save_stats()
+    tb._stats_executor.submit(lambda: None).result()
     headers = _auth_headers(unlocked_user_id)
 
     catalog = client.get("/api/v1/histology/exam/catalog", headers=headers)
@@ -554,6 +556,7 @@ def test_biology_default_locked_for_user_with_no_subscription_no_referrals():
     tb.stats['referral_warnings']['900777888999'] = {'count': tb.REFERRAL_WARNING_THRESHOLD, 'last_warn_at': time.time()}
     tb.save_stats()
     tb._stats_executor.submit(lambda: None).result()
+    tb._stats_executor.submit(lambda: None).result()
     headers = _auth_headers()
     section = client.get("/api/v1/subjects/biology/sections/tickets", headers=headers).json()
     assert len(section["groups"]) == 40  # см. отчёт по данным: 40 билетов
@@ -578,6 +581,7 @@ def test_biology_ticket_and_question_bank_material_round_trip_once_referral_thre
     current_month = tb.local_today().strftime("%Y-%m")
     tb.stats["referral_monthly"][str(unlocked_user_id)] = {"month": current_month, "count": 2}
     tb.save_stats()
+    tb._stats_executor.submit(lambda: None).result()
 
     headers = _auth_headers(unlocked_user_id)
     detail = client.get("/api/v1/subjects/biology", headers=headers)
@@ -641,6 +645,7 @@ def test_chemistry_default_locked_for_user_with_no_subscription_no_referrals():
     tb.stats['referral_warnings']['900777888999'] = {'count': tb.REFERRAL_WARNING_THRESHOLD, 'last_warn_at': time.time()}
     tb.save_stats()
     tb._stats_executor.submit(lambda: None).result()
+    tb._stats_executor.submit(lambda: None).result()
     headers = _auth_headers()
 
     theory_resp = client.get("/api/v1/subjects/chemistry/sections/theory", headers=headers)
@@ -689,6 +694,7 @@ def test_chemistry_full_round_trip_once_referral_threshold_is_met():
     current_month = tb.local_today().strftime("%Y-%m")
     tb.stats["referral_monthly"][str(unlocked_user_id)] = {"month": current_month, "count": 2}
     tb.save_stats()
+    tb._stats_executor.submit(lambda: None).result()
 
     headers = _auth_headers(unlocked_user_id)
     detail = client.get("/api/v1/subjects/chemistry", headers=headers)
@@ -806,6 +812,7 @@ def test_physics_default_locked_for_user_with_no_subscription_no_referrals():
     tb.stats['referral_warnings']['900777888999'] = {'count': tb.REFERRAL_WARNING_THRESHOLD, 'last_warn_at': time.time()}
     tb.save_stats()
     tb._stats_executor.submit(lambda: None).result()
+    tb._stats_executor.submit(lambda: None).result()
     headers = _auth_headers()
 
     test_resp = client.get("/api/v1/subjects/physics/sections/test", headers=headers)
@@ -850,6 +857,7 @@ def test_physics_full_round_trip_once_referral_threshold_is_met():
     current_month = tb.local_today().strftime("%Y-%m")
     tb.stats["referral_monthly"][str(unlocked_user_id)] = {"month": current_month, "count": 2}
     tb.save_stats()
+    tb._stats_executor.submit(lambda: None).result()
 
     headers = _auth_headers(unlocked_user_id)
     detail = client.get("/api/v1/subjects/physics", headers=headers)

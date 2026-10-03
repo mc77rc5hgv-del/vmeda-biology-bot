@@ -55,7 +55,8 @@ processes = []; logs = []
 def launch(module, number, env):
     output = (folder / (module.replace('.', '-') + f'-{len(logs)}.log')).open('w')
     logs.append(output)
-    proc = subprocess.Popen([sys.executable, '-m', 'uvicorn', module+':app', '--host', '127.0.0.1', '--port', str(number), '--log-level', 'warning'], cwd=ROOT, env=env, stdout=output, stderr=subprocess.STDOUT)
+    command = [sys.executable, '-m', 'web_api.run'] if module == 'web_api.main' else [sys.executable, '-m', 'uvicorn', module+':app', '--host', '127.0.0.1', '--port', str(number), '--log-level', 'warning']
+    proc = subprocess.Popen(command, cwd=ROOT, env=dict(env, PORT=str(number)), stdout=output, stderr=subprocess.STDOUT)
     processes.append(proc)
     return proc
 
@@ -91,6 +92,7 @@ def auth():
 
 try:
     gateway = launch('web_api.main', gateway_port, gateway_env); ready(gateway_url, gateway)
+    assert client.get(f'http://[::1]:{gateway_port}/healthz').status_code == 200
     owner = launch('sync_tests.service_fixture', owner_port, owner_env); ready(owner_url, owner)
     headers = auth()
     assert client.get(owner_url+'/api/v1/me').status_code == 403

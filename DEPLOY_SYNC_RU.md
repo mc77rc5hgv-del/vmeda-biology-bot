@@ -42,7 +42,7 @@ PORT=8080
 SYNC_REQUIRE_EXISTING_DB=1
 ```
 
-Старт API: `uvicorn web_api.main:app --host :: --port $PORT`. Удалить из start command старое создание пустого `stats.json`; исходный файл сохранить. Healthcheck API `/healthz` подтверждает готовность локального журнала; доступность owner дополнительно проверять через авторизованный `/api/v1/sync/state`. В production не запускать тестовые fixture-модули.
+Старт API: `python -m web_api.run`. Удалить из start command старое создание пустого `stats.json`; исходный файл сохранить. Healthcheck API `/healthz` подтверждает готовность локального журнала; доступность owner дополнительно проверять через авторизованный `/api/v1/sync/state`. В production не запускать тестовые fixture-модули.
 
 ## Порядок и ограничения
 
