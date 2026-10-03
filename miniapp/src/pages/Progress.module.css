@@ -1,0 +1,88 @@
+.statsGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.statCard {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  min-height: 132px;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+}
+
+.statCard::after {
+  content: "";
+  position: absolute;
+  right: -24px;
+  bottom: -32px;
+  width: 90px;
+  height: 90px;
+  border-radius: 50%;
+  background: var(--academic-blue);
+  opacity: .08;
+}
+
+.statValue {
+  font-size: 28px;
+  font-weight: 840;
+  letter-spacing: -.04em;
+}
+
+.statLabel,
+.subjectMeta,
+.favoriteMeta {
+  color: var(--ink-secondary);
+  font-size: 12px;
+}
+
+.sectionTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 11px;
+  font-size: 17px;
+  font-weight: 760;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.subjectCard {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  padding: 17px 18px;
+}
+
+.subjectTop,
+.favoriteRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.subjectName,
+.favoriteName {
+  font-size: 14px;
+  font-weight: 720;
+}
+
+.emptyCard {
+  border-style: dashed;
+}
+
+.emptyCard p {
+  color: var(--ink-secondary);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.favoriteMeta { margin-top: 4px; }

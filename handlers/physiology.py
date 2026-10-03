@@ -61,9 +61,10 @@ text/table-узлы в одну Telegram-страницу (до ~3500 симво
 `PHYS_RK_FILE_ID_CACHE` — тот же паттерн, что `ANATOMY_FILE_ID_CACHE`/`OH_FILE_ID_CACHE`: кэширует
 Telegram `file_id` после первой загрузки, повторные показы не перезаливают файл с диска."""
 import html
+import asyncio
+import os
 import json
 import math
-import os
 import random
 import time
 
@@ -125,7 +126,16 @@ def _phys_progress_all(user_id: int) -> dict:
 
 
 def get_phys_progress(user_id: int, topic_id: str) -> dict:
-    return _phys_progress_all(user_id).get(topic_id, {})
+    result = _phys_progress_all(user_id).get(topic_id, {})
+    override = tb.stats.get('physiology_completion_overrides', {}).get(str(user_id), {}).get(topic_id)
+    if isinstance(override, bool):
+        result = dict(result)
+        topic = get_phys_topic(topic_id)
+        total = result.get('total_cards') or (len(build_phys_learn_cards(topic)) if topic else 0)
+        result['total_cards'] = total
+        result['completed_cards'] = total if override else 0
+        _phys_recalc_mastery(result)
+    return result
 
 
 def _phys_progress_entry(user_id: int, topic_id: str) -> dict:
@@ -154,6 +164,9 @@ def phys_mark_card_done(user_id: int, topic_id: str) -> None:
     entry["completed_cards"] = min(entry["total_cards"] or 999, entry["completed_cards"] + 1)
     entry["last_studied_at"] = time.time()
     _phys_recalc_mastery(entry)
+    overrides = tb.stats.get('physiology_completion_overrides', {}).get(str(user_id), {})
+    if topic_id in overrides:
+        overrides[topic_id] = None  # preserve history while resuming real study
     tb.save_stats()
 
 
@@ -233,8 +246,34 @@ def phys_toggle_favorite(user_id: int, topic_id: str) -> bool:
     else:
         favs.append(topic_id)
         added = True
+    tb.stats.setdefault('physiology_favorite_overrides', {}).setdefault(str(user_id), {})[topic_id] = added
     tb.save_stats()
     return added
+
+
+async def _refresh_shared_learning(user_id: int):
+    if os.environ.get('BOT_SYNC_MODE') != 'owner':
+        return
+    from web_api import learning
+    state = await asyncio.to_thread(learning.get_state, user_id)
+    uid = str(user_id)
+    favs = phys_favorites(user_id)
+    overrides = tb.stats.get('physiology_favorite_overrides', {}).get(uid, {})
+    changed = False
+    for row in state['favorites']:
+        if (row['subject_id'], row['section_id']) == ('physiology', 'course') and overrides.get(row['material_id']) is not False:
+            if row['material_id'] not in favs:
+                favs.append(row['material_id'])
+                changed = True
+    completion = tb.stats.setdefault('physiology_completion_overrides', {}).setdefault(uid, {})
+    for key in state['completed_keys']:
+        if key.startswith('physiology/course/'):
+            topic_id = key.split('/', 2)[2]
+            if topic_id not in completion:
+                completion[topic_id] = True
+                changed = True
+    if changed:
+        tb.save_stats()
 
 
 # ==================== step-card assembly ("Учить по шагам") ====================
@@ -924,6 +963,12 @@ async def cb_phys_rk_page(callback: CallbackQuery):
 
 @router.callback_query(F.data == "phys:menu")
 async def cb_phys_menu(callback: CallbackQuery):
+    try:
+        await _refresh_shared_learning(callback.from_user.id)
+    except Exception:
+        tb.logger.exception('Не удалось получить общий прогресс физиологии')
+        await callback.answer('Прогресс временно недоступен. Повтори попытку.', show_alert=True)
+        return
     await callback.answer()
     tb.PHYS_SEARCH_PENDING.discard(callback.from_user.id)
     user_id = callback.from_user.id
@@ -948,6 +993,18 @@ async def cb_phys_continue(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("phys:topics:"))
 async def cb_phys_topics(callback: CallbackQuery):
+    try:
+        await _refresh_shared_learning(callback.from_user.id)
+    except Exception:
+        tb.logger.exception('Не удалось получить общий прогресс физиологии')
+        await callback.answer('Прогресс временно недоступен. Повтори попытку.', show_alert=True)
+        return
+    try:
+        await _refresh_shared_learning(callback.from_user.id)
+    except Exception:
+        tb.logger.exception('Не удалось получить общий прогресс физиологии')
+        await callback.answer('Прогресс временно недоступен. Повтори попытку.', show_alert=True)
+        return
     page = int(callback.data.split(":")[2])
     await callback.answer()
     await tb.safe_edit_text(
@@ -994,6 +1051,12 @@ async def cb_phys_topic(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("phys:fav_toggle:"))
 async def cb_phys_fav_toggle(callback: CallbackQuery):
+    try:
+        await _refresh_shared_learning(callback.from_user.id)
+    except Exception:
+        tb.logger.exception('Не удалось получить общий прогресс физиологии')
+        await callback.answer('Прогресс временно недоступен. Повтори попытку.', show_alert=True)
+        return
     topic_id = callback.data.split(":")[2]
     topic = get_phys_topic(topic_id)
     if topic is None:
@@ -1241,6 +1304,12 @@ async def cb_phys_mini_answer(callback: CallbackQuery):
 
 @router.callback_query(F.data == "phys:favorites")
 async def cb_phys_favorites(callback: CallbackQuery):
+    try:
+        await _refresh_shared_learning(callback.from_user.id)
+    except Exception:
+        tb.logger.exception('Не удалось получить общий прогресс физиологии')
+        await callback.answer('Прогресс временно недоступен. Повтори попытку.', show_alert=True)
+        return
     user_id = callback.from_user.id
     await callback.answer()
     await tb.safe_edit_text(
@@ -1251,6 +1320,12 @@ async def cb_phys_favorites(callback: CallbackQuery):
 
 @router.callback_query(F.data == "phys:progress")
 async def cb_phys_progress(callback: CallbackQuery):
+    try:
+        await _refresh_shared_learning(callback.from_user.id)
+    except Exception:
+        tb.logger.exception('Не удалось получить общий прогресс физиологии')
+        await callback.answer('Прогресс временно недоступен. Повтори попытку.', show_alert=True)
+        return
     user_id = callback.from_user.id
     await callback.answer()
     await tb.safe_edit_text(

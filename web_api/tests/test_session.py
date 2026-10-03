@@ -70,3 +70,15 @@ def test_different_users_get_different_tokens():
     assert token_a != token_b
     assert verify_session_token(token_a, SECRET) == 1
     assert verify_session_token(token_b, SECRET) == 2
+
+
+def test_token_with_extra_separator_is_rejected():
+    token = create_session_token(1, SECRET)
+    with pytest.raises(SessionTokenError, match="формат"):
+        verify_session_token(token + ".extra", SECRET)
+
+
+@pytest.mark.parametrize("bad_user_id", [0, -1, True])
+def test_invalid_user_id_is_rejected_on_create(bad_user_id):
+    with pytest.raises(SessionTokenError, match="user_id"):
+        create_session_token(bad_user_id, SECRET)

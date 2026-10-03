@@ -3,19 +3,22 @@ generated_courses/pharmacology.json) -- не на фикстуре, как web_a
 и не на моках, как miniapp/src/lib/mockData.ts. Если эти данные когда-нибудь поменяют форму,
 тест должен упасть -- он и есть проверка того, что "контент-адаптер для 2-3 предметов" (Этап 3)
 реально доводит один предмет от JSON до HTTP-ответа."""
+import json
 import os
 import tempfile
 
 os.environ.setdefault("BOT_TOKEN", "123456789:AASubjectsIntegrationTestToken0000000")
 os.environ.setdefault("SESSION_SECRET", "subjects-integration-test-secret")
-os.environ.setdefault("STATS_DIR", tempfile.mkdtemp(prefix="web_api_subjects_test_stats_"))
+_TEST_STATS_DIR = tempfile.mkdtemp(prefix="web_api_subjects_test_stats_")
+os.environ.setdefault("STATS_DIR", _TEST_STATS_DIR)
+with open(os.path.join(os.environ["STATS_DIR"], "stats.json"), "w", encoding="utf-8") as _stats_stream:
+    json.dump({}, _stats_stream)
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.chdir(_REPO_ROOT)
 
 import hashlib  # noqa: E402
 import hmac  # noqa: E402
-import json  # noqa: E402
 import time  # noqa: E402
 from urllib.parse import urlencode  # noqa: E402
 
@@ -23,14 +26,21 @@ import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from web_api.main import app  # noqa: E402
+import telegram_bot as tb  # noqa: E402
 
 client = TestClient(app)
 
 
-def _auth_headers() -> dict:
+@pytest.fixture(autouse=True)
+def _keep_content_contract_tests_independent_from_temporary_closure(monkeypatch):
+    """Most tests below validate content shape, not the temporary operational switch."""
+    monkeypatch.setattr(tb, "DYNAMIC_COURSE_MAINTENANCE_IDS", frozenset())
+
+
+def _auth_headers(user_id: int = 900_777_888_999) -> dict:
     bot_token = os.environ["BOT_TOKEN"]
     fields = {
-        "user": json.dumps({"id": 900_777_888_999, "first_name": "Тест Контента"}),
+        "user": json.dumps({"id": user_id, "first_name": "Тест Контента"}),
         "auth_date": str(int(time.time())),
     }
     data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(fields.items()))
@@ -45,12 +55,34 @@ def test_list_subjects_includes_real_dynamic_courses():
     resp = client.get("/api/v1/subjects", headers=_auth_headers())
     assert resp.status_code == 200
     ids = {s["id"] for s in resp.json()}
-    assert {"biochemistry", "pharmacology", "latin", "law"} <= ids
+    assert {
+        "biochemistry", "pharmacology", "latin", "law", "physiology", "operative_surgery", "anatomy",
+        "histology", "biology", "chemistry", "physics",
+    } <= ids
 
 
 def test_list_subjects_requires_auth():
     resp = client.get("/api/v1/subjects")
     assert resp.status_code == 401
+
+
+def test_pharmacology_is_closed_at_every_api_depth(monkeypatch):
+    subject_id = "pharmacology"
+    monkeypatch.setattr(tb, "DYNAMIC_COURSE_MAINTENANCE_IDS", frozenset({"pharmacology"}))
+    headers = _auth_headers()
+    listing = client.get("/api/v1/subjects", headers=headers).json()
+    card = next(item for item in listing if item["id"] == subject_id)
+    assert card["maintenance"] is True
+    assert "переработ" in card["maintenance_reason"]
+
+    detail = client.get(f"/api/v1/subjects/{subject_id}", headers=headers)
+    assert detail.status_code == 200
+    assert detail.json()["maintenance"] is True
+
+    section_id = "course"
+    section = client.get(f"/api/v1/subjects/{subject_id}/sections/{section_id}", headers=headers)
+    assert section.status_code == 503
+    assert "переработ" in section.json()["detail"]
 
 
 def test_biochemistry_subject_detail_has_real_sections():
@@ -163,17 +195,799 @@ def test_unknown_section_returns_404():
 
 def test_unknown_material_returns_404():
     resp = client.get(
-        "/api/v1/materials/biochemistry/credit/does-not-exist", headers=_auth_headers()
+        "/api/v1/materials/biochemistry/foundations/does-not-exist", headers=_auth_headers()
     )
     assert resp.status_code == 404
 
 
+def test_physiology_course_and_boundary_control_round_trip():
+    headers = _auth_headers()
+    detail = client.get("/api/v1/subjects/physiology", headers=headers)
+    assert detail.status_code == 200, detail.text
+    sections = {section["id"]: section for section in detail.json()["sections"]}
+    assert sections["course"]["item_count"] == 23
+    assert sections["boundary-controls"]["kind"] == "grouped"
+
+    course = client.get("/api/v1/subjects/physiology/sections/course", headers=headers).json()
+    first_topic = course["items"][0]
+    material = client.get(
+        f"/api/v1/materials/physiology/course/{first_topic['id']}", headers=headers
+    )
+    assert material.status_code == 200, material.text
+    assert material.json()["title"] == first_topic["title"]
+    assert material.json()["content_html"]
+    assert material.json()["sources"] == []
+
+    controls = client.get(
+        "/api/v1/subjects/physiology/sections/boundary-controls", headers=headers
+    ).json()
+    assert len(controls["groups"]) == 11
+    first_control_id = controls["groups"][0]["id"]
+    group = client.get(
+        f"/api/v1/subjects/physiology/sections/boundary-controls/groups/{first_control_id}",
+        headers=headers,
+    ).json()
+    assert group["items"]
+
+    media_material = None
+    for item in group["items"]:
+        candidate = client.get(
+            f"/api/v1/materials/physiology/boundary-controls/{item['id']}", headers=headers
+        ).json()
+        if candidate["media"]:
+            media_material = candidate
+            break
+    assert media_material is not None
+    media = client.get(
+        f"/api/v1/materials/physiology/boundary-controls/{media_material['id']}/media/0",
+        headers=headers,
+    )
+    assert media.status_code == 200
+    assert media.content
+
+
+def test_operative_surgery_volumes_and_material_round_trip():
+    """Реальные operative_surgery.json: 4 тома, 61 тема — проверяем, что раздел "Тома"
+    (сгруппированный, как у Фармакологии) действительно доводит студента до текста конкретной
+    темы, с правильным prev/next внутри тома (см. web_api/static_content.py)."""
+    headers = _auth_headers()
+    detail = client.get("/api/v1/subjects/operative_surgery", headers=headers)
+    assert detail.status_code == 200, detail.text
+    sections = {section["id"]: section for section in detail.json()["sections"]}
+    assert sections["volumes"]["kind"] == "grouped"
+    assert sections["volumes"]["item_count"] == 61  # см. отчёт аудита: 61 тема в 4 томах
+
+    volumes = client.get("/api/v1/subjects/operative_surgery/sections/volumes", headers=headers).json()
+    assert [g["id"] for g in volumes["groups"]] == ["I", "II", "III", "IV"]
+    volume_i = next(g for g in volumes["groups"] if g["id"] == "I")
+    assert volume_i["item_count"] == 10  # см. отчёт аудита: том I — 10 тем
+
+    group = client.get(
+        "/api/v1/subjects/operative_surgery/sections/volumes/groups/I", headers=headers
+    ).json()
+    assert len(group["items"]) == 10
+    first_topic = group["items"][0]
+    assert first_topic["id"] == "01"
+
+    material = client.get(
+        f"/api/v1/materials/operative_surgery/volumes/{first_topic['id']}", headers=headers
+    )
+    assert material.status_code == 200, material.text
+    body = material.json()
+    assert body["title"] == first_topic["title"]
+    assert body["content_html"]  # реальный текст подтем, не заглушка
+    assert body["group_id"] == "I"
+    assert body["prev_id"] is None  # первая тема тома
+    assert body["next_id"] == group["items"][1]["id"]
+
+
+def _set_anatomy_maintenance_override(value) -> None:
+    """anatomy_maintenance_mode_enabled() reads stats["anatomy_maintenance_override"] from disk on
+    EVERY request (web_api/deps.py::get_fresh_bot_module calls bot_state.refresh_stats(), which
+    replaces tb.stats with a fresh tb.load_stats() read of STATS_FILE) -- an in-memory-only mutation
+    of tb.stats would just get overwritten by the very next request, so this writes straight to the
+    test's own isolated stats.json on disk, the same file the test bootstrap at the top of this
+    module initialized to {}."""
+    stats_path = os.path.join(os.environ["STATS_DIR"], "stats.json")
+    with open(stats_path, "r", encoding="utf-8") as stream:
+        data = json.load(stream)
+    data["anatomy_maintenance_override"] = value
+    with open(stats_path, "w", encoding="utf-8") as stream:
+        json.dump(data, stream)
+
+
+def _first_anatomy_topic_id(module_key: str) -> str:
+    """Реальный id темы читается напрямую из anatomy.json, а не через /sections/course/groups/{id}
+    -- у платного модуля этот эндпоинт сам гейтится (403), так что через API список тем платного
+    модуля недоступен ДО того, как есть подписка, ровно как и в самом боте (см. cb_anatomy_section)."""
+    with open("anatomy.json", encoding="utf-8") as stream:
+        anatomy = json.load(stream)
+    return next(iter(anatomy[module_key]["topics"]))
+
+
+def test_anatomy_default_maintenance_mode_locks_every_module_for_non_admin():
+    """Свежая база (админ ни разу не трогал тумблер техрежима -- см. CLAUDE.md "Anatomy maintenance
+    mode") -- ANATOMY_MAINTENANCE_MODE=True по умолчанию закрывает ВЕСЬ раздел, включая бесплатные
+    модули, для всех, кроме админа/помощника. Список модулей при этом всё равно виден (см.
+    "hide vs relabel" в CLAUDE.md) -- только помечен locked, а не скрыт."""
+    _set_anatomy_maintenance_override(None)
+    headers = _auth_headers()
+    section = client.get("/api/v1/subjects/anatomy/sections/course", headers=headers).json()
+    assert len(section["groups"]) == 10  # см. отчёт по данным: 10 модулей Кафарова
+    assert all(g["locked"] for g in section["groups"])
+    assert all("технич" in g["locked_reason"].lower() for g in section["groups"])
+
+    free_group_id = section["groups"][0]["id"]
+    resp = client.get(
+        f"/api/v1/subjects/anatomy/sections/course/groups/{free_group_id}", headers=headers
+    )
+    assert resp.status_code == 403
+
+
+def test_anatomy_free_module_open_and_paid_module_locked_once_maintenance_is_off():
+    """С выключенным техрежимом (админ явно открыл раздел) вступает в силу обычный
+    ANATOMY_FREE_SECTIONS-гейт по модулям -- module1_osteology бесплатен всем,
+    module7_nervous нет (см. handlers/anatomy.py::ANATOMY_FREE_SECTIONS)."""
+    _set_anatomy_maintenance_override(False)
+    headers = _auth_headers()
+
+    section = client.get("/api/v1/subjects/anatomy/sections/course", headers=headers).json()
+    groups_by_id = {g["id"]: g for g in section["groups"]}
+    assert groups_by_id["module1_osteology"]["locked"] is False
+    assert groups_by_id["module1_osteology"]["locked_reason"] is None
+    assert groups_by_id["module7_nervous"]["locked"] is True
+    assert "подписк" in groups_by_id["module7_nervous"]["locked_reason"].lower()
+
+    group = client.get(
+        "/api/v1/subjects/anatomy/sections/course/groups/module1_osteology", headers=headers
+    ).json()
+    assert group["items"], "module1_osteology must have real topics"
+    first_topic = group["items"][0]
+
+    material = client.get(
+        f"/api/v1/materials/anatomy/course/{first_topic['id']}", headers=headers
+    )
+    assert material.status_code == 200, material.text
+    body = material.json()
+    assert body["title"] == first_topic["title"]
+    assert body["content_html"]  # реальный текст, не заглушка -- модуль бесплатный
+    assert body["group_id"] == "module1_osteology"
+    assert body["sources"] == []
+
+    locked_group_resp = client.get(
+        "/api/v1/subjects/anatomy/sections/course/groups/module7_nervous", headers=headers
+    )
+    assert locked_group_resp.status_code == 403
+
+    nervous_topic_id = _first_anatomy_topic_id("module7_nervous")
+    locked_material_resp = client.get(
+        f"/api/v1/materials/anatomy/course/{nervous_topic_id}", headers=headers
+    )
+    assert locked_material_resp.status_code == 403
+
+
+def test_anatomy_unknown_module_is_not_found_not_locked():
+    _set_anatomy_maintenance_override(False)
+    headers = _auth_headers()
+    resp = client.get(
+        "/api/v1/subjects/anatomy/sections/course/groups/module99_missing", headers=headers
+    )
+    assert resp.status_code == 404
+
+
+def test_anatomy_exam_exposes_all_parts_without_leaking_answer_keys():
+    """Exam tests stay available independently from the course maintenance/subscription gate."""
+    _set_anatomy_maintenance_override(None)
+    headers = _auth_headers()
+    parts = client.get("/api/v1/anatomy/exam/parts", headers=headers)
+    assert parts.status_code == 200, parts.text
+    assert len(parts.json()) == 10
+    assert sum(part["question_count"] for part in parts.json()) == 1040
+
+    first_part = parts.json()[0]
+    questions = client.get(
+        f"/api/v1/anatomy/exam/parts/{first_part['id']}/questions", headers=headers
+    )
+    assert questions.status_code == 200, questions.text
+    assert len(questions.json()) == first_part["question_count"]
+    first_question = questions.json()[0]
+    assert set(first_question) == {"id", "num", "question", "option_letters", "options"}
+    assert "correct" not in first_question and "correct_index" not in first_question
+    assert len(first_question["options"]) in (4, 5)
+
+
+def test_anatomy_exam_answer_returns_verified_key_and_explanation_only_after_choice():
+    headers = _auth_headers()
+    questions = client.get("/api/v1/anatomy/exam/parts/1/questions", headers=headers).json()
+    first_question = questions[0]
+    with open("anatomy_exam_test.json", encoding="utf-8") as stream:
+        source = json.load(stream)
+    source_question = source["parts"][0]["questions"][0]
+    letters = first_question["option_letters"]
+    correct_index = letters.index(source_question["correct"])
+
+    answer = client.post(
+        f"/api/v1/anatomy/exam/questions/{first_question['num']}/answer",
+        headers=headers,
+        json={"selected_index": correct_index},
+    )
+    assert answer.status_code == 200, answer.text
+    body = answer.json()
+    assert body["correct"] is True
+    assert body["correct_index"] == correct_index
+    assert body["correct_letter"] == source_question["correct"]
+    assert body["correct_text"] == source_question["options"][source_question["correct"]]
+    assert body["explanation"] == tb.ANATOMY_EXAM_TEST_EXPLANATIONS[str(first_question["num"])]
+
+    invalid = client.post(
+        f"/api/v1/anatomy/exam/questions/{first_question['num']}/answer",
+        headers=headers,
+        json={"selected_index": 99},
+    )
+    assert invalid.status_code == 400
+
+
+def test_anatomy_exam_flash_returns_fifty_unique_questions():
+    response = client.get("/api/v1/anatomy/exam/flash", headers=_auth_headers())
+    assert response.status_code == 200, response.text
+    ids = [question["id"] for question in response.json()]
+    assert len(ids) == 50
+    assert len(set(ids)) == 50
+
+
+def test_histology_default_locked_for_user_with_no_trial_no_subscription_no_referrals():
+    """Свежий тестовый пользователь никогда не открывал раздел в самом боте -- значит, пробный
+    период (выдаётся только стейтфул-версией гейта, histology_gate_ok, побочным эффектом визита в
+    боте) не выдан, и histology_access_ok(user_id) честно возвращает False. Список диагностик при
+    этом всё равно виден (см. "hide vs relabel" в CLAUDE.md), только помечен locked."""
+    headers = _auth_headers()
+    section = client.get("/api/v1/subjects/histology/sections/specimens", headers=headers).json()
+    assert len(section["groups"]) == 5  # см. отчёт по данным: 5 диагностик
+    assert all(g["locked"] for g in section["groups"])
+    assert all(g["locked_reason"] for g in section["groups"])
+
+    first_group_id = section["groups"][0]["id"]
+    resp = client.get(
+        f"/api/v1/subjects/histology/sections/specimens/groups/{first_group_id}", headers=headers
+    )
+    assert resp.status_code == 403
+
+
+def test_histology_specimen_material_round_trip_once_referral_threshold_is_met():
+    """Гейт Гистологии -- один на весь предмет (не по группам, как у Анатомии) -- см.
+    handlers/histology.py::histology_access_ok. Отдельный user_id (не тот, что использует
+    большинство тестов файла), чтобы не менять состояние доступа для остальных тестов."""
+    import telegram_bot as tb  # уже импортирован предыдущими тестами (лениво, через bot_state)
+
+    unlocked_user_id = 900_444_555_666
+    tb.stats["total_users"].add(unlocked_user_id)
+    current_month = tb.local_today().strftime("%Y-%m")
+    tb.stats["referral_monthly"][str(unlocked_user_id)] = {"month": current_month, "count": 2}
+    tb.save_stats()
+
+    headers = _auth_headers(unlocked_user_id)
+    section = client.get("/api/v1/subjects/histology/sections/specimens", headers=headers).json()
+    assert all(g["locked"] is False for g in section["groups"])
+    assert all(g["locked_reason"] is None for g in section["groups"])
+
+    diagnostika_3 = next(g for g in section["groups"] if g["id"] == "diagnostika_3")
+    assert diagnostika_3["item_count"] == 23  # см. отчёт по данным
+
+    group = client.get(
+        "/api/v1/subjects/histology/sections/specimens/groups/diagnostika_1", headers=headers
+    ).json()
+    assert len(group["items"]) == 10  # см. отчёт по данным
+    first_specimen = group["items"][0]
+
+    material = client.get(
+        f"/api/v1/materials/histology/specimens/{first_specimen['id']}", headers=headers
+    )
+    assert material.status_code == 200, material.text
+    body = material.json()
+    assert body["title"] == first_specimen["title"]
+    assert body["content_html"]  # реальный протокол препарата, не заглушка
+    assert "Окраска" in body["content_html"]
+    assert body["group_id"] == "diagnostika_1"
+    assert body["prev_id"] is None
+    assert body["next_id"] == group["items"][1]["id"]
+
+
+def test_histology_exam_catalog_practical_reveal_and_grade():
+    unlocked_user_id = 900_444_555_777
+    tb.stats["total_users"].add(unlocked_user_id)
+    current_month = tb.local_today().strftime("%Y-%m")
+    tb.stats["referral_monthly"][str(unlocked_user_id)] = {"month": current_month, "count": 2}
+    tb.save_stats()
+    headers = _auth_headers(unlocked_user_id)
+
+    catalog = client.get("/api/v1/histology/exam/catalog", headers=headers)
+    assert catalog.status_code == 200, catalog.text
+    body = catalog.json()
+    assert body["title"] == "ЭКЗАМЕН"
+    assert body["total_specimens"] == 71
+    assert len(body["groups"]) == 5
+
+    practical = client.get("/api/v1/histology/exam/practical?limit=10", headers=headers)
+    assert practical.status_code == 200, practical.text
+    questions = practical.json()
+    assert len(questions) == 10
+    assert all("title" not in question for question in questions)
+
+    specimen_id = questions[0]["id"]
+    detail = client.get(f"/api/v1/histology/exam/specimens/{specimen_id}", headers=headers)
+    assert detail.status_code == 200
+    assert detail.json()["protocol"]
+    assert detail.json()["images"]
+
+    reveal = client.post(f"/api/v1/histology/exam/specimens/{specimen_id}/reveal", headers=headers)
+    assert reveal.status_code == 200
+    assert reveal.json()["title"]
+
+    grade = client.post(
+        f"/api/v1/histology/exam/specimens/{specimen_id}/grade",
+        headers=headers,
+        json={"known": False, "scope": "all"},
+    )
+    assert grade.status_code == 200
+    assert specimen_id in grade.json()["mistake_ids"]
+
+    repeated = client.get("/api/v1/histology/exam/practical?scope=mistakes&limit=10", headers=headers)
+    assert repeated.status_code == 200
+    assert {item["id"] for item in repeated.json()} == {specimen_id}
+
+
+def test_histology_unknown_diagnostic_is_not_found_not_locked():
+    headers = _auth_headers(900_444_555_666)  # уже разблокирован предыдущим тестом
+    resp = client.get(
+        "/api/v1/subjects/histology/sections/specimens/groups/diagnostika_99", headers=headers
+    )
+    assert resp.status_code == 404
+
+
+def test_biology_default_locked_for_user_with_no_subscription_no_referrals():
+    """Биология гейтится тем же реферальным middleware, что Физика/Химия (has_subject_access) --
+    свежий тестовый пользователь без подписки/рефералов честно заблокирован. Список билетов
+    (группы) всё равно виден с locked=true; раздел "questions" (плоский, сами заголовки вопросов
+    зачёта уже содержательны) отдаёт 403 целиком, а не список с пометками -- см. docstring гейта
+    Биологии в routers/subjects.py."""
+    # The bot blocks only AFTER the grace warnings; use that same exhausted state.
+    tb.stats['referral_warnings']['900777888999'] = {'count': tb.REFERRAL_WARNING_THRESHOLD, 'last_warn_at': time.time()}
+    tb.save_stats()
+    tb._stats_executor.submit(lambda: None).result()
+    headers = _auth_headers()
+    section = client.get("/api/v1/subjects/biology/sections/tickets", headers=headers).json()
+    assert len(section["groups"]) == 40  # см. отчёт по данным: 40 билетов
+    assert all(g["locked"] for g in section["groups"])
+    assert all(g["locked_reason"] for g in section["groups"])
+
+    first_ticket_id = section["groups"][0]["id"]
+    locked_group = client.get(
+        f"/api/v1/subjects/biology/sections/tickets/groups/{first_ticket_id}", headers=headers
+    )
+    assert locked_group.status_code == 403
+
+    locked_questions = client.get("/api/v1/subjects/biology/sections/questions", headers=headers)
+    assert locked_questions.status_code == 403
+
+
+def test_biology_ticket_and_question_bank_material_round_trip_once_referral_threshold_is_met():
+    import telegram_bot as tb  # уже импортирован предыдущими тестами (лениво, через bot_state)
+
+    unlocked_user_id = 900_555_666_777
+    tb.stats["total_users"].add(unlocked_user_id)
+    current_month = tb.local_today().strftime("%Y-%m")
+    tb.stats["referral_monthly"][str(unlocked_user_id)] = {"month": current_month, "count": 2}
+    tb.save_stats()
+
+    headers = _auth_headers(unlocked_user_id)
+    detail = client.get("/api/v1/subjects/biology", headers=headers)
+    assert detail.status_code == 200, detail.text
+    sections = {s["id"]: s for s in detail.json()["sections"]}
+    assert sections["tickets"]["item_count"] == 120  # см. отчёт по данным: 40 билетов * 3 вопроса
+    assert sections["questions"]["item_count"] == 185  # см. отчёт по данным
+
+    tickets_section = client.get("/api/v1/subjects/biology/sections/tickets", headers=headers).json()
+    assert all(g["locked"] is False for g in tickets_section["groups"])
+    first_ticket_id = tickets_section["groups"][0]["id"]
+
+    ticket_group = client.get(
+        f"/api/v1/subjects/biology/sections/tickets/groups/{first_ticket_id}", headers=headers
+    ).json()
+    assert len(ticket_group["items"]) == 3  # см. отчёт по данным: 3 вопроса на билет
+    first_question = ticket_group["items"][0]
+
+    ticket_material = client.get(
+        f"/api/v1/materials/biology/tickets/{first_question['id']}", headers=headers
+    )
+    assert ticket_material.status_code == 200, ticket_material.text
+    ticket_body = ticket_material.json()
+    assert ticket_body["title"] == first_question["title"]
+    assert ticket_body["content_html"]  # реальный ответ, не заглушка
+    assert ticket_body["group_id"] == first_ticket_id
+    assert ticket_body["prev_id"] is None
+    assert ticket_body["next_id"] == ticket_group["items"][1]["id"]
+
+    questions_section = client.get("/api/v1/subjects/biology/sections/questions", headers=headers)
+    assert questions_section.status_code == 200, questions_section.text
+    first_bank_question = questions_section.json()["items"][0]
+
+    bank_material = client.get(
+        f"/api/v1/materials/biology/questions/{first_bank_question['id']}", headers=headers
+    )
+    assert bank_material.status_code == 200, bank_material.text
+    bank_body = bank_material.json()
+    assert bank_body["title"] == first_bank_question["title"]
+    assert bank_body["content_html"]
+    assert bank_body["group_id"] is None
+    assert bank_body["prev_id"] is None
+
+
+def test_biology_unknown_ticket_group_is_not_found_not_locked():
+    headers = _auth_headers(900_555_666_777)  # уже разблокирован предыдущим тестом
+    resp = client.get(
+        "/api/v1/subjects/biology/sections/tickets/groups/does-not-exist", headers=headers
+    )
+    assert resp.status_code == 404
+
+
+def test_chemistry_default_locked_for_user_with_no_subscription_no_referrals():
+    """Химия использует ДВА независимых гейта (см. docstring _check_chemistry_access /
+    _check_chemistry_tickets_access в routers/subjects.py): обычный has_subject_access для
+    theory/tasks/labs, и более строгий chemistry_tickets_access_ok для theory_tickets/
+    practice_tickets. Свежий пользователь без подписки/рефералов заблокирован по обоим сразу.
+    theory/labs/practice_tickets — плоские/безгрупповые разделы, 403 целиком; tasks/
+    theory_tickets — группированные, список групп виден с locked=true (hide vs relabel)."""
+    # The bot blocks only AFTER the grace warnings; use that same exhausted state.
+    tb.stats['referral_warnings']['900777888999'] = {'count': tb.REFERRAL_WARNING_THRESHOLD, 'last_warn_at': time.time()}
+    tb.save_stats()
+    tb._stats_executor.submit(lambda: None).result()
+    headers = _auth_headers()
+
+    theory_resp = client.get("/api/v1/subjects/chemistry/sections/theory", headers=headers)
+    assert theory_resp.status_code == 403
+
+    labs_resp = client.get("/api/v1/subjects/chemistry/sections/labs", headers=headers)
+    assert labs_resp.status_code == 403
+
+    practice_tickets_resp = client.get(
+        "/api/v1/subjects/chemistry/sections/practice_tickets", headers=headers
+    )
+    assert practice_tickets_resp.status_code == 403
+
+    tasks_section = client.get("/api/v1/subjects/chemistry/sections/tasks", headers=headers).json()
+    assert len(tasks_section["groups"]) == 15  # см. отчёт по данным: 15 тем задач
+    assert all(g["locked"] for g in tasks_section["groups"])
+    assert all(g["locked_reason"] for g in tasks_section["groups"])
+    first_task_group_id = tasks_section["groups"][0]["id"]
+    locked_tasks_group = client.get(
+        f"/api/v1/subjects/chemistry/sections/tasks/groups/{first_task_group_id}", headers=headers
+    )
+    assert locked_tasks_group.status_code == 403
+
+    theory_tickets_section = client.get(
+        "/api/v1/subjects/chemistry/sections/theory_tickets", headers=headers
+    ).json()
+    assert len(theory_tickets_section["groups"]) == 11  # см. отчёт по данным: 11 билетов
+    assert all(g["locked"] for g in theory_tickets_section["groups"])
+    assert all(g["locked_reason"] for g in theory_tickets_section["groups"])
+    first_ticket_id = theory_tickets_section["groups"][0]["id"]
+    locked_ticket_group = client.get(
+        f"/api/v1/subjects/chemistry/sections/theory_tickets/groups/{first_ticket_id}", headers=headers
+    )
+    assert locked_ticket_group.status_code == 403
+
+
+def test_chemistry_full_round_trip_once_referral_threshold_is_met():
+    """REFERRAL_FULL_ACCESS_THRESHOLD рефералов в этом месяце удовлетворяет ОБА гейта Химии разом
+    (обычный has_subject_access и более строгий chemistry_tickets_access_ok — см.
+    services/access.py::chemistry_tickets_access_ok), так что один и тот же грант открывает
+    все 5 разделов. Отдельный user_id, чтобы не трогать состояние доступа остальных тестов."""
+    import telegram_bot as tb  # уже импортирован предыдущими тестами (лениво, через bot_state)
+
+    unlocked_user_id = 900_222_333_444
+    tb.stats["total_users"].add(unlocked_user_id)
+    current_month = tb.local_today().strftime("%Y-%m")
+    tb.stats["referral_monthly"][str(unlocked_user_id)] = {"month": current_month, "count": 2}
+    tb.save_stats()
+
+    headers = _auth_headers(unlocked_user_id)
+    detail = client.get("/api/v1/subjects/chemistry", headers=headers)
+    assert detail.status_code == 200, detail.text
+    sections = {s["id"]: s for s in detail.json()["sections"]}
+    assert sections["theory"]["item_count"] == 16  # см. отчёт по данным
+    assert sections["tasks"]["item_count"] == 75  # 15 тем * (1 карточка формул + N задач)
+    assert sections["labs"]["item_count"] == 6
+    assert sections["theory_tickets"]["item_count"] == 22  # 11 билетов * 2 вопроса
+    assert sections["practice_tickets"]["item_count"] == 12
+
+    # theory: плоский раздел, содержательный текст темы
+    theory_section = client.get("/api/v1/subjects/chemistry/sections/theory", headers=headers).json()
+    first_theory_item = theory_section["items"][0]
+    theory_material = client.get(
+        f"/api/v1/materials/chemistry/theory/{first_theory_item['id']}", headers=headers
+    )
+    assert theory_material.status_code == 200, theory_material.text
+    theory_body = theory_material.json()
+    assert theory_body["title"] == first_theory_item["title"]
+    assert theory_body["content_html"]
+    assert theory_body["group_id"] is None
+
+    # tasks: группированный раздел -- первая карточка группы это "Формулы и алгоритм"
+    tasks_section = client.get("/api/v1/subjects/chemistry/sections/tasks", headers=headers).json()
+    assert all(g["locked"] is False for g in tasks_section["groups"])
+    first_task_group_id = tasks_section["groups"][0]["id"]
+    task_group = client.get(
+        f"/api/v1/subjects/chemistry/sections/tasks/groups/{first_task_group_id}", headers=headers
+    ).json()
+    assert task_group["items"], "task group must have at least the formulas card"
+    formulas_item = task_group["items"][0]
+    assert formulas_item["id"].endswith("_formulas")
+    formulas_material = client.get(
+        f"/api/v1/materials/chemistry/tasks/{formulas_item['id']}", headers=headers
+    )
+    assert formulas_material.status_code == 200, formulas_material.text
+    assert formulas_material.json()["group_id"] == first_task_group_id
+    if len(task_group["items"]) > 1:
+        task_item = task_group["items"][1]
+        task_material = client.get(
+            f"/api/v1/materials/chemistry/tasks/{task_item['id']}", headers=headers
+        )
+        assert task_material.status_code == 200, task_material.text
+        task_body = task_material.json()
+        assert task_body["group_id"] == first_task_group_id
+        assert task_body["content_html"]
+
+    # labs: плоский раздел, реальная методика + вывод
+    labs_section = client.get("/api/v1/subjects/chemistry/sections/labs", headers=headers).json()
+    first_lab = labs_section["items"][0]
+    lab_material = client.get(
+        f"/api/v1/materials/chemistry/labs/{first_lab['id']}", headers=headers
+    )
+    assert lab_material.status_code == 200, lab_material.text
+    lab_body = lab_material.json()
+    assert lab_body["title"] == first_lab["title"]
+    assert lab_body["content_html"]
+    assert lab_body["group_id"] is None
+
+    # theory_tickets: группированный раздел, вопрос-ответ внутри билета
+    theory_tickets_section = client.get(
+        "/api/v1/subjects/chemistry/sections/theory_tickets", headers=headers
+    ).json()
+    assert all(g["locked"] is False for g in theory_tickets_section["groups"])
+    first_ticket_id = theory_tickets_section["groups"][0]["id"]
+    ticket_group = client.get(
+        f"/api/v1/subjects/chemistry/sections/theory_tickets/groups/{first_ticket_id}", headers=headers
+    ).json()
+    assert ticket_group["items"]
+    first_ticket_question = ticket_group["items"][0]
+    ticket_material = client.get(
+        f"/api/v1/materials/chemistry/theory_tickets/{first_ticket_question['id']}", headers=headers
+    )
+    assert ticket_material.status_code == 200, ticket_material.text
+    ticket_body = ticket_material.json()
+    assert ticket_body["title"] == first_ticket_question["title"]
+    assert ticket_body["content_html"]
+    assert ticket_body["group_id"] == first_ticket_id
+
+    # practice_tickets: плоский раздел
+    practice_tickets_section = client.get(
+        "/api/v1/subjects/chemistry/sections/practice_tickets", headers=headers
+    ).json()
+    first_practice_ticket = practice_tickets_section["items"][0]
+    practice_material = client.get(
+        f"/api/v1/materials/chemistry/practice_tickets/{first_practice_ticket['id']}", headers=headers
+    )
+    assert practice_material.status_code == 200, practice_material.text
+    practice_body = practice_material.json()
+    assert practice_body["title"] == first_practice_ticket["title"]
+    assert practice_body["content_html"]
+    assert practice_body["group_id"] is None
+
+
+def test_chemistry_unknown_task_group_and_ticket_group_are_not_found_not_locked():
+    headers = _auth_headers(900_222_333_444)  # уже разблокирован предыдущим тестом
+    resp = client.get(
+        "/api/v1/subjects/chemistry/sections/tasks/groups/does-not-exist", headers=headers
+    )
+    assert resp.status_code == 404
+    resp2 = client.get(
+        "/api/v1/subjects/chemistry/sections/theory_tickets/groups/does-not-exist", headers=headers
+    )
+    assert resp2.status_code == 404
+
+
+def test_physics_default_locked_for_user_with_no_subscription_no_referrals():
+    """Физика гейтится одним и тем же has_subject_access(user_id, "physics") на все семь разделов
+    (в отличие от Химии, без доп. ужесточения на билеты — см. docstring раздела "Физика" в
+    static_content.py). Свежий пользователь без подписки/рефералов заблокирован везде: три плоских
+    раздела (test/grade45/extra) 403-ят целиком, четыре группированных (tasks/task_tickets/
+    theory_tickets/test_tickets) показывают список групп с locked=true (hide vs relabel)."""
+    # The bot blocks only AFTER the grace warnings; use that same exhausted state.
+    tb.stats['referral_warnings']['900777888999'] = {'count': tb.REFERRAL_WARNING_THRESHOLD, 'last_warn_at': time.time()}
+    tb.save_stats()
+    tb._stats_executor.submit(lambda: None).result()
+    headers = _auth_headers()
+
+    test_resp = client.get("/api/v1/subjects/physics/sections/test", headers=headers)
+    assert test_resp.status_code == 403
+
+    grade45_resp = client.get("/api/v1/subjects/physics/sections/grade45", headers=headers)
+    assert grade45_resp.status_code == 403
+
+    extra_resp = client.get("/api/v1/subjects/physics/sections/extra", headers=headers)
+    assert extra_resp.status_code == 403
+
+    tasks_section = client.get("/api/v1/subjects/physics/sections/tasks", headers=headers).json()
+    assert len(tasks_section["groups"]) == 9  # см. отчёт по данным: 9 тем задач
+    assert all(g["locked"] for g in tasks_section["groups"])
+    assert all(g["locked_reason"] for g in tasks_section["groups"])
+    first_tasks_group_id = tasks_section["groups"][0]["id"]
+    locked_tasks_group = client.get(
+        f"/api/v1/subjects/physics/sections/tasks/groups/{first_tasks_group_id}", headers=headers
+    )
+    assert locked_tasks_group.status_code == 403
+
+    test_tickets_section = client.get(
+        "/api/v1/subjects/physics/sections/test_tickets", headers=headers
+    ).json()
+    assert len(test_tickets_section["groups"]) == 23  # см. отчёт по данным: 23 тестовых билета
+    assert all(g["locked"] for g in test_tickets_section["groups"])
+    first_test_ticket_id = test_tickets_section["groups"][0]["id"]
+    locked_test_ticket_group = client.get(
+        f"/api/v1/subjects/physics/sections/test_tickets/groups/{first_test_ticket_id}", headers=headers
+    )
+    assert locked_test_ticket_group.status_code == 403
+
+
+def test_physics_full_round_trip_once_referral_threshold_is_met():
+    """REFERRAL_FULL_ACCESS_THRESHOLD рефералов в этом месяце удовлетворяет has_subject_access --
+    один и тот же грант открывает все семь разделов физики разом. Отдельный user_id, чтобы не
+    трогать состояние доступа остальных тестов."""
+    import telegram_bot as tb  # уже импортирован предыдущими тестами (лениво, через bot_state)
+
+    unlocked_user_id = 900_111_222_333
+    tb.stats["total_users"].add(unlocked_user_id)
+    current_month = tb.local_today().strftime("%Y-%m")
+    tb.stats["referral_monthly"][str(unlocked_user_id)] = {"month": current_month, "count": 2}
+    tb.save_stats()
+
+    headers = _auth_headers(unlocked_user_id)
+    detail = client.get("/api/v1/subjects/physics", headers=headers)
+    assert detail.status_code == 200, detail.text
+    sections = {s["id"]: s for s in detail.json()["sections"]}
+    assert sections["test"]["item_count"] == 186  # см. отчёт по данным
+    assert sections["grade45"]["item_count"] == 60
+    assert sections["extra"]["item_count"] == 13
+    assert sections["tasks"]["item_count"] == 58  # 9 тем * (1 карточка формул + N задач)
+    assert sections["task_tickets"]["item_count"] == 40  # 8 билетов * N задач
+    assert sections["theory_tickets"]["item_count"] == 60  # 30 билетов * 2 вопроса
+    assert sections["test_tickets"]["item_count"] == 123  # 23 билета * (1 mcq-блок + N задач)
+
+    # test: плоский раздел, содержательный ответ вопроса
+    test_section = client.get("/api/v1/subjects/physics/sections/test", headers=headers).json()
+    first_test_item = test_section["items"][0]
+    test_material = client.get(
+        f"/api/v1/materials/physics/test/{first_test_item['id']}", headers=headers
+    )
+    assert test_material.status_code == 200, test_material.text
+    test_body = test_material.json()
+    assert test_body["title"] == first_test_item["title"]
+    assert test_body["content_html"]
+    assert test_body["group_id"] is None
+
+    # extra: плоский раздел с картинками у части вопросов
+    extra_section = client.get("/api/v1/subjects/physics/sections/extra", headers=headers).json()
+    extra_with_media = None
+    for item in extra_section["items"]:
+        material = client.get(f"/api/v1/materials/physics/extra/{item['id']}", headers=headers).json()
+        if material["media"]:
+            extra_with_media = material
+            break
+    assert extra_with_media is not None, "expected at least one extra question with an image"
+    media_resp = client.get(
+        f"/api/v1/materials/physics/extra/{extra_with_media['id']}/media/0", headers=headers
+    )
+    assert media_resp.status_code == 200
+    assert len(media_resp.content) > 0
+
+    # tasks: группированный раздел -- первая карточка группы это "Формулы и алгоритм"
+    tasks_section = client.get("/api/v1/subjects/physics/sections/tasks", headers=headers).json()
+    assert all(g["locked"] is False for g in tasks_section["groups"])
+    first_tasks_group_id = tasks_section["groups"][0]["id"]
+    tasks_group = client.get(
+        f"/api/v1/subjects/physics/sections/tasks/groups/{first_tasks_group_id}", headers=headers
+    ).json()
+    assert tasks_group["items"], "task group must have at least the formulas card"
+    formulas_item = tasks_group["items"][0]
+    assert formulas_item["id"].endswith("_formulas")
+    formulas_material = client.get(
+        f"/api/v1/materials/physics/tasks/{formulas_item['id']}", headers=headers
+    )
+    assert formulas_material.status_code == 200, formulas_material.text
+    assert formulas_material.json()["group_id"] == first_tasks_group_id
+
+    # task_tickets: группированный раздел, задачи без формул
+    task_tickets_section = client.get(
+        "/api/v1/subjects/physics/sections/task_tickets", headers=headers
+    ).json()
+    assert all(g["locked"] is False for g in task_tickets_section["groups"])
+    first_task_ticket_id = task_tickets_section["groups"][0]["id"]
+    task_ticket_group = client.get(
+        f"/api/v1/subjects/physics/sections/task_tickets/groups/{first_task_ticket_id}", headers=headers
+    ).json()
+    assert task_ticket_group["items"]
+    first_ticket_task = task_ticket_group["items"][0]
+    ticket_task_material = client.get(
+        f"/api/v1/materials/physics/task_tickets/{first_ticket_task['id']}", headers=headers
+    )
+    assert ticket_task_material.status_code == 200, ticket_task_material.text
+    ticket_task_body = ticket_task_material.json()
+    assert ticket_task_body["title"] == first_ticket_task["title"]
+    assert ticket_task_body["content_html"]
+    assert ticket_task_body["group_id"] == first_task_ticket_id
+
+    # theory_tickets: группированный раздел, вопрос-ответ внутри билета
+    theory_tickets_section = client.get(
+        "/api/v1/subjects/physics/sections/theory_tickets", headers=headers
+    ).json()
+    assert all(g["locked"] is False for g in theory_tickets_section["groups"])
+    first_theory_ticket_id = theory_tickets_section["groups"][0]["id"]
+    theory_ticket_group = client.get(
+        f"/api/v1/subjects/physics/sections/theory_tickets/groups/{first_theory_ticket_id}", headers=headers
+    ).json()
+    assert theory_ticket_group["items"]
+    first_theory_question = theory_ticket_group["items"][0]
+    theory_question_material = client.get(
+        f"/api/v1/materials/physics/theory_tickets/{first_theory_question['id']}", headers=headers
+    )
+    assert theory_question_material.status_code == 200, theory_question_material.text
+    theory_question_body = theory_question_material.json()
+    assert theory_question_body["title"] == first_theory_question["title"]
+    assert theory_question_body["content_html"]
+    assert theory_question_body["group_id"] == first_theory_ticket_id
+
+    # test_tickets: группированный раздел, МСQ-блок первым пунктом + задачи "Часть 2"
+    test_tickets_section = client.get(
+        "/api/v1/subjects/physics/sections/test_tickets", headers=headers
+    ).json()
+    assert all(g["locked"] is False for g in test_tickets_section["groups"])
+    first_test_ticket_id = test_tickets_section["groups"][0]["id"]
+    test_ticket_group = client.get(
+        f"/api/v1/subjects/physics/sections/test_tickets/groups/{first_test_ticket_id}", headers=headers
+    ).json()
+    assert test_ticket_group["items"]
+    mcq_item = test_ticket_group["items"][0]
+    assert mcq_item["id"].endswith("_mcq")
+    mcq_material = client.get(
+        f"/api/v1/materials/physics/test_tickets/{mcq_item['id']}", headers=headers
+    )
+    assert mcq_material.status_code == 200, mcq_material.text
+    mcq_body = mcq_material.json()
+    assert mcq_body["group_id"] == first_test_ticket_id
+    assert "✅" in mcq_body["content_html"]  # правильный вариант отмечен
+    if len(test_ticket_group["items"]) > 1:
+        task_item = test_ticket_group["items"][1]
+        task_material = client.get(
+            f"/api/v1/materials/physics/test_tickets/{task_item['id']}", headers=headers
+        )
+        assert task_material.status_code == 200, task_material.text
+        assert task_material.json()["group_id"] == first_test_ticket_id
+
+
+def test_physics_unknown_task_group_and_test_ticket_group_are_not_found_not_locked():
+    headers = _auth_headers(900_111_222_333)  # уже разблокирован предыдущим тестом
+    resp = client.get(
+        "/api/v1/subjects/physics/sections/tasks/groups/does-not-exist", headers=headers
+    )
+    assert resp.status_code == 404
+    resp2 = client.get(
+        "/api/v1/subjects/physics/sections/test_tickets/groups/does-not-exist", headers=headers
+    )
+    assert resp2.status_code == 404
+
+
 def test_media_endpoint_serves_real_file_when_present():
-    """Реальный урок с media -- Биохимия v2 (см. commit message) убрала свой единственный
-    раздел с картинками ("Введение", вместе с остальным неструктурированным конспектом), так
-    что теперь единственный предмет с media -- Фармакология, причём внутри ГРУППИРОВАННОГО
-    раздела (course/drug_comparison, 455 уроков). Обход поэтому заходит и в groups, а не
-    только в плоские секции, как раньше, когда единственный известный пример был плоским."""
+    """Serve the first real media attachment found in grouped course content."""
     headers = _auth_headers()
     for subject_id in ("pharmacology", "biochemistry"):
         subject = client.get(f"/api/v1/subjects/{subject_id}", headers=headers).json()
@@ -204,3 +1018,84 @@ def test_media_endpoint_serves_real_file_when_present():
                     assert len(media_resp.content) > 0
                     return
     pytest.fail("expected at least one lesson with media, found none")
+
+
+def _first_biochemistry_lesson() -> tuple[dict, str, str]:
+    course = next(course for course in tb.DYNAMIC_COURSES if course["id"] == "biochemistry")
+    section = next(section for section in course["sections"] if section["id"] == "foundations")
+    group = next(group for group in section["groups"] if group["id"] == "class_1")
+    return group["lessons"][0], section["id"], group["lessons"][0]["id"]
+
+
+def test_quiz_material_exposes_options_never_correct_index(monkeypatch):
+    """The generic quiz contract stays covered without restoring obsolete biochemistry data."""
+    lesson, section_id, lesson_id = _first_biochemistry_lesson()
+    monkeypatch.setitem(lesson, "quiz", {
+        "options": ["глюкоза", "аминокислоты", "пептон", "нуклеозид"],
+        "correct_index": 1,
+    })
+    headers = _auth_headers()
+    material = client.get(
+        f"/api/v1/materials/biochemistry/{section_id}/{lesson_id}", headers=headers
+    ).json()
+    assert material["quiz"] == {
+        "options": ["глюкоза", "аминокислоты", "пептон", "нуклеозид"],
+    }
+    assert "correct_index" not in material["quiz"]
+
+
+def test_quiz_answer_endpoint_reveals_correctness_only_after_answering(monkeypatch):
+    lesson, section_id, lesson_id = _first_biochemistry_lesson()
+    monkeypatch.setitem(lesson, "quiz", {
+        "options": ["глюкоза", "аминокислоты", "пептон", "нуклеозид"],
+        "correct_index": 1,
+    })
+    headers = _auth_headers()
+    correct = client.post(
+        f"/api/v1/materials/biochemistry/{section_id}/{lesson_id}/answer",
+        headers=headers, json={"selected_index": 1},
+    )
+    assert correct.status_code == 200
+    assert correct.json() == {"correct": True, "correct_index": 1}
+
+    wrong = client.post(
+        f"/api/v1/materials/biochemistry/{section_id}/{lesson_id}/answer",
+        headers=headers, json={"selected_index": 0},
+    )
+    assert wrong.status_code == 200
+    assert wrong.json() == {"correct": False, "correct_index": 1}
+
+
+def test_biochemistry_non_quiz_lesson_has_null_quiz_and_rejects_answer():
+    lesson, section_id, lesson_id = _first_biochemistry_lesson()
+    assert "quiz" not in lesson
+    headers = _auth_headers()
+    material = client.get(
+        f"/api/v1/materials/biochemistry/{section_id}/{lesson_id}", headers=headers
+    ).json()
+    assert material["quiz"] is None
+
+    resp = client.post(
+        f"/api/v1/materials/biochemistry/{section_id}/{lesson_id}/answer",
+        headers=headers, json={"selected_index": 0},
+    )
+    assert resp.status_code == 400
+
+
+def test_biochemistry_quiz_answer_out_of_range_index_rejected(monkeypatch):
+    lesson, section_id, lesson_id = _first_biochemistry_lesson()
+    monkeypatch.setitem(lesson, "quiz", {"options": ["а", "б"], "correct_index": 0})
+    headers = _auth_headers()
+    resp = client.post(
+        f"/api/v1/materials/biochemistry/{section_id}/{lesson_id}/answer",
+        headers=headers, json={"selected_index": 99},
+    )
+    assert resp.status_code == 400
+
+
+def test_quiz_answer_requires_auth():
+    resp = client.post(
+        "/api/v1/materials/biochemistry/foundations/b1_u1_p1/answer",
+        json={"selected_index": 1},
+    )
+    assert resp.status_code == 401

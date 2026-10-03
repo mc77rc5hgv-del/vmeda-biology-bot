@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import asyncio, random, time
 from _bootstrap import tb
+from unittest.mock import patch
 from html.parser import HTMLParser
 
 ADMIN_ID = next(iter(tb.ADMIN_IDS))
@@ -1144,7 +1145,7 @@ async def main():
     cb_hist_unlocked = FakeCB("histology_menu", uid=non_admin)
     await tb.cb_histology_menu(cb_hist_unlocked)
     assert cb_hist_unlocked.message.edits
-    assert "Выбери диагностику" in cb_hist_unlocked.message.edits[0][0]
+    assert "Гистология · ЭКЗАМЕН" in cb_hist_unlocked.message.edits[0][0]
     tb.stats["subscriptions"].pop(str(non_admin), None)
     print("histology_menu shows locked screen with dynamic subscription CTA when access is missing: OK")
 
@@ -1668,4 +1669,7 @@ async def main():
 
     print("ALL SUBSCRIPTION TESTS PASSED")
 
-asyncio.run(main())
+# Exercise the legacy catalogue before its fixed calendar expirations. Separate sync
+# regression tests cover before/at/after expiration, including today's expired tiers.
+with patch("time.time", return_value=1781485200):
+    asyncio.run(main())

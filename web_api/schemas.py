@@ -21,6 +21,55 @@ class TelegramAuthResponse(BaseModel):
     photo_url: str | None = None
 
 
+class QuizAnswerRequest(BaseModel):
+    selected_index: int
+
+
+class QuizAnswerResponse(BaseModel):
+    correct: bool
+    correct_index: int
+
+
+class AnatomyExamAnswerRequest(BaseModel):
+    selected_index: int
+
+
+class AnatomyExamAnswerResponse(BaseModel):
+    correct: bool
+    correct_index: int
+    correct_letter: str
+    correct_text: str
+    explanation: str
+
+
+class HistologyPracticalGradeRequest(BaseModel):
+    """Самооценка после показа ответа в практическом зачёте.
+
+    В гистологии ответ вводится не строкой: студент сначала рассматривает препарат, затем
+    открывает эталон и честно отмечает, узнал ли его. Поэтому сервер хранит ``known`` и на его
+    основе формирует устойчивый список ошибок для повторения.
+    """
+
+    known: bool
+    scope: str = "all"
+    attempt_id: str | None = None
+
+
+class LearningFlagRequest(BaseModel):
+    value: bool
+
+
+class LearningMaterialTouchRequest(BaseModel):
+    subject_id: str
+    section_id: str
+    material_id: str
+    subject_title: str = ""
+    section_title: str = ""
+    material_title: str = ""
+    material_order: int = 1
+    total_in_section: int = 1
+
+
 class MeResponse(BaseModel):
     """См. ТЗ §16 -- все поля здесь СЧИТАЕТ backend через уже существующие предикаты бота
     (services.access, реэкспортированные на telegram_bot), фронт их только показывает."""
@@ -33,3 +82,43 @@ class MeResponse(BaseModel):
     has_active_subscription: bool
     subscription_tier_title: str | None
     is_admin: bool
+
+
+class DashboardStatsResponse(BaseModel):
+    streak_days: int
+    xp: int
+    readiness_percent: int
+    daily_goal_minutes: int
+    minutes_left_today: int
+
+
+class AccessStatusResponse(BaseModel):
+    """Права и лимиты уже рассчитаны сервером; клиент не выводит их из названия тарифа."""
+    trial_available: bool = False
+    can_open_subject: bool
+    can_download: bool
+    can_use_ai: bool
+    ai_requests_left: int | None
+    subscription_expires_at: str | None
+    subscription_title: str | None
+    locked_reason: str | None
+
+
+class AiSolveRequest(BaseModel):
+    """mode="text" -- заполнен text, mode="photo" -- заполнен image_base64 (сырой base64, без
+    префикса "data:image/...;base64," -- клиент срезает его сам, см. apiClient.ts)."""
+    subject_id: str | None = None
+    mode: str
+    text: str | None = None
+    image_base64: str | None = None
+
+
+class AiSolveResponse(BaseModel):
+    """answer_html -- уже прогнан через ai.service.format_answer_html и НЕ содержит
+    confidence_note (та идёт отдельным полем -- см. web_api/routers/ai.py) -- клиент рендерит
+    его через DOMPurify, как и обычный материал (см. Material.tsx)."""
+    answer_html: str
+    low_confidence: bool
+    confidence_note: str | None
+    requests_left: int | None
+    session_active: bool

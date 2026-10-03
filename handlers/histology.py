@@ -8,6 +8,8 @@ get_referral_count, cheapest_histology_tier, _broadcast, HISTOLOGY, HISTOLOGY_IM
 определены в его модульном пространстве имён — обращения к ним разрешаются во время вызова
 хендлера, не во время импорта этого файла."""
 import os
+import asyncio
+import uuid
 import random
 import time
 
@@ -18,6 +20,13 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 import telegram_bot as tb
 
 router = Router()
+
+
+async def _learning_call(function, *args):
+    if os.environ.get("BOT_SYNC_MODE") == "owner":
+        return await asyncio.to_thread(function, *args)
+    return function(*args)
+
 
 HISTOLOGY_PUBLIC = False  # когда раздел будет готов для всех — переключить на True
 HISTOLOGY_PROMO_SECONDS = 24 * 60 * 60
@@ -43,7 +52,10 @@ def histology_permanently_unlocked(user_id: int) -> bool:
     )
 
 def histology_access_ok(user_id: int) -> bool:
-    return histology_permanently_unlocked(user_id) or has_histology_temp_access(user_id)
+    if histology_permanently_unlocked(user_id):
+        return True
+    warnings = tb.stats['histology_warnings'].get(str(user_id), {})
+    return has_histology_temp_access(user_id) and warnings.get('count', 0) < HISTOLOGY_WARNING_THRESHOLD
 
 async def histology_gate_ok(callback: CallbackQuery) -> bool:
     """Единый шлюз для контента гистологии — как у Биологии/Физики/Химии, только пробное окно
@@ -55,19 +67,9 @@ async def histology_gate_ok(callback: CallbackQuery) -> bool:
     Возвращает True, если хендлер должен продолжить (и сам обязан вызвать callback.answer()).
     Возвращает False, если гейт уже сам ответил на callback и отредактировал сообщение."""
     user_id = callback.from_user.id
-    user_id_str = str(user_id)
-
-    if histology_permanently_unlocked(user_id):
-        return True
-
-    if not has_histology_temp_access(user_id) and user_id_str not in tb.stats["histology_warnings"]:
-        tb.stats["histology_temp_access"][user_id_str] = time.time() + tb.TEMP_ACCESS_GRANT_SECONDS
-        tb.save_stats()
-        return True
-
-    entry = tb.stats["histology_warnings"].get(user_id_str, {"count": 0, "last_warn_at": 0})
-
-    if not has_histology_temp_access(user_id) or entry["count"] >= HISTOLOGY_WARNING_THRESHOLD:
+    from services.content_access import enter
+    decision = enter(tb, user_id, 'histology')
+    if not decision['allowed']:
         await callback.answer("🚨 Гистология закрыта — пригласи друзей или оформи подписку!", show_alert=True)
         await tb.safe_edit_text(
             callback.message,
@@ -78,12 +80,8 @@ async def histology_gate_ok(callback: CallbackQuery) -> bool:
         return False
 
     now = time.time()
-    if now - entry.get("last_warn_at", 0) >= HISTOLOGY_WARNING_COOLDOWN_SECONDS:
-        entry["count"] += 1
-        entry["last_warn_at"] = now
-        tb.stats["histology_warnings"][user_id_str] = entry
-        tb.save_stats()
-        remaining = HISTOLOGY_WARNING_THRESHOLD - entry["count"]
+    if decision['warning']:
+        remaining = decision['warnings_remaining']
         days_left = max(int((get_histology_temp_expiry(user_id) - now) // 86400), 0)
         cheapest_histology = tb.cheapest_histology_tier()
         price_rub = cheapest_histology["price_rub"]
@@ -296,6 +294,9 @@ HISTOLOGY_GUESS_SESSIONS: dict[int, dict] = {}
 
 
 def get_histology_learning(user_id: int) -> dict:
+    if os.environ.get('BOT_SYNC_MODE') == 'owner':
+        from services.histology_sync import entry
+        return entry(tb, user_id)
     key = str(user_id)
     entry = tb.stats.setdefault("histology_learning", {}).setdefault(key, {})
     entry.setdefault("attempts", 0)
@@ -306,7 +307,11 @@ def get_histology_learning(user_id: int) -> dict:
     return entry
 
 
-def record_histology_result(user_id: int, specimen_id: str, known: bool) -> dict:
+def record_histology_result(user_id: int, specimen_id: str, known: bool, event_id: str | None = None) -> dict:
+    if os.environ.get('BOT_SYNC_MODE') == 'owner':
+        from web_api import learning
+        learning.record_histology_attempt(user_id, specimen_id, known, event_id=event_id or uuid.uuid4().hex)
+        return {}
     entry = get_histology_learning(user_id)
     entry["attempts"] += 1
     if known:
@@ -362,6 +367,7 @@ def start_histology_guess_session(user_id: int, scope: str) -> bool:
         return False
     size = min(HISTOLOGY_GUESS_SESSION_SIZE, len(pool))
     HISTOLOGY_GUESS_SESSIONS[user_id] = {
+        'id': uuid.uuid4().hex[:12],
         "scope": scope,
         "items": random.sample(pool, size),
         "index": 0,
@@ -370,17 +376,19 @@ def start_histology_guess_session(user_id: int, scope: str) -> bool:
     }
     return True
 
-def get_histology_guess_question_keyboard():
+def get_histology_guess_question_keyboard(session=None):
     builder = InlineKeyboardBuilder()
-    builder.button(text="🙈 Показать ответ", callback_data="histology_guess_show_answer")
+    suffix = f":{session['id']}:{session['index']}" if session else ''
+    builder.button(text="🙈 Показать ответ", callback_data="histology_guess_show_answer" + suffix)
     builder.button(text="🛑 Закончить", callback_data="histology_guess_stop")
     builder.adjust(1)
     return builder.as_markup()
 
-def get_histology_guess_answer_keyboard():
+def get_histology_guess_answer_keyboard(session=None):
     builder = InlineKeyboardBuilder()
-    builder.button(text="✅ Угадал(а)", callback_data="histology_guess_know")
-    builder.button(text="❌ Не угадал(а)", callback_data="histology_guess_dont_know")
+    suffix = f":{session['id']}:{session['index']}" if session else ''
+    builder.button(text="✅ Угадал(а)", callback_data="histology_guess_know" + suffix)
+    builder.button(text="❌ Не угадал(а)", callback_data="histology_guess_dont_know" + suffix)
     builder.adjust(2)
     builder.row(InlineKeyboardButton(text="🛑 Закончить", callback_data="histology_guess_stop"))
     return builder.as_markup()
@@ -404,7 +412,7 @@ async def render_histology_guess_question(callback: CallbackQuery, user_id: int)
     caption = f"🎓 {mode} — {session['index'] + 1}/{total}\n\nЧто это за препарат?"
     photo = FSInputFile(os.path.join(tb.HISTOLOGY_IMAGES_DIR, spec["guess_image"]))
     await callback.message.delete()
-    sent = await callback.message.answer_photo(photo, caption=caption, reply_markup=get_histology_guess_question_keyboard())
+    sent = await callback.message.answer_photo(photo, caption=caption, reply_markup=get_histology_guess_question_keyboard(session))
     session["msg"] = sent
 
 async def render_histology_guess_answer(user_id: int):
@@ -419,7 +427,7 @@ async def render_histology_guess_answer(user_id: int):
         lines.append(f"Увеличение: {spec['magnification']}")
     lines.append("")
     lines.append("Ты угадал(а)?")
-    await session["msg"].edit_caption(caption="\n".join(lines), reply_markup=get_histology_guess_answer_keyboard())
+    await session["msg"].edit_caption(caption="\n".join(lines), reply_markup=get_histology_guess_answer_keyboard(session))
 
 async def render_histology_guess_summary(user_id: int, aborted: bool = False):
     session = HISTOLOGY_GUESS_SESSIONS.pop(user_id, None)
@@ -440,38 +448,54 @@ async def cb_histology_guess_start(callback: CallbackQuery):
         return
     scope = callback.data.split(":", 1)[1]
     user_id = callback.from_user.id
-    if not start_histology_guess_session(user_id, scope):
+    if not await _learning_call(start_histology_guess_session, user_id, scope):
         message = "Ошибок для повторения пока нет" if scope == "mistakes" else "Препаратов пока нет"
         await callback.answer(message, show_alert=True)
         return
     await callback.answer()
     await render_histology_guess_question(callback, user_id)
 
-@router.callback_query(F.data == "histology_guess_show_answer")
+@router.callback_query(F.data.startswith("histology_guess_show_answer:"))
 async def cb_histology_guess_show_answer(callback: CallbackQuery):
     user_id = callback.from_user.id
-    if user_id not in HISTOLOGY_GUESS_SESSIONS:
+    session = HISTOLOGY_GUESS_SESSIONS.get(user_id)
+    fields = callback.data.split(':')
+    if not session or len(fields) != 3 or fields[1:] != [session['id'], str(session['index'])] or session.get('saving') or session['index'] >= len(session['items']):
         await callback.answer("Сессия истекла, начни заново", show_alert=True)
         return
-    await callback.answer()
     await render_histology_guess_answer(user_id)
+    await callback.answer()
 
-@router.callback_query(F.data.in_({"histology_guess_know", "histology_guess_dont_know"}))
+@router.callback_query(F.data.startswith('histology_guess_know:') | F.data.startswith('histology_guess_dont_know:'))
 async def cb_histology_guess_answer(callback: CallbackQuery):
     user_id = callback.from_user.id
     session = HISTOLOGY_GUESS_SESSIONS.get(user_id)
     if not session:
         await callback.answer("Сессия истекла, начни заново", show_alert=True)
         return
-    await callback.answer()
+    fields = callback.data.split(':')
+    if len(fields) != 3 or fields[1] != session.get('id') or fields[2] != str(session['index']) or session.get('saving'):
+        await callback.answer('Этот ответ уже обработан или вопрос устарел')
+        return
+    session['saving'] = True
     diag_key, spec_id = session["items"][session["index"]]
-    known = callback.data == "histology_guess_know"
-    record_histology_result(user_id, spec_id, known)
-    if known:
-        session["know"] += 1
-    else:
-        session["dont_know"] += 1
-    session["index"] += 1
+    known = fields[0] == "histology_guess_know"
+    try:
+        await _learning_call(record_histology_result, user_id, spec_id, known, f"bot:{session['id']}:{session['index']}")
+        if known:
+            session["know"] += 1
+        else:
+            session["dont_know"] += 1
+        session["index"] += 1
+    except Exception:
+        tb.logger.exception('Не удалось сохранить попытку гистологии')
+        await callback.answer('Ответ пока не сохранён. Повтори нажатие.', show_alert=True)
+        return
+    finally:
+        session['saving'] = False
+    await callback.answer()
+    if HISTOLOGY_GUESS_SESSIONS.get(user_id) is not session:
+        return
     if session["index"] >= len(session["items"]):
         await render_histology_guess_summary(user_id)
     else:
@@ -479,6 +503,10 @@ async def cb_histology_guess_answer(callback: CallbackQuery):
 
 @router.callback_query(F.data == "histology_guess_stop")
 async def cb_histology_guess_stop(callback: CallbackQuery):
+    session = HISTOLOGY_GUESS_SESSIONS.get(callback.from_user.id)
+    if session and session.get('saving'):
+        await callback.answer('Дождись сохранения ответа')
+        return
     await callback.answer()
     if callback.from_user.id in HISTOLOGY_GUESS_SESSIONS:
         await render_histology_guess_summary(callback.from_user.id, aborted=True)
@@ -490,14 +518,14 @@ async def cb_histology_stats(callback: CallbackQuery):
         return
     await callback.answer()
     builder = InlineKeyboardBuilder()
-    if get_histology_learning(callback.from_user.id)["mistakes"]:
+    if (await _learning_call(get_histology_learning, callback.from_user.id))["mistakes"]:
         builder.button(text="🩺 Повторить ошибки", callback_data="histology_guess_start:mistakes")
     builder.button(text="🎓 Практический зачёт", callback_data="histology_guess_start:all")
     builder.button(text="🔙 К экзамену", callback_data="histology_menu")
     builder.adjust(1)
     await tb.safe_edit_text(
         callback.message,
-        get_histology_stats_text(callback.from_user.id),
+        await _learning_call(get_histology_stats_text, callback.from_user.id),
         parse_mode="HTML",
         reply_markup=builder.as_markup(),
     )

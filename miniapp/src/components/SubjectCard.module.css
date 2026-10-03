@@ -1,0 +1,105 @@
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  position: relative;
+  /* Обрезает .accentBar ниже по радиусу карточки -- сама полоса почти плоская (3px), поэтому
+     её собственный border-radius: var(--radius-lg) на такой высоте браузер пропорционально
+     схлопывает, и без overflow: hidden прямые углы полосы торчали бы за скруглённый край
+     карточки, унаследованный от Card.module.css. */
+  overflow: hidden;
+  min-height: 154px;
+  padding: 18px;
+  background:
+    linear-gradient(145deg, var(--border-highlight), transparent 45%),
+    var(--surface-glass);
+}
+
+.card::before {
+  content: "";
+  position: absolute;
+  top: -42px;
+  right: -42px;
+  width: 126px;
+  height: 126px;
+  border-radius: 50%;
+  background: var(--subject-accent, var(--academic-blue));
+  opacity: .1;
+  filter: blur(4px);
+  pointer-events: none;
+}
+
+.card.locked {
+  opacity: 0.72;
+}
+
+/* Тонкая цветная полоса по верхнему краю карточки — собственный акцент предмета поверх
+   единого компонента (§9 ТЗ), без замены иконки/фона: то же цветовое значение, что уже несёт
+   иконка и тег, просто ещё в одном месте карточки. Позиционируется абсолютно от верхнего края
+   паддинг-бокса кнопки, поэтому не сдвигает остальной контент и не зависит от --space-5
+   отступа, который задаёт Card.module.css; скругление верхних углов даёт overflow: hidden
+   родителя (.card выше), а не собственный border-radius полосы. */
+.accentBar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: auto;
+  width: 54px;
+  height: 4px;
+  left: 18px;
+  border-radius: 0 0 var(--radius-pill) var(--radius-pill);
+}
+
+.top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.iconWrap {
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--border-highlight);
+  border-radius: 15px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tag {
+  font-size: 11px;
+  font-weight: 720;
+  padding: 4px 9px;
+  border-radius: var(--radius-pill);
+  color: var(--ink);
+}
+
+.title {
+  font-size: 15px;
+  font-weight: 760;
+  line-height: 1.25;
+  letter-spacing: -.01em;
+  color: var(--ink);
+}
+
+.readinessRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.readinessValue {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-secondary);
+  min-width: 32px;
+  text-align: right;
+}
+
+.lockRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: 11px;
+  color: var(--ink-secondary);
+}

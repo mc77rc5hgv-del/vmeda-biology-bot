@@ -40,6 +40,9 @@ class FakeMsg:
 
 class FakeCB:
     def __init__(self, data, uid=NON_ADMIN):
+        current = tb.ANATOMY_EXAM_TEST_SESSIONS.get(uid)
+        if current and data.startswith('anatomy_exam_test_answer:') and data.count(':') == 1 :
+            data += f":{current['id']}:{current['index']}"
         self.data = data
         self.from_user = FakeUser(uid)
         self.message = FakeMsg()
@@ -152,7 +155,7 @@ async def main():
         assert opt in text6
     btn_data6 = kb_data(kb6)
     for letter in q1["options"]:
-        assert f"anatomy_exam_test_answer:{letter}" in btn_data6
+        assert any(value.startswith(f"anatomy_exam_test_answer:{letter}:") for value in btn_data6)
     assert "anatomy_exam_test_stop" in btn_data6
     print("starting a part renders question 1 with option buttons + stop: OK")
 

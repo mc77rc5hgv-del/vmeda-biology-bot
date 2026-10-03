@@ -1,0 +1,75 @@
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 91% 10%, rgb(56 199 232 / 46%), transparent 31%),
+    radial-gradient(circle at 14% 115%, rgb(240 79 104 / 28%), transparent 37%),
+    linear-gradient(135deg, #071a38 0%, #173e8d 62%, #396bee 100%);
+  color: var(--ink-inverse);
+  border-color: rgb(255 255 255 / 14%);
+  box-shadow: var(--shadow-brand);
+}
+
+.card::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  top: -35px;
+  right: -25px;
+  width: 122px;
+  height: 122px;
+  border: 1px solid rgb(255 255 255 / 16%);
+  border-radius: 36px;
+  transform: rotate(22deg);
+}
+
+.eyebrow {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 750;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.title {
+  font-size: 19px;
+  font-weight: 780;
+  letter-spacing: -.02em;
+}
+
+.meta {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.progressWrap {
+  flex: 1;
+}
+
+.cta {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  border: 1px solid rgb(255 255 255 / 22%);
+  background: rgb(255 255 255 / 16%);
+  box-shadow: inset 0 1px rgb(255 255 255 / 15%);
+  backdrop-filter: blur(8px);
+  color: #fff;
+  font-weight: 720;
+  font-size: 13px;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-pill);
+  min-height: var(--tap-min);
+  white-space: nowrap;
+}

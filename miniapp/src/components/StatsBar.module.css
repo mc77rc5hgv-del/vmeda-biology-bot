@@ -1,0 +1,51 @@
+.bar {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  overflow: hidden;
+  padding: 1px;
+  border: 1px solid var(--border-highlight);
+  border-radius: var(--radius-lg);
+  background: var(--border);
+  box-shadow: var(--shadow-card);
+}
+
+.pill {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--surface-glass);
+  border-radius: 0;
+  padding: 12px 10px;
+  box-shadow: none;
+  min-height: var(--tap-min);
+  transition: transform 120ms ease;
+}
+
+.pill:active {
+  transform: scale(0.97);
+}
+
+.iconWrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+
+.value {
+  font-size: 14px;
+  font-weight: 780;
+  color: var(--ink);
+  line-height: 1.1;
+}
+
+.label {
+  font-size: 9px;
+  color: var(--ink-secondary);
+  line-height: 1.1;
+}

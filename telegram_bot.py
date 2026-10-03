@@ -257,8 +257,11 @@ def load_stats() -> dict:
             data.setdefault("ai_error_log", [])
             data.setdefault("subscription_purchase_log", [])
             return data
-        except (json.JSONDecodeError, OSError):
-            logger.exception("Не удалось прочитать %s, статистика будет создана заново", STATS_FILE)
+        except (json.JSONDecodeError, OSError, TypeError, ValueError, AttributeError) as exc:
+            # A malformed existing file must NEVER become empty users/subscriptions on save.
+            raise RuntimeError("Существующая статистика недоступна; пересоздание запрещено") from exc
+    if os.environ.get('BOT_SYNC_MODE') == 'owner' or os.environ.get('REQUIRE_EXISTING_STATS') == '1':
+        raise RuntimeError('Существующий stats.json отсутствует; запуск с пустой статистикой запрещён')
     return {
         "total_users": set(),
         "start_count": 0,
@@ -321,6 +324,8 @@ def _write_stats_file(data: dict) -> None:
     tmp_path = f"{STATS_FILE}.tmp"
     with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
     os.replace(tmp_path, STATS_FILE)
 
 def _log_stats_write_result(future) -> None:
@@ -334,6 +339,16 @@ def save_stats() -> None:
     data["total_users"] = list(data["total_users"])
     future = _stats_executor.submit(_write_stats_file, data)
     future.add_done_callback(_log_stats_write_result)
+
+if __name__ == '__main__':
+    # A second process on the SAME persistent volume must never read stale stats or poll.
+    import fcntl
+    os.makedirs(STATS_DIR, exist_ok=True)
+    _bot_process_lock = open(os.path.join(STATS_DIR, 'bot-owner.lock'), 'a')
+    try:
+        fcntl.flock(_bot_process_lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError as exc:
+        raise RuntimeError('На этом volume уже работает владелец бота; второй запуск запрещён') from exc
 
 stats = load_stats()
 
@@ -1060,10 +1075,9 @@ async def referral_gate_middleware(handler, event: Update, data):
     elif has_free_access(user.id):
         return await handler(event, data)
 
-    user_id_str = str(user.id)
-    entry = stats["referral_warnings"].get(user_id_str, {"count": 0, "last_warn_at": 0})
-
-    if entry["count"] >= REFERRAL_WARNING_THRESHOLD:
+    from services.content_access import enter
+    decision = enter(sys.modules['telegram_bot'], user.id, subject or 'biology')
+    if not decision['allowed']:
         block_text = (
             "🚨❗️ <b>ДОСТУП ЗАКРЫТ!</b> ❗️🚨\n\n"
             "Чтобы продолжить пользоваться ботом бесплатно — <b>пригласи друзей</b>! "
@@ -1081,13 +1095,8 @@ async def referral_gate_middleware(handler, event: Update, data):
             logger.exception("Не удалось отправить сообщение о блокировке пользователю %s", user.id)
         return  # обработчик НЕ вызываем — доступ закрыт
 
-    now = time.time()
-    if now - entry.get("last_warn_at", 0) >= REFERRAL_WARNING_COOLDOWN_SECONDS:
-        entry["count"] += 1
-        entry["last_warn_at"] = now
-        stats["referral_warnings"][user_id_str] = entry
-        save_stats()
-        remaining = REFERRAL_WARNING_THRESHOLD - entry["count"]
+    if decision['warning']:
+        remaining = decision['warnings_remaining']
         warn_text = (
             "⚠️❗️ <b>ВНИМАНИЕ! Пригласи друзей!</b> ❗️⚠️\n\n"
             f"{get_referral_status_text(user.id)}"
@@ -4905,6 +4914,20 @@ async def ensure_rag_context(session: dict) -> str:
             "показания, противопоказания и побочные действия. Не придумывай дозировки и не выдавай "
             "учебный ответ за индивидуальное назначение.\n\n" + session["rag_context"]
         )
+    elif session.get("mode") == "biochemistry":
+        session["rag_context"] = (
+            "Ты работаешь в специализированном режиме биохимии ВМедА. Опирайся прежде всего "
+            "на закрытые материалы курса ниже. Чётко связывай реакцию, фермент, кофермент, "
+            "локализацию, регуляцию и клиническое значение; не смешивай сходные метаболические "
+            "пути и честно отмечай, если данных для точного ответа недостаточно.\n\n"
+            + session["rag_context"]
+        )
+    elif subject_filter:
+        session["rag_context"] = (
+            f"Ты работаешь в предметном режиме ВМедА: {subject_filter}. "
+            "Отвечай в рамках выбранного предмета и опирайся на материалы курса ниже.\n\n"
+            + session["rag_context"]
+        )
     return session["rag_context"]
 
 async def get_first_message_ai_answer(user_id: int, session: dict, task) -> tuple:
@@ -5109,6 +5132,12 @@ async def begin_ai_session(callback: CallbackQuery, mode: str | None = None):
             f"💊 <b>VMedA AI — Фармакология</b>\n{DIVIDER}\n\n"
             "Пришли текст или чёткое фото задания. Ответ будет основан на материалах курса ВМедА. "
             "Дозировки и назначения обязательно сверяй с актуальной инструкцией и преподавателем."
+        )
+    elif mode == "biochemistry":
+        waiting_text = (
+            f"🧬 <b>VMedA AI — Биохимия</b>\n{DIVIDER}\n\n"
+            "Пришли текст или чёткое фото задания. AI сверит ответ с загруженной базой ВМедА "
+            "по биохимии и разберёт реакцию, ферменты, регуляцию и клиническое значение."
         )
     else:
         waiting_text = (
@@ -6030,9 +6059,12 @@ async def main():
         ))
     else:
         logger.info("AI_BUILD_EMBEDDINGS_ON_START=0 — пересчёт эмбеддингов RAG на старте пропущен")
+    from services.sync_runtime import start_optional_api, stop_optional_api
+    sync_server = start_optional_api()
     try:
         await dp.start_polling(bot)
     finally:
+        await stop_optional_api(sync_server)
         _stats_executor.shutdown(wait=True)
 
 if __name__ == "__main__":
