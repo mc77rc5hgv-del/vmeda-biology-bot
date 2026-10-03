@@ -100,6 +100,11 @@ try:
     assert client.post(gateway_url+'/api/v1/access/histology/enter', headers=headers).json()['trial_started']
     assert not client.post(gateway_url+'/api/v1/access/histology/enter', headers=headers).json()['trial_started']
     internal = {'X-Vmeda-Sync-Token': token}
+    assert client.get(gateway_url+'/internal/sync/status').status_code == 403
+    safety = client.get(gateway_url+'/internal/sync/status', headers=internal).json()
+    assert safety['backups']['learning']['verified']
+    assert safety['owner']['backups']['stats']['loaded_data_preserved']
+    assert safety['owner']['users'] == 1
     assert client.post(owner_url+'/internal/test/grant', headers=internal, json={'user_id': user_id, 'tier': 24}).status_code == 200
     assert client.get(gateway_url+'/api/v1/subscription', headers=headers).json()['subscription_title']
     assert client.get(gateway_url+'/api/v1/sync/state', headers=headers).json()['source'] == 'running_bot'

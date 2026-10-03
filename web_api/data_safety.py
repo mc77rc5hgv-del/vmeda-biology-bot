@@ -5,6 +5,10 @@ import os
 from pathlib import Path
 import sqlite3
 import time
+import logging
+
+logger = logging.getLogger(__name__)
+backup_status: dict = {}
 
 
 def backup_stats(path: str):
@@ -23,6 +27,8 @@ def backup_stats(path: str):
         os.fsync(stream.fileno())
     if target.read_bytes() != raw:
         raise RuntimeError('Stats backup verification failed')
+    backup_status['stats'] = {'verified': True, 'users': len(data['total_users']), 'sha256': hashlib.sha256(raw).hexdigest()}
+    logger.warning('SYNC_STATS_BACKUP_VERIFIED users=%d', len(data['total_users']))
     return str(target)
 
 
@@ -41,4 +47,17 @@ def backup_sqlite(path: str):
             if new.execute('PRAGMA quick_check').fetchone()[0] != 'ok':
                 raise RuntimeError('Learning backup verification failed')
     os.chmod(target, 0o600)
+    backup_status['learning'] = {'verified': True, 'integrity': 'ok', 'bytes': target.stat().st_size}
+    logger.warning('SYNC_LEARNING_BACKUP_VERIFIED integrity=ok bytes=%d', target.stat().st_size)
     return str(target)
+
+
+def verify_loaded_stats(snapshot: str, current: dict):
+    original = json.loads(Path(snapshot).read_text())
+    if set(original['total_users']) != set(current.get('total_users', [])):
+        raise RuntimeError('Loaded user list differs from the verified snapshot')
+    for key, value in original.items():
+        if key != 'total_users' and current.get(key) != value:
+            raise RuntimeError('Loaded statistics differ from the verified snapshot')
+    backup_status['stats']['loaded_data_preserved'] = True
+    logger.warning('SYNC_STATS_LOADED_PRESERVED all_original_fields=true users=%d', len(original['total_users']))

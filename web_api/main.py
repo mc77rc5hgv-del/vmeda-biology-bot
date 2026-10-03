@@ -16,7 +16,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import config
-from .routers import access, ai, auth, learning, me, subjects, sync, anatomy_runs
+from .routers import access, ai, auth, learning, me, subjects, sync, anatomy_runs, diagnostics
 from . import learning_rpc
 from .sync_transport import BotGateway, OwnerGuard, mode
 
@@ -45,6 +45,7 @@ app.include_router(learning.router)
 app.include_router(sync.router)
 app.include_router(anatomy_runs.router)
 app.include_router(learning_rpc.router)
+app.include_router(diagnostics.router)
 
 sync_mode = mode()
 if sync_mode == 'gateway':

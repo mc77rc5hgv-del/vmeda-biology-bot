@@ -25,8 +25,9 @@ def start_optional_api():
         live = sys.modules.get('telegram_bot')
         if live is None:
             raise RuntimeError('Synchronization owner requires the existing bot module')
-        from web_api.data_safety import backup_stats
-        backup_stats(live.STATS_FILE)
+        from web_api.data_safety import backup_stats, verify_loaded_stats
+        snapshot = backup_stats(live.STATS_FILE)
+        verify_loaded_stats(snapshot, live.stats)
         live._sync_owner_running = True
         import uvicorn
         from web_api.main import app

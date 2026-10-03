@@ -170,3 +170,18 @@ def test_run_retry_rejects_changed_queue_and_metadata():
         learning.create_anatomy_run(123, 'bot', 'part', True, [1, 3], 'same-key')
     assert error.value.status_code == 409
     assert learning.get_anatomy_run(123, 'same-key')['queue'] == [1, 2]
+
+
+def test_loaded_stats_verification_detects_removed_users_or_fields(tmp_path):
+    from web_api.data_safety import verify_loaded_stats
+    path = tmp_path / 'stats.json'
+    original = {'total_users': [123, 456], 'usernames': {'123': 'keep'}, 'future': [1, 2]}
+    path.write_text(json.dumps(original))
+    snapshot = backup_stats(str(path))
+    current = {**original, 'total_users': {123, 456}, 'new_default': {}}
+    verify_loaded_stats(snapshot, current)
+    with pytest.raises(RuntimeError):
+        verify_loaded_stats(snapshot, {**current, 'total_users': {123}})
+    with pytest.raises(RuntimeError):
+        verify_loaded_stats(snapshot, {**current, 'usernames': {}})
+    assert json.loads(path.read_text()) == original

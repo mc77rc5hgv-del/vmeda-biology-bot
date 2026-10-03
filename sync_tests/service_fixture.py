@@ -8,6 +8,8 @@ if os.environ.get('BOT_TOKEN') != '123456789:AAIntegrationTestTokenNotReal000000
 
 import telegram_bot as tb
 tb._sync_owner_running = True
+from web_api.data_safety import backup_stats, verify_loaded_stats
+verify_loaded_stats(backup_stats(tb.STATS_FILE), tb.stats)
 from web_api.main import app
 from pydantic import BaseModel
 
