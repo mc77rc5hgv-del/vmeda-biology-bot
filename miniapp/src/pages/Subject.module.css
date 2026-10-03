@@ -157,3 +157,6 @@
   border-radius: var(--radius-md);
   background: rgb(255 255 255 / 11%);
 }
+
+.trialButton { width: 100%; min-height: 44px; padding: 12px 16px; border-radius: var(--radius-pill); color: #fff; background: linear-gradient(135deg, var(--academic-blue), var(--brand-violet)); font-size: 14px; font-weight: 700; }
+.trialButton:disabled { opacity: .6; }

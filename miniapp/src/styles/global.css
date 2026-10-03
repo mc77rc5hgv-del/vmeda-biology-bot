@@ -90,6 +90,7 @@ img, svg {
    всегда перекрывает нижнюю часть вьюпорта, а не отталкивает контент как обычный элемент
    потока) -- без этого последний блок каждого экрана уезжал бы под панель навигации. */
 .screen {
+  width: 100%;
   position: relative;
   isolation: isolate;
   padding-top: calc(var(--safe-top) + var(--space-5));
@@ -104,13 +105,15 @@ img, svg {
   animation: screen-enter 260ms ease-out both;
 }
 
+.screen > * { min-width: 0; }
+
 .screen::before {
   content: "";
   position: fixed;
   z-index: -1;
   top: calc(var(--safe-top) - 88px);
   left: 50%;
-  width: min(680px, 130vw);
+  width: min(680px, 100vw);
   height: 290px;
   transform: translateX(-50%);
   pointer-events: none;

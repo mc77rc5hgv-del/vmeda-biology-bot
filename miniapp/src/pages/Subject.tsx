@@ -72,7 +72,7 @@ export function SubjectPage() {
     <div className="screen">
       <div className={styles.header}>
         {entryMutation.isError && <StateMessage title="Не удалось открыть доступ" onRetry={() => entryMutation.mutate()} />}
-        {accessQuery.data.trialAvailable && <button type="button" onClick={() => entryMutation.mutate()}>Открыть пробный доступ к гистологии</button>}
+        {accessQuery.data.trialAvailable && <button type="button" className={styles.trialButton} disabled={entryMutation.isPending} onClick={() => entryMutation.mutate()}>{entryMutation.isPending ? "Открываем…" : "Открыть пробный доступ к гистологии"}</button>}
         <h1 className={styles.title}>{subject.title}</h1>
         {locked ? (
           <StateMessage
