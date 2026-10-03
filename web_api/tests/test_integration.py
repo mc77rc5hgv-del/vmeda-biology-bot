@@ -115,6 +115,8 @@ def test_me_reflects_real_referral_and_admin_state():
     current_month = tb.local_today().strftime("%Y-%m")
     tb.stats["referral_monthly"][str(referrer_id)] = {"month": current_month, "count": 2}
     tb.save_stats()
+    # The legacy API reads the file; wait for the queued test data write.
+    tb._stats_executor.submit(lambda: None).result()
 
     init_data = build_signed_init_data(TEST_BOT_TOKEN, {"id": referrer_id, "first_name": "Реферер"})
     session_token = client.post("/api/v1/auth/telegram", json={"init_data": init_data}).json()["session_token"]
@@ -129,3 +131,4 @@ def test_me_reflects_real_referral_and_admin_state():
     tb.stats["referrals"].pop(str(referrer_id), None)
     tb.stats["referral_monthly"].pop(str(referrer_id), None)
     tb.save_stats()
+    tb._stats_executor.submit(lambda: None).result()
