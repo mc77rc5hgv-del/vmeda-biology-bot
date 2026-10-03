@@ -3,11 +3,11 @@
 
 :root {
   /* ---- Base palette (light), см. ТЗ раздел 7 ---- */
-  --background: #F3F6FC;
+  --background: #F8FAFF;
   --surface: #FFFFFF;
-  --surface-secondary: #EDF2FB;
+  --surface-secondary: #F1F5FF;
   --surface-elevated: #FFFFFF;
-  --surface-glass: rgb(255 255 255 / 82%);
+  --surface-glass: rgb(255 255 255 / 94%);
 
   --ink: #0B1730;
   --ink-secondary: #64718A;
@@ -28,8 +28,8 @@
   --brand-cyan: #38C7E8;
   --brand-violet: #7367F7;
 
-  --border: #DCE4F2;
-  --border-highlight: rgb(255 255 255 / 82%);
+  --border: #DAE5F6;
+  --border-highlight: rgb(160 187 230 / 26%);
   --success: #159A72;
   --warning: #D9942B;
   --danger: #E84560;
@@ -62,9 +62,9 @@
 
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, system-ui, sans-serif;
 
-  --shadow-card: 0 1px 2px rgb(18 42 78 / 4%), 0 10px 28px rgb(26 58 105 / 8%);
-  --shadow-pop: 0 18px 42px rgb(20 49 94 / 16%);
-  --shadow-brand: 0 18px 38px rgb(57 107 238 / 24%);
+  --shadow-card: 0 1px 2px rgb(18 42 78 / 3%), 0 8px 24px rgb(57 107 238 / 6%);
+  --shadow-pop: 0 18px 42px rgb(57 107 238 / 12%);
+  --shadow-brand: 0 14px 32px rgb(57 107 238 / 18%);
 
   --tap-min: 44px; /* минимальная область нажатия, см. §18 ТЗ */
 
@@ -90,18 +90,18 @@
    Telegram успел инициализироваться (первый кадр рендера). */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --background: #06101F;
-    --surface: #0F1C31;
-    --surface-secondary: #17263E;
-    --surface-elevated: #14233A;
-    --surface-glass: rgb(15 28 49 / 84%);
+    --background: #0D192C;
+    --surface: #192A43;
+    --surface-secondary: #223653;
+    --surface-elevated: #1E304C;
+    --surface-glass: rgb(25 42 67 / 94%);
 
     --ink: #F5F8FF;
     --ink-secondary: #9BAAC2;
     --ink-inverse: #111827;
 
     --navy: #E4ECFF;
-    --border: #243753;
+    --border: #354D70;
     --border-highlight: rgb(143 179 234 / 14%);
 
     --shadow-card: 0 1px 2px rgb(0 0 0 / 25%), 0 16px 32px rgb(0 0 0 / 24%);
@@ -113,18 +113,18 @@
 }
 
 :root[data-theme="dark"] {
-  --background: #06101F;
-  --surface: #0F1C31;
-  --surface-secondary: #17263E;
-  --surface-elevated: #14233A;
-  --surface-glass: rgb(15 28 49 / 84%);
+  --background: #0D192C;
+  --surface: #192A43;
+  --surface-secondary: #223653;
+  --surface-elevated: #1E304C;
+  --surface-glass: rgb(25 42 67 / 94%);
 
   --ink: #F5F8FF;
   --ink-secondary: #9BAAC2;
   --ink-inverse: #111827;
 
   --navy: #E4ECFF;
-  --border: #243753;
+  --border: #354D70;
   --border-highlight: rgb(143 179 234 / 14%);
 
   --shadow-card: 0 1px 2px rgb(0 0 0 / 25%), 0 16px 32px rgb(0 0 0 / 24%);
