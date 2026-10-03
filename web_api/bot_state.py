@@ -26,9 +26,15 @@ JSON-баз контента и конфигурацию AI-пайплайна. 
    но НЕ бесплатно, поэтому не на каждую мелкую операцию внутри одного запроса, а один раз в его
    начале.
 """
+import json
 import os
+import sys
 
 _bot_module = None
+
+
+class BotStateUnavailableError(RuntimeError):
+    """Критическое состояние недоступно — API обязан закрыться, а не выдавать пустые права."""
 
 
 def get_bot_module():
@@ -36,11 +42,22 @@ def get_bot_module():
     BOT_TOKEN) до первого реального запроса/явного прогрева, а не до момента импорта самого
     web_api (важно для тестов auth.py/session.py выше, которым telegram_bot вообще не нужен)."""
     global _bot_module
+    if os.environ.get('BOT_SYNC_MODE') == 'gateway':
+        raise BotStateUnavailableError('Gateway must obtain state from the running bot; local stats are not authoritative')
+    if os.environ.get('BOT_SYNC_MODE') == 'owner':
+        live = sys.modules.get('telegram_bot')
+        if live is None or not getattr(live, '_sync_owner_running', False):
+            raise BotStateUnavailableError('Owner API must run inside the existing bot process')
+        return live
     if _bot_module is None:
         if not os.environ.get("BOT_TOKEN"):
-            raise RuntimeError(
+            raise BotStateUnavailableError(
                 "BOT_TOKEN не задан -- web_api импортирует telegram_bot.py, а тот требует тот же "
                 "токен, что и сам бот (см. docstring этого файла)."
+            )
+        if not os.environ.get("STATS_DIR"):
+            raise BotStateUnavailableError(
+                "STATS_DIR не задан явно: web_api не может доказать, что читает persistent volume бота"
             )
         import telegram_bot  # noqa: PLC0415 -- намеренно ленивый импорт, см. докстринг выше
 
@@ -53,4 +70,20 @@ def refresh_stats() -> None:
     модуля. services.access читает tb.stats заново при каждом вызове (не кэширует ссылку сама),
     так что подмены самого объекта достаточно -- ничего больше переинициализировать не нужно."""
     tb = get_bot_module()
+    if os.environ.get('BOT_SYNC_MODE') == 'owner':
+        # Preserve pending in-memory purchases and writes; NEVER replace live stats from disk.
+        return
+    if not os.path.isfile(tb.STATS_FILE):
+        raise BotStateUnavailableError(
+            f"файл состояния {tb.STATS_FILE!r} отсутствует; пустые права намеренно не создаются"
+        )
+    try:
+        with open(tb.STATS_FILE, "r", encoding="utf-8") as stream:
+            raw = json.load(stream)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise BotStateUnavailableError(
+            f"файл состояния {tb.STATS_FILE!r} повреждён или временно недоступен"
+        ) from exc
+    if not isinstance(raw, dict):
+        raise BotStateUnavailableError(f"файл состояния {tb.STATS_FILE!r} не содержит JSON-объект")
     tb.stats = tb.load_stats()

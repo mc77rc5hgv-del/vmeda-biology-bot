@@ -45,6 +45,9 @@ class FakeMsg:
 
 class FakeCB:
     def __init__(self, data, uid=ADMIN_ID):
+        current = tb.HISTOLOGY_GUESS_SESSIONS.get(uid)
+        if current and data in {'histology_guess_know', 'histology_guess_dont_know', 'histology_guess_show_answer'}:
+            data += f":{current['id']}:{current['index']}"
         self.data = data
         self.from_user = FakeUser(uid)
         self.message = FakeMsg()

@@ -14,3 +14,5 @@ scripts/ai_model_compare_results.txt
 miniapp/node_modules/
 miniapp/dist/
 /conversion_preview/
+
+sync_tests/results.json

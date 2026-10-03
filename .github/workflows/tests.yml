@@ -15,7 +15,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt ruff
+        run: pip install -r requirements.txt ruff pytest pytest-asyncio
 
       - name: Syntax check
         run: python3 -m py_compile telegram_bot.py
@@ -25,3 +25,25 @@ jobs:
 
       - name: Run test suite
         run: python3 tests/run_all.py
+
+      - name: API tests
+        run: python3 -m pytest web_api/tests -q
+
+      - name: Synchronization and data preservation
+        run: |
+          python3 sync_tests/check_sync.py
+          python3 sync_tests/check_services.py
+
+  miniapp:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: miniapp/package-lock.json
+      - run: npm ci
+        working-directory: miniapp
+      - run: npm run build && npm run lint
+        working-directory: miniapp

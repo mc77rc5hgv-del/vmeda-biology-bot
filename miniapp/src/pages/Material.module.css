@@ -1,0 +1,172 @@
+/* .nav ниже теперь position: fixed (не часть потока .screen) -- без этого последний блок
+   контента (фото/источники) оказывался бы визуально под рядом кнопок "Назад/Далее". Высота
+   ряда кнопок ~44px (--tap-min) + отступ над BottomNav (--space-2) + сам BottomNav
+   (--bottom-nav-height) + safe-area. ":global(.screen)" -- страница использует общий класс
+   "screen" из global.css (не styles.screen), CSS-модуль по умолчанию хэширует локальные имена,
+   поэтому обычный ".screen" здесь не совпал бы с ним; сочетание с локальным .materialScreen
+   даёт составному селектору специфичность выше одноклассового ".screen" в global.css, так что
+   оверрайд применяется независимо от порядка импорта файлов, без !important. */
+.materialScreen:global(.screen) {
+  padding-bottom: calc(
+    var(--safe-bottom) + var(--bottom-nav-height) + var(--tap-min) + var(--space-4)
+  );
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-5);
+  border: 1px solid var(--border-highlight);
+  border-radius: var(--radius-lg);
+  background:
+    radial-gradient(circle at 96% 0%, var(--academic-blue-tint), transparent 38%),
+    var(--surface-glass);
+  box-shadow: var(--shadow-card);
+}
+
+.eyebrow {
+  font-size: 12px;
+  color: var(--academic-blue);
+  font-weight: 720;
+  text-transform: uppercase;
+  letter-spacing: .055em;
+}
+
+.title {
+  font-size: 23px;
+  font-weight: 800;
+  line-height: 1.22;
+  letter-spacing: -.025em;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.actionButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: var(--tap-min);
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface-elevated);
+  color: var(--ink-secondary);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.actionButtonActive {
+  border-color: var(--academic-blue);
+  background: var(--academic-blue-tint);
+  color: var(--academic-blue);
+}
+
+.actionButtonDone {
+  border-color: var(--success);
+  background: var(--success-tint);
+  color: var(--success);
+}
+
+.block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: 22px;
+}
+
+.blockTitle {
+  font-size: 13px;
+  font-weight: 760;
+  color: var(--academic-blue);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.blockBody {
+  font-size: 15px;
+  line-height: 1.68;
+  color: var(--ink);
+  white-space: pre-line;
+}
+
+/* Таблицы/структурные формулы источника (см. scripts/reflow_generated_course_content.py) --
+   строки, которые нельзя честно перелить в обычную прозу, приходят одним <pre>-блоком внутри
+   .blockBody. pre-wrap (а не голый "pre" из UA-стиля) переносит длинные строки по ширине экрана
+   вместо горизонтального скролла всей страницы -- ни одна строка не обрезается и не теряется,
+   просто оборачивается; overflow-x/word-break остаются страховкой на случай одного очень
+   длинного нераздельного токена. */
+.blockBody pre {
+  margin: var(--space-1) 0;
+  padding: var(--space-2);
+  background: var(--surface-secondary);
+  border-radius: var(--radius-md);
+  font-family: ui-monospace, "SF Mono", "Roboto Mono", Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-x: auto;
+}
+
+.media {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-height: 120px;
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  object-fit: contain;
+}
+
+/* Тот же баг и то же лечение, что у components/BottomNav.module.css (см. комментарий там) --
+   position: sticky на короткой теме (напр. честная пустая заглушка Анатомии "Материал по этой
+   теме пока не добавлен") просто не имел скролла, чтобы прилипнуть к низу, и рендерился сразу
+   под коротким контентом. fixed решает это так же, как для BottomNav -- ПЛЮС даёт ещё один
+   плюс: кнопки "Назад/Далее" видны сразу, не только долистав длинную тему до конца.
+   bottom считается от НАСТОЯЩЕГО фиксированного BottomNav, а не от safe-area напрямую -- иначе
+   этот ряд кнопок оказался бы под таббаром, а не над ним. */
+.nav {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: calc(var(--bottom-nav-height) + var(--safe-bottom) + var(--space-2));
+  z-index: 5;
+  display: flex;
+  gap: var(--space-2);
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 0 var(--space-4);
+  box-sizing: border-box;
+}
+
+.navButton {
+  flex: 1;
+  min-height: var(--tap-min);
+  border-radius: var(--radius-pill);
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.navPrimary {
+  background: linear-gradient(135deg, var(--academic-blue), var(--brand-violet));
+  color: #fff;
+  box-shadow: var(--shadow-brand);
+}
+
+.navSecondary {
+  background: var(--surface-glass);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-card);
+}
+
+.navSecondary:disabled {
+  opacity: 0.4;
+}

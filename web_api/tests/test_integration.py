@@ -18,8 +18,11 @@ from urllib.parse import urlencode
 # stats.json репозитория (которого и так нет в чекауте, см. .gitignore) этот тест не трогает.
 TEST_BOT_TOKEN = "123456789:AAIntegrationTestTokenNotReal00000000"
 os.environ.setdefault("BOT_TOKEN", TEST_BOT_TOKEN)
-os.environ.setdefault("STATS_DIR", tempfile.mkdtemp(prefix="web_api_test_stats_"))
+_TEST_STATS_DIR = tempfile.mkdtemp(prefix="web_api_test_stats_")
+os.environ.setdefault("STATS_DIR", _TEST_STATS_DIR)
 os.environ.setdefault("SESSION_SECRET", "integration-test-session-secret")
+with open(os.path.join(os.environ["STATS_DIR"], "stats.json"), "w", encoding="utf-8") as _stats_stream:
+    json.dump({}, _stats_stream)
 
 # repositories/knowledge.py открывает JSON-файлы контента ОТНОСИТЕЛЬНЫМ путём -- тест должен
 # идти из корня репозитория. pytest.ini/pyproject.toml уже задают rootdir там же, где лежит

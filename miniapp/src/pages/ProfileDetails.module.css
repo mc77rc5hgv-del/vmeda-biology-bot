@@ -1,0 +1,22 @@
+.intro { display: flex; flex-direction: column; gap: 5px; }
+.title { font-size: 24px; font-weight: 800; letter-spacing: -.025em; }
+.subtitle { color: var(--ink-secondary); font-size: 14px; line-height: 1.5; }
+.stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.stat { min-height: 104px; display: flex; flex-direction: column; justify-content: center; gap: 5px; }
+.stat strong { font-size: 25px; font-weight: 820; }
+.stat span { color: var(--ink-secondary); font-size: 12px; }
+.progressTrack { height: 9px; overflow: hidden; border-radius: 999px; background: var(--surface-soft); }
+.progressFill { height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--academic-blue), #6f64f7); }
+.linkBox { display: flex; align-items: center; gap: 10px; }
+.linkText { min-width: 0; flex: 1; overflow: hidden; color: var(--ink-secondary); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.copyButton, .primaryButton { min-height: 44px; border: 0; border-radius: 14px; font-weight: 780; display: flex; align-items: center; justify-content: center; gap: 7px; }
+.copyButton { flex: 0 0 auto; padding: 0 14px; color: var(--academic-blue); background: var(--academic-blue-soft); }
+.primaryButton { width: 100%; color: #fff; background: linear-gradient(135deg, var(--academic-blue), #6558ef); box-shadow: 0 8px 20px rgb(52 91 220 / 25%); }
+.note { color: var(--ink-secondary); font-size: 13px; line-height: 1.55; }
+.list { display: flex; flex-direction: column; gap: 9px; }
+.favoriteCard { display: flex; align-items: stretch; gap: 8px; padding: 0; overflow: hidden; }
+.favoriteMain { min-width: 0; flex: 1; padding: 16px 6px 16px 17px; border: 0; color: var(--ink); background: transparent; text-align: left; }
+.favoriteName { overflow: hidden; font-size: 14px; font-weight: 760; text-overflow: ellipsis; white-space: nowrap; }
+.favoriteMeta { margin-top: 4px; color: var(--ink-secondary); font-size: 12px; }
+.removeButton { width: 52px; border: 0; border-left: 1px solid var(--line); color: var(--academy-red); background: transparent; }
+.removeButton:disabled { opacity: .45; }

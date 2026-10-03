@@ -18,8 +18,10 @@ import tempfile
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO_ROOT)
 
-os.environ.setdefault("BOT_TOKEN", "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11")
-os.environ.setdefault("STATS_DIR", tempfile.mkdtemp(prefix="vmeda_test_stats_"))
+os.environ["BOT_TOKEN"] = "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
+os.environ["STATS_DIR"] = tempfile.mkdtemp(prefix="vmeda_test_stats_")
+os.environ["MINIAPP_LEARNING_DB"] = os.path.join(os.environ["STATS_DIR"], "learning.sqlite3")
+os.environ["BOT_SYNC_MODE"] = "legacy"
 
 # telegram_bot.py loads its JSON content files with relative paths (e.g. open("tickets.json")),
 # so it must be imported with the repo root as the current working directory.

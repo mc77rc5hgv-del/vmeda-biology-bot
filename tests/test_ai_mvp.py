@@ -171,7 +171,7 @@ async def main():
     # and rag.search_for_task are three SEPARATE seams in the new pipeline (see CLAUDE.md) — mock
     # each independently so handler tests can assert exactly what crosses each boundary ----
     solve_calls = []
-    async def fake_solve(*, task=None, text=None, history=None, quick=False, bucket=None, rag_context=None):
+    async def fake_solve(*, task=None, text=None, history=None, quick=False, bucket=None, rag_context=None, subject=None):
         solve_calls.append({
             "task": task, "text": text, "history": list(history or []), "quick": quick,
             "bucket": bucket, "rag_context": rag_context,
@@ -1585,7 +1585,7 @@ async def main():
     tb.stats["ai_usage"].pop(str(uid), None)
     tb.stats["ai_cost_totals"] = {"requests": 0, "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0}
     solve_calls_44 = []
-    async def fake_solve_44(*, task=None, text=None, history=None, quick=False, bucket=None, rag_context=None):
+    async def fake_solve_44(*, task=None, text=None, history=None, quick=False, bucket=None, rag_context=None, subject=None):
         solve_calls_44.append({"task": task, "quick": quick, "bucket": bucket, "rag_context": rag_context})
         text_part = task.to_prompt_text() + tb.ai_prompts.QUICK_SUFFIX
         return (
@@ -1638,7 +1638,7 @@ async def main():
     tb.stats["ai_raw_text_aliases"].clear()
     tb.end_ai_session(uid)
     solve_calls_45 = []
-    async def fake_solve_45(*, task=None, text=None, history=None, quick=False, bucket=None, rag_context=None):
+    async def fake_solve_45(*, task=None, text=None, history=None, quick=False, bucket=None, rag_context=None, subject=None):
         solve_calls_45.append(1)
         text_part = task.to_prompt_text() if task is not None else (text or "")
         answer = "Ответ: 46 хромосом" if quick else "Подробно: ..."
@@ -1825,7 +1825,7 @@ async def main():
     # canonical anchor for "Показать решение по шагам") stays the ORIGINAL answer, unmarked — the
     # warning must not contaminate the model's own memory of what it previously answered ----
     tb.stats["ai_usage"].pop(str(uid), None)
-    async def fake_solve_50(*, task=None, text=None, history=None, quick=False, bucket=None, rag_context=None):
+    async def fake_solve_50(*, task=None, text=None, history=None, quick=False, bucket=None, rag_context=None, subject=None):
         return (
             "Б", {"role": "user", "content": task.to_prompt_text() + tb.ai_prompts.QUICK_SUFFIX},
             dict(FAKE_USAGE, provider="openai"),
@@ -2072,7 +2072,7 @@ async def main():
     # queue ahead of a plain SERVE entry, exactly like a VERIFY/ESCALATE from the validator would ----
     tb.stats["ai_answer_cache"].clear()
     tb.stats["ai_usage"].pop(str(uid), None)
-    async def fake_solve_58(*, task=None, text=None, history=None, quick=False, bucket=None, rag_context=None):
+    async def fake_solve_58(*, task=None, text=None, history=None, quick=False, bucket=None, rag_context=None, subject=None):
         return (
             "pH раствора равен 3,7",  # wrong — the recognized formula gives 3
             {"role": "user", "content": task.to_prompt_text() + tb.ai_prompts.QUICK_SUFFIX},
@@ -2233,7 +2233,7 @@ async def main():
     # moderation queue ahead of a plain SERVE entry ----
     tb.stats["ai_answer_cache"].clear()
     tb.stats["ai_usage"].pop(str(uid), None)
-    async def fake_solve_62(*, task=None, text=None, history=None, quick=False, bucket=None, rag_context=None):
+    async def fake_solve_62(*, task=None, text=None, history=None, quick=False, bucket=None, rag_context=None, subject=None):
         return (
             "Правильный ответ: а) Аристотель",  # wrong — the real answer key says «б» (Гиппократ)
             {"role": "user", "content": task.to_prompt_text() + tb.ai_prompts.QUICK_SUFFIX},
@@ -2314,7 +2314,7 @@ async def main():
         return [], {"input_tokens": 42, "output_tokens": 0}
     tb.ai_rag.search_for_task = fake_search_for_task_64
 
-    async def fake_solve_64(*, task=None, text=None, history=None, quick=False, bucket=None, rag_context=None):
+    async def fake_solve_64(*, task=None, text=None, history=None, quick=False, bucket=None, rag_context=None, subject=None):
         text_part = task.to_prompt_text() + tb.ai_prompts.QUICK_SUFFIX
         return (
             "ответ 64", {"role": "user", "content": text_part}, dict(FAKE_USAGE, provider="openai"),
@@ -2387,7 +2387,7 @@ async def main():
     # detailed request) ----
     rag_calls_65.clear()
     tb.stats["ai_usage"].pop(str(uid), None)
-    async def fake_solve_65b(*, task=None, text=None, history=None, quick=False, bucket=None, rag_context=None):
+    async def fake_solve_65b(*, task=None, text=None, history=None, quick=False, bucket=None, rag_context=None, subject=None):
         assert rag_context, "the detailed explanation must receive a non-empty RAG context computed on demand"
         return (
             "подробный ответ", {"role": "user", "content": text}, dict(FAKE_USAGE, provider="openai"),
@@ -2425,7 +2425,7 @@ async def main():
         return TaskRepresentation(type="theory", question=text or "", raw_text=text or ""), dict(FAKE_PARSE_USAGE)
     tb.ai_vision_parser.parse_task = slow_parse_task_66
     tb.ai_rag.search_for_task = fake_search_for_task
-    async def fake_solve_66(*, task=None, text=None, history=None, quick=False, bucket=None, rag_context=None):
+    async def fake_solve_66(*, task=None, text=None, history=None, quick=False, bucket=None, rag_context=None, subject=None):
         text_part = task.to_prompt_text() + tb.ai_prompts.QUICK_SUFFIX
         return (
             "ответ 66", {"role": "user", "content": text_part}, dict(FAKE_USAGE, provider="openai"),
@@ -2553,7 +2553,7 @@ async def main():
         return TaskRepresentation(type="theory", question=text or "", raw_text=text or ""), dict(FAKE_PARSE_USAGE)
     tb.ai_vision_parser.parse_task = slow_parse_task_69
     tb.ai_rag.search_for_task = fake_search_for_task
-    async def fake_solve_69(*, task=None, text=None, history=None, quick=False, bucket=None, rag_context=None):
+    async def fake_solve_69(*, task=None, text=None, history=None, quick=False, bucket=None, rag_context=None, subject=None):
         text_part = task.to_prompt_text() + tb.ai_prompts.QUICK_SUFFIX
         return (
             "ответ 69", {"role": "user", "content": text_part}, dict(FAKE_USAGE, provider="openai"),
@@ -2655,7 +2655,7 @@ async def main():
         parse_calls_70b.append(text)
         return TaskRepresentation(type="theory", question=text or "", raw_text=text or ""), dict(FAKE_PARSE_USAGE)
     tb.ai_vision_parser.parse_task = counting_parse_task_70b
-    async def fake_solve_70b(*, task=None, text=None, history=None, quick=False, bucket=None, rag_context=None):
+    async def fake_solve_70b(*, task=None, text=None, history=None, quick=False, bucket=None, rag_context=None, subject=None):
         text_part = task.to_prompt_text() + tb.ai_prompts.QUICK_SUFFIX
         return (
             "первый ответ 70b", {"role": "user", "content": text_part}, dict(FAKE_USAGE, provider="openai"),
@@ -2715,7 +2715,7 @@ async def main():
     async def fake_parse_71b(*, image_bytes=None, text=None):
         return TaskRepresentation(type="list", question=text or "", raw_text=text or ""), dict(FAKE_PARSE_USAGE)
 
-    async def fake_solve_71b(*, task=None, text=None, history=None, quick=False, bucket=None, rag_context=None):
+    async def fake_solve_71b(*, task=None, text=None, history=None, quick=False, bucket=None, rag_context=None, subject=None):
         solve_calls_71b.append({"text": text, "quick": quick})
         if quick:
             return (

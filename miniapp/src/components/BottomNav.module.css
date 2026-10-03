@@ -1,0 +1,54 @@
+.nav {
+  /* position: sticky (было раньше) сохраняет якорь ТОЛЬКО в пределах высоты своего блока в
+     потоке документа -- на короткой странице (напр. экран теста "Вопрос 2 из 5" или 404), где
+     контента меньше высоты вьюпорта, у sticky-элемента просто нет достаточно скролла, чтобы
+     "прилипнуть" к низу экрана -- он остаётся на своём обычном месте в потоке сразу под
+     коротким контентом, посреди экрана с пустотой под ним. При переходе между короткой и
+     длинной страницей панель визуально "прыгает" между серединой экрана и настоящим низом --
+     ровно то, что описано как "экран скачет"/"залипание панели в разных частях экрана".
+     fixed привязывает панель к вьюпорту всегда, независимо от высоты контента страницы. */
+  position: fixed;
+  bottom: calc(8px + var(--safe-bottom));
+  left: 12px;
+  right: 12px;
+  z-index: 20;
+  display: flex;
+  justify-content: space-around;
+  background: var(--surface-glass);
+  border: 1px solid var(--border-highlight);
+  border-radius: 24px;
+  box-shadow: 0 18px 44px rgb(4 16 38 / 22%);
+  padding: 7px;
+  max-width: 536px;
+  margin: 0 auto;
+  backdrop-filter: blur(24px) saturate(150%);
+  -webkit-backdrop-filter: blur(24px) saturate(150%);
+}
+
+.item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  min-width: var(--tap-min);
+  min-height: var(--tap-min);
+  padding: 6px var(--space-3);
+  color: var(--ink-secondary);
+  border-radius: var(--radius-md);
+  background: transparent;
+  position: relative;
+  transition: background 160ms ease, color 160ms ease, transform 160ms ease;
+}
+
+.item:active { transform: scale(.94); }
+
+.itemActive {
+  color: #fff;
+  background: linear-gradient(135deg, var(--academic-blue), var(--brand-violet));
+  box-shadow: 0 8px 18px rgb(57 107 238 / 28%);
+}
+
+.label {
+  font-size: 10px;
+  font-weight: 720;
+}

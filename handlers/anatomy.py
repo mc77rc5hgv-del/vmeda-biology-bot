@@ -11,6 +11,8 @@ ANATOMY_EXAM_PRACTICE_SECTIONS) уже
 определены в его модульном пространстве имён — обращения к ним разрешаются во время вызова
 хендлера или при импорте этого модуля (модульные константы вроде ANATOMY_FILE_ID_CACHE_PATH),
 никогда раньше."""
+import asyncio
+import uuid
 import json
 import os
 import random
@@ -1608,6 +1610,8 @@ def set_anatomy_exam_test_mode(user_id: int, mode: str) -> None:
     tb.save_stats()
 
 def record_anatomy_exam_test_score(user_id: int, correct: int, total: int) -> None:
+    if os.environ.get('BOT_SYNC_MODE') == 'owner':
+        return False
     if total <= 0:
         return
     uid_str = str(user_id)
@@ -1619,7 +1623,11 @@ def record_anatomy_exam_test_score(user_id: int, correct: int, total: int) -> No
     tb.save_stats()
 
 def get_anatomy_exam_test_leaderboard_text(user_id: int = None) -> str:
-    scores = tb.stats.get("anatomy_exam_test_scores", {})
+    if os.environ.get('BOT_SYNC_MODE') == 'owner':
+        from services.anatomy_sync import scores as shared_scores
+        scores = shared_scores(tb, 'part', user_id or 1)
+    else:
+        scores = tb.stats.get('anatomy_exam_test_scores', {})
     ranked = sorted(
         scores.items(),
         key=lambda kv: (kv[1]["correct"], kv[1]["correct"] / kv[1]["total"] if kv[1]["total"] else 0),
@@ -1661,7 +1669,7 @@ async def cb_anatomy_exam_test_leaderboard(callback: CallbackQuery):
     await callback.answer()
     await tb.safe_edit_text(
         callback.message,
-        get_anatomy_exam_test_leaderboard_text(callback.from_user.id),
+        await asyncio.to_thread(get_anatomy_exam_test_leaderboard_text, callback.from_user.id),
         parse_mode="HTML",
         reply_markup=get_anatomy_exam_test_leaderboard_keyboard()
     )
@@ -1672,6 +1680,8 @@ async def cb_anatomy_exam_test_leaderboard(callback: CallbackQuery):
 # прохождение). Рейтинг — по личному лучшему результату, как у теста по латыни
 # (ANATOMY_LATIN_SESSIONS/record_anatomy_latin_score), а не накопительно, как у частей.
 def record_anatomy_exam_flash_score(user_id: int, correct: int, total: int) -> bool:
+    if os.environ.get('BOT_SYNC_MODE') == 'owner':
+        return False
     if total <= 0:
         return False
     uid_str = str(user_id)
@@ -1691,7 +1701,11 @@ def record_anatomy_exam_flash_score(user_id: int, correct: int, total: int) -> b
     return is_new_best
 
 def get_anatomy_exam_flash_leaderboard_text(user_id: int = None) -> str:
-    scores = tb.stats.get("anatomy_exam_flash_scores", {})
+    if os.environ.get('BOT_SYNC_MODE') == 'owner':
+        from services.anatomy_sync import scores as shared_scores
+        scores = shared_scores(tb, 'flash', user_id or 1)
+    else:
+        scores = tb.stats.get('anatomy_exam_flash_scores', {})
     ranked = sorted(
         scores.items(),
         key=lambda kv: (kv[1]["best_correct"] / kv[1]["best_total"] if kv[1]["best_total"] else 0, kv[1]["best_correct"]),
@@ -1734,7 +1748,7 @@ async def cb_anatomy_exam_flash_leaderboard(callback: CallbackQuery):
     await callback.answer()
     await tb.safe_edit_text(
         callback.message,
-        get_anatomy_exam_flash_leaderboard_text(callback.from_user.id),
+        await asyncio.to_thread(get_anatomy_exam_flash_leaderboard_text, callback.from_user.id),
         parse_mode="HTML",
         reply_markup=get_anatomy_exam_flash_leaderboard_keyboard()
     )
@@ -1810,6 +1824,7 @@ def start_anatomy_exam_test_session(user_id: int, part_id: int) -> bool:
         return False
     ANATOMY_EXAM_TEST_MISTAKES.pop(user_id, None)
     ANATOMY_EXAM_TEST_SESSIONS[user_id] = {
+        "id": uuid.uuid4().hex[:12],
         "part_id": part_id,
         "queue": part["questions"],
         "index": 0,
@@ -1828,6 +1843,7 @@ def start_anatomy_exam_flash_session(user_id: int) -> bool:
     size = min(ANATOMY_EXAM_FLASH_SIZE, len(ANATOMY_EXAM_TEST_ALL_QUESTIONS))
     ANATOMY_EXAM_TEST_MISTAKES.pop(user_id, None)
     ANATOMY_EXAM_TEST_SESSIONS[user_id] = {
+        "id": uuid.uuid4().hex[:12],
         "part_id": None,
         "queue": random.sample(ANATOMY_EXAM_TEST_ALL_QUESTIONS, size),
         "index": 0,
@@ -1855,6 +1871,7 @@ def start_anatomy_exam_mistake_work_session(user_id: int) -> bool:
         for mistake in record["mistakes"]
     ]
     ANATOMY_EXAM_TEST_SESSIONS[user_id] = {
+        "id": uuid.uuid4().hex[:12],
         "part_id": record.get("part_id"),
         "queue": queue,
         "index": 0,
@@ -1869,11 +1886,11 @@ def start_anatomy_exam_mistake_work_session(user_id: int) -> bool:
     }
     return True
 
-def get_anatomy_exam_test_keyboard(question: dict):
+def get_anatomy_exam_test_keyboard(question: dict, session: dict | None = None):
     builder = InlineKeyboardBuilder()
     for letter in ANATOMY_EXAM_TEST_OPTION_LETTERS:
         if letter in question["options"]:
-            builder.button(text=letter, callback_data=f"anatomy_exam_test_answer:{letter}")
+            builder.button(text=letter, callback_data=f"anatomy_exam_test_answer:{letter}:{session['id']}:{session['index']}" if session else f"anatomy_exam_test_answer:{letter}")
     builder.adjust(3, 2)
     builder.row(InlineKeyboardButton(text="🛑 Завершить досрочно", callback_data="anatomy_exam_test_stop"))
     return builder.as_markup()
@@ -1905,7 +1922,7 @@ async def render_anatomy_exam_test_question(message, user_id: int):
     lines.append("\nНажми букву правильного ответа:")
     await tb.safe_edit_text(
         message, "\n".join(lines), parse_mode="HTML",
-        reply_markup=get_anatomy_exam_test_keyboard(question)
+        reply_markup=get_anatomy_exam_test_keyboard(question, session)
     )
 
 def get_anatomy_exam_mistake_explanation_text(question: dict, chosen: str) -> str:
@@ -2091,9 +2108,31 @@ async def cb_anatomy_exam_test_answer(callback: CallbackQuery):
     if session.get("awaiting_explanation_next"):
         await callback.answer("Сначала нажми «Следующий вопрос»", show_alert=True)
         return
-    chosen = callback.data.split(":")[1]
-    question = session["queue"][session["index"]]
-    correct = question["correct"]
+    fields = callback.data.split(':')
+    if len(fields) != 4 or fields[2] != session.get('id') or fields[3] != str(session['index']) or session.get('saving'):
+        await callback.answer('Ответ уже обработан или вопрос устарел')
+        return
+    chosen = fields[1]
+    question = session['queue'][session['index']]
+    if chosen not in question['options']:
+        await callback.answer('Некорректный вариант ответа', show_alert=True)
+        return
+    correct = question['correct']
+    if os.environ.get('BOT_SYNC_MODE') == 'owner':
+        from web_api import learning
+        session['saving'] = True
+        try:
+            kind = 'mistakes' if session.get('is_mistake_work') else 'flash' if session.get('is_flash') else 'part'
+            run_id = 'bot:' + session['id']
+            await asyncio.to_thread(learning.create_anatomy_run, user_id, 'bot', kind, session.get('is_rating', False), [q['num'] for q in session['queue']], run_id)
+            await asyncio.to_thread(learning.answer_anatomy_run, user_id, run_id, session['index'], question['num'], chosen, chosen == correct)
+        except Exception:
+            tb.logger.exception('Не удалось сохранить ответ по анатомии')
+            await callback.answer('Ответ пока не сохранён. Повтори нажатие.', show_alert=True)
+            return
+        finally:
+            session['saving'] = False
+    session['index'] += 1
     if chosen == correct:
         session["correct"] += 1
         await callback.answer("✅ Верно!")
@@ -2107,7 +2146,6 @@ async def cb_anatomy_exam_test_answer(callback: CallbackQuery):
             "chosen": chosen,
         })
         if session.get("is_mistake_work"):
-            session["index"] += 1
             session["awaiting_explanation_next"] = True
             await callback.answer()
             await tb.safe_edit_text(
@@ -2121,7 +2159,8 @@ async def cb_anatomy_exam_test_answer(callback: CallbackQuery):
             return
         correct_text = question["options"].get(correct, "")
         await callback.answer(f"❌ Неверно. Правильно: {correct}) {correct_text}", show_alert=True)
-    session["index"] += 1
+    if ANATOMY_EXAM_TEST_SESSIONS.get(user_id) is not session:
+        return
     if session["index"] >= len(session["queue"]):
         await render_anatomy_exam_test_summary(callback.message, user_id)
     else:
@@ -2129,6 +2168,9 @@ async def cb_anatomy_exam_test_answer(callback: CallbackQuery):
 
 @router.callback_query(F.data == "anatomy_exam_test_stop")
 async def cb_anatomy_exam_test_stop(callback: CallbackQuery):
+    if ANATOMY_EXAM_TEST_SESSIONS.get(callback.from_user.id, {}).get('saving'):
+        await callback.answer('Подожди, ответ сохраняется')
+        return
     await callback.answer()
     if callback.from_user.id in ANATOMY_EXAM_TEST_SESSIONS:
         await render_anatomy_exam_test_summary(callback.message, callback.from_user.id, aborted=True)
@@ -2157,6 +2199,16 @@ async def cb_anatomy_exam_test_mistakes(callback: CallbackQuery):
 
 @router.callback_query(F.data == "anatomy_exam_mistake_work_start")
 async def cb_anatomy_exam_mistake_work_start(callback: CallbackQuery):
+    if os.environ.get('BOT_SYNC_MODE') == 'owner':
+        from web_api import learning
+        try:
+            nums = await asyncio.to_thread(learning.get_anatomy_mistakes, callback.from_user.id)
+            by_num = {q['num']: q for q in ANATOMY_EXAM_TEST_ALL_QUESTIONS}
+            ANATOMY_EXAM_TEST_MISTAKES[callback.from_user.id] = {'part_id': None, 'is_flash': False,
+                'mistakes': [{**by_num[num], 'chosen': None} for num in nums if num in by_num]}
+        except Exception:
+            await callback.answer('История временно недоступна. Попробуй позже.', show_alert=True)
+            return
     if not start_anatomy_exam_mistake_work_session(callback.from_user.id):
         await callback.answer("Ошибок для повторения нет или список устарел", show_alert=True)
         return

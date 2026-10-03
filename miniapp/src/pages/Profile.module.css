@@ -1,0 +1,111 @@
+.hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+  padding: 30px var(--space-5) 26px;
+  border: 1px solid rgb(255 255 255 / 13%);
+  border-radius: var(--radius-lg);
+  color: #fff;
+  background:
+    radial-gradient(circle at 12% 8%, rgb(56 199 232 / 38%), transparent 34%),
+    radial-gradient(circle at 92% 105%, rgb(240 79 104 / 27%), transparent 36%),
+    linear-gradient(140deg, #071a38, #204aa7 68%, #7367f7);
+  box-shadow: var(--shadow-brand);
+}
+
+.avatar {
+  width: 80px;
+  height: 80px;
+  border-radius: var(--radius-pill);
+  background: rgb(255 255 255 / 14%);
+  border: 1px solid rgb(255 255 255 / 28%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  font-weight: 780;
+  color: #fff;
+  box-shadow: inset 0 1px rgb(255 255 255 / 18%), 0 12px 26px rgb(0 0 0 / 20%);
+}
+
+.name {
+  font-size: 21px;
+  font-weight: 780;
+}
+
+.username {
+  font-size: 13px;
+  color: rgb(255 255 255 / 68%);
+}
+
+.statsGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2);
+}
+
+.statCard {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 118px;
+  justify-content: center;
+}
+
+.statValue {
+  margin-top: 4px;
+  font-size: 23px;
+  font-weight: 800;
+}
+
+.statLabel {
+  font-size: 12px;
+  color: var(--ink-secondary);
+}
+
+.subRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.subTitle {
+  font-size: 15px;
+  font-weight: 760;
+}
+
+.subMeta {
+  font-size: 12px;
+  color: var(--ink-secondary);
+  margin-top: 2px;
+}
+
+.linkRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: var(--tap-min);
+  padding: 17px 18px;
+  font-weight: 680;
+}
+
+
+.avatarImage {
+  width: 80px;
+  height: 80px;
+  border-radius: var(--radius-pill);
+  object-fit: cover;
+  border: 2px solid rgb(255 255 255 / 34%);
+  box-shadow: 0 12px 26px rgb(0 0 0 / 24%);
+}
+.statButton { width: 100%; text-align: left; color: var(--ink); }
+.queryError { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--ink-secondary); font-size: 13px; }
+.queryError button { min-height: 36px; padding: 0 13px; border: 0; border-radius: 11px; color: #fff; background: var(--academic-blue); font-weight: 760; }
+.subCard { width: 100%; padding: 18px; text-align: left; color: var(--ink); }
+.subAction { flex: 0 0 auto; color: var(--academic-blue); font-size: 12px; font-weight: 780; }
+.linkRow { width: 100%; }
