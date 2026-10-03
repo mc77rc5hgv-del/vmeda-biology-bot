@@ -9,8 +9,8 @@
      fixed привязывает панель к вьюпорту всегда, независимо от высоты контента страницы. */
   position: fixed;
   bottom: calc(8px + var(--safe-bottom));
-  left: 12px;
-  right: 12px;
+  left: calc(12px + var(--safe-left));
+  right: calc(12px + var(--safe-right));
   z-index: 20;
   display: flex;
   justify-content: space-around;

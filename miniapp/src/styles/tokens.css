@@ -76,8 +76,10 @@
      панели"). */
   --bottom-nav-height: 82px;
 
-  --safe-top: env(safe-area-inset-top, 0px);
-  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-top: max(env(safe-area-inset-top, 0px), var(--vmeda-safe-top, 0px));
+  --safe-bottom: max(env(safe-area-inset-bottom, 0px), var(--vmeda-safe-bottom, 0px));
+  --safe-left: max(env(safe-area-inset-left, 0px), var(--vmeda-safe-left, 0px));
+  --safe-right: max(env(safe-area-inset-right, 0px), var(--vmeda-safe-right, 0px));
 
   color-scheme: light;
 }

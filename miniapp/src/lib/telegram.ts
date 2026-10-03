@@ -20,6 +20,13 @@ interface TelegramThemeParams {
   secondary_bg_color?: string;
 }
 
+interface TelegramInsets {
+  top: number;
+  bottom: number;
+  left: number;
+  right: number;
+}
+
 interface TelegramWebApp {
   initData: string;
   initDataUnsafe: Record<string, unknown>;
@@ -28,6 +35,11 @@ interface TelegramWebApp {
   viewportHeight: number;
   viewportStableHeight: number;
   isExpanded: boolean;
+  isFullscreen?: boolean;
+  safeAreaInset?: TelegramInsets;
+  contentSafeAreaInset?: TelegramInsets;
+  isVersionAtLeast?: (version: string) => boolean;
+  requestFullscreen?: () => void;
   platform: string;
   ready: () => void;
   expand: () => void;
@@ -81,14 +93,32 @@ export function normalizeTelegramLaunchHash(): void {
   );
 }
 
+let initialized = false;
+
 export function initTelegramApp(): void {
   if (!webApp) return;
+  if (initialized) return;
+  initialized = true;
   webApp.ready();
   webApp.expand();
   applyThemeAttribute();
   syncViewportHeight();
   webApp.onEvent("themeChanged", applyThemeAttribute);
   webApp.onEvent("viewportChanged", syncViewportHeight);
+  if (webApp.requestFullscreen && (!webApp.isVersionAtLeast || webApp.isVersionAtLeast("8.0"))) {
+    webApp.onEvent("safeAreaChanged", syncViewportHeight);
+    webApp.onEvent("contentSafeAreaChanged", syncViewportHeight);
+    webApp.onEvent("fullscreenChanged", syncViewportHeight);
+    webApp.onEvent("fullscreenFailed", () => {
+      webApp.expand();
+      syncViewportHeight();
+    });
+    if (!webApp.isFullscreen) {
+      try { webApp.requestFullscreen(); }
+      catch { webApp.expand(); }
+    }
+    syncViewportHeight();
+  }
 }
 
 function applyThemeAttribute(): void {
@@ -123,6 +153,11 @@ function syncViewportHeight(): void {
   const height = webApp.viewportStableHeight || webApp.viewportHeight || window.innerHeight;
   if (height > 0) {
     document.documentElement.style.setProperty("--tg-viewport-height", `${height}px`);
+  }
+  for (const side of ["top", "bottom", "left", "right"] as const) {
+    const device = webApp.safeAreaInset?.[side] ?? 0;
+    const controls = webApp.contentSafeAreaInset?.[side] ?? 0;
+    document.documentElement.style.setProperty(`--vmeda-safe-${side}`, `${Math.max(0, device) + Math.max(0, controls)}px`);
   }
 }
 
