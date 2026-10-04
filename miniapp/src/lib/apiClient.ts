@@ -76,8 +76,37 @@ export async function fetchAuthorizedBlob(url: string): Promise<Blob> {
     if (response.status === 401) expireSession();
     throw new ApiError(response.status, response.statusText);
   }
-  return response.blob();
+  const blob = await response.blob();
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  const signature = [137, 80, 78, 71, 13, 10, 26, 10];
+  if (signature.every((value, index) => bytes[index] === value)) {
+    // Some WebViews report load for a damaged PNG but display an empty rectangle.
+    const view = new DataView(bytes.buffer);
+    let position = 8;
+    let ended = false;
+    while (position + 12 <= bytes.length) {
+      const length = view.getUint32(position);
+      const end = position + 12 + length;
+      if (end > bytes.length) throw new Error("Повреждённый PNG-файл");
+      let crc = 0xffffffff;
+      for (let index = position + 4; index < end - 4; index++) {
+        crc = (crc >>> 8) ^ PNG_CRC_TABLE[(crc ^ bytes[index]) & 255];
+      }
+      if ((crc ^ 0xffffffff) >>> 0 !== view.getUint32(end - 4)) throw new Error("Повреждённый PNG-файл");
+      ended = bytes[position + 4] === 73 && bytes[position + 5] === 69 && bytes[position + 6] === 78 && bytes[position + 7] === 68;
+      position = end;
+      if (ended) break;
+    }
+    if (!ended) throw new Error("Неполный PNG-файл");
+  }
+  return blob;
 }
+
+const PNG_CRC_TABLE = Uint32Array.from({ length: 256 }, (_, value) => {
+  let crc = value;
+  for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0);
+  return crc >>> 0;
+});
 
 // ==================== аутентификация (ТЗ §5) ====================
 

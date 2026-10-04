@@ -11,6 +11,9 @@
   cursor: zoom-in;
 }
 
+.loadError { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 24px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); color: var(--ink-secondary); font-size: 13px; }
+.loadError button { min-height: 44px; padding: 10px 16px; border-radius: var(--radius-pill); color: #fff; background: linear-gradient(135deg, var(--academic-blue), var(--brand-violet)); font-weight: 700; }
+
 .zoomHint {
   position: absolute;
   right: 10px;
