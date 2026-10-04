@@ -196,10 +196,6 @@
   --border: var(--subject-border, #DAE5F6);
   --border-highlight: var(--subject-border, rgb(160 187 230 / 26%));
 }
-.subject-theme[data-subject] .screen::after {
-  content: ""; position: fixed; inset: 0; z-index: -2; pointer-events: none;
-  background: var(--subject-page, transparent);
-}
 :root[data-theme="dark"] .subject-theme[data-subject] {
   --subject-page: var(--subject-page-dark);
   --subject-card: var(--subject-card-dark);

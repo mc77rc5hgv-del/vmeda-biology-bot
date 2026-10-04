@@ -1,6 +1,7 @@
 import { Route, Routes, useLocation } from "react-router-dom";
 import { SubjectTheme } from "./components/SubjectTheme";
 import { useEffect } from "react";
+import { applyPreferredTheme } from "./lib/theme";
 import { useAuthStore } from "./lib/store";
 import { useLastStepStore } from "./lib/lastStep";
 import { BottomNav } from "./components/BottomNav";
@@ -26,9 +27,10 @@ export function App() {
   useEffect(() => { remember(owner, pathname); }, [owner, pathname, remember]);
   const subjectId = pathname.match(/^\/(?:subjects|materials|tests)\/([^/]+)/)?.[1]
     ?? (pathname.startsWith("/histology/") ? "histology" : undefined);
+  useEffect(() => { applyPreferredTheme(); }, [subjectId]);
   return (
     <>
-      <SubjectTheme subjectId={subjectId}>
+      <SubjectTheme subjectId={subjectId} appShell>
       <Routes>
         <Route path="/" element={<HomePage />} />
         <Route path="/subjects/:subjectId" element={<SubjectPage />} />

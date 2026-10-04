@@ -7,8 +7,10 @@ import { ApiError, authenticateWithTelegram } from "./lib/apiClient";
 import { useAuthStore } from "./lib/store";
 import { getRawInitData, initTelegramApp, isInsideTelegram, normalizeTelegramLaunchHash } from "./lib/telegram";
 import "./styles/global.css";
+import { initializeTheme } from "./lib/theme";
 
 normalizeTelegramLaunchHash();
+initializeTheme();
 
 // HashRouter, не BrowserRouter — Mini App отдаётся статическим хостингом без серверного
 // перенаправления неизвестных путей на index.html; hash-роутинг работает при прямом обновлении

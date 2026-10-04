@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { applyPreferredTheme } from "./theme";
 
 // Тонкая типизированная обёртка над window.Telegram.WebApp (официальный скрипт, см. index.html).
 // Никакой сторонней SDK-библиотеки — см. комментарий в index.html о причине.
@@ -122,20 +123,7 @@ export function initTelegramApp(): void {
 }
 
 function applyThemeAttribute(): void {
-  if (!webApp) return;
-  document.documentElement.setAttribute("data-theme", webApp.colorScheme);
-  // Telegram заливает область ВНЕ нашего DOM (шапка клиента, и — что важнее для бага "чёрная
-  // область под нижней панелью" — любой временной зазор между высотой, на которую страница
-  // успела отрисоваться, и высотой, до которой expand() растягивает сам WebView) своим фоном по
-  // умолчанию (часто чёрным в тёмной теме), а не фоном страницы. Явно сообщаем Telegram цвет фона
-  // экрана (читаем уже применённое значение --background, а не дублируем hex из tokens.css —
-  // см. пункт CLAUDE.md про дублирование значений), чтобы даже кратковременный зазор был не
-  // "дырой", а тем же фоном, что и сам экран.
-  const bg = getComputedStyle(document.documentElement).getPropertyValue("--background").trim();
-  if (bg) {
-    webApp.setBackgroundColor?.(bg);
-    webApp.setHeaderColor?.(bg);
-  }
+  applyPreferredTheme();
 }
 
 /** Синхронизирует CSS-переменную --tg-viewport-height с реальной высотой WebView Telegram
