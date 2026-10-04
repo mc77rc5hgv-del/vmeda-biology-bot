@@ -1,12 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Images, Microscope } from "lucide-react";
+import { ArrowLeft, ArrowRight, Images, Microscope } from "lucide-react";
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Icon } from "../components/Icon";
 import { Skeleton } from "../components/Skeleton";
 import { StateMessage } from "../components/StateMessage";
 import { ZoomableMicrograph } from "../components/ZoomableMicrograph";
-import { fetchHistologySpecimen } from "../lib/apiClient";
+import { fetchHistologyCatalog, fetchHistologySpecimen } from "../lib/apiClient";
 import { useTelegramBackButton } from "../lib/telegram";
 import styles from "./HistologySpecimen.module.css";
 
@@ -14,18 +14,32 @@ export function HistologySpecimenPage() {
   const { specimenId = "" } = useParams();
   const navigate = useNavigate();
   const [imageIndex, setImageIndex] = useState(0);
+  const [imageSpecimenId, setImageSpecimenId] = useState(specimenId);
+  if (imageSpecimenId !== specimenId) {
+    setImageSpecimenId(specimenId);
+    setImageIndex(0);
+  }
   useTelegramBackButton(() => navigate("/histology/exam"));
 
   const query = useQuery({
     queryKey: ["histology-specimen", specimenId],
     queryFn: () => fetchHistologySpecimen(specimenId),
   });
+  const catalogQuery = useQuery({ queryKey: ["histology-catalog"], queryFn: fetchHistologyCatalog });
 
   if (query.isLoading) return <div className="screen"><Skeleton height={34} width="55%" /><Skeleton height={360} radius="22px" /></div>;
   if (query.isError || !query.data) {
     return <div className="screen"><StateMessage title="Препарат не найден" onRetry={() => query.refetch()} /></div>;
   }
   const specimen = query.data;
+  const specimens = catalogQuery.data?.groups.flatMap((group) => group.specimens) ?? [];
+  const position = specimens.findIndex((item) => item.id === specimenId);
+  const previous = position > 0 ? specimens[position - 1] : undefined;
+  const next = position >= 0 ? specimens[position + 1] : undefined;
+  function openSpecimen(id: string) {
+    navigate(`/histology/specimens/${encodeURIComponent(id)}`);
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }
   const paragraphs = specimen.protocol.split(/\n\s*\n/).map((item) => item.trim()).filter(Boolean);
 
   return (
@@ -82,6 +96,21 @@ export function HistologySpecimenPage() {
             <div key={`${marker.label}-${index}`}><span>{index + 1}</span>{marker.label}</div>
           ))}
         </section>
+      )}
+      {catalogQuery.isError ? (
+        <StateMessage title="Не удалось загрузить переходы между препаратами" onRetry={() => catalogQuery.refetch()} />
+      ) : catalogQuery.isLoading ? <Skeleton height={52} /> : position >= 0 && (
+        <nav className={styles.specimenNavigation} aria-label="Переходы между препаратами">
+          <p>Препарат {position + 1} из {specimens.length}</p>
+          <div>
+            <button type="button" disabled={!previous} onClick={() => previous && openSpecimen(previous.id)}>
+              <Icon icon={ArrowLeft} size={18} /> Предыдущий
+            </button>
+            <button type="button" className={styles.nextButton} onClick={() => next ? openSpecimen(next.id) : navigate("/histology/exam")}>
+              {next ? "Следующий препарат" : "К списку препаратов"}<Icon icon={ArrowRight} size={18} />
+            </button>
+          </div>
+        </nav>
       )}
     </div>
   );

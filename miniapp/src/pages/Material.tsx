@@ -151,6 +151,7 @@ export function MaterialPage() {
   function goTo(nextMaterialId: string) {
     hapticImpact("light");
     navigate(`/materials/${subjectId}/${sectionId}/${nextMaterialId}`);
+    window.scrollTo({ top: 0, behavior: "auto" });
   }
 
   function goBackToList() {
@@ -297,7 +298,7 @@ export function MaterialPage() {
             Назад
           </button>
           <button type="button" className={`${styles.navButton} ${styles.navPrimary}`} onClick={handleNext}>
-            {hasNext ? "Понятно, дальше" : "Завершить раздел"}
+            {hasNext ? "Следующий материал" : "Завершить раздел"}
           </button>
         </div>
       )}

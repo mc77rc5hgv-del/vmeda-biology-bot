@@ -1,4 +1,10 @@
 .screen { gap: 15px; }
+.specimenNavigation { display: flex; flex-direction: column; gap: 10px; }
+.specimenNavigation p { color: var(--ink-secondary); font-size: 12px; text-align: center; }
+.specimenNavigation > div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 8px; }
+.specimenNavigation button { display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 52px; padding: 10px 8px; color: var(--subject-ink, var(--subject-histology)); background: var(--surface-elevated); border: 1px solid var(--border); border-radius: 16px; font-size: 12px; font-weight: 750; }
+.specimenNavigation button:disabled { opacity: .45; }
+.specimenNavigation .nextButton { color: #fff; border-color: transparent; background: linear-gradient(135deg, var(--subject-histology), var(--subject-deep)); }
 .backButton { display: flex; align-items: center; align-self: flex-start; gap: 6px; padding: 8px 10px; color: var(--ink-secondary); font-size: 11px; font-weight: 750; border: 1px solid var(--border); border-radius: 11px; background: var(--surface-elevated); }
 .header { padding: 5px 2px 2px; }
 .kicker { display: flex; align-items: center; gap: 6px; color: var(--subject-ink, var(--subject-histology)); font-size: 10px; font-weight: 850; letter-spacing: .11em; text-transform: uppercase; }

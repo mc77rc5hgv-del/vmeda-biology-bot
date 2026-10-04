@@ -17,6 +17,7 @@ function AuthenticatedImageRequest({ src, alt, className }: AuthenticatedImagePr
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [retry, setRetry] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -36,7 +37,7 @@ function AuthenticatedImageRequest({ src, alt, className }: AuthenticatedImagePr
       active = false;
       if (createdUrl) URL.revokeObjectURL(createdUrl);
     };
-  }, [src]);
+  }, [src, retry]);
 
   useEffect(() => {
     if (!expanded) return;
@@ -52,7 +53,10 @@ function AuthenticatedImageRequest({ src, alt, className }: AuthenticatedImagePr
     };
   }, [expanded]);
 
-  if (failed) return <div role="img" aria-label={alt} className={className}>Изображение недоступно</div>;
+  if (failed) return <div className={styles.loadError} role="status">
+    <p>Изображение не загрузилось</p>
+    <button type="button" onClick={() => { setFailed(false); setObjectUrl(null); setRetry((value) => value + 1); }}>Повторить загрузку</button>
+  </div>;
   if (!objectUrl) return <div aria-hidden="true" className={className}>Загрузка изображения…</div>;
 
   return (
@@ -63,7 +67,7 @@ function AuthenticatedImageRequest({ src, alt, className }: AuthenticatedImagePr
         onClick={() => setExpanded(true)}
         aria-label={`Открыть изображение «${alt}» в полном размере`}
       >
-        <img src={objectUrl} alt={alt} className={className} />
+        <img src={objectUrl} alt={alt} className={className} onError={() => { setFailed(true); setExpanded(false); }} />
         <span className={styles.zoomHint}>Нажмите, чтобы увеличить</span>
       </button>
 

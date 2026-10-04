@@ -45,8 +45,8 @@ export function App() {
         <Route path="/profile/favorites" element={<FavoritesPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
-      </SubjectTheme>
       <BottomNav />
+      </SubjectTheme>
     </>
   );
 }
