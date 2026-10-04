@@ -12,8 +12,8 @@ html, body {
 
 body {
   background:
-    radial-gradient(circle at -10% -4%, rgb(57 107 238 / 16%), transparent 31rem),
-    radial-gradient(circle at 112% 23%, rgb(56 199 232 / 11%), transparent 26rem),
+    radial-gradient(circle at -10% -4%, rgb(57 107 238 / 8%), transparent 31rem),
+    radial-gradient(circle at 112% 23%, rgb(56 199 232 / 6%), transparent 26rem),
     var(--background);
   color: var(--ink);
   font-family: var(--font-sans);
