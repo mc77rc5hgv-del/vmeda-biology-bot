@@ -75,3 +75,7 @@
 .resultCard > button.secondaryButton { color: var(--ink); box-shadow: none; border: 1px solid var(--border); background: var(--surface); }
 
 @media (hover: hover) { .group > button:hover, .actions > button:hover { transform: translateY(-1px); } }
+
+@media (min-width: 900px) {
+  .catalog { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+}

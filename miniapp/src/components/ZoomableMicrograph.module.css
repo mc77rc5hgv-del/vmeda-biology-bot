@@ -115,3 +115,8 @@
   border-radius: 22px;
   background: var(--surface-raised);
 }
+
+@media (min-width: 900px) {
+  .viewport { max-height: 560px; }
+  .fullscreen .viewport { max-height: none; }
+}

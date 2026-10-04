@@ -28,10 +28,10 @@ export function ProgressPage() {
   });
 
   if (subjectsQuery.isLoading || learningQuery.isLoading || detailsQuery.isLoading) {
-    return <div className="screen"><Skeleton height={30} width="50%" />{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} height={72} radius="16px" />)}</div>;
+    return <div className="screen dashboard-screen"><Skeleton height={30} width="50%" />{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} height={72} radius="16px" />)}</div>;
   }
   if (subjectsQuery.isError || learningQuery.isError || !subjectsQuery.data || !learningQuery.data) {
-    return <div className="screen"><StateMessage title="Не удалось загрузить прогресс" onRetry={() => { subjectsQuery.refetch(); learningQuery.refetch(); }} /></div>;
+    return <div className="screen dashboard-screen"><StateMessage title="Не удалось загрузить прогресс" onRetry={() => { subjectsQuery.refetch(); learningQuery.refetch(); }} /></div>;
   }
 
   const totals = new Map((detailsQuery.data ?? []).flatMap((result) => result.status === "fulfilled" && result.value ? [result.value] : []).map((subject) => [
@@ -45,7 +45,7 @@ export function ProgressPage() {
   const partialTotals = detailsQuery.isError || detailsQuery.data?.some((result) => result.status === "rejected");
 
   return (
-    <div className="screen">
+    <div className="screen dashboard-screen">
       <div className="page-intro">
         <h1>Мой прогресс</h1>
         <p>Твои результаты и следующий шаг в подготовке</p>

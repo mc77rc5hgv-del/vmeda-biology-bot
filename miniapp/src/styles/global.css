@@ -160,3 +160,14 @@ img, svg {
     padding-right: var(--space-5);
   }
 }
+
+/* Ширина чтения отличается от ширины обзора; мобильные правила остаются прежними. */
+@media (min-width: 900px) {
+  :root { --bottom-nav-height: 96px; }
+  .screen { max-width: 800px; padding-top: calc(var(--safe-top) + 32px); padding-left: 28px; padding-right: 28px; gap: 22px; }
+  .screen.dashboard-screen { max-width: 1080px; }
+  .page-intro h1 { font-size: 30px !important; }
+  .page-intro p { font-size: 14px !important; }
+  button, a { cursor: pointer; }
+  button:disabled { cursor: not-allowed; }
+}
