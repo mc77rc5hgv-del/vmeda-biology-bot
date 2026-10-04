@@ -1,4 +1,4 @@
-import { ChevronRight, Flame, Target, Users, Zap } from "lucide-react";
+import { Bookmark, ChevronRight, Flame, LifeBuoy, Monitor, Moon, Sun, Target, Users, Zap } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { fetchDashboard, fetchMe, fetchSubscriptionSummary } from "../lib/api";
@@ -7,6 +7,7 @@ import { Card, PressableCard } from "../components/Card";
 import { Icon } from "../components/Icon";
 import { Skeleton } from "../components/Skeleton";
 import { StateMessage } from "../components/StateMessage";
+import { setThemePreference, useThemePreference, type ThemePreference } from "../lib/theme";
 import styles from "./Profile.module.css";
 
 function initials(firstName: string, lastName: string | null): string {
@@ -19,6 +20,7 @@ function formatDate(iso: string): string {
 
 export function ProfilePage() {
   useTelegramBackButton(null);
+  const theme = useThemePreference();
   const navigate = useNavigate();
   const meQuery = useQuery({ queryKey: ["me"], queryFn: fetchMe });
   const dashboardQuery = useQuery({ queryKey: ["dashboard"], queryFn: fetchDashboard });
@@ -45,12 +47,14 @@ export function ProfilePage() {
 
   return (
     <div className="screen">
+      <header className={styles.intro}><h1>Профиль</h1><p>Твоё обучение, доступ и настройки</p></header>
       <div className={styles.hero}>
         {user.photoUrl ? <img className={styles.avatarImage} src={user.photoUrl} alt="" /> : <div className={styles.avatar}>{initials(user.firstName, user.lastName)}</div>}
         <div className={styles.name}>{user.firstName} {user.lastName ?? ""}</div>
         {user.username && <div className={styles.username}>@{user.username}</div>}
       </div>
 
+      <h2 className={styles.sectionTitle}>Моё обучение</h2>
       {dashboardQuery.isLoading ? (
         <div className={styles.statsGrid}>{Array.from({ length: 4 }).map((_, index) => <Skeleton key={index} height={118} radius="16px" />)}</div>
       ) : dashboardQuery.isError || !dashboard ? (
@@ -72,20 +76,34 @@ export function ProfilePage() {
         </div>
       )}
 
-      <PressableCard className={styles.subCard} onClick={openBot} aria-label="Открыть управление подпиской в боте">
+      <h2 className={styles.sectionTitle}>Доступ и подписка</h2>
+      {subQuery.isError ? <Card className={styles.queryError}><span>Не удалось проверить подписку</span><button type="button" onClick={() => subQuery.refetch()}>Повторить</button></Card> : <PressableCard className={styles.subCard} onClick={openBot} aria-label="Открыть управление подпиской в боте">
         <div className={styles.subRow}>
           <div>
             <div className={styles.subTitle}>{subQuery.isLoading ? "Проверяем подписку…" : subQuery.isError ? "Не удалось проверить подписку" : subQuery.data?.subscriptionTitle ?? "Нет активной подписки"}</div>
             {subQuery.data?.subscriptionExpiresAt && <div className={styles.subMeta}>до {formatDate(subQuery.data.subscriptionExpiresAt)}</div>}
-            {!subQuery.isLoading && !subQuery.isError && <div className={styles.subMeta}>AI-запросов осталось: {subQuery.data?.aiRequestsLeft ?? "без ограничений"}</div>}
+            {!subQuery.isLoading && !subQuery.isError && <div className={styles.subMeta}>AI-запросов осталось: {subQuery.data?.aiRequestsLeft === null ? "без ограничений" : subQuery.data?.aiRequestsLeft ?? "—"}</div>}
           </div>
           <span className={styles.subAction}>{subQuery.data?.subscriptionTitle ? "Управлять" : "Оформить"}</span>
         </div>
-      </PressableCard>
+      </PressableCard>}
 
-      <PressableCard className={styles.linkRow} onClick={() => navigate("/profile/referrals")}><span>Реферальная программа</span><Icon icon={ChevronRight} size={18} color="var(--ink-secondary)" /></PressableCard>
-      <PressableCard className={styles.linkRow} onClick={() => navigate("/profile/favorites")}><span>Избранное</span><Icon icon={ChevronRight} size={18} color="var(--ink-secondary)" /></PressableCard>
-      <PressableCard className={styles.linkRow} onClick={openSupport}><span>Поддержка</span><Icon icon={ChevronRight} size={18} color="var(--ink-secondary)" /></PressableCard>
+      <Card className={styles.themeCard}>
+        <h2 className={styles.sectionTitle}>Тема оформления</h2>
+        <div className={styles.themeOptions} role="group" aria-label="Тема оформления">
+          {([{ value: "light", label: "Светлая", icon: Sun }, { value: "dark", label: "Тёмная", icon: Moon }, { value: "auto", label: "Авто", icon: Monitor }] as const).map(option => (
+            <button key={option.value} type="button" aria-pressed={theme === option.value} onClick={() => { hapticImpact(); setThemePreference(option.value as ThemePreference); }}>
+              <Icon icon={option.icon} size={20} /><span>{option.label}</span>
+            </button>
+          ))}
+        </div>
+        <p className={styles.hint}>Авто — как в Telegram или системе. Выбор сохраняется на этом устройстве.</p>
+      </Card>
+
+      <h2 className={styles.sectionTitle}>Полезное</h2>
+      <PressableCard className={styles.linkRow} onClick={() => navigate("/profile/referrals")}><Icon icon={Users} size={22} color="var(--academic-blue)" /><span className={styles.linkText}>Реферальная программа<small>Пригласи однокурсников</small></span><Icon icon={ChevronRight} size={18} color="var(--ink-secondary)" /></PressableCard>
+      <PressableCard className={styles.linkRow} onClick={() => navigate("/profile/favorites")}><Icon icon={Bookmark} size={22} color="var(--academic-blue)" /><span className={styles.linkText}>Избранное<small>Сохранённые материалы</small></span><Icon icon={ChevronRight} size={18} color="var(--ink-secondary)" /></PressableCard>
+      <PressableCard className={styles.linkRow} onClick={openSupport}><Icon icon={LifeBuoy} size={22} color="var(--academic-blue)" /><span className={styles.linkText}>Поддержка<small>Помощь с мини-приложением</small></span><Icon icon={ChevronRight} size={18} color="var(--ink-secondary)" /></PressableCard>
     </div>
   );
 }
