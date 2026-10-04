@@ -16,11 +16,13 @@ interface ContinueCardProps {
  * активность, а не общий экран предмета: тап сразу ведёт на конкретный материал. */
 export function ContinueCard({ item }: ContinueCardProps) {
   const navigate = useNavigate();
-  const percent = Math.round((item.order / item.totalInSection) * 100);
+  const percent = item.totalInSection > 0 ? Math.round((item.order / item.totalInSection) * 100) : 0;
 
   function handleContinue() {
     hapticSelection();
-    if (item.sectionId && item.materialId) {
+    if (item.path) {
+      navigate(item.path);
+    } else if (item.sectionId && item.materialId) {
       navigate(`/materials/${item.subjectId}/${item.sectionId}/${item.materialId}`);
     } else {
       navigate(`/subjects/${item.subjectId}`);
@@ -36,12 +38,12 @@ export function ContinueCard({ item }: ContinueCardProps) {
           {item.subjectTitle} · {item.sectionTitle}
         </div>
         <div className={styles.meta}>
-          Тема {item.order} из {item.totalInSection}
+          {item.totalInSection > 0 ? `Тема ${item.order} из ${item.totalInSection}` : "Вернуться к последнему занятию"}
         </div>
       </div>
       <div className={styles.footer}>
         <div className={styles.progressWrap}>
-          <ProgressBar percent={percent} color="#fff" label="Прогресс раздела" />
+          {item.totalInSection > 0 && <ProgressBar percent={percent} color="#fff" label="Прогресс раздела" />}
         </div>
         <button type="button" className={styles.cta} onClick={handleContinue}>
           Продолжить

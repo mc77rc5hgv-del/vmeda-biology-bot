@@ -249,6 +249,8 @@ export interface DashboardStats {
 }
 
 export interface ContinueItem {
+  /** Последний открытый экран; старые серверные материалы используют свои идентификаторы. */
+  path?: string;
   subjectId: string;
   sectionId?: string;
   materialId?: string;
