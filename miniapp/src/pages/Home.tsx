@@ -35,7 +35,7 @@ export function HomePage() {
 
   if (hasError) {
     return (
-      <div className="screen">
+      <div className="screen dashboard-screen">
         <StateMessage
           title="Не удалось загрузить главную"
           body="Попробуй ещё раз через пару секунд."
@@ -65,7 +65,7 @@ export function HomePage() {
   } : null);
 
   return (
-    <div className="screen">
+    <div className="screen dashboard-screen">
       {isLoading || !meQuery.data ? (
         <Skeleton height={40} radius="16px" />
       ) : (

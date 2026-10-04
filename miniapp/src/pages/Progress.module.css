@@ -103,3 +103,13 @@
 .progressRow strong { min-width: 35px; font-size: 12px; text-align: right; }
 .accessHint { display: flex; align-items: flex-start; gap: 5px; font-size: 11px; color: var(--ink-secondary); line-height: 1.4; }
 .accessHint svg { flex-shrink: 0; margin-top: 2px; }
+
+@media (min-width: 900px) {
+  .list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+  .statsGrid { gap: 16px; }
+  .filters { max-width: 480px; }
+  .subjectCard { height: 100%; justify-content: space-between; }
+  .favoriteRow > div { min-width: 0; }
+  .favoriteName { overflow-wrap: anywhere; }
+  .sectionTitle { font-size: 20px; }
+}
