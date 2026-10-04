@@ -27,7 +27,7 @@
 
 .eyebrow {
   font-size: 12px;
-  color: var(--academic-blue);
+  color: var(--subject-ink, var(--academic-blue));
   font-weight: 720;
   text-transform: uppercase;
   letter-spacing: .055em;
@@ -62,9 +62,9 @@
 }
 
 .actionButtonActive {
-  border-color: var(--academic-blue);
+  border-color: var(--subject-ink, var(--academic-blue));
   background: var(--academic-blue-tint);
-  color: var(--academic-blue);
+  color: var(--subject-ink, var(--academic-blue));
 }
 
 .actionButtonDone {
@@ -83,7 +83,7 @@
 .blockTitle {
   font-size: 13px;
   font-weight: 760;
-  color: var(--academic-blue);
+  color: var(--subject-ink, var(--academic-blue));
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }

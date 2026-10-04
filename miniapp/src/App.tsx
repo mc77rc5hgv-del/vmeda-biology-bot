@@ -1,4 +1,5 @@
-import { Route, Routes } from "react-router-dom";
+import { Route, Routes, useLocation } from "react-router-dom";
+import { SubjectTheme } from "./components/SubjectTheme";
 import { BottomNav } from "./components/BottomNav";
 import { HomePage } from "./pages/Home";
 import { SubjectPage } from "./pages/Subject";
@@ -16,8 +17,12 @@ import { HistologyExamPage } from "./pages/HistologyExam";
 import { HistologySpecimenPage } from "./pages/HistologySpecimen";
 
 export function App() {
+  const { pathname } = useLocation();
+  const subjectId = pathname.match(/^\/(?:subjects|materials|tests)\/([^/]+)/)?.[1]
+    ?? (pathname.startsWith("/histology/") ? "histology" : undefined);
   return (
     <>
+      <SubjectTheme subjectId={subjectId}>
       <Routes>
         <Route path="/" element={<HomePage />} />
         <Route path="/subjects/:subjectId" element={<SubjectPage />} />
@@ -34,6 +39,7 @@ export function App() {
         <Route path="/profile/favorites" element={<FavoritesPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
+      </SubjectTheme>
       <BottomNav />
     </>
   );

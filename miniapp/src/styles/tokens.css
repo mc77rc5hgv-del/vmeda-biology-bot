@@ -143,11 +143,31 @@
   --subject-operative-surgery: var(--muted-teal);
   --subject-biochemistry: var(--academic-blue);
   --subject-pharmacology: var(--amber);
-  --subject-biology: #4E8B5C;
-  --subject-physics: #3157A4;
-  --subject-chemistry: #8A5FB0;
-  --subject-anatomy: #8A6D3E;
-  --subject-histology: #C43B45;
-  --subject-latin: #6B7280;
-  --subject-law: #16213A;
+  --subject-biology: #287A48;
+  --subject-physics: #913DE0;
+  --subject-chemistry: #2864CC;
+  --subject-anatomy: #C93648;
+  --subject-histology: #7944C6;
+  --subject-latin: #875633;
+  --subject-law: #573B2A;
+}
+
+/* Наследуемые акценты предмета: кнопки и прогресс сохраняют общую геометрию. */
+.subject-theme { display: contents; }
+.subject-theme[data-subject="anatomy"] { --subject-color: var(--subject-anatomy); --subject-deep: #9D2335; --subject-tint: #C936481A; --subject-ink: #C93648; --subject-dark-ink: #F58B97; }
+.subject-theme[data-subject="histology"] { --subject-color: var(--subject-histology); --subject-deep: #57318F; --subject-tint: #7944C61A; --subject-ink: #7944C6; --subject-dark-ink: #CDA5FF; }
+.subject-theme[data-subject="chemistry"] { --subject-color: var(--subject-chemistry); --subject-deep: #204D9C; --subject-tint: #2864CC1A; --subject-ink: #2864CC; --subject-dark-ink: #8EB6FF; }
+.subject-theme[data-subject="biology"] { --subject-color: var(--subject-biology); --subject-deep: #205E39; --subject-tint: #287A481A; --subject-ink: #287A48; --subject-dark-ink: #8CD3A8; }
+.subject-theme[data-subject="latin"] { --subject-color: var(--subject-latin); --subject-deep: #654024; --subject-tint: #8756331A; --subject-ink: #875633; --subject-dark-ink: #DBB18E; }
+.subject-theme[data-subject="law"] { --subject-color: var(--subject-law); --subject-deep: #3E2A1E; --subject-tint: #573B2A1A; --subject-ink: #573B2A; --subject-dark-ink: #C5A48E; }
+.subject-theme[data-subject="physics"] { --subject-color: var(--subject-physics); --subject-deep: #702CB2; --subject-tint: #913DE01A; --subject-ink: #913DE0; --subject-dark-ink: #D3A0FF; }
+.subject-theme[data-subject] {
+  --academic-blue: var(--subject-color, #396BEE);
+  --brand-violet: var(--subject-deep, #7367F7);
+  --academic-blue-tint: var(--subject-tint, #396BEE1A);
+  --navy-surface: var(--subject-deep, #071A38);
+}
+:root[data-theme="dark"] .subject-theme[data-subject] { --subject-ink: var(--subject-dark-ink); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .subject-theme[data-subject] { --subject-ink: var(--subject-dark-ink); }
 }
