@@ -1,16 +1,5 @@
-import {
-  Activity,
-  Atom,
-  Bone,
-  Dna,
-  FlaskConical,
-  Landmark,
-  Lock,
-  Microscope,
-  Pill,
-  Scale,
-  Scissors,
-} from "lucide-react";
+import { subjectIcon } from "../lib/subjectIcons";
+import { Lock } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import type { SubjectSummary } from "../lib/types";
 import { hapticSelection } from "../lib/telegram";
@@ -19,29 +8,13 @@ import { Icon } from "./Icon";
 import { ProgressBar } from "./ProgressBar";
 import styles from "./SubjectCard.module.css";
 
-/** Предмет → иконка (§9 ТЗ: собственный микродизайн предмета, но единые компоненты и только
- * SVG/CSS — никаких фотореалистичных изображений). */
-const SUBJECT_ICONS: Record<string, typeof Activity> = {
-  physiology: Activity,
-  operative_surgery: Scissors,
-  biochemistry: Atom,
-  pharmacology: Pill,
-  biology: Dna,
-  physics: Atom,
-  chemistry: FlaskConical,
-  anatomy: Bone,
-  histology: Microscope,
-  latin: Landmark,
-  law: Scale,
-};
-
 interface SubjectCardProps {
   subject: SubjectSummary;
 }
 
 export function SubjectCard({ subject }: SubjectCardProps) {
   const navigate = useNavigate();
-  const IconComponent = SUBJECT_ICONS[subject.id] ?? Dna;
+  const IconComponent = subjectIcon(subject.id);
   const accentVar = `var(--subject-${subject.accent})`;
 
   function handleOpen() {
