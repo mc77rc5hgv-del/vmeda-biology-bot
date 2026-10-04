@@ -6,6 +6,7 @@ import { Card } from "./Card";
 import { Icon } from "./Icon";
 import { ProgressBar } from "./ProgressBar";
 import styles from "./ContinueCard.module.css";
+import { SubjectTheme } from "./SubjectTheme";
 
 interface ContinueCardProps {
   item: ContinueItem;
@@ -27,6 +28,7 @@ export function ContinueCard({ item }: ContinueCardProps) {
   }
 
   return (
+    <SubjectTheme subjectId={item.subjectId}>
     <Card className={styles.card}>
       <span className={styles.eyebrow}>Следующий шаг</span>
       <div>
@@ -47,5 +49,6 @@ export function ContinueCard({ item }: ContinueCardProps) {
         </button>
       </div>
     </Card>
+    </SubjectTheme>
   );
 }

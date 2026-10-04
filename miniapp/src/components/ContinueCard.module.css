@@ -6,8 +6,8 @@
   isolation: isolate;
   overflow: hidden;
   background:
-    radial-gradient(circle at 91% 10%, rgb(56 199 232 / 25%), transparent 31%),
-    linear-gradient(135deg, #2855bd 0%, #396bee 62%, #6255d8 100%);
+    radial-gradient(circle at 91% 10%, rgb(255 255 255 / 16%), transparent 31%),
+    linear-gradient(135deg, var(--navy-surface) 0%, var(--academic-blue) 62%, var(--brand-violet) 100%);
   color: #fff;
   border-color: rgb(255 255 255 / 14%);
   box-shadow: var(--shadow-brand);

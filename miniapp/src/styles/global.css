@@ -118,8 +118,8 @@ img, svg {
   transform: translateX(-50%);
   pointer-events: none;
   background:
-    radial-gradient(circle at 18% 16%, rgb(115 103 247 / 12%), transparent 34%),
-    radial-gradient(circle at 82% 6%, rgb(56 199 232 / 10%), transparent 30%);
+    radial-gradient(circle at 18% 16%, var(--academic-blue-tint), transparent 34%),
+    radial-gradient(circle at 82% 6%, var(--subject-tint, rgb(56 199 232 / 10%)), transparent 30%);
   filter: blur(2px);
 }
 

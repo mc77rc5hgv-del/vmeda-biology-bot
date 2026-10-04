@@ -105,7 +105,7 @@
   border-color: transparent;
   background:
     radial-gradient(circle at 90% 10%, rgb(255 255 255 / 17%), transparent 32%),
-    linear-gradient(135deg, #071a38, #244fb4 68%, var(--brand-violet));
+    linear-gradient(135deg, var(--navy-surface), var(--academic-blue) 68%, var(--brand-violet));
   box-shadow: var(--shadow-brand);
 }
 
@@ -143,7 +143,7 @@
   border-color: transparent;
   background:
     radial-gradient(circle at 88% 10%, rgb(249 184 255 / 25%), transparent 34%),
-    linear-gradient(138deg, #26122e, #6d3084 76%, #b55ccc);
+    linear-gradient(138deg, var(--navy-surface), var(--academic-blue) 76%, var(--brand-violet));
   box-shadow: 0 16px 38px rgb(79 28 95 / 26%);
 }
 
