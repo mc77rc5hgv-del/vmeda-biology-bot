@@ -1,5 +1,8 @@
 import { Route, Routes, useLocation } from "react-router-dom";
 import { SubjectTheme } from "./components/SubjectTheme";
+import { useEffect } from "react";
+import { useAuthStore } from "./lib/store";
+import { useLastStepStore } from "./lib/lastStep";
 import { BottomNav } from "./components/BottomNav";
 import { HomePage } from "./pages/Home";
 import { SubjectPage } from "./pages/Subject";
@@ -18,6 +21,9 @@ import { HistologySpecimenPage } from "./pages/HistologySpecimen";
 
 export function App() {
   const { pathname } = useLocation();
+  const owner = useAuthStore((state) => String(state.profile?.userId ?? "preview"));
+  const remember = useLastStepStore((state) => state.remember);
+  useEffect(() => { remember(owner, pathname); }, [owner, pathname, remember]);
   const subjectId = pathname.match(/^\/(?:subjects|materials|tests)\/([^/]+)/)?.[1]
     ?? (pathname.startsWith("/histology/") ? "histology" : undefined);
   return (

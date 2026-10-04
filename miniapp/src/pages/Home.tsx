@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { fetchLearningState, fetchMe, fetchSubjects } from "../lib/api";
-import { useUiStore } from "../lib/store";
+import { useUiStore, useAuthStore } from "../lib/store";
+import { useLastStepStore } from "../lib/lastStep";
 import { useTelegramBackButton } from "../lib/telegram";
 import { TopBar } from "../components/TopBar";
 import { StatsBar } from "../components/StatsBar";
@@ -25,6 +26,8 @@ export function HomePage() {
   const subjectsQuery = useQuery({ queryKey: ["subjects"], queryFn: fetchSubjects });
 
   const selectedCourse = useUiStore((s) => s.selectedCourse);
+  const owner = useAuthStore((state) => String(state.profile?.userId ?? "preview"));
+  const lastStep = useLastStepStore((state) => state.steps[owner]);
   const setSelectedCourse = useUiStore((s) => s.setSelectedCourse);
 
   const isLoading = meQuery.isLoading || learningQuery.isLoading;
@@ -50,7 +53,7 @@ export function HomePage() {
   const learning = learningQuery.data;
   const accuracy = learning?.quizAttempts ? Math.round((learning.quizCorrect / learning.quizAttempts) * 100) : 0;
   const last = learning?.lastMaterial;
-  const continueItem = last ? {
+  const continueItem = lastStep ?? (last ? {
     subjectId: last.subjectId,
     sectionId: last.sectionId,
     materialId: last.materialId,
@@ -59,7 +62,7 @@ export function HomePage() {
     materialTitle: last.materialTitle,
     order: last.materialOrder,
     totalInSection: last.totalInSection,
-  } : null;
+  } : null);
 
   return (
     <div className="screen">
