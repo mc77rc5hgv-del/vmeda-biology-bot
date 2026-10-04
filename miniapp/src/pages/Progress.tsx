@@ -1,3 +1,4 @@
+import { isSubjectOnCourse } from "../lib/subjectCourses";
 import { useQuery } from "@tanstack/react-query";
 import { Bookmark, ChevronRight, CircleCheckBig, Target, Search, Lock } from "lucide-react";
 import { useState } from "react";
@@ -40,7 +41,7 @@ export function ProgressPage() {
   ]));
   const learning = learningQuery.data;
   const accuracy = learning.quizAttempts ? Math.round((learning.quizCorrect / learning.quizAttempts) * 100) : 0;
-  const visibleSubjects = subjectsQuery.data.filter((subject) => (!course || subject.course === course)
+  const visibleSubjects = subjectsQuery.data.filter((subject) => (!course || isSubjectOnCourse(subject, course))
     && subject.title.toLocaleLowerCase("ru").includes(search.trim().toLocaleLowerCase("ru")));
   const partialTotals = detailsQuery.isError || detailsQuery.data?.some((result) => result.status === "rejected");
 

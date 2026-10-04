@@ -1,3 +1,4 @@
+import { isSubjectOnCourse } from "../lib/subjectCourses";
 import { useQuery } from "@tanstack/react-query";
 import { fetchLearningState, fetchMe, fetchSubjects } from "../lib/api";
 import { useUiStore, useAuthStore } from "../lib/store";
@@ -49,7 +50,7 @@ export function HomePage() {
     );
   }
 
-  const subjectsForCourse = (subjectsQuery.data ?? []).filter((s) => s.course === selectedCourse);
+  const subjectsForCourse = (subjectsQuery.data ?? []).filter((s) => isSubjectOnCourse(s, selectedCourse));
   const learning = learningQuery.data;
   const accuracy = learning?.quizAttempts ? Math.round((learning.quizCorrect / learning.quizAttempts) * 100) : 0;
   const last = learning?.lastMaterial;

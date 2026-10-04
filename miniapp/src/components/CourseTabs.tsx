@@ -22,7 +22,7 @@ export function CourseTabs({ value, onChange }: CourseTabsProps) {
             onChange(course);
           }}
         >
-          {course === 1 ? "1️⃣ Первый курс" : "2️⃣ Второй курс"}
+          <span className={styles.number}>{course}</span> курс
         </button>
       ))}
     </div>

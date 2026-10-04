@@ -24,3 +24,5 @@
   color: #fff;
   box-shadow: 0 8px 18px rgb(57 107 238 / 22%);
 }
+
+.number { font-family: var(--font-sans); font-size: 15px; font-weight: 780; font-variant-numeric: tabular-nums; }
