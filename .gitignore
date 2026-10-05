@@ -16,3 +16,7 @@ miniapp/dist/
 /conversion_preview/
 
 sync_tests/results.json
+
+# Owner-only financial journal; never commit payment/user data.
+billing.sqlite3*
+billing_backups/

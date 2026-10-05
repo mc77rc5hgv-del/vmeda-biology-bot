@@ -22,6 +22,7 @@ import asyncio
 import os
 import re
 import time
+from html import escape
 
 from aiogram import F, Router
 from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton
@@ -66,6 +67,7 @@ def get_admin_menu():
     builder = InlineKeyboardBuilder()
     builder.button(text="📊 Статистика", callback_data="admin_stats")
     builder.button(text="📅 Статистика оплат по месяцам", callback_data="admin_monthly_payments")
+    builder.button(text="🏦 Платежи СБП codeePay", callback_data="admin_sbp:0")
     builder.button(text="📥 Экспорт stats.json", callback_data="admin_export_stats")
     builder.button(text="👥 Список пользователей", callback_data="admin_userlist:0")
     builder.button(text="🔎 Найти пользователя", callback_data="admin_lookup_prompt")
@@ -2030,3 +2032,41 @@ async def cb_payment_admin_panel(callback: CallbackQuery):
         parse_mode="HTML",
         reply_markup=get_payment_admin_menu_keyboard()
     )
+
+
+@router.callback_query(F.data.startswith("admin_sbp:"))
+async def cb_admin_sbp(callback: CallbackQuery):
+    if not tb.is_admin(callback.from_user.id):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    from services.payments.runtime import runtime
+    service = runtime(tb)
+    await callback.answer()
+    if not service:
+        await callback.message.answer("Журнал СБП пока недоступен. Старые платежи и статистика сохранены.")
+        return
+    try:
+        offset = max(0, int(callback.data.split(":")[1]))
+    except ValueError:
+        return
+    labels = {'pending': 'ожидает оплаты', 'confirmed': 'оплачен, выдача доступа', 'applied': 'подписка активирована', 'review': 'оплачен, нужна проверка', 'creating': 'создание', 'creation_unknown': 'проверить создание'}
+    lines = ['<b>🏦 СБП codeePay</b>', 'Суммы и комиссии подтверждаются API провайдера.']
+    for item in service.ledger.summary()[:8]:
+        paid = item['state'] in ('applied', 'review', 'confirmed')
+        lines.append(f"{item['month']} · {labels.get(item['state'], item['state'])}: {item['count']} сч. · {item['amount_minor']/100:g}₽")
+        if paid:
+            lines.append(f"Зачислено: {(item['net_minor'] or 0)/100:g}₽ · комиссия: {(item['fee_minor'] or 0)/100:g}₽")
+    rows = service.ledger.history(limit=8, offset=offset)
+    lines.append('\n<b>Последние счета</b>')
+    for row in rows:
+        username = '@' + escape(row['username']) if row['username'] else 'без username'
+        created = tb.datetime.fromtimestamp(row['created'], tb.APP_TIMEZONE).strftime('%d.%m %H:%M')
+        lines.append(f"\n{created} · {row['amount_minor']/100:g}₽ · тариф {row['tier_id']} · {row['source']}\n{row['user_id']} {username}\n{labels.get(row['state'], row['state'])}\n<code>{row['id']}</code>")
+    builder = InlineKeyboardBuilder()
+    if offset:
+        builder.button(text="← Предыдущие", callback_data=f"admin_sbp:{max(0, offset-8)}")
+    if len(rows) == 8:
+        builder.button(text="Следующие →", callback_data=f"admin_sbp:{offset+8}")
+    builder.button(text="🔙 Админ-панель", callback_data="admin_panel")
+    builder.adjust(1)
+    await tb.safe_edit_text(callback.message, '\n'.join(lines), parse_mode='HTML', reply_markup=builder.as_markup())
