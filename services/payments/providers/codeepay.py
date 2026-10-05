@@ -61,8 +61,7 @@ class CodeePayProvider:
             metadata['notification_url'] = self.notification_url
         data = await self._post('/initiate_payment', {'method_slug': 'sbp', 'amount': order.amount_minor / 100,
                  'description': f'VMEDA: подписка {order.tier_id}', 'shop_name': 'VMEDA',
-                 'shop_url': 'https://t.me/VMEDA_examen_bot', 'success_url': self.return_url,
-                 'failure_url': self.return_url, 'metadata': metadata})
+                 'metadata': metadata})
         url = urlsplit(data.get('url', ''))
         if (url.scheme != 'https' or url.hostname not in {'codeepay.ru', 'payment.codeepay.xyz'} or url.username or url.password
                 or not url.path.startswith(('/payment/', '/transfer/')) or minor(data.get('amount')) != order.amount_minor
@@ -86,7 +85,7 @@ class CodeePayProvider:
         if deposited and (not data.get('payment_id') or net + fee != amount):
             raise PaymentMismatch('Invalid settlement totals')
         status = PaymentStatus.PAID if deposited else PaymentStatus.PENDING
-        if not deposited and data['payment_status'].lower() in {'failed', 'fail', 'error'}:
+        if not deposited and data['payment_status'].lower() in {'failed', 'fail', 'error', 'rejected'}:
             status = PaymentStatus.FAILED
         elif not deposited and data['payment_status'].lower() in {'cancelled', 'canceled', 'expired'}:
             status = PaymentStatus.CANCELLED
