@@ -130,3 +130,40 @@
   .hero { flex-direction: row; justify-content: flex-start; flex-wrap: wrap; gap: 18px; text-align: left; padding: 24px; }
   .themeOptions { max-width: 460px; }
 }
+
+/* A distinct VMEDA subscription card, keeping the action in its existing position. */
+.subCard {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  padding: 22px;
+  color: #fff;
+  border: 1px solid rgb(116 148 255 / 50%);
+  background: radial-gradient(ellipse at 100% 0%, rgb(245 194 105 / 23%), transparent 65%), linear-gradient(125deg, #214abe, #263f93 62%, #172b65);
+  box-shadow: 0 12px 28px rgb(35 66 162 / 20%), inset 0 1px 0 rgb(255 255 255 / 15%);
+}
+.subCard::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  width: 180px;
+  height: 180px;
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 50%;
+  right: -85px;
+  bottom: -105px;
+  box-shadow: 0 0 0 26px rgb(255 255 255 / 3%), 0 0 0 52px rgb(255 255 255 / 2%);
+  pointer-events: none;
+}
+.subBadge { display: inline-flex; align-items: center; gap: 7px; color: #ffe0a6; font-size: 10px; font-weight: 800; letter-spacing: .09em; margin-bottom: 15px; }
+.subRow { align-items: center; gap: 14px; }
+.subRow > div { min-width: 0; }
+.subTitle { font-size: 18px; line-height: 1.35; letter-spacing: -.02em; overflow-wrap: anywhere; }
+.subDescription { margin-top: 6px; color: rgb(255 255 255 / 86%); font-size: 12px; line-height: 1.5; }
+.subMeta { color: rgb(255 255 255 / 80%); margin-top: 6px; line-height: 1.5; }
+.subAction { display: inline-flex; align-items: center; justify-content: center; gap: 3px; min-height: 44px; padding: 0 12px; border-radius: 13px; background: #fff; color: #24469d; box-shadow: 0 4px 12px rgb(10 22 60 / 14%); font-size: 12px; font-weight: 800; }
+.subFooter { display: flex; align-items: center; gap: 7px; border-top: 1px solid rgb(255 255 255 / 15%); padding-top: 13px; margin-top: 16px; color: rgb(255 255 255 / 82%); font-size: 11px; line-height: 1.5; }
+.subFooter svg { flex-shrink: 0; color: #ffe0a6; }
+.subCard:focus-visible { outline: 3px solid var(--academic-blue); outline-offset: 4px; }
+:global([data-theme="dark"]) .subCard { border-color: rgb(133 164 255 / 45%); background: radial-gradient(ellipse at 100% 0%, rgb(245 194 105 / 18%), transparent 65%), linear-gradient(125deg, #273f8b, #25376e 62%, #182749); box-shadow: 0 12px 30px rgb(0 0 0 / 24%), inset 0 1px 0 rgb(255 255 255 / 12%); }
+@media (max-width: 350px) { .subCard { padding: 18px; } .subTitle { font-size: 16px; } .subRow { gap: 10px; } .subAction { padding: 0 9px; } }

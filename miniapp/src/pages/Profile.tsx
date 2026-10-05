@@ -1,4 +1,4 @@
-import { Bookmark, ChevronRight, Flame, LifeBuoy, Monitor, Moon, Sun, Target, Users, Zap } from "lucide-react";
+import { Bookmark, ChevronRight, Flame, Gem, LifeBuoy, ShieldCheck, Monitor, Moon, Sun, Target, Users, Zap } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { fetchDashboard, fetchMe, fetchSubscriptionSummary } from "../lib/api";
@@ -74,14 +74,17 @@ export function ProfilePage() {
 
       <h2 className={styles.sectionTitle}>Доступ и подписка</h2>
       {subQuery.isError ? <Card className={styles.queryError}><span>Не удалось проверить подписку</span><button type="button" onClick={() => subQuery.refetch()}>Повторить</button></Card> : <PressableCard className={styles.subCard} onClick={() => navigate("/profile/subscriptions")} aria-label="Открыть тарифы и оплату подписки">
+        <div className={styles.subBadge}><Gem size={15} aria-hidden="true" /><span>VMEDA · ПОДПИСКА</span></div>
         <div className={styles.subRow}>
           <div>
-            <div className={styles.subTitle}>{subQuery.isLoading ? "Проверяем подписку…" : subQuery.isError ? "Не удалось проверить подписку" : subQuery.data?.subscriptionTitle ?? "Нет активной подписки"}</div>
+            <div className={styles.subTitle}>{subQuery.isLoading ? "Проверяем подписку…" : subQuery.isError ? "Не удалось проверить подписку" : subQuery.data?.subscriptionTitle ?? "Открой больше возможностей"}</div>
+            {!subQuery.isLoading && !subQuery.data?.subscriptionTitle && <div className={styles.subDescription}>Выбери тариф для своего курса</div>}
             {subQuery.data?.subscriptionExpiresAt && <div className={styles.subMeta}>до {formatDate(subQuery.data.subscriptionExpiresAt)}</div>}
             {!subQuery.isLoading && !subQuery.isError && <div className={styles.subMeta}>AI-запросов осталось: {subQuery.data?.aiRequestsLeft === null ? "без ограничений" : subQuery.data?.aiRequestsLeft ?? "—"}</div>}
           </div>
-          <span className={styles.subAction}>{subQuery.data?.subscriptionTitle ? "Управлять" : "Оформить"}</span>
+          <span className={styles.subAction}>{subQuery.data?.subscriptionTitle ? "Управлять" : "Выбрать"}<ChevronRight size={16} aria-hidden="true" /></span>
         </div>
+        <div className={styles.subFooter}><ShieldCheck size={14} aria-hidden="true" /><span>Единый доступ в боте и miniapp</span></div>
       </PressableCard>}
 
       <Card className={styles.themeCard}>
