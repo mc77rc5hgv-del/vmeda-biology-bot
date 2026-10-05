@@ -43,9 +43,10 @@ def test_no_insecure_or_credential_bearing_api_url(url):
         CodeePayConfig(enabled=True, api_url=url, api_key='synthetic-value').validate_checkout_configuration()
 
 
-def test_https_config_does_not_mean_provider_ready():
+def test_only_official_api_accepts_credentials():
     settings = CodeePayConfig(enabled=True, api_url='https://payments.example/api', api_key='synthetic-value')
-    settings.validate_checkout_configuration()
+    with pytest.raises(ValueError):
+        settings.validate_checkout_configuration()
     assert CodeePayProvider(settings).public_status()['available'] is False
 
 
@@ -59,7 +60,7 @@ async def test_unimplemented_provider_never_accepts_money_or_webhooks(enabled, t
     with pytest.raises(ProviderNotReady):
         await provider.fetch_payment('payment-test')
     with pytest.raises(ProviderNotReady):
-        await provider.verify_webhook(b'{"status":"paid"}', {'x-signature': 'unverified'})
+        await provider.verify_webhook(b'{"order_id":"payment-test","status":"paid"}', {'x-signature': 'unverified'})
     assert list(tmp_path.iterdir()) == [], 'Scaffold created or changed persistent data'
 
 
@@ -85,3 +86,46 @@ def test_verified_confirmation_matches_original_server_order():
 def test_foreign_underpaid_or_unconfirmed_payment_cannot_pass(updates):
     with pytest.raises(PaymentMismatch):
         validate_confirmation(order(), replace(payment(), **updates), provider_payment_id='payment-test')
+
+
+@pytest.mark.asyncio
+async def test_documented_api_units_headers_and_provider_confirmed_settlement():
+    import json
+    import httpx
+    requests = []
+    def respond(request):
+        body = json.loads(request.content)
+        requests.append((request.url.path, body))
+        assert request.headers['X-Api-Key'] == 'test-api-key'
+        if request.url.path == '/initiate_payment':
+            assert body['method_slug'] == 'sbp' and body['amount'] == 129
+            assert body['metadata']['vmeda_order'] == 'order-test'
+            return httpx.Response(200, json={'url': 'https://payment.codeepay.xyz/transfer/test', 'order_id': 'provider-test', 'amount': 129})
+        assert body == {'order_id': 'provider-test'}
+        return httpx.Response(200, json={'payment_order_id': 'provider-test', 'payment_id': 'charge-test', 'payment_method': 'sbp',
+            'payment_status': 'success', 'payment_deposited': True, 'payment_amount': 129,
+            'payment_deposited_amount': 122.55, 'payment_commission_amount': 6.45,
+            'payment_metadata': {'vmeda_order': 'order-test', 'vmeda_proof': 'order-test'}})
+    provider = CodeePayProvider(CodeePayConfig.from_env({'CODEEPAY_ENABLED': 'true', 'CODEEPAY_API_KEY': 'test-api-key'}), transport=httpx.MockTransport(respond))
+    session = await provider.create_checkout(order())
+    result = await provider.verify_webhook(b'{"order_id":"provider-test","amount":1,"status":"paid"}', {})
+    validate_confirmation(order(), result, provider_payment_id=session.provider_payment_id)
+    assert result.evidence['net_minor'] == 12255 and result.evidence['fee_minor'] == 645
+    assert len(requests) == 2, 'Webhook JSON was trusted instead of requerying merchant API'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('change', [{'payment_deposited': False}, {'payment_deposited': 'true'}, {'payment_amount': True},
+                                  {'payment_amount': 1.001}, {'payment_method': 'card'}, {'payment_order_id': 'foreign'},
+                                  {'payment_commission_amount': 1}, {'payment_metadata': {}}, {'payment_deposited_amount': -1}])
+async def test_malformed_or_unpaid_provider_response_cannot_confirm(change):
+    import httpx
+    body = {'payment_order_id': 'provider-test', 'payment_id': 'charge-test', 'payment_method': 'sbp',
+            'payment_status': 'success', 'payment_deposited': True, 'payment_amount': 129,
+            'payment_deposited_amount': 122.55, 'payment_commission_amount': 6.45,
+            'payment_metadata': {'vmeda_order': 'order-test', 'vmeda_proof': 'order-test'}}
+    body.update(change)
+    provider = CodeePayProvider(CodeePayConfig.from_env({'CODEEPAY_ENABLED': 'true', 'CODEEPAY_API_KEY': 'test-api-key'}), transport=httpx.MockTransport(lambda r: httpx.Response(200, json=body)))
+    with pytest.raises(PaymentMismatch):
+        result = await provider.fetch_payment('provider-test')
+        validate_confirmation(order(), result, provider_payment_id='provider-test')

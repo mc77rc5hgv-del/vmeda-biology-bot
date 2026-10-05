@@ -64,7 +64,7 @@ class VerifiedPayment:
     currency: str
     status: PaymentStatus
     # Provider-specific evidence stays private and must not be returned to the miniapp.
-    evidence: Mapping[str, str] = field(default_factory=dict, repr=False)
+    evidence: Mapping[str, object] = field(default_factory=dict, repr=False)
 
 
 def validate_confirmation(order: PaymentOrder, payment: VerifiedPayment, *, provider_payment_id: str) -> None:

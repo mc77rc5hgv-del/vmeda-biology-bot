@@ -174,23 +174,7 @@ async def successful_payment(tb, message):
         tb.stats['subscription_purchase_log'].append({'user_id': message.from_user.id, 'tier': data['tier_id'],
                 'method': 'stars', 'price': payment.total_amount, 'ts': time.time(), 'status': 'review'})
     else:
-        cfg = tb.SUBSCRIPTION_TIERS[data['tier_id']]
-        active = bool(old and tb.has_active_subscription(message.from_user.id))
-        tb.grant_subscription(message.from_user.id, data['tier_id'], 'stars', payment.total_amount,
-                              data['subject'], persist=False)
-        granted = tb.get_subscription(message.from_user.id)
-        merged = {**(old or {}), **granted}
-        if active and old.get('tier') == data['tier_id'] and cfg.get('duration_days'):
-            merged['expires'] = max(old['expires'] or time.time(), time.time()) + cfg['duration_days'] * 86400
-            if cfg.get('ai_limit_type') == 'period':
-                merged['miniapp_ai_bonus'] = old.get('miniapp_ai_bonus', 0) + cfg['ai_limit']
-        elif not active or tb.SUBSCRIPTION_TIERS.get((old or {}).get('tier'), {}).get('ai_limit_type') != 'period':
-            merged['miniapp_ai_period_start'] = (old or {}).get('ai_used_period', 0)
-            merged['miniapp_ai_bonus'] = 0
-        else:
-            merged['miniapp_ai_period_start'] = (old or {}).get('ai_used_period', 0)
-            merged['miniapp_ai_bonus'] = 0
-        tb.stats['subscriptions'][str(message.from_user.id)] = merged
+        grant_preserving_history(tb, message.from_user.id, data['tier_id'], data['subject'], 'stars', payment.total_amount, old)
     tb.stats['processed_payment_charge_ids'][charge_id] = receipt
     await _persist(tb)  # Single atomic snapshot: entitlement, receipt and purchase history.
     _pending_checkouts.pop(message.from_user.id, None)
@@ -202,3 +186,23 @@ async def successful_payment(tb, message):
             await tb.bot.send_message(target, text if target == message.from_user.id else f'{text}\nПользователь: {message.from_user.id}\nПлатёж: {data["payment_id"]}\nСумма: {payment.total_amount} Stars')
         except Exception:
             tb.logger.exception('Could not deliver miniapp payment notification')
+
+
+def grant_preserving_history(tb, user_id, tier_id, subject, method, price, old):
+    cfg = tb.SUBSCRIPTION_TIERS[tier_id]
+    active = bool(old and tb.has_active_subscription(user_id))
+    tb.grant_subscription(user_id, tier_id, method, price,
+                          subject, persist=False)
+    granted = tb.get_subscription(user_id)
+    merged = {**(old or {}), **granted}
+    if active and old.get('tier') == tier_id and cfg.get('duration_days'):
+        merged['expires'] = max(old['expires'] or time.time(), time.time()) + cfg['duration_days'] * 86400
+        if cfg.get('ai_limit_type') == 'period':
+            merged['miniapp_ai_bonus'] = old.get('miniapp_ai_bonus', 0) + cfg['ai_limit']
+    elif not active or tb.SUBSCRIPTION_TIERS.get((old or {}).get('tier'), {}).get('ai_limit_type') != 'period':
+        merged['miniapp_ai_period_start'] = (old or {}).get('ai_used_period', 0)
+        merged['miniapp_ai_bonus'] = 0
+    else:
+        merged['miniapp_ai_period_start'] = (old or {}).get('ai_used_period', 0)
+        merged['miniapp_ai_bonus'] = 0
+    tb.stats['subscriptions'][str(user_id)] = merged

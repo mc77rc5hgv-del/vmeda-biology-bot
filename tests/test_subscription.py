@@ -187,6 +187,34 @@ async def check_miniapp_payments():
     assert persisted['processed_payment_charge_ids']['miniapp-race']['status'] == 'review'
     print('miniapp Stars: signature, ownership, currency, concurrent checkout, renewal, idempotency and data preservation: OK')
 
+async def check_sbp_bot_routes():
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    import copy
+    uid = 888765432
+    row = {'id': 'sbp_' + 'b' * 32, 'user_id': uid, 'amount_minor': 12900, 'url': 'https://payment.codeepay.xyz/transfer/test', 'state': 'pending', 'tier_id': 21}
+    fake = SimpleNamespace(provider=SimpleNamespace(public_status=lambda: {'available': True}),
+                           checkout=AsyncMock(return_value=row), check=AsyncMock(return_value={**row, 'state': 'applied'}),
+                           ledger=SimpleNamespace(get=lambda order_id: row))
+    before = copy.deepcopy(tb.stats)
+    with patch.object(tb, '_billing_runtime', fake, create=True):
+        data = kb_data(tb.get_sub_tier_keyboard(21))
+        assert 'buy_sub_sbp:21' in data and 'buy_sub_stars:21' in data and 'buy_sub_rubles:21' in data
+        data = kb_data(tb.get_sub_subject_keyboard(20, 'biology'))
+        assert 'buy_sub_sbp:20:biology' in data and 'buy_sub_rubles_subj:20:biology' in data
+        cb = FakeCB('buy_sub_sbp:21', uid=uid); cb.id = 'fake-callback-123'
+        await tb.cb_buy_sub_sbp(cb)
+        assert fake.checkout.call_args.args == (uid, 21, None, 'bot_fake-callback-123', 'bot')
+        assert 'check_sbp:' + row['id'] in kb_data(cb.message.answers[0][1])
+        await tb.cb_check_sbp(FakeCB('check_sbp:' + row['id'], uid=uid + 1))
+        fake.check.assert_not_awaited()
+        cb = FakeCB('check_sbp:' + row['id'], uid=uid)
+        await tb.cb_check_sbp(cb)
+        assert 'активирована' in cb.message.answers[0][0]
+    assert tb.stats == before
+    print('SBP bot: automatic checkout, owner isolation, preserved Stars/card routes and unchanged stats: OK')
+
+
 async def main():
     non_admin = random.randint(10_000_000, 99_999_999)
     tb.stats["subscriptions"].pop(str(non_admin), None)
@@ -1777,6 +1805,7 @@ async def main():
     tb.stats["subscriptions"] = orig_subs_snapshot
 
     await check_miniapp_payments()
+    await check_sbp_bot_routes()
     print("ALL SUBSCRIPTION TESTS PASSED")
 
 # Exercise the legacy catalogue before its fixed calendar expirations. Separate sync
