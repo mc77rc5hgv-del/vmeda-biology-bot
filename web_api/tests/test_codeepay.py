@@ -99,6 +99,7 @@ async def test_documented_api_units_headers_and_provider_confirmed_settlement():
         assert request.headers['X-Api-Key'] == 'test-api-key'
         if request.url.path == '/initiate_payment':
             assert body['method_slug'] == 'sbp' and body['amount'] == 129
+            assert not {'shop_url', 'success_url', 'failure_url'} & body.keys(), 'Return URLs must use merchant defaults to avoid api:error.url_not_allowed'
             assert body['metadata']['vmeda_order'] == 'order-test'
             return httpx.Response(200, json={'url': 'https://payment.codeepay.xyz/transfer/test', 'order_id': 'provider-test', 'amount': 129})
         assert body == {'order_id': 'provider-test'}
@@ -129,3 +130,20 @@ async def test_malformed_or_unpaid_provider_response_cannot_confirm(change):
     with pytest.raises(PaymentMismatch):
         result = await provider.fetch_payment('provider-test')
         validate_confirmation(order(), result, provider_payment_id='provider-test')
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('deposited,expected', [(False, PaymentStatus.FAILED), (True, PaymentStatus.PAID)])
+async def test_rejected_checkout_is_retryable_without_overriding_settlement(deposited, expected):
+    import httpx
+    body = {'payment_order_id': 'provider-test', 'payment_id': 'charge-test', 'payment_method': 'sbp',
+            'payment_status': 'rejected', 'payment_deposited': deposited, 'payment_amount': 129,
+            'payment_deposited_amount': 122.55 if deposited else 0, 'payment_commission_amount': 6.45 if deposited else 0,
+            'payment_metadata': {'vmeda_order': 'order-test', 'vmeda_proof': 'order-test'}}
+    provider = CodeePayProvider(CodeePayConfig.from_env({'CODEEPAY_ENABLED': 'true', 'CODEEPAY_API_KEY': 'test-api-key'}),
+                               transport=httpx.MockTransport(lambda r: httpx.Response(200, json=body)))
+    result = await provider.fetch_payment('provider-test')
+    assert result.status is expected
+    if not deposited:
+        with pytest.raises(PaymentMismatch):
+            validate_confirmation(order(), result, provider_payment_id='provider-test')

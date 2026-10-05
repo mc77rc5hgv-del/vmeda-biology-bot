@@ -1,12 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, ArrowRight, Images, Microscope } from "lucide-react";
+import { ArrowLeft, ArrowRight, Images, Lock, Microscope } from "lucide-react";
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Icon } from "../components/Icon";
 import { Skeleton } from "../components/Skeleton";
 import { StateMessage } from "../components/StateMessage";
 import { ZoomableMicrograph } from "../components/ZoomableMicrograph";
-import { fetchHistologyCatalog, fetchHistologySpecimen } from "../lib/apiClient";
+import { ApiError, fetchHistologyCatalog, fetchHistologySpecimen } from "../lib/apiClient";
 import { useTelegramBackButton } from "../lib/telegram";
 import styles from "./HistologySpecimen.module.css";
 
@@ -29,6 +29,9 @@ export function HistologySpecimenPage() {
 
   if (query.isLoading) return <div className="screen"><Skeleton height={34} width="55%" /><Skeleton height={360} radius="22px" /></div>;
   if (query.isError || !query.data) {
+    if (query.error instanceof ApiError && query.error.status === 403) {
+      return <div className="screen"><StateMessage icon={Lock} title="Препарат закрыт" body={query.error.message} onRetry={() => navigate("/profile/subscriptions")} actionLabel="Открыть подписки" /></div>;
+    }
     return <div className="screen"><StateMessage title="Препарат не найден" onRetry={() => query.refetch()} /></div>;
   }
   const specimen = query.data;

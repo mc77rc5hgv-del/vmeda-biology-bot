@@ -3,6 +3,7 @@ import { CheckCircle2, ChevronRight, Layers, Lock } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { fetchLearningState, fetchSection, hasContentSession } from "../lib/api";
+import { ApiError } from "../lib/apiClient";
 import { formatMaterialCount } from "../lib/format";
 import { hapticSelection, useTelegramBackButton } from "../lib/telegram";
 import { PressableCard } from "../components/Card";
@@ -53,6 +54,13 @@ export function SectionPage() {
   }
 
   if (sectionQuery.isError || !sectionQuery.data) {
+    if (sectionQuery.error instanceof ApiError && sectionQuery.error.status === 503) {
+      return <div className="screen"><StateMessage title="Раздел временно недоступен" body={sectionQuery.error.message} onRetry={() => sectionQuery.refetch()} /></div>;
+    }
+    const error = sectionQuery.error;
+    if (error instanceof ApiError && error.status === 403) {
+      return <div className="screen"><StateMessage icon={Lock} title="Раздел закрыт" body={error.message} onRetry={() => navigate("/profile/subscriptions")} actionLabel="Открыть подписки" /></div>;
+    }
     return (
       <div className="screen">
         <StateMessage title="Раздел не найден" onRetry={() => sectionQuery.refetch()} />
