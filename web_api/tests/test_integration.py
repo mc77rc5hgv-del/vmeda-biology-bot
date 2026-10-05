@@ -132,3 +132,49 @@ def test_me_reflects_real_referral_and_admin_state():
     tb.stats["referral_monthly"].pop(str(referrer_id), None)
     tb.save_stats()
     tb._stats_executor.submit(lambda: None).result()
+
+
+def test_subscription_storefront_and_invoice_are_server_authoritative():
+    import copy
+    from unittest.mock import AsyncMock
+    from web_api.deps import get_current_user_id, get_fresh_bot_module
+    from web_api import bot_state
+    from web_api.subscriptions import parse_payload
+    tb = bot_state.get_bot_module()
+    uid = 913987654
+    app.dependency_overrides[get_current_user_id] = lambda: uid
+    app.dependency_overrides[get_fresh_bot_module] = lambda: tb
+    original_create = tb.bot.create_invoice_link
+    tb.bot.create_invoice_link = AsyncMock(return_value='https://t.me/$test-invoice')
+    before = copy.deepcopy(tb.stats)
+    try:
+        response = client.get('/api/v1/subscriptions/catalog')
+        assert response.status_code == 200, response.text
+        catalog = response.json()
+        assert catalog['plans']
+        assert all(plan['id'] in tb.ACTIVE_SUBSCRIPTION_TIERS for plan in catalog['plans'])
+        assert all(plan['price_stars'] == tb.SUBSCRIPTION_TIERS[plan['id']]['price_stars'] for plan in catalog['plans'])
+        assert len(catalog['current']['access']) == 11
+        assert client.post('/api/v1/subscriptions/invoice', json={'tier_id': 21, 'price_stars': 1}).status_code == 422
+        assert client.post('/api/v1/subscriptions/invoice', json={'tier_id': 21, 'user_id': uid + 1}).status_code == 422
+        for body in ({'tier_id': 1}, {'tier_id': 30}, {'tier_id': 20}, {'tier_id': 20, 'subject': 'anatomy'}):
+            assert client.post('/api/v1/subscriptions/invoice', json=body).status_code == 409
+        created = client.post('/api/v1/subscriptions/invoice', json={'tier_id': 21})
+        assert created.status_code == 200, created.text
+        args = tb.bot.create_invoice_link.call_args.kwargs
+        signed = parse_payload(tb, args['payload'])
+        assert signed['user_id'] == uid
+        assert signed['amount'] == tb.SUBSCRIPTION_TIERS[21]['price_stars']
+        assert args['currency'] == 'XTR' and args['provider_token'] == ''
+        assert args['prices'][0].amount == signed['amount']
+        assert client.get('/api/v1/subscriptions/payments/' + created.json()['payment_id']).json()['status'] == 'processing'
+        from aiogram.exceptions import TelegramNetworkError
+        from aiogram.methods import CreateInvoiceLink
+        tb.bot.create_invoice_link.side_effect = TelegramNetworkError(method=CreateInvoiceLink(title='test', description='test', payload='test', currency='XTR', prices=[]), message='synthetic timeout')
+        assert client.post('/api/v1/subscriptions/invoice', json={'tier_id': 21}).status_code == 503
+        assert tb.stats == before, 'viewing tariffs / creating invoices changed user data'
+    finally:
+        tb.bot.create_invoice_link = original_create
+        app.dependency_overrides.clear()
+    assert client.get('/api/v1/subscriptions/catalog').status_code == 401
+    assert client.post('/api/v1/subscriptions/invoice', json={'tier_id': 21}).status_code == 401

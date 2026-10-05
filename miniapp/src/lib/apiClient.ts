@@ -802,3 +802,25 @@ export async function setLearningFlag(
     body: JSON.stringify({ value }),
   }));
 }
+
+export interface SubscriptionPlan {
+  id: number; title: string; short: string; price_stars: number; duration_days: number | null;
+  expires_at: string | null; benefits: string[]; badge: string | null; ai_limit: number | null;
+  ai_period: string | null; courses: number[]; unavailable_reason: string | null;
+  subject_options: { id: string; title: string; unavailable_reason: string | null }[];
+}
+export interface SubscriptionCatalog {
+  plans: SubscriptionPlan[];
+  current: { active: boolean; tier_id: number | null; title: string | null; expires_at: string | null;
+    benefits: string[]; ai_remaining: number | null; ai_limit: number | null; ai_period: string | null;
+    access: { id: string; title: string; available: boolean }[] };
+}
+export function fetchSubscriptionCatalog(): Promise<SubscriptionCatalog> {
+  return apiFetch("/api/v1/subscriptions/catalog");
+}
+export function createSubscriptionInvoice(tierId: number, subject?: string): Promise<{url: string; payment_id: string}> {
+  return apiFetch("/api/v1/subscriptions/invoice", {method: "POST", body: JSON.stringify({tier_id: tierId, subject})});
+}
+export function fetchSubscriptionPayment(id: string): Promise<{status: "processing" | "applied" | "review"}> {
+  return apiFetch(`/api/v1/subscriptions/payments/${encodeURIComponent(id)}`);
+}

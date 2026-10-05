@@ -71,7 +71,7 @@ export function Root() {
     // Purchases and grants in Telegram must be visible without reopening the Mini App.
     const refresh = () => {
       if (document.visibilityState !== 'visible') return;
-      for (const key of ['access', 'subscription', 'me', 'learning', 'dashboard', 'histology-stats', 'anatomy-active', 'anatomy-ratings', 'anatomy-preferences', 'continue']) {
+      for (const key of ['access', 'subscription', 'subscriptions', 'me', 'learning', 'dashboard', 'histology-stats', 'anatomy-active', 'anatomy-ratings', 'anatomy-preferences', 'continue']) {
         void queryClient.invalidateQueries({ queryKey: [key] });
       }
     };
