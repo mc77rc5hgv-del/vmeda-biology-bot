@@ -24,7 +24,7 @@ export function ProfilePage() {
   const navigate = useNavigate();
   const meQuery = useQuery({ queryKey: ["me"], queryFn: fetchMe });
   const dashboardQuery = useQuery({ queryKey: ["dashboard"], queryFn: fetchDashboard });
-  const subQuery = useQuery({ queryKey: ["subscription-summary"], queryFn: fetchSubscriptionSummary });
+  const subQuery = useQuery({ queryKey: ["subscription", "summary"], queryFn: fetchSubscriptionSummary });
 
   if (meQuery.isLoading) {
     return <div className="screen"><Skeleton height={172} radius="22px" /><div className={styles.statsGrid}>{Array.from({ length: 4 }).map((_, index) => <Skeleton key={index} height={118} radius="16px" />)}</div></div>;
@@ -35,10 +35,6 @@ export function ProfilePage() {
 
   const user = meQuery.data;
   const dashboard = dashboardQuery.data;
-  const openBot = () => {
-    hapticImpact();
-    openTelegramLink("https://t.me/VMEDA_examen_bot");
-  };
   const openSupport = () => {
     hapticImpact();
     const text = encodeURIComponent("Здравствуйте! Нужна помощь с VMEDA Mini App.");
@@ -77,7 +73,7 @@ export function ProfilePage() {
       )}
 
       <h2 className={styles.sectionTitle}>Доступ и подписка</h2>
-      {subQuery.isError ? <Card className={styles.queryError}><span>Не удалось проверить подписку</span><button type="button" onClick={() => subQuery.refetch()}>Повторить</button></Card> : <PressableCard className={styles.subCard} onClick={openBot} aria-label="Открыть управление подпиской в боте">
+      {subQuery.isError ? <Card className={styles.queryError}><span>Не удалось проверить подписку</span><button type="button" onClick={() => subQuery.refetch()}>Повторить</button></Card> : <PressableCard className={styles.subCard} onClick={() => navigate("/profile/subscriptions")} aria-label="Открыть тарифы и оплату подписки">
         <div className={styles.subRow}>
           <div>
             <div className={styles.subTitle}>{subQuery.isLoading ? "Проверяем подписку…" : subQuery.isError ? "Не удалось проверить подписку" : subQuery.data?.subscriptionTitle ?? "Нет активной подписки"}</div>

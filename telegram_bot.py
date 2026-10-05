@@ -9,7 +9,7 @@ import os
 import sys
 import time
 import urllib.parse
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import (
@@ -333,12 +333,13 @@ def _log_stats_write_result(future) -> None:
     if exc is not None:
         logger.error("Не удалось сохранить статистику: %s", exc)
 
-def save_stats() -> None:
+def save_stats() -> Future[None]:
     # Снимок делаем сразу (deepcopy — быстро), сама запись на диск уходит в отдельный поток.
     data = copy.deepcopy(stats)
     data["total_users"] = list(data["total_users"])
     future = _stats_executor.submit(_write_stats_file, data)
     future.add_done_callback(_log_stats_write_result)
+    return future
 
 if __name__ == '__main__':
     # A second process on the SAME persistent volume must never read stale stats or poll.
@@ -4172,6 +4173,10 @@ async def handle_pre_checkout(pre_checkout_query) -> None:
     из-за бага при формировании инвойса; отклонить здесь дешевле и безопаснее, чем молча выдать
     несоответствующую payload'у подписку в handle_successful_payment)."""
     payload = pre_checkout_query.invoice_payload or ""
+    if payload.startswith("vmeda-miniapp:"):
+        from web_api.subscriptions import pre_checkout
+        await pre_checkout(sys.modules[__name__], pre_checkout_query)
+        return
     if payload.startswith("sub_stars_"):
         parts = payload.split("_")
         try:
@@ -4196,6 +4201,10 @@ async def handle_pre_checkout(pre_checkout_query) -> None:
 @dp.message(F.successful_payment)
 async def handle_successful_payment(message: Message):
     payment = message.successful_payment
+    if (payment.invoice_payload or "").startswith("vmeda-miniapp:"):
+        from web_api.subscriptions import successful_payment
+        await successful_payment(sys.modules[__name__], message)
+        return
     stars = payment.total_amount
     payload = payment.invoice_payload or ""
 
@@ -4492,7 +4501,7 @@ def _sub_ai_plan(user_id: int) -> tuple[str | None, int | None]:
         cfg = SUBSCRIPTION_TIERS.get(sub.get("tier"), {})
         limit_type, limit = cfg.get("ai_limit_type"), cfg.get("ai_limit")
         if limit_type and limit:
-            return limit_type, limit
+            return limit_type, limit + (sub.get("miniapp_ai_bonus", 0) if limit_type == "period" else 0)
         return None, None
     return "monthly", LEGACY_PAID_AI_MONTHLY_BONUS
 
@@ -4505,7 +4514,7 @@ def _get_sub_ai_used(sub: dict, limit_type: str) -> int:
         if not entry or entry.get("month") != _current_ai_month_key():
             return 0
         return entry.get("count", 0)
-    return sub.get("ai_used_period", 0)
+    return max(0, sub.get("ai_used_period", 0) - sub.get("miniapp_ai_period_start", 0))
 
 def _increment_sub_ai_usage(user_id: int, limit_type: str) -> None:
     sub = get_subscription(user_id)

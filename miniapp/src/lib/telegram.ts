@@ -45,6 +45,7 @@ interface TelegramWebApp {
   ready: () => void;
   expand: () => void;
   close: () => void;
+  openInvoice?: (url: string, callback: (status: "paid" | "cancelled" | "failed" | "pending") => void) => void;
   openTelegramLink?: (url: string) => void;
   openLink?: (url: string) => void;
   setBackgroundColor?: (color: string) => void;
@@ -195,4 +196,12 @@ export function useTelegramBackButton(onBack: (() => void) | null): void {
       webApp.BackButton.offClick(onBack);
     };
   }, [onBack]);
+}
+
+export function canOpenInvoice(): boolean {
+  return Boolean(webApp?.initData && webApp.openInvoice && (!webApp.isVersionAtLeast || webApp.isVersionAtLeast("6.1")));
+}
+export function openInvoice(url: string, callback: (status: "paid" | "cancelled" | "failed" | "pending") => void): void {
+  if (!canOpenInvoice()) throw new Error("Открой miniapp в обновлённом Telegram для оплаты.");
+  webApp!.openInvoice!(url, callback);
 }

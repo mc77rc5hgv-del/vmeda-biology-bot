@@ -78,6 +78,115 @@ ACTIVE_TIERS = {20, 21, 22, 23, 24, 25, 26, 27, 28, 29}
 # flow has an exactly-365-day option for giveaway prizes; see services/access.py's comment on it.
 ADMIN_ONLY_TIERS = {30}
 
+
+async def check_miniapp_payments():
+    """Exercise paid updates on disposable test stats, never contact Telegram."""
+    import copy
+    import json
+    from types import SimpleNamespace
+    from web_api import subscriptions as billing
+    uid = 910234567
+    tb.stats['total_users'].add(uid)
+    tb.stats.setdefault('usernames', {})[str(uid)] = 'preserved_username'
+    tb.stats.setdefault('subscription_purchase_log', [])
+    baseline = copy.deepcopy(tb.stats)
+    billing._pending_checkouts.clear()
+    payload, payment_id = billing.make_payload(tb, uid, 21, None)
+    assert len(payload.encode()) <= 128
+    assert billing.parse_payload(tb, payload)['user_id'] == uid
+    try:
+        billing.parse_payload(tb, payload[:-1] + ('0' if payload[-1] != '0' else '1'))
+        assert False, 'tampered signature accepted'
+    except ValueError:
+        pass
+    class Query:
+        def __init__(self):
+            self.id = 'checkout1'
+            self.from_user = FakeUser(uid)
+            self.invoice_payload = payload
+            self.currency = 'XTR'
+            self.total_amount = tb.SUBSCRIPTION_TIERS[21]['price_stars']
+            self.answers = []
+        async def answer(self, **kw):
+            self.answers.append(kw)
+    query = Query()
+    await tb.handle_pre_checkout(query)
+    assert query.answers[-1]['ok']
+    with patch.object(billing.time, 'time', return_value=time.time() + 901):
+        await tb.handle_pre_checkout(query)
+        assert not query.answers[-1]['ok']
+    query.currency = 'RUB'
+    await tb.handle_pre_checkout(query)
+    assert not query.answers[-1]['ok']
+    query.currency = 'XTR'
+    query.from_user = FakeUser(uid + 1)
+    await tb.handle_pre_checkout(query)
+    assert not query.answers[-1]['ok']
+    query.from_user = FakeUser(uid)
+    query.id = 'other-checkout'
+    await tb.handle_pre_checkout(query)
+    assert not query.answers[-1]['ok']
+    msg = FakeMsg(FakeUser(uid))
+    msg.successful_payment = SimpleNamespace(invoice_payload=payload, currency='XTR', total_amount=tb.SUBSCRIPTION_TIERS[21]['price_stars'], telegram_payment_charge_id='miniapp-first')
+    # Fail the first write, then save a real atomic snapshot on the isolated volume.
+    from concurrent.futures import Future
+    original_save = tb.save_stats
+    writes = []
+    def flaky_save():
+        writes.append(True)
+        if len(writes) == 1:
+            failed = Future()
+            failed.set_exception(OSError('synthetic transient disk failure'))
+            return failed
+        return original_save()
+    with patch.object(tb, 'save_stats', flaky_save):
+        await tb.handle_successful_payment(msg)
+    assert len(writes) == 2
+    assert billing.payment_receipt(tb, uid, payment_id)['status'] == 'applied'
+    assert billing.payment_receipt(tb, uid + 1, payment_id) is None
+    assert tb.has_active_subscription(uid)
+    after = copy.deepcopy(tb.stats)
+    await tb.handle_successful_payment(msg)
+    assert tb.stats == after, 'duplicate payment granted twice'
+    for key, value in baseline.items():
+        if key not in ('subscriptions', 'subscription_purchase_log', 'processed_payment_charge_ids'):
+            assert tb.stats[key] == value, f'unrelated stats changed: {key}'
+    sub = tb.get_subscription(uid)
+    sub['ai_used_period'] = 17
+    sub['unknown_existing_field'] = {'retain': True}
+    old = copy.deepcopy(sub)
+    old_remaining = tb.sub_ai_requests_left(uid)
+    payload2, id2 = billing.make_payload(tb, uid, 21, None)
+    msg.successful_payment.invoice_payload = payload2
+    msg.successful_payment.telegram_payment_charge_id = 'miniapp-renew'
+    await tb.handle_successful_payment(msg)
+    renewed = tb.get_subscription(uid)
+    assert abs(renewed['expires'] - old['expires'] - 30 * 86400) < 1
+    assert renewed['ai_used_period'] == 17
+    assert renewed['unknown_existing_field'] == old['unknown_existing_field']
+    assert tb.sub_ai_requests_left(uid) == old_remaining + tb.SUBSCRIPTION_TIERS[21]['ai_limit']
+    assert billing.payment_receipt(tb, uid, id2)['previous_subscription'] == old
+    assert billing.purchase_reason(tb, uid, 20, 'biology') is not None
+    renewed['ai_used_monthly'] = {'month': tb._current_ai_month_key(), 'count': 100}
+    assert billing.purchase_reason(tb, uid, 26, None) is not None, 'monthly switch lost paid remaining requests'
+    renewed['anatomy'] = True
+    assert billing.purchase_reason(tb, uid, 21, None) is not None, 'renewal lost enhanced rights'
+    renewed['anatomy'] = False
+    # A better subscription activated after invoice creation must remain intact.
+    review_payload, review_id = billing.make_payload(tb, uid, 21, None)
+    tb.grant_subscription(uid, 28, 'rubles_manual', 0)
+    protected = copy.deepcopy(tb.get_subscription(uid))
+    msg.successful_payment.invoice_payload = review_payload
+    msg.successful_payment.telegram_payment_charge_id = 'miniapp-race'
+    await tb.handle_successful_payment(msg)
+    assert tb.get_subscription(uid) == protected
+    assert billing.payment_receipt(tb, uid, review_id)['status'] == 'review'
+    with open(tb.STATS_FILE, encoding='utf-8') as stream:
+        persisted = json.load(stream)
+    assert persisted['subscriptions'][str(uid)] == protected
+    assert persisted['processed_payment_charge_ids']['miniapp-race']['status'] == 'review'
+    print('miniapp Stars: signature, ownership, currency, concurrent checkout, renewal, idempotency and data preservation: OK')
+
 async def main():
     non_admin = random.randint(10_000_000, 99_999_999)
     tb.stats["subscriptions"].pop(str(non_admin), None)
@@ -1667,6 +1776,7 @@ async def main():
     tb.stats["subscription_purchase_log"] = orig_log
     tb.stats["subscriptions"] = orig_subs_snapshot
 
+    await check_miniapp_payments()
     print("ALL SUBSCRIPTION TESTS PASSED")
 
 # Exercise the legacy catalogue before its fixed calendar expirations. Separate sync

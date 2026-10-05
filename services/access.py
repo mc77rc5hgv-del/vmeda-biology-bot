@@ -806,7 +806,7 @@ def biology_tickets_download_ok(user_id: int) -> bool:
         return False
     return _sub_has_biology_download(sub)
 
-def grant_subscription(user_id: int, tier: int, method: str, price: int, subject: str | None = None) -> None:
+def grant_subscription(user_id: int, tier: int, method: str, price: int, subject: str | None = None, *, persist: bool = True) -> None:
     cfg = SUBSCRIPTION_TIERS[tier]
     now = time.time()
     if cfg.get("expires_at") is not None:
@@ -849,7 +849,8 @@ def grant_subscription(user_id: int, tier: int, method: str, price: int, subject
     tb.stats.setdefault("subscription_purchase_log", []).append({
         "user_id": user_id, "tier": tier, "method": method, "price": price, "ts": now,
     })
-    tb.save_stats()
+    if persist:
+        tb.save_stats()
 
 def _month_key_msk(ts: float) -> str:
     return datetime.fromtimestamp(ts, tb.APP_TIMEZONE).strftime("%Y-%m")
