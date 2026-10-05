@@ -39,3 +39,11 @@
 @media (min-width: 760px) { .plans { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
 .page button:focus-visible, .page select:focus-visible, .page summary:focus-visible { outline: 2px solid var(--academic-blue); outline-offset: 3px; }
+.purchase { display: flex; flex-direction: column; gap: 8px; }
+.purchase .secondary { background: color-mix(in srgb, var(--academic-blue) 10%, var(--surface)); color: var(--academic-blue); border: 1px solid var(--border); }
+.history { display: flex; flex-direction: column; gap: 12px; }
+.history article { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 0; border-top: 1px solid var(--border); }
+.history article > div { min-width: 0; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.history small { color: var(--ink-secondary); }
+.paymentId { overflow-wrap: anywhere; font-size: 10px; }
+.history button { border: 0; background: transparent; color: var(--academic-blue); min-height: 44px; font-weight: 600; }

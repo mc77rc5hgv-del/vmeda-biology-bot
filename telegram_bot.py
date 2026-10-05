@@ -3728,6 +3728,7 @@ def get_subscription_course_picker_keyboard():
     builder.button(text="1️⃣ Первый курс", callback_data="subscription_course:year1")
     builder.button(text="2️⃣ Второй курс", callback_data="subscription_course:year2")
     builder.button(text="📦 Все тарифы", callback_data="subscription_all_tiers")
+    builder.button(text="🏦 Мои платежи СБП", callback_data="sbp_history")
     builder.adjust(1)
     builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
     return builder.as_markup()
@@ -3791,6 +3792,9 @@ def get_sub_tier_keyboard(tier_id: int):
         builder.adjust(1)
     else:
         builder.button(text=f"⭐ Оплатить {cfg['price_stars']} звёзд", callback_data=f"buy_sub_stars:{tier_id}")
+        from services.payments.runtime import available as sbp_available
+        if sbp_available(sys.modules[__name__]):
+            builder.button(text=f"🏦 СБП {cfg['price_rub']}₽ — автоматически", callback_data=f"buy_sub_sbp:{tier_id}")
         builder.button(text=f"💵 Оплатить {cfg['price_rub']}₽", callback_data=f"buy_sub_rubles:{tier_id}")
         builder.adjust(1)
     nxt_kb = get_tier_upsell_keyboard(tier_id)
@@ -3806,6 +3810,9 @@ def get_sub_subject_keyboard(tier_id: int, subject: str):
         text=f"⭐ Оплатить {cfg['price_stars']} звёзд",
         callback_data=f"buy_sub_stars_subj:{tier_id}:{subject}"
     )
+    from services.payments.runtime import available as sbp_available
+    if sbp_available(sys.modules[__name__]):
+        builder.button(text=f"🏦 СБП {cfg['price_rub']}₽ — автоматически", callback_data=f"buy_sub_sbp:{tier_id}:{subject}")
     builder.button(
         text=f"💵 Оплатить {cfg['price_rub']}₽",
         callback_data=f"buy_sub_rubles_subj:{tier_id}:{subject}"
@@ -4012,6 +4019,68 @@ async def cb_buy_sub_stars_subj(callback: CallbackQuery):
         return
     await callback.answer()
     await send_subscription_stars_invoice(callback.from_user.id, tier_id, subject)
+
+@dp.callback_query(F.data.startswith("buy_sub_sbp:"))
+async def cb_buy_sub_sbp(callback: CallbackQuery):
+    from services.payments.runtime import runtime
+    service = runtime(sys.modules[__name__])
+    await callback.answer()
+    if not service:
+        await callback.message.answer("СБП временно недоступна. Stars и перевод на карту остаются доступны.")
+        return
+    try:
+        parts = callback.data.split(":")
+        row = await service.checkout(callback.from_user.id, int(parts[1]), parts[2] if len(parts) == 3 else None,
+                                     "bot_" + callback.id, "bot")
+    except Exception:
+        await callback.message.answer("Не удалось подтвердить создание счёта СБП. Проверь историю или напиши @vmeda_helper. Доступ не изменён.")
+        return
+    builder = InlineKeyboardBuilder()
+    builder.button(text=f"🏦 Оплатить СБП {row['amount_minor'] // 100}₽", url=row['url'])
+    builder.button(text="🔄 Проверить оплату", callback_data="check_sbp:" + row['id'])
+    builder.button(text="🔙 Подписки", callback_data="subscription_menu")
+    builder.adjust(1)
+    await callback.message.answer("Счёт СБП готов. После оплаты подписка включится автоматически в боте и miniapp. Не нужно присылать чек.\nПлатёж: " + row['id'], reply_markup=builder.as_markup())
+
+
+@dp.callback_query(F.data == "sbp_history")
+async def cb_sbp_history(callback: CallbackQuery):
+    from services.payments.runtime import runtime
+    service = runtime(sys.modules[__name__])
+    await callback.answer()
+    rows = service.ledger.history(callback.from_user.id, limit=8) if service else []
+    if not rows:
+        await callback.message.answer("Платежей СБП пока нет. Stars и перевод на карту доступны в подписках.")
+        return
+    lines = ["🏦 Мои платежи СБП"]
+    builder = InlineKeyboardBuilder()
+    for row in rows:
+        label = 'оплачено, подписка активирована' if row['state'] == 'applied' else 'оплачено, проверка поддержки' if row['state'] == 'review' else 'счёт требует проверки' if row['state'] == 'creation_unknown' else 'ожидает оплаты'
+        lines.append(f"\n{row['amount_minor']/100:g}₽ · тариф {row['tier_id']} · {label}\n{row['id']}")
+        if row['state'] == 'pending' and row['url']:
+            builder.button(text=f"СБП {row['amount_minor']/100:g}₽ · продолжить", url=row['url'])
+            builder.button(text="Проверить " + row['id'][-6:], callback_data='check_sbp:' + row['id'])
+    builder.button(text="🔙 Подписки", callback_data="subscription_menu")
+    builder.adjust(1)
+    await callback.message.answer('\n'.join(lines), reply_markup=builder.as_markup())
+
+
+@dp.callback_query(F.data.startswith("check_sbp:"))
+async def cb_check_sbp(callback: CallbackQuery):
+    from services.payments.runtime import runtime
+    service = runtime(sys.modules[__name__])
+    row = service.ledger.get(callback.data.split(":", 1)[1]) if service else None
+    if not row or row['user_id'] != callback.from_user.id:
+        await callback.answer("Платёж не найден", show_alert=True)
+        return
+    await callback.answer()
+    try:
+        row = await service.check(row)
+        text = "✅ Подписка активирована в боте и miniapp." if row['state'] == 'applied' else "Оплата получена; нужна проверка @vmeda_helper." if row['state'] == 'review' else "Оплата ещё не подтверждена. Продолжаем проверять автоматически."
+    except Exception:
+        text = "Провайдер пока недоступен. Проверка продолжится автоматически; повторно оплачивать этот счёт не нужно."
+    await callback.message.answer(text)
+
 
 @dp.callback_query(F.data.startswith("buy_sub_rubles:"))
 async def cb_buy_sub_rubles(callback: CallbackQuery):
@@ -6070,9 +6139,17 @@ async def main():
         logger.info("AI_BUILD_EMBEDDINGS_ON_START=0 — пересчёт эмбеддингов RAG на старте пропущен")
     from services.sync_runtime import start_optional_api, stop_optional_api
     sync_server = start_optional_api()
+    from services.payments.runtime import start as start_billing
+    billing_task = start_billing(sys.modules[__name__])
     try:
         await dp.start_polling(bot)
     finally:
+        if billing_task:
+            billing_task.cancel()
+            try:
+                await billing_task
+            except asyncio.CancelledError:
+                pass
         await stop_optional_api(sync_server)
         _stats_executor.shutdown(wait=True)
 

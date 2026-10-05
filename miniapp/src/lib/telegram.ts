@@ -205,3 +205,12 @@ export function openInvoice(url: string, callback: (status: "paid" | "cancelled"
   if (!canOpenInvoice()) throw new Error("Открой miniapp в обновлённом Telegram для оплаты.");
   webApp!.openInvoice!(url, callback);
 }
+
+/** External SBP checkout uses openLink, never openTelegramLink or a client-side grant. */
+export function openPaymentLink(url: string): void {
+  const target = new URL(url);
+  if (target.protocol !== "https:" || !["codeepay.ru", "payment.codeepay.xyz"].includes(target.hostname)) throw new Error("Некорректная ссылка оплаты");
+  if (webApp?.openLink) { webApp.openLink(url); return; }
+  const popup = window.open(url, "_blank", "noopener,noreferrer");
+  if (!popup) window.location.assign(url);
+}
