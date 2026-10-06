@@ -1,0 +1,203 @@
+[
+  {
+    "id": "S01",
+    "title": "Histology Guide: каталог тканей и органов",
+    "url": "https://www.histologyguide.org/slidebox/slidebox.html",
+    "note": "Базовая сравнительная морфология тканей и органов; каталог эталонных срезов. Это сравнительный атлас, не доказательство происхождения наших файлов.",
+    "specimens": [],
+    "verification": "Проверены доступные материалы источника"
+  },
+  {
+    "id": "S02",
+    "title": "Spear & Erickson: apical movement during interkinetic nuclear migration",
+    "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC3935435/",
+    "note": "Митозы нейроэпителиальных клеток локализуются у апикальной поверхности, обращённой к просвету.",
+    "specimens": [
+      "d1_05"
+    ],
+    "verification": "Проверены доступные материалы источника"
+  },
+  {
+    "id": "S03",
+    "title": "Janeway: Antigen Recognition by B-cell and T-cell Receptors",
+    "url": "https://www.ncbi.nlm.nih.gov/books/NBK10770/",
+    "note": "Мембранный иммуноглобулин — антигенный рецептор B-клеток; его нельзя приписывать всем лимфоцитам.",
+    "specimens": [
+      "d2_02"
+    ],
+    "verification": "Проверены доступные материалы источника"
+  },
+  {
+    "id": "S04",
+    "title": "Janeway: Effector mechanisms in allergic reactions",
+    "url": "https://www.ncbi.nlm.nih.gov/sites/books/NBK27112/",
+    "note": "Эозинофилы участвуют в аллергическом воспалении; нельзя свести их действие к противовоспалительному.",
+    "specimens": [
+      "d2_02"
+    ],
+    "verification": "Проверены доступные материалы источника"
+  },
+  {
+    "id": "S05",
+    "title": "Histology Guide: submandibular gland",
+    "url": "https://histologyguide.org/slideview/MH-095-submandibular-gland/12-slide-1.html",
+    "note": "Смешанная железа: серозные и слизистые отделы, протоки и серозные полулуния.",
+    "specimens": [
+      "d3_16"
+    ],
+    "verification": "Проверены доступные материалы источника"
+  },
+  {
+    "id": "S06",
+    "title": "University of Basel: submandibular gland",
+    "url": "https://tales.nmc.unibas.ch/en/histology-12/verdauungsorgane-mundhohle-anatomische-mikroskopie-54/submandibular-gland-1-349",
+    "note": "Подчелюстная железа преимущественно серозная; долек не должно быть фиксированно десять.",
+    "specimens": [
+      "d3_16"
+    ],
+    "verification": "Проверены доступные материалы источника"
+  },
+  {
+    "id": "S07",
+    "title": "StatPearls: Tooth Eruption",
+    "url": "https://www.ncbi.nlm.nih.gov/sites/books/NBK549878/",
+    "note": "Гидростатическое давление — одна из теорий; важны зубной фолликул и ремоделирование кости.",
+    "specimens": [
+      "d3_18"
+    ],
+    "verification": "Проверены доступные материалы источника"
+  },
+  {
+    "id": "S09",
+    "title": "Histology Guide: gastric glands, SEM",
+    "url": "https://www.histologyguide.org/EM-view/EM-023-gastric-glands/14-photo-1.html",
+    "note": "Фундальные железы бывают простыми или разветвлёнными трубчатыми; париетальные клетки секретируют кислоту и внутренний фактор.",
+    "specimens": [
+      "d3_21"
+    ],
+    "verification": "Проверены доступные материалы источника"
+  },
+  {
+    "id": "S10",
+    "title": "Histology Guide: kidney",
+    "url": "https://histologyguide.org/slideview/MH-141a-kidney/16-slide-1.html",
+    "note": "Различаются тонкие нисходящие и восходящие отделы, толстый восходящий отдел и собирательные трубки.",
+    "specimens": [
+      "d4_37"
+    ],
+    "verification": "Проверены доступные материалы источника"
+  },
+  {
+    "id": "S11",
+    "title": "Digital Histology: cortex, medullary ray",
+    "url": "https://digitalhistology.org/organs-systems/urinary/tubules-and-collecting-system/tubules-and-collecting-system-9/",
+    "note": "В мозговом луче коры — прямые проксимальные канальцы, толстые восходящие отделы и собирательные трубки; не тонкие отделы.",
+    "specimens": [
+      "d4_37"
+    ],
+    "verification": "Проверены доступные материалы источника"
+  },
+  {
+    "id": "S12",
+    "title": "Dixon & Gosling: muscularis mucosae of human urinary bladder",
+    "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC1170972/",
+    "note": "В человеческом пузыре описаны прерывистые пучки muscularis mucosae. Категоричное отсутствие неверно.",
+    "specimens": [
+      "d4_40"
+    ],
+    "verification": "Проверены доступные материалы источника"
+  },
+  {
+    "id": "S13",
+    "title": "Weaver & Abdul-Karim: prevalence of muscularis mucosae",
+    "url": "https://pubmed.ncbi.nlm.nih.gov/2076889/",
+    "note": "Наличие и выраженность мышечной пластинки вариабельны; её отсутствие на отдельном поле не означает универсального отсутствия.",
+    "specimens": [
+      "d4_40"
+    ],
+    "verification": "Проверены доступные материалы источника"
+  },
+  {
+    "id": "S14",
+    "title": "Betz cells of the primary motor cortex, review",
+    "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC10952528/",
+    "note": "Клетки Беца — малая доля кортикоспинальных проекционных нейронов; не все пирамидные нейроны и не большинство аксонов пути.",
+    "specimens": [
+      "d4_52"
+    ],
+    "verification": "Проверены доступные материалы источника"
+  },
+  {
+    "id": "S15",
+    "title": "AAO EyeWiki: Basic Histology of the Eye",
+    "url": "https://eyewiki.aao.org/Basic_Histology_of_the_Eye_and_Accessory_Structures",
+    "note": "Диск — место выхода аксонов без фоторецепторов; слепое пятно следует отличать от pars caeca retinae.",
+    "specimens": [
+      "d4_53",
+      "d4_54"
+    ],
+    "verification": "Проверены доступные материалы источника"
+  },
+  {
+    "id": "S16",
+    "title": "Webvision: Photoreceptors",
+    "url": "https://www.ncbi.nlm.nih.gov/books/NBK11522/",
+    "note": "Наружный сегмент содержит светочувствительные диски; внутренний содержит метаболические органеллы, включая митохондрии.",
+    "specimens": [
+      "d4_54"
+    ],
+    "verification": "Проверены доступные материалы источника"
+  },
+  {
+    "id": "S18",
+    "title": "Hakizimana & Fridberger, Nature Communications 2021",
+    "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC8110531/",
+    "note": "Исследование сообщает о контакте внутренних стереоцилий с покровной мембраной. Это ограничивает категоричное традиционное объяснение; наш световой снимок не позволяет выбрать механизм.",
+    "specimens": [
+      "d4_55"
+    ],
+    "verification": "Проверены доступные материалы источника"
+  },
+  {
+    "id": "S19",
+    "title": "StatPearls: Histology, Spermatogenesis",
+    "url": "https://www.ncbi.nlm.nih.gov/books/NBK553142/",
+    "note": "Сперматиды — гаплоидные клетки после мейоза; спермиогенез является дифференцировкой, а не очередной стадией деления.",
+    "specimens": [
+      "d5_56"
+    ],
+    "verification": "Проверены доступные материалы источника"
+  },
+  {
+    "id": "S20",
+    "title": "Histology Guide: uterus, late secretory phase",
+    "url": "https://histologyguide.com/slideview/MH-166-uterus/18-slide-1.html",
+    "note": "Функциональный и базальный слои; секреторные железы и гликоген; слои миометрия разграничены нечётко.",
+    "specimens": [
+      "d5_60"
+    ],
+    "verification": "Проверены доступные материалы источника"
+  },
+  {
+    "id": "S21",
+    "title": "Digital Histology: placenta, late pregnancy",
+    "url": "https://digitalhistology.org/organs-systems/reproductive/female/placenta/placenta-8/",
+    "note": "Цитотрофобласт поздних ворсин прерывист; нельзя обещать сплошной слой на любом сроке.",
+    "specimens": [
+      "d5_61",
+      "d5_62"
+    ],
+    "verification": "Проверены доступные материалы источника"
+  },
+  {
+    "id": "S22",
+    "title": "Histology Guide: placenta",
+    "url": "https://www.histologyguide.org/slideview/MH-175-placenta/18-slide-1.html?page=1&x=0&y=0&z=-1",
+    "note": "Плацента состоит из плодного хориона и материнской decidua basalis; ворсины остаются плодными структурами даже на материнской поверхности.",
+    "specimens": [
+      "d5_61",
+      "d5_62"
+    ],
+    "verification": "Проверены доступные материалы источника"
+  }
+]

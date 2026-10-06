@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import os
+from services.miniapp_testers import has_test_access
+
 from fastapi import APIRouter, Depends
 
 from ..deps import get_current_user_id, get_fresh_bot_module
@@ -16,6 +18,7 @@ def sync_state(user_id: int = Depends(get_current_user_id), tb=Depends(get_fresh
     sub = tb.get_subscription(user_id) if active else None
     return {
         'user_id': user_id,
+        'tester_access': has_test_access(tb, user_id),
         'source': 'running_bot' if os.environ.get('BOT_SYNC_MODE') == 'owner' else 'legacy_local_file',
         'content_revision': os.environ.get('RAILWAY_GIT_COMMIT_SHA'),
         'subscription': {
@@ -34,9 +37,9 @@ def sync_state(user_id: int = Depends(get_current_user_id), tb=Depends(get_fresh
         },
         'subjects': {subject: get_subject_access(subject, user_id, tb).model_dump() for subject in sorted(SUBJECT_IDS)},
         'anatomy_modules': {
-            key: (not tb.anatomy_maintenance_mode_enabled() or tb.is_admin_or_assistant(user_id))
-                 and tb.anatomy_section_access_ok(user_id, key)
+            key: (not tb.anatomy_maintenance_mode_enabled() or tb.is_admin_or_assistant(user_id) or has_test_access(tb, user_id))
+                 and (has_test_access(tb, user_id) or tb.anatomy_section_access_ok(user_id, key))
             for key in tb.ANATOMY
         },
-        'chemistry_tickets': tb.chemistry_tickets_access_ok(user_id),
+        'chemistry_tickets': has_test_access(tb, user_id) or tb.chemistry_tickets_access_ok(user_id),
     }

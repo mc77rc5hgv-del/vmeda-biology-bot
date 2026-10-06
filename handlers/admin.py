@@ -71,6 +71,9 @@ def get_admin_menu():
     builder.button(text="📥 Экспорт stats.json", callback_data="admin_export_stats")
     builder.button(text="👥 Список пользователей", callback_data="admin_userlist:0")
     builder.button(text="🔎 Найти пользователя", callback_data="admin_lookup_prompt")
+    builder.button(text="🧪 Выдать тестовый доступ miniapp", callback_data="admin_tester_grant")
+    builder.button(text="🧪 Отозвать тестовый доступ miniapp", callback_data="admin_tester_revoke")
+    builder.button(text="🧪 Тестировщики miniapp", callback_data="admin_tester_list")
     builder.button(text="🔍 Поиск по контенту", callback_data="admin_content_search_prompt")
     builder.button(text="🔓 Дать доступ по username/ID", callback_data="admin_grant_prompt")
     builder.button(text="🚫 Отозвать доступ по username/ID", callback_data="admin_revoke_prompt")
@@ -285,6 +288,7 @@ def get_admin_user_card_text(target_id: int) -> str:
     name = tb.stats["user_names"].get(uid_str, "—")
     label = format_admin_target_label(username, target_id)
 
+    from services.miniapp_testers import has_test_access
     roles = []
     if tb.is_admin(target_id):
         roles.append("👑 админ")
@@ -325,6 +329,7 @@ def get_admin_user_card_text(target_id: int) -> str:
         f"Роли: {roles_line}\n\n"
         f"🔗 Рефералов всего: <b>{refs_total}</b>, в этом месяце: <b>{refs_month}</b> "
         f"(порог {tb.REFERRAL_FULL_ACCESS_THRESHOLD})\n"
+        f"🧪 Тестовый доступ miniapp: {'✅' if has_test_access(tb, target_id) else '❌'}\n"
         f"🔓 Ручной доступ: {manual}\n"
         f"🦴 Демо-доступ Анатомия: {anatomy_demo}\n"
         f"⏳ Временный доступ (реф./перекличка): {temp_line}\n"
@@ -2070,3 +2075,50 @@ async def cb_admin_sbp(callback: CallbackQuery):
     builder.button(text="🔙 Админ-панель", callback_data="admin_panel")
     builder.adjust(1)
     await tb.safe_edit_text(callback.message, '\n'.join(lines), parse_mode='HTML', reply_markup=builder.as_markup())
+
+
+@router.callback_query(F.data.in_({"admin_tester_grant", "admin_tester_revoke"}))
+async def cb_admin_tester_prompt(callback: CallbackQuery):
+    if not tb.is_admin(callback.from_user.id):
+        await callback.answer("Недостаточно прав", show_alert=True)
+        return
+    grant = callback.data == "admin_tester_grant"
+    tb.ADMIN_PENDING[callback.from_user.id] = {
+        "action": "grant_miniapp_tester" if grant else "revoke_miniapp_tester"
+    }
+    await callback.answer()
+    await tb.safe_edit_text(
+        callback.message,
+        ("🧪 <b>Выдать тестовый доступ miniapp</b>" if grant else
+         "🧪 <b>Отозвать тестовый доступ miniapp</b>")
+        + "\n\nОтправь @username (или Telegram ID). Пользователь должен сначала нажать /start в боте."
+        + "\nТестовый доступ действует до отзыва, открывает все доступные учебные функции miniapp."
+        + "\nПодписки, платежи и административные права не изменяются.",
+        parse_mode="HTML", reply_markup=get_admin_back_keyboard(),
+    )
+
+
+@router.callback_query((F.data == "admin_tester_list") | F.data.startswith("admin_tester_list:"))
+async def cb_admin_tester_list(callback: CallbackQuery):
+    if not tb.is_admin(callback.from_user.id):
+        await callback.answer("Недостаточно прав", show_alert=True)
+        return
+    tb.ADMIN_PENDING.pop(callback.from_user.id, None)
+    from services.miniapp_testers import has_test_access
+    labels = [escape(format_admin_target_label(tb.stats["user_username"].get(uid), int(uid)))
+              for uid in tb.stats.get("miniapp_tester_access", {}) if has_test_access(tb, int(uid))]
+    await callback.answer()
+    # Paginate to keep Telegram's message limit even with large tester cohorts.
+    page = int((callback.data or "").partition(":")[2] or "0")
+    start = page * 25
+    builder = InlineKeyboardBuilder()
+    if page > 0:
+        builder.button(text="← Назад", callback_data=f"admin_tester_list:{page-1}")
+    if start + 25 < len(labels):
+        builder.button(text="Далее →", callback_data=f"admin_tester_list:{page+1}")
+    builder.button(text="🔙 В админ-панель", callback_data="admin_panel")
+    builder.adjust(1)
+    text = "🧪 <b>Активные тестировщики miniapp</b>\n\n" + ("\n".join(labels[start:start+25]) or "Нет активных тестировщиков.")
+    if labels:
+        text += f"\n\nВсего: {len(labels)}. Для отзыва используй @username или ID."
+    await tb.safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=builder.as_markup())

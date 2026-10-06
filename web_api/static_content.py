@@ -980,6 +980,8 @@ def _histology_specimen_html(specimen: dict) -> str:
     magnification = specimen.get("magnification")
     if magnification:
         parts.append(f"<p><strong>Увеличение:</strong> ×{escape(str(magnification))}</p>")
+    if specimen.get("metadata_note"):
+        parts.append(f"<p>{escape(specimen['metadata_note'])}</p>")
     protocol = str(specimen.get("protocol", "")).strip()
     for paragraph in protocol.split("\n\n"):
         paragraph = paragraph.strip()
@@ -989,6 +991,7 @@ def _histology_specimen_html(specimen: dict) -> str:
 
 
 def _histology_material(histology: dict, section_id: str, item_id: str) -> dict:
+    from services.histology_content import image_caption
     if section_id != HISTOLOGY_SECTION_ID:
         raise ContentNotFoundError(f"раздел {section_id!r} не найден в гистологии")
 
@@ -1007,8 +1010,8 @@ def _histology_material(histology: dict, section_id: str, item_id: str) -> dict:
         "prev_id": specimens[index - 1]["id"] if index > 0 else None,
         "next_id": specimens[index + 1]["id"] if index + 1 < len(specimens) else None,
         "media": [
-            {"path": f"images/histology/{path}", "caption": specimen["title"]}
-            for path in specimen.get("images", [])
+            {"path": f"images/histology/{path}", "caption": image_caption(specimen, index)}
+            for index, path in enumerate(specimen.get("images", []))
         ],
     }
 

@@ -1272,7 +1272,8 @@ async def main():
     assert cb_hist_locked.message.edits
     hist_locked_text, hist_locked_kb = cb_hist_locked.message.edits[0]
     check_html(hist_locked_text)
-    assert "полностью готов" in hist_locked_text
+    assert "учебные схемы" in hist_locked_text
+    assert "сверено с преподавателями" not in hist_locked_text
     assert str(tb.cheapest_histology_tier()["price_rub"]) in hist_locked_text
     assert any("Оформить подписку" in t for t in kb_texts(hist_locked_kb))
     tb.stats["histology_temp_access"].pop(str(non_admin), None)

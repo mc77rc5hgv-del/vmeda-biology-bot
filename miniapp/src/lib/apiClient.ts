@@ -213,6 +213,7 @@ export async function fetchRealDashboard(): Promise<DashboardStats> {
 // ==================== подписка и доступ ====================
 
 interface AccessStatusWire {
+  tester_access?: boolean;
   trial_available?: boolean;
   can_open_subject: boolean;
   can_download: boolean;
@@ -225,6 +226,7 @@ interface AccessStatusWire {
 
 function toAccessStatus(wire: AccessStatusWire): AccessStatus {
   return {
+    testerAccess: wire.tester_access ?? false,
     canOpenSubject: wire.can_open_subject,
     trialAvailable: wire.trial_available ?? false,
     canDownload: wire.can_download,
@@ -595,12 +597,18 @@ export async function fetchHistologySpecimen(specimenId: string): Promise<Histol
   const wire = await apiFetch<HistologySpecimenWire & {
     protocol: string;
     images: string[];
+    image_guides?: HistologySpecimen["imageGuides"];
+    metadata_note?: string;
+    sources?: HistologySpecimen["sources"];
     markers: Array<{ x: number; y: number; label: string }>;
   }>(`/api/v1/histology/exam/specimens/${encodeURIComponent(specimenId)}`);
   return {
     ...toHistologySummary(wire),
     protocol: wire.protocol,
     images: wire.images.map(absoluteApiUrl),
+    imageGuides: wire.image_guides ?? [],
+    metadataNote: wire.metadata_note ?? "",
+    sources: wire.sources ?? [],
     markers: wire.markers,
   };
 }

@@ -448,6 +448,17 @@ def test_histology_material_includes_stain_magnification_and_images(histology):
     ]
 
 
+def test_histology_reviewed_caption_and_metadata_render_without_html_injection(histology):
+    specimen = histology['diagnostika_1']['specimens'][0]
+    specimen['metadata_note'] = 'Кадр <не> подтверждает одинаковый масштаб.'
+    specimen['image_guides'] = [{'kind': 'diagram', 'visible': 'Слои эпителия.', 'note': 'Не микрофото.'}]
+    material = static_content.get_material(FakeTb(histology=histology), 'histology', 'specimens', 'd1_01')
+    assert '&lt;не&gt;' in material['content_html']
+    caption = material['media'][0]['caption']
+    assert 'Учебная схема, не микрофотография' in caption
+    assert 'Слои эпителия.' in caption
+
+
 def test_histology_specimen_without_images_has_empty_media(histology):
     tb = FakeTb(histology=histology)
     material = static_content.get_material(tb, "histology", "specimens", "d1_02")

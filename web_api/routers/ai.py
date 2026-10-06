@@ -17,6 +17,8 @@ import base64
 import binascii
 import logging
 
+from services.miniapp_testers import has_test_access
+
 from fastapi import APIRouter, Depends, HTTPException
 
 from ..deps import get_current_user_id, get_fresh_bot_module
@@ -27,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 
 def _requests_left(tb, user_id: int) -> int | None:
-    return None if tb.has_unlimited_ai(user_id) else tb.ai_requests_left(user_id)
+    return None if has_test_access(tb, user_id) or tb.has_unlimited_ai(user_id) else tb.ai_requests_left(user_id)
 
 
 async def _acquire_or_503(tb, user_id: int):
@@ -42,7 +44,7 @@ async def _acquire_or_503(tb, user_id: int):
             status_code=503,
             detail="AI временно отключён из-за высокой нагрузки — администраторы уже знают, попробуй позже.",
         )
-    if not tb.ai_quota_ok(user_id):
+    if not has_test_access(tb, user_id) and not tb.ai_quota_ok(user_id):
         raise HTTPException(status_code=429, detail="На сегодня бесплатные AI-запросы закончились, попробуй завтра.")
     lock = tb._get_ai_user_lock(user_id)  # noqa: SLF001 -- тот же приватный хелпер, что и у бота
     if lock.locked():
