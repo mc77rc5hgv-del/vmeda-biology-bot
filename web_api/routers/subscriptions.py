@@ -1,6 +1,8 @@
 """Authenticated subscription storefront. Invoices do not grant access."""
 import re
 
+from services.miniapp_testers import has_test_access
+
 from aiogram.exceptions import TelegramAPIError
 from aiogram.types import LabeledPrice
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -41,7 +43,7 @@ def _catalog(tb, user_id):
     active = tb.has_active_subscription(user_id)
     sub = tb.get_subscription(user_id) if active else None
     cfg = tb.SUBSCRIPTION_TIERS.get(sub.get('tier'), {}) if sub else {}
-    unlimited = tb.has_unlimited_ai(user_id)
+    unlimited = has_test_access(tb, user_id) or tb.has_unlimited_ai(user_id)
     limit_type, limit = tb._sub_ai_plan(user_id)
     return {'plans': plans, 'sbp_available': available(tb), 'current': {'active': active, 'tier_id': sub.get('tier') if sub else None,
             'title': cfg.get('title'), 'expires_at': iso(sub.get('expires')) if sub else None,

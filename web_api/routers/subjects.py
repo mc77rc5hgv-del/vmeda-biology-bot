@@ -1,6 +1,8 @@
 import os
 import random
 
+from services.miniapp_testers import has_test_access
+
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 
@@ -330,7 +332,7 @@ def answer_anatomy_exam_question(
 
 
 def _anatomy_maintenance_locked_reason(tb, user_id: int) -> str | None:
-    if tb.anatomy_maintenance_mode_enabled() and not tb.is_admin_or_assistant(user_id):
+    if tb.anatomy_maintenance_mode_enabled() and not (tb.is_admin_or_assistant(user_id) or has_test_access(tb, user_id)):
         # Тот же текст, что показывает боту get_anatomy_maintenance_text(), без HTML-обёртки —
         # раздел временно закрыт технически, это не платный гейт.
         return (
@@ -344,7 +346,7 @@ def _anatomy_module_locked_reason(tb, user_id: int, module_key: str) -> str | No
     maintenance_reason = _anatomy_maintenance_locked_reason(tb, user_id)
     if maintenance_reason is not None:
         return maintenance_reason
-    if tb.anatomy_section_access_ok(user_id, module_key):
+    if has_test_access(tb, user_id) or tb.anatomy_section_access_ok(user_id, module_key):
         return None
     cheapest = tb.cheapest_anatomy_tier()
     return (
@@ -408,7 +410,7 @@ def _get_material_data(tb, user_id: int, subject_id: str, section_id: str, item_
 
 
 def _histology_locked_reason(tb, user_id: int) -> str | None:
-    if tb.histology_access_ok(user_id):
+    if has_test_access(tb, user_id) or tb.histology_access_ok(user_id):
         return None
     cheapest = tb.cheapest_histology_tier()
     return (
@@ -445,7 +447,7 @@ def _annotate_histology_groups(tb, user_id: int, section: dict) -> dict:
 
 
 def _biology_locked_reason(tb, user_id: int) -> str | None:
-    if can_visit(tb, user_id, "biology"):
+    if has_test_access(tb, user_id) or can_visit(tb, user_id, "biology"):
         return None
     cheapest = tb.cheapest_gated3_tier()
     return (
@@ -479,7 +481,7 @@ def _annotate_biology_section(tb, user_id: int, section: dict) -> dict:
 
 
 def _chemistry_locked_reason(tb, user_id: int) -> str | None:
-    if can_visit(tb, user_id, "chemistry"):
+    if has_test_access(tb, user_id) or can_visit(tb, user_id, "chemistry"):
         return None
     cheapest = tb.cheapest_gated3_tier()
     return (
@@ -489,7 +491,7 @@ def _chemistry_locked_reason(tb, user_id: int) -> str | None:
 
 
 def _chemistry_tickets_locked_reason(tb, user_id: int) -> str | None:
-    if tb.chemistry_tickets_access_ok(user_id):
+    if has_test_access(tb, user_id) or tb.chemistry_tickets_access_ok(user_id):
         return None
     return (
         "Билеты по химии закрыты дополнительным условием: нужно 2 реферала в этом месяце или "
@@ -533,7 +535,7 @@ def _annotate_chemistry_section(tb, user_id: int, section: dict) -> dict:
 
 
 def _physics_locked_reason(tb, user_id: int) -> str | None:
-    if can_visit(tb, user_id, "physics"):
+    if has_test_access(tb, user_id) or can_visit(tb, user_id, "physics"):
         return None
     cheapest = tb.cheapest_gated3_tier()
     return (

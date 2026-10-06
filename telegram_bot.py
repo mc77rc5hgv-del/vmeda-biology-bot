@@ -218,6 +218,7 @@ def load_stats() -> dict:
             data.setdefault("user_names", {})
             data.setdefault("user_username", {})
             data.setdefault("usernames", {})
+            data.setdefault("miniapp_tester_access", {})
             data.setdefault("manual_access_granted", [])
             data.setdefault("manual_anatomy_demo_granted", [])
             data.setdefault("assistant_admins", [])
@@ -277,6 +278,7 @@ def load_stats() -> dict:
         "user_names": {},
         "user_username": {},
         "usernames": {},
+        "miniapp_tester_access": {},
         "manual_access_granted": [],
         "manual_anatomy_demo_granted": [],
         "assistant_admins": [],
@@ -2868,6 +2870,33 @@ async def handle_admin_pending_action(message: Message):
 
     pending = ADMIN_PENDING[admin_id]
     action = pending["action"]
+
+    if action in {"grant_miniapp_tester", "revoke_miniapp_tester"}:
+        from html import escape
+        from services.miniapp_testers import set_test_access
+        username, target_id = resolve_user_by_username(message.text)
+        current = stats.get("user_username", {}).get(str(target_id))
+        by_id = message.text.strip().lstrip("@").isdigit()
+        if (not target_id or target_id not in stats["total_users"]
+                or (not by_id and (current or "").casefold() != (username or "").casefold())):
+            await message.answer(
+                "⚠️ Пользователь не найден или username устарел. Попроси его открыть бота "
+                "и нажать /start, затем отправь @username снова. Можно также указать Telegram ID."
+            )
+            return
+        active = action == "grant_miniapp_tester"
+        saved = set_test_access(__import__(__name__), admin_id, target_id, active=active)
+        if saved is not None:
+            await asyncio.wrap_future(saved)
+        del ADMIN_PENDING[admin_id]
+        label = escape(format_admin_target_label(current, target_id))
+        await message.answer(
+            f"🧪 Тестовый доступ miniapp для {label} "
+            + ("выдан до отзыва. Все доступные учебные разделы и AI открыты."
+               if active else "отозван. Обычные права по подписке и рефералам сохранены."),
+            parse_mode="HTML", reply_markup=get_admin_menu(),
+        )
+        return
 
     if action == "content_search":
         await message.answer(get_admin_content_search_text(message.text), parse_mode="HTML")

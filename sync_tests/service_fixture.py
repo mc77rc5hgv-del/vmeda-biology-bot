@@ -40,3 +40,11 @@ async def anatomy(payload: dict):
     q = tb.ANATOMY_EXAM_TEST_PARTS[0]['questions'][0]
     await asyncio.to_thread(learning.answer_anatomy_run, payload['user_id'], 'synthetic-bot-run', 0, 1, q['correct'], True)
     return {'ok': True}
+
+
+@app.post('/internal/test/tester')
+async def tester(payload: dict):
+    from services.miniapp_testers import set_test_access
+    saved = set_test_access(tb, next(iter(tb.ADMIN_IDS)), payload['user_id'], active=payload['active'])
+    await asyncio.wrap_future(saved)
+    return {'ok': True}

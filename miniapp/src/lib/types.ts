@@ -288,6 +288,7 @@ export interface LearningState {
 
 /** Права доступа — решает ТОЛЬКО backend (§16 ТЗ), фронт лишь отображает эти уже посчитанные поля. */
 export interface AccessStatus {
+  testerAccess?: boolean;
   trialAvailable?: boolean;
   canOpenSubject: boolean;
   canDownload: boolean;

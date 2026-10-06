@@ -1,3 +1,5 @@
+from services.miniapp_testers import has_test_access
+
 from fastapi import Header, HTTPException
 
 from . import bot_state, config
@@ -30,10 +32,10 @@ def ensure_miniapp_access(user_id: int) -> None:
         tb = bot_state.get_bot_module()
     except bot_state.BotStateUnavailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    if not tb.is_admin(user_id):
+    if not tb.is_admin(user_id) and not has_test_access(tb, user_id):
         raise HTTPException(
             status_code=403,
-            detail="Мини-приложение пока доступно только администратору VMEDA.",
+            detail="Мини-приложение пока доступно только администратору VMEDA и приглашённым тестировщикам.",
         )
 
 

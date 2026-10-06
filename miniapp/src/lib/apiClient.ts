@@ -213,6 +213,7 @@ export async function fetchRealDashboard(): Promise<DashboardStats> {
 // ==================== подписка и доступ ====================
 
 interface AccessStatusWire {
+  tester_access?: boolean;
   trial_available?: boolean;
   can_open_subject: boolean;
   can_download: boolean;
@@ -225,6 +226,7 @@ interface AccessStatusWire {
 
 function toAccessStatus(wire: AccessStatusWire): AccessStatus {
   return {
+    testerAccess: wire.tester_access ?? false,
     canOpenSubject: wire.can_open_subject,
     trialAvailable: wire.trial_available ?? false,
     canDownload: wire.can_download,

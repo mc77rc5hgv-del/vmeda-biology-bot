@@ -107,6 +107,15 @@ try:
     assert safety['backups']['learning']['verified']
     assert safety['owner']['backups']['stats']['loaded_data_preserved']
     assert safety['owner']['users'] == 1
+    # Grant/revoke on the owner must be visible through the gateway without a restart.
+    assert client.post(owner_url+'/internal/test/tester', headers=internal, json={'user_id': user_id, 'active': True}).status_code == 200
+    state = client.get(gateway_url+'/api/v1/sync/state', headers=headers).json()
+    assert state['tester_access'] and state['chemistry_tickets'] and all(state['anatomy_modules'].values())
+    assert client.get(gateway_url+'/api/v1/access/physics', headers=headers).json()['tester_access']
+    assert not client.get(gateway_url+'/api/v1/me', headers=headers).json()['is_admin']
+    assert client.post(owner_url+'/internal/test/tester', headers=internal, json={'user_id': user_id, 'active': False}).status_code == 200
+    assert not client.get(gateway_url+'/api/v1/sync/state', headers=headers).json()['tester_access']
+
     assert client.post(owner_url+'/internal/test/grant', headers=internal, json={'user_id': user_id, 'tier': 24}).status_code == 200
     assert client.get(gateway_url+'/api/v1/subscription', headers=headers).json()['subscription_title']
     assert client.get(gateway_url+'/api/v1/sync/state', headers=headers).json()['source'] == 'running_bot'
@@ -139,6 +148,8 @@ try:
     persisted = json.loads((owner_data/'stats.json').read_text())
     for key in ['user_names', 'user_username', 'usernames', 'histology_learning', 'anatomy_exam_test_scores', 'unknown_future_field']:
         assert persisted[key] == baseline[key], key
+    assert persisted['miniapp_tester_access'][str(user_id)]['active'] is False
+    assert len(persisted['miniapp_tester_access'][str(user_id)]['history']) == 2
     assert (gateway_data/'stats.json').read_bytes() == gateway_snapshot
     with sqlite3.connect(db) as conn:
         assert conn.execute('SELECT * FROM legacy_identity').fetchall() == [(user_id, 'preserved_username')]
@@ -146,7 +157,7 @@ try:
     if os.environ.get('VMEDA_BROWSER_SMOKE') == '1':
         from browser_smoke import run_browser_smoke
         print(json.dumps(run_browser_smoke(gateway_url, signed_init_data(), client, headers)))
-    print(json.dumps({'real_owner_gateway_http': True, 'subscription_visible_immediately': True,
+    print(json.dumps({'real_owner_gateway_http': True, 'tester_grant_revoke_synchronized': True, 'subscription_visible_immediately': True,
                       'histology_retry_survives_restart': True, 'anatomy_resume_and_common_rating': True,
                       'outage_fails_closed_with_cors': True, 'legacy_identity_and_stats_preserved': True,
                       'synthetic_directory': str(folder)}, ensure_ascii=False, indent=2))
