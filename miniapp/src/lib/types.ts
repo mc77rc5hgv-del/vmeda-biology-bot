@@ -183,6 +183,9 @@ export interface HistologySpecimenSummary {
 export interface HistologySpecimen extends HistologySpecimenSummary {
   protocol: string;
   images: string[];
+  imageGuides: Array<{ kind: "micrograph" | "diagram"; visible: string; note: string }>;
+  metadataNote: string;
+  sources: Array<{ title: string; url: string }>;
   markers: HistologyMarker[];
 }
 

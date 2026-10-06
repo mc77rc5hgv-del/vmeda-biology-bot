@@ -12,6 +12,7 @@ import asyncio
 import uuid
 import random
 import time
+from html import escape
 
 from aiogram import F, Router
 from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton
@@ -121,9 +122,9 @@ def get_histology_locked_text() -> str:
     cheapest = tb.cheapest_histology_tier()
     return (
         f"🔬 <b>Гистология</b>\n{tb.DIVIDER}\n\n"
-        "✅ Раздел уже полностью готов и проработан: все микрофотографии и "
-        "протоколы-описания взяты именно с препаратов академии, а содержание "
-        "сверено с преподавателями.\n\n"
+        "Микрофотографии, учебные схемы, описания и ориентиры для подготовки "
+        "к распознаванию препаратов. Пояснения к каждому кадру помогают "
+        "сопоставить изображение с теорией.\n\n"
         f"Открывается бесплатно — как Биология, Физика и Химия — после "
         f"<b>{tb.REFERRAL_FULL_ACCESS_THRESHOLD}</b> приглашённых друзей в этом месяце, либо сразу по подписке от "
         f"<b>{cheapest['price_rub']}₽ / {cheapest['price_stars']}⭐</b> "
@@ -187,13 +188,20 @@ def get_histology_topic_keyboard(diag_key: str):
 
 def get_histology_specimen_text(diag_key: str, spec_id: str) -> str:
     spec = get_histology_specimen(diag_key, spec_id)
-    lines = [f"🔬 <b>№{spec['number']}. {spec['title']}</b>\n{tb.DIVIDER}\n"]
+    lines = [f"🔬 <b>№{spec['number']}. {escape(spec['title'])}</b>\n{tb.DIVIDER}\n"]
     if spec.get("stain"):
-        lines.append(f"Окраска: {spec['stain']}")
+        lines.append(f"Окраска исходного препарата: {escape(spec['stain'])}")
     if spec.get("magnification"):
-        lines.append(f"Увеличение: {spec['magnification']}")
+        lines.append(f"Увеличение исходного препарата: {escape(str(spec['magnification']))}")
+    if spec.get("metadata_note"):
+        lines.append(escape(spec["metadata_note"]))
     lines.append("")
-    lines.append(spec["protocol"] or "Протокол-описание пока не добавлено.")
+    lines.append(escape(spec["protocol"] or "Протокол-описание пока не добавлено."))
+    sources = spec.get("sources", [])
+    if sources:
+        lines.append("\nУчебные источники:")
+        lines.extend(f'<a href="{escape(source["url"], quote=True)}">{escape(source["title"])}</a>'
+                     for source in sources)
     return "\n".join(lines)
 
 def get_histology_specimen_keyboard(diag_key: str, spec_id: str):
@@ -201,7 +209,7 @@ def get_histology_specimen_keyboard(diag_key: str, spec_id: str):
     builder = InlineKeyboardBuilder()
     n_img = len(spec.get("images", []))
     if n_img:
-        builder.button(text=f"🖼 Микрофото ({n_img})", callback_data=f"histology_img:{diag_key}:{spec_id}:0")
+        builder.button(text=f"🖼 Изображения ({n_img})", callback_data=f"histology_img:{diag_key}:{spec_id}:0")
     builder.adjust(1)
     builder.row(InlineKeyboardButton(text="🔙 К списку препаратов", callback_data=f"histology_topic:{diag_key}"))
     return builder.as_markup()
@@ -221,7 +229,8 @@ def get_histology_image_keyboard(diag_key: str, spec_id: str, idx: int, total: i
 async def render_histology_image(callback: CallbackQuery, diag_key: str, spec_id: str, idx: int):
     spec = get_histology_specimen(diag_key, spec_id)
     images = spec.get("images", [])
-    caption = f"🔬 №{spec['number']}. {spec['title']}\n\n{idx + 1}/{len(images)}"
+    from services.histology_content import image_caption
+    caption = f"🔬 №{spec['number']}. " + image_caption(spec, idx) + f"\n\n{idx + 1}/{len(images)}"
     keyboard = get_histology_image_keyboard(diag_key, spec_id, idx, len(images))
     photo = FSInputFile(os.path.join(tb.HISTOLOGY_IMAGES_DIR, images[idx]))
     await callback.message.delete()

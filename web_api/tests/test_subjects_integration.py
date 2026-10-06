@@ -520,6 +520,9 @@ def test_histology_exam_catalog_practical_reveal_and_grade():
     assert detail.status_code == 200
     assert detail.json()["protocol"]
     assert detail.json()["images"]
+    assert len(detail.json()['image_guides']) == len(detail.json()['images'])
+    assert detail.json()['metadata_note']
+    assert detail.json()['sources']
 
     reveal = client.post(f"/api/v1/histology/exam/specimens/{specimen_id}/reveal", headers=headers)
     assert reveal.status_code == 200
@@ -536,6 +539,36 @@ def test_histology_exam_catalog_practical_reveal_and_grade():
     repeated = client.get("/api/v1/histology/exam/practical?scope=mistakes&limit=10", headers=headers)
     assert repeated.status_code == 200
     assert {item["id"] for item in repeated.json()} == {specimen_id}
+
+
+def test_all_reviewed_histology_cards_and_media_preserve_previous_learning():
+    import copy
+    user_id = 900_444_555_778
+    tb.stats['total_users'].add(user_id)
+    tb.stats['referral_monthly'][str(user_id)] = {'month': tb.local_today().strftime('%Y-%m'), 'count': 2}
+    previous_learning = {'attempts': 12, 'known': 8, 'wrong': 4,
+                         'mastered': ['d1_01', 'd4_54'], 'mistakes': ['d4_55']}
+    tb.stats['histology_learning'][str(user_id)] = copy.deepcopy(previous_learning)
+    tb.save_stats()
+    tb._stats_executor.submit(lambda: None).result()
+    headers = _auth_headers(user_id)
+    catalog = client.get('/api/v1/histology/exam/catalog', headers=headers).json()
+    summaries = [s for g in catalog['groups'] for s in g['specimens']]
+    assert len(summaries) == 71
+    media_count = 0
+    for summary in summaries:
+        response = client.get(f'/api/v1/histology/exam/specimens/{summary["id"]}', headers=headers)
+        assert response.status_code == 200
+        card = response.json()
+        assert len(card['image_guides']) == len(card['images'])
+        for url in card['images']:
+            image = client.get(url, headers=headers)
+            assert image.status_code == 200, url
+            assert image.headers['content-type'].startswith('image/'), url
+            assert image.content, url
+            media_count += 1
+    assert media_count == 186
+    assert tb.stats['histology_learning'][str(user_id)] == previous_learning
 
 
 def test_histology_unknown_diagnostic_is_not_found_not_locked():

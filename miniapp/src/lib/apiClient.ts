@@ -595,12 +595,18 @@ export async function fetchHistologySpecimen(specimenId: string): Promise<Histol
   const wire = await apiFetch<HistologySpecimenWire & {
     protocol: string;
     images: string[];
+    image_guides?: HistologySpecimen["imageGuides"];
+    metadata_note?: string;
+    sources?: HistologySpecimen["sources"];
     markers: Array<{ x: number; y: number; label: string }>;
   }>(`/api/v1/histology/exam/specimens/${encodeURIComponent(specimenId)}`);
   return {
     ...toHistologySummary(wire),
     protocol: wire.protocol,
     images: wire.images.map(absoluteApiUrl),
+    imageGuides: wire.image_guides ?? [],
+    metadataNote: wire.metadata_note ?? "",
+    sources: wire.sources ?? [],
     markers: wire.markers,
   };
 }

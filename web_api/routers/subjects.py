@@ -141,6 +141,9 @@ def get_histology_exam_specimen(
         **_histology_specimen_payload(group_id, group, specimen),
         "protocol": specimen.get("protocol", ""),
         "images": [f"{media_base}/{index}" for index, _ in enumerate(specimen.get("images", []))],
+        "image_guides": specimen.get("image_guides", []),
+        "metadata_note": specimen.get("metadata_note", ""),
+        "sources": specimen.get("sources", []),
         "markers": specimen.get("markers", []),
     }
 

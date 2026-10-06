@@ -1,0 +1,12 @@
+{
+  "specimens": 71,
+  "ids_order_titles_numbers_preserved": true,
+  "quiz_assignments_preserved": 48,
+  "original_image_slots_preserved_unchanged": 262,
+  "protocols_updated": 71,
+  "active_gallery_images": 186,
+  "withheld_gallery_images": 38,
+  "new_teaching_images": 10,
+  "production_data_accessed": false,
+  "runtime_schema_changes": false
+}

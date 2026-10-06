@@ -73,6 +73,15 @@ async def main():
             total_specimens += 1
             assert spec["protocol"], f"{diag_key}/{spec['id']} missing protocol"
             assert spec["images"], f"{diag_key}/{spec['id']} missing images"
+            from services.histology_content import image_caption
+            assert len(spec['image_guides']) == len(spec['images']), spec['id']
+            for index, guide in enumerate(spec['image_guides']):
+                assert guide['kind'] in {'micrograph', 'diagram'}, spec['id']
+                assert guide['visible'], spec['id']
+                # Telegram photo captions have a 1024-character limit, including header/counter.
+                assert len(image_caption(spec, index)) + 40 <= 1024, spec['id']
+            assert spec['metadata_note'], spec['id']
+            assert spec['sources'] and all(s['url'].startswith('https://') for s in spec['sources'])
             for img in spec["images"]:
                 full = os.path.join(tb.HISTOLOGY_IMAGES_DIR, img)
                 assert os.path.isfile(full), full
@@ -224,7 +233,7 @@ async def main():
     spec_text, spec_kb = cb3.message.edits[0]
     assert "Жировые включения" in spec_text
     assert "Осмиевая" in spec_text
-    assert any("Микрофото" in t for t in kb_texts(spec_kb))
+    assert any("Изображения" in t for t in kb_texts(spec_kb))
     print("specimen view d1_01: OK")
 
     cb4 = FakeCB("histology_img:diagnostika_1:d1_01:0")
@@ -236,20 +245,23 @@ async def main():
     assert "1/1" in caption
     print("image carousel single-photo d1_01: OK")
 
-    # 6. Multi-photo carousel navigation (diagnostika_2, d2_02 has 9 images)
+    # 6. Multi-image carousel navigation, including a teaching diagram.
     spec = tb.get_histology_specimen("diagnostika_2", "d2_02")
-    assert len(spec["images"]) == 9
+    image_count = len(spec["images"])
+    assert image_count > 1
     cb5 = FakeCB("histology_img:diagnostika_2:d2_02:0")
     await tb.cb_histology_img(cb5)
     _, cap5, kb5 = cb5.message.photos[0]
-    assert "1/9" in cap5
+    assert f"1/{image_count}" in cap5
+    assert "Ориентиры:" in cap5
     assert not any(b.text == "⬅️" for row in kb5.inline_keyboard for b in row)
     assert any(b.text == "➡️" for row in kb5.inline_keyboard for b in row)
 
-    cb6 = FakeCB("histology_img:diagnostika_2:d2_02:8")
+    cb6 = FakeCB(f"histology_img:diagnostika_2:d2_02:{image_count - 1}")
     await tb.cb_histology_img(cb6)
     _, cap6, kb6 = cb6.message.photos[0]
-    assert "9/9" in cap6
+    assert f"{image_count}/{image_count}" in cap6
+    assert "Учебная схема, не микрофотография" in cap6
     assert any(b.text == "⬅️" for row in kb6.inline_keyboard for b in row)
     assert not any(b.text == "➡️" for row in kb6.inline_keyboard for b in row)
     print("multi-photo carousel nav d2_02: OK")
