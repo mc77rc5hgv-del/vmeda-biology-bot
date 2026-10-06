@@ -124,6 +124,23 @@ async def main():
         for command in commands
     }
     assert "app" in admin_command_names
+    tb.stats['miniapp_tester_access'][str(non_admin)] = {'active': True, 'history': []}
+    tester_buttons = [button for button in kb_buttons(tb.get_main_menu(non_admin)) if button.web_app]
+    assert len(tester_buttons) == 1
+    tester_message = FakeCommandMsg(non_admin)
+    await tb.cmd_app(tester_message)
+    assert len(tester_message.answers) == 1
+    fake_bot.menu_calls.clear()
+    tb.setup_bot_commands.__globals__['bot'] = fake_bot
+    try:
+        await tb.setup_bot_commands()
+    finally:
+        tb.setup_bot_commands.__globals__['bot'] = real_bot
+    assert {chat_id for chat_id, _ in fake_bot.menu_calls} == tb.ADMIN_IDS | {non_admin}
+    assert all(menu_button.web_app.url == tb.MINIAPP_URL for _, menu_button in fake_bot.menu_calls)
+    tb.stats['miniapp_tester_access'][str(non_admin)]['active'] = False
+    assert all(button.web_app is None for button in kb_buttons(tb.get_main_menu(non_admin)))
+
     print("1d. startup pins VMEDA App beside the Telegram input for every full admin: OK")
 
     # ---- 2. 1st course: Физика, Химия, Биология, Анатомия, Гистология, in that order ----

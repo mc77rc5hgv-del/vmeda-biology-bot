@@ -15,7 +15,7 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.types import (
     Message, CallbackQuery, InlineKeyboardButton, FSInputFile, BufferedInputFile, Update,
     BotCommand, BotCommandScopeDefault, BotCommandScopeChat, LabeledPrice,
-    ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, WebAppInfo, MenuButtonWebApp,
+    ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, WebAppInfo, MenuButtonWebApp, MenuButtonCommands,
 )
 from aiogram.filters import CommandStart, Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -1984,13 +1984,28 @@ def _histology_menu_label(user_id: int = None) -> str:
         return "🔬 Гистология (рефералы/подписка)"
 
 
+def miniapp_launch_allowed(user_id: int) -> bool:
+    from services.miniapp_testers import has_test_access
+    return is_admin(user_id) or has_test_access(__import__(__name__), user_id)
+
+
+async def sync_miniapp_menu_button(user_id: int) -> bool:
+    """Refresh the persistent Telegram launcher without sending messages or changing roles."""
+    menu = (MenuButtonWebApp(text="VMEDA App", web_app=WebAppInfo(url=MINIAPP_URL))
+            if MINIAPP_URL and miniapp_launch_allowed(user_id) else MenuButtonCommands())
+    try:
+        await bot.set_chat_menu_button(chat_id=user_id, menu_button=menu)
+        return True
+    except Exception:
+        logger.exception("Не удалось обновить кнопку Mini App для %s", user_id)
+        return False
+
+
 def get_main_menu(user_id: int = None):
     builder = InlineKeyboardBuilder()
-    # Пока backend Mini App закрыт серверным admin_only-гейтом, точку входа показываем только
-    # полным администраторам. Это не заменяет серверную проверку initData, а лишь не ведёт
-    # студентов к заведомо закрытому preview. Кнопка открывает приложение внутри Telegram,
-    # поэтому initData будет подписана тем же ботом и сможет пройти web_api/auth.py.
-    if user_id is not None and is_admin(user_id) and MINIAPP_URL:
+    # Beta entry is available to admins and explicitly granted miniapp testers.
+    # Server-side initData and entitlement checks remain authoritative.
+    if user_id is not None and miniapp_launch_allowed(user_id) and MINIAPP_URL:
         builder.row(InlineKeyboardButton(
             text="🎓 Открыть VMEDA App",
             web_app=WebAppInfo(url=MINIAPP_URL),
@@ -2647,10 +2662,10 @@ async def cmd_start(message: Message):
 async def cmd_app(message: Message):
     """Резервная явная точка входа, если пользователь смотрит старое сообщение /start.
 
-    Команда намеренно доступна только полным администраторам, пока web_api работает в
-    admin_only-режиме. Сервер всё равно повторно проверит подписанный Telegram initData.
+    Команда доступна администраторам и тестировщикам. Сервер повторно проверит initData
+    и текущие права пользователя.
     """
-    if not is_admin(message.from_user.id) or not MINIAPP_URL:
+    if not miniapp_launch_allowed(message.from_user.id) or not MINIAPP_URL:
         return
     await message.answer(
         "🎓 <b>VMEDA Mini App</b>\n\nОткройте приложение кнопкой ниже.",
@@ -2888,12 +2903,15 @@ async def handle_admin_pending_action(message: Message):
         saved = set_test_access(__import__(__name__), admin_id, target_id, active=active)
         if saved is not None:
             await asyncio.wrap_future(saved)
+        menu_updated = await sync_miniapp_menu_button(target_id)
         del ADMIN_PENDING[admin_id]
         label = escape(format_admin_target_label(current, target_id))
         await message.answer(
             f"🧪 Тестовый доступ miniapp для {label} "
             + ("выдан до отзыва. Все доступные учебные разделы и AI открыты."
-               if active else "отозван. Обычные права по подписке и рефералам сохранены."),
+               if active else "отозван. Обычные права по подписке и рефералам сохранены.")
+            + ("\nКнопка Telegram временно не обновилась. Для запуска используй /app или /start."
+               if active and not menu_updated else ""),
             parse_mode="HTML", reply_markup=get_admin_menu(),
         )
         return
@@ -6122,22 +6140,14 @@ async def setup_bot_commands() -> None:
             await bot.set_my_commands(admin_commands, scope=BotCommandScopeChat(chat_id=admin_id))
         except Exception:
             logger.exception("Не удалось установить админ-команды для %s", admin_id)
-        if MINIAPP_URL:
-            try:
-                # В отличие от inline-кнопки в сообщении /start, эта кнопка постоянно находится
-                # рядом с полем ввода Telegram и не зависит от того, насколько старое сообщение
-                # главного меню сейчас открыто у администратора.
-                await bot.set_chat_menu_button(
-                    chat_id=admin_id,
-                    menu_button=MenuButtonWebApp(
-                        text="VMEDA App",
-                        web_app=WebAppInfo(url=MINIAPP_URL),
-                    ),
-                )
-            except Exception:
-                # Не роняем production polling, если конкретный админ ещё ни разу не запускал
-                # бота или Telegram временно не принимает per-chat menu button.
-                logger.exception("Не удалось установить кнопку Mini App для админа %s", admin_id)
+
+    from services.miniapp_testers import has_test_access
+    testers = {int(uid) for uid in stats.get("miniapp_tester_access", {})
+               if has_test_access(__import__(__name__), int(uid))}
+    # Existing testers also receive the launcher after a deploy; no mass notifications.
+    if MINIAPP_URL:
+        for user_id in sorted(ADMIN_IDS | testers):
+            await sync_miniapp_menu_button(user_id)
 
 # AI_BUILD_EMBEDDINGS_ON_START=0 полностью отключает пересчёт эмбеддингов на старте (RAG падает
 # на чистый keyword/IDF-поиск, как без ключа OpenAI вообще) — аварийный рубильник на случай, если
