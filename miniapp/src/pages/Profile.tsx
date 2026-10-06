@@ -79,6 +79,7 @@ export function ProfilePage() {
           <div>
             <div className={styles.subTitle}>{subQuery.isLoading ? "Проверяем подписку…" : subQuery.isError ? "Не удалось проверить подписку" : subQuery.data?.subscriptionTitle ?? "Открой больше возможностей"}</div>
             {!subQuery.isLoading && !subQuery.data?.subscriptionTitle && <div className={styles.subDescription}>Выбери тариф для своего курса</div>}
+            {subQuery.data?.testerAccess && <div className={styles.subMeta}>🧪 Тестировщик: все доступные учебные функции открыты до отзыва доступа</div>}
             {subQuery.data?.subscriptionExpiresAt && <div className={styles.subMeta}>до {formatDate(subQuery.data.subscriptionExpiresAt)}</div>}
             {!subQuery.isLoading && !subQuery.isError && <div className={styles.subMeta}>AI-запросов осталось: {subQuery.data?.aiRequestsLeft === null ? "без ограничений" : subQuery.data?.aiRequestsLeft ?? "—"}</div>}
           </div>

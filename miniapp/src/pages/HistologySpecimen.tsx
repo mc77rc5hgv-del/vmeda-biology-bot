@@ -44,6 +44,7 @@ export function HistologySpecimenPage() {
     window.scrollTo({ top: 0, behavior: "auto" });
   }
   const paragraphs = specimen.protocol.split(/\n\s*\n/).map((item) => item.trim()).filter(Boolean);
+  const guide = specimen.imageGuides[imageIndex];
 
   return (
     <div className={["screen", styles.screen].join(" ")}>
@@ -56,9 +57,10 @@ export function HistologySpecimenPage() {
         <h1>{specimen.title}</h1>
         <div className={styles.meta}>
           {specimen.stain && <span>{specimen.stain}</span>}
-          {specimen.magnification && <span>Увеличение ×{specimen.magnification}</span>}
+          {specimen.magnification && <span>Исходный препарат ×{specimen.magnification}</span>}
           <span>{specimen.groupTitle}</span>
         </div>
+        {specimen.metadataNote && <p className={styles.metadataNote}>{specimen.metadataNote}</p>}
       </header>
 
       <ZoomableMicrograph
@@ -67,6 +69,14 @@ export function HistologySpecimenPage() {
         alt={`${specimen.title}, изображение ${imageIndex + 1}`}
         markers={specimen.markers}
       />
+
+      {guide && (
+        <section className={styles.imageGuide} aria-live="polite">
+          <p className={styles.eyebrow}>{guide.kind === "diagram" ? "Учебная схема · не в масштабе" : `Кадр ${imageIndex + 1} · ориентиры`}</p>
+          <p>{guide.visible}</p>
+          {guide.note && <p className={styles.guideNote}>{guide.note}</p>}
+        </section>
+      )}
 
       {specimen.images.length > 1 && (
         <div className={styles.imagePicker}>
@@ -91,6 +101,15 @@ export function HistologySpecimenPage() {
           {paragraphs.map((paragraph, index) => <p key={index}>{paragraph}</p>)}
         </div>
       </section>
+
+      {specimen.sources.length > 0 && (
+        <details className={styles.sources}>
+          <summary>Учебные источники</summary>
+          <ul>{specimen.sources.map((source) => (
+            <li key={source.url}><a href={source.url} target="_blank" rel="noopener noreferrer">{source.title}</a></li>
+          ))}</ul>
+        </details>
+      )}
 
       {specimen.markers.length > 0 && (
         <section className={styles.markerLegend}>
