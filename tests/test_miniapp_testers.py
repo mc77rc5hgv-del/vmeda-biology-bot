@@ -24,12 +24,22 @@ async def main():
     tb.stats['total_users'].add(uid)
     tb.stats['usernames']['tester'] = uid
     tb.stats['user_username'][str(uid)] = 'Tester'
+    menus = []
+    original_menu = tb.bot.set_chat_menu_button
+    async def set_menu(*, chat_id, menu_button):
+        menus.append((chat_id, menu_button))
+    tb.bot.set_chat_menu_button = set_menu
     original = deepcopy(tb.stats)
     tb.ADMIN_PENDING[admin] = {'action': 'grant_miniapp_tester'}
     message = Message(admin, '@TESTER')
     await tb.handle_admin_pending_action(message)
     assert has_test_access(tb, uid) and admin not in tb.ADMIN_PENDING
     assert not tb.is_admin(uid) and not tb.is_payment_admin(uid)
+    assert menus[-1][0] == uid and menus[-1][1].type == 'web_app'
+    assert any(button.web_app for row in tb.get_main_menu(uid).inline_keyboard for button in row)
+    app_message = Message(uid, '/app')
+    await tb.cmd_app(app_message)
+    assert app_message.answers
     assert {k:v for k,v in tb.stats.items() if k!='miniapp_tester_access'} == {k:v for k,v in original.items() if k!='miniapp_tester_access'}
     loaded = tb.load_stats()
     assert loaded['miniapp_tester_access'][str(uid)]['active'] is True
@@ -42,6 +52,11 @@ async def main():
     tb.ADMIN_PENDING[admin] = {'action': 'revoke_miniapp_tester'}
     await tb.handle_admin_pending_action(Message(admin, str(uid)))
     assert not has_test_access(tb, uid)
+    assert menus[-1][0] == uid and menus[-1][1].type == 'commands'
+    assert all(button.web_app is None for row in tb.get_main_menu(uid).inline_keyboard for button in row)
+    app_message = Message(uid, '/app')
+    await tb.cmd_app(app_message)
+    assert not app_message.answers
     assert len(tb.load_stats()['miniapp_tester_access'][str(uid)]['history']) == 2
     answers = []
     async def answer(*args, **kwargs):
@@ -49,6 +64,7 @@ async def main():
     callback = SimpleNamespace(from_user=SimpleNamespace(id=uid), data='admin_tester_grant', answer=answer)
     await cb_admin_tester_prompt(callback)
     assert uid not in tb.ADMIN_PENDING and answers[0][1]['show_alert'] is True
+    tb.bot.set_chat_menu_button = original_menu
     print('Tester admin grant/revoke, persistence, stale username and non-admin protection: OK')
 
 
