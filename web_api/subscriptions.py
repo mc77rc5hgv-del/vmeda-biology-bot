@@ -183,7 +183,12 @@ async def successful_payment(tb, message):
     )
     for target in {message.from_user.id, *tb.ADMIN_IDS}:
         try:
-            await tb.bot.send_message(target, text if target == message.from_user.id else f'{text}\nПользователь: {message.from_user.id}\nПлатёж: {data["payment_id"]}\nСумма: {payment.total_amount} Stars')
+            if target == message.from_user.id:
+                await tb.bot.send_message(target, text)
+            else:
+                from html import escape
+                from services.payment_notifications import buyer_label
+                await tb.bot.send_message(target, f'{escape(text)}\nПользователь: {buyer_label(tb, message.from_user.id)}\nПлатёж: <code>{escape(data["payment_id"])}</code>\nСумма: {payment.total_amount} Stars', parse_mode='HTML')
         except Exception:
             tb.logger.exception('Could not deliver miniapp payment notification')
 
