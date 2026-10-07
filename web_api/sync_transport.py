@@ -61,7 +61,7 @@ class OwnerGuard:
         self.app, self.token = app, token
 
     async def __call__(self, scope, receive, send):
-        if scope['type'] == 'http' and scope['path'] != '/healthz':
+        if scope['type'] == 'http' and scope['path'] not in ('/healthz', '/readyz', '/livez'):
             supplied = next((v.decode('latin-1') for k, v in scope['headers'] if k.lower() == b'x-vmeda-sync-token'), '')
             if not hmac.compare_digest(supplied.encode(), self.token.encode()):
                 return await JSONResponse({'detail': 'Нет доступа к внутреннему API'}, status_code=403)(scope, receive, send)
