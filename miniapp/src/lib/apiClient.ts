@@ -836,7 +836,7 @@ export function fetchSubscriptionPayment(id: string): Promise<{status: "processi
   return apiFetch(`/api/v1/subscriptions/payments/${encodeURIComponent(id)}`);
 }
 
-export function createSbpSubscription(tierId: number, requestKey: string, subject?: string): Promise<{url: string; payment_id: string}> {
+export function createSbpSubscription(tierId: number, requestKey: string, subject?: string): Promise<{url: string; payment_id: string; status?: string}> {
   return apiFetch("/api/v1/subscriptions/sbp", {method: "POST", body: JSON.stringify({tier_id: tierId, subject, request_key: requestKey})});
 }
 export interface BillingPayment { id: string; tier_id: number; subject: string | null; amount_minor: number; created: number; state: string; reason: string | null; url: string | null }

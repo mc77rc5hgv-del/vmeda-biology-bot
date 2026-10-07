@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { ArrowLeft, Check, ShieldCheck, Sparkles } from "lucide-react";
-import { fetchSubscriptionCatalog, createSubscriptionInvoice, fetchSubscriptionPayment, createSbpSubscription, fetchBillingHistory, type SubscriptionPlan } from "../lib/apiClient";
+import { ApiError, fetchSubscriptionCatalog, createSubscriptionInvoice, fetchSubscriptionPayment, createSbpSubscription, fetchBillingHistory, type SubscriptionPlan } from "../lib/apiClient";
 import { useAuthStore, useUiStore } from "../lib/store";
 import { canOpenInvoice, openInvoice, openPaymentLink, openTelegramLink, useTelegramBackButton } from "../lib/telegram";
 import { StateMessage } from "../components/StateMessage";
@@ -76,9 +76,24 @@ export function SubscriptionsPage() {
       delete requestKeys.current[key];
       try { localStorage.removeItem(key); } catch { /* Saved server quote remains available. */ }
       setNotice("Счёт СБП готов. После оплаты вернись сюда — подписка активируется автоматически. Повторно платить не нужно.");
+      if (invoice.status === 'applied' || invoice.status === 'review' || invoice.status === 'resolved_keep') {
+        setNotice(invoice.status === 'applied' ? 'Оплата подтверждена, доступ обновляется.' : 'Оплата подтверждена. Повторно платить не нужно.');
+        for (const queryKey of ['subscriptions', 'subscription', 'access', 'me', 'subjects', 'subject', 'section', 'group']) void client.invalidateQueries({queryKey: [queryKey]});
+        void history.refetch();
+        return;
+      }
       try { openPaymentLink(invoice.url); } catch { setNotice("Счёт сохранён. Нажми «Продолжить оплату», чтобы открыть СБП."); }
       void history.refetch();
-    } catch (error) { setNotice(error instanceof Error ? error.message : "Не удалось создать счёт СБП"); }
+    } catch (error) {
+      // A confirmed terminal quote may be replaced. A 503/timeout remains
+      // ambiguous: keep its nonce so it cannot create a second bank invoice.
+      if (error instanceof ApiError && error.status === 409) {
+        delete requestKeys.current[key];
+        try { localStorage.removeItem(key); } catch { /* In-memory key also cleared. */ }
+      }
+      setNotice(error instanceof Error ? error.message : "Не удалось создать счёт СБП");
+      void history.refetch();
+    }
     finally { lock.current = false; if (mounted.current) setBusy(false); }
   };
   const transfer = (plan: SubscriptionPlan) => {
@@ -105,7 +120,7 @@ export function SubscriptionsPage() {
           <div className={styles.purchase}>{catalog.data.sbp_available && <button disabled={busy || Boolean(pending) || Boolean(reason) || missingChoice} onClick={() => void buySbp(plan)}>{current && plan.duration_days ? "Продлить" : "Оплатить"} по СБП · {plan.price_rub} ₽</button>}<button className={styles.secondary} disabled={busy || Boolean(pending) || Boolean(reason) || missingChoice || !canOpenInvoice()} onClick={() => void buy(plan)}>{current && plan.duration_days ? "Продлить" : current ? "Уже активен" : `Оформить за ${plan.price_stars} Stars`}</button><button className={styles.secondary} disabled={busy || Boolean(reason) || missingChoice} onClick={() => transfer(plan)}>Перевод на карту · {plan.price_rub} ₽</button>{reason && <small>{reason}</small>}{!canOpenInvoice() && <small>Для оплаты Stars нужен актуальный Telegram. СБП и перевод на карту доступны отдельно.</small>}</div>
         </article>;
       })}</div>
-      {history.data && history.data.payments.length > 0 && <section className={styles.current}><h2>Мои платежи СБП</h2><p>Счета из бота и miniapp в одной истории.</p><div className={styles.history}>{history.data.payments.map(item => <article key={item.id}><div><strong>{catalog.data.plans.find(plan => plan.id === item.tier_id)?.short ?? "Подписка VMEDA"}</strong><small>{new Date(item.created * 1000).toLocaleDateString("ru-RU")} · {item.amount_minor / 100} ₽</small><span>{item.state === "applied" ? "Оплачено · подписка активирована" : item.state === "review" ? "Оплачено · проверка поддержки" : item.state === "creation_unknown" ? "Счёт требует проверки поддержки" : item.state === "failed" || item.state === "cancelled" ? "Счёт не оплачен или отменён" : "Ожидает оплаты"}</span><small className={styles.paymentId}>{item.id}</small></div>{!["applied", "review", "creation_unknown", "failed", "cancelled"].includes(item.state) && <button onClick={() => { remember(item.id, item.url ?? undefined); setNotice("Проверяем сохранённый счёт СБП."); void receipt.refetch(); }}>Проверить</button>}</article>)}</div></section>}
+      {history.data && history.data.payments.length > 0 && <section className={styles.current}><h2>Мои платежи СБП</h2><p>Счета из бота и miniapp в одной истории.</p><div className={styles.history}>{history.data.payments.map(item => <article key={item.id}><div><strong>{catalog.data.plans.find(plan => plan.id === item.tier_id)?.short ?? "Подписка VMEDA"}</strong><small>{new Date(item.created * 1000).toLocaleDateString("ru-RU")} · {item.amount_minor / 100} ₽</small><span>{item.state === "applied" ? "Оплачено · подписка активирована" : item.state === "review" ? "Оплачено · проверка поддержки" : item.state === "resolved_keep" ? "Оплачено · решение согласовано" : item.state === "creation_rejected" ? "Счёт не создан · можно повторить" : item.state === "creation_closed" ? "Создание сверено поддержкой" : item.state === "creation_unknown" ? "Счёт требует проверки поддержки" : item.state === "failed" || item.state === "cancelled" ? "Счёт не оплачен или отменён" : "Ожидает оплаты"}</span><small className={styles.paymentId}>{item.id}</small></div>{!["applied", "review", "resolved_keep", "creation_unknown", "creation_rejected", "creation_closed", "failed", "cancelled"].includes(item.state) && <button onClick={() => { remember(item.id, item.url ?? undefined); setNotice("Проверяем сохранённый счёт СБП."); void receipt.refetch(); }}>Проверить</button>}</article>)}</div></section>}
       <footer className={styles.footer}><ShieldCheck size={20} /><p>СБП подтверждает codeePay, оплату Stars — Telegram. Перевод на карту подтверждается вручную. Подписка общая для бота и miniapp. Продление добавляет срок к уже оплаченному периоду.</p><button onClick={support}>Помощь с подпиской</button></footer>
     </>}
   </div>;
