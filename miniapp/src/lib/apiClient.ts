@@ -399,6 +399,9 @@ export async function fetchRealSection(subjectId: string, sectionId: string): Pr
 interface GroupDetail {
   id: string;
   title: string;
+  parentId?: string | null;
+  subgroups?: { id: string; title: string; item_count: number }[];
+  sections?: { title: string; items: SectionItemRef[] }[];
   items: SectionItemRef[];
 }
 

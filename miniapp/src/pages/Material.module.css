@@ -176,3 +176,10 @@
   .blockBody { font-size: 16px; line-height: 1.75; }
   .media { max-height: 72vh; }
 }
+
+.blockBody h2 { font-size: 19px; line-height: 1.4; margin: 24px 0 12px; }
+.blockBody ul, .blockBody ol { padding-left: 24px; margin: 12px 0; }
+.blockBody li { margin: 8px 0; }
+.blockBody details { border: 1px solid var(--border); border-radius: 14px; padding: 14px; margin: 10px 0; }
+.blockBody summary { cursor: pointer; font-weight: 650; min-height: 24px; }
+.blockBody details[open] summary { margin-bottom: 12px; }

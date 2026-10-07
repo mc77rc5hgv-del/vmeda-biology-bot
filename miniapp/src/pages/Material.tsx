@@ -138,7 +138,7 @@ export function MaterialPage() {
     item.subjectId === subjectId && item.sectionId === sectionId && item.materialId === materialId
   ) ?? false;
   const safeHtml = DOMPurify.sanitize(material.rawHtml ?? "", {
-    ALLOWED_TAGS: ["a", "b", "blockquote", "br", "code", "del", "em", "i", "p", "pre", "s", "strong", "u"],
+    ALLOWED_TAGS: ["a", "b", "blockquote", "br", "code", "del", "em", "i", "p", "pre", "s", "strong", "u", "ul", "ol", "li", "h2", "h3", "details", "summary"],
     ALLOWED_ATTR: ["href", "title"],
   });
   const order = material.order;

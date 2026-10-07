@@ -268,7 +268,7 @@ def test_anatomy_summary_and_sections_use_real_counts(anatomy):
     detail = static_content.get_subject_detail(tb, "anatomy")
     assert detail["title"] == "Анатомия"
     assert detail["sections"] == [
-        {"id": "course", "title": "Курс", "item_count": 3, "kind": "grouped"},
+        {"id": "course", "title": "Курс", "item_count": 143, "kind": "grouped"},
     ]
 
 
@@ -277,8 +277,12 @@ def test_anatomy_course_section_lists_modules_as_groups(anatomy):
     section = static_content.get_section_detail(tb, "anatomy", "course")
     assert section["kind"] == "grouped"
     assert [(g["id"], g["title"], g["item_count"]) for g in section["groups"]] == [
-        ("module1_osteology", "Остеология", 2),
-        ("module7_nervous", "Нервная система", 1),
+        ("anatomapp_m1", "Остеология", 37),
+        ("anatomapp_m2", "Синдесмология", 15),
+        ("anatomapp_m3", "Миология", 15),
+        ("anatomapp_m4", "Спланхнология", 31),
+        ("anatomapp_m6", "Неврология", 33),
+        ("anatomapp_m5", "Ангиология", 12),
     ]
 
 

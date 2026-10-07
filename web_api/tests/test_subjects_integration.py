@@ -313,7 +313,7 @@ def test_anatomy_default_maintenance_mode_locks_every_module_for_non_admin():
     _set_anatomy_maintenance_override(None)
     headers = _auth_headers()
     section = client.get("/api/v1/subjects/anatomy/sections/course", headers=headers).json()
-    assert len(section["groups"]) == 10  # см. отчёт по данным: 10 модулей Кафарова
+    assert len(section["groups"]) == 6  # All source modules, in source order
     assert all(g["locked"] for g in section["groups"])
     assert all("технич" in g["locked_reason"].lower() for g in section["groups"])
 
@@ -333,10 +333,10 @@ def test_anatomy_free_module_open_and_paid_module_locked_once_maintenance_is_off
 
     section = client.get("/api/v1/subjects/anatomy/sections/course", headers=headers).json()
     groups_by_id = {g["id"]: g for g in section["groups"]}
-    assert groups_by_id["module1_osteology"]["locked"] is False
-    assert groups_by_id["module1_osteology"]["locked_reason"] is None
-    assert groups_by_id["module7_nervous"]["locked"] is True
-    assert "подписк" in groups_by_id["module7_nervous"]["locked_reason"].lower()
+    assert groups_by_id["anatomapp_m1"]["locked"] is False
+    assert groups_by_id["anatomapp_m1"]["locked_reason"] is None
+    assert groups_by_id["anatomapp_m6"]["locked"] is True
+    assert "подписк" in groups_by_id["anatomapp_m6"]["locked_reason"].lower()
 
     group = client.get(
         "/api/v1/subjects/anatomy/sections/course/groups/module1_osteology", headers=headers
@@ -1140,3 +1140,20 @@ def test_quiz_answer_requires_auth():
         json={"selected_index": 1},
     )
     assert resp.status_code == 401
+
+
+def test_all_anatomapp_topics_and_nested_groups_through_authenticated_api(monkeypatch):
+    from services import anatomy_miniapp as course
+    monkeypatch.setattr(tb, 'is_admin_or_assistant', lambda uid: True)
+    headers = _auth_headers()
+    section = client.get('/api/v1/subjects/anatomy/sections/course', headers=headers)
+    assert section.status_code == 200
+    assert sum(group['item_count'] for group in section.json()['groups']) == 143
+    for gid in course.GROUPS:
+        response = client.get(f'/api/v1/subjects/anatomy/sections/course/groups/{gid}', headers=headers)
+        assert response.status_code == 200, response.text
+        assert response.json()['parentId'] == course.GROUPS[gid]['parent_id']
+    for tid in course.TOPICS:
+        response = client.get(f'/api/v1/materials/anatomy/course/{tid}', headers=headers)
+        assert response.status_code == 200, response.text
+        assert response.json() == course.material(tid)

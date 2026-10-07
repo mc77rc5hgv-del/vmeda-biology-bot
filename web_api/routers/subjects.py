@@ -346,6 +346,7 @@ def _anatomy_module_locked_reason(tb, user_id: int, module_key: str) -> str | No
     maintenance_reason = _anatomy_maintenance_locked_reason(tb, user_id)
     if maintenance_reason is not None:
         return maintenance_reason
+    module_key = static_content.anatomy_miniapp.GROUPS.get(module_key, {}).get("permission_key", module_key)
     if has_test_access(tb, user_id) or tb.anatomy_section_access_ok(user_id, module_key):
         return None
     cheapest = tb.cheapest_anatomy_tier()
@@ -367,7 +368,8 @@ def _annotate_anatomy_groups(tb, user_id: int, section: dict) -> dict:
 def _check_anatomy_material_access(tb, user_id: int, section_id: str, item_id: str) -> None:
     if section_id != static_content.ANATOMY_SECTION_ID:
         raise HTTPException(status_code=404, detail=f"раздел {section_id!r} не найден в анатомии")
-    module_key = None
+    imported = static_content.anatomy_miniapp.TOPICS.get(item_id)
+    module_key = imported["module_id"] if imported else None
     for candidate_key, module in tb.ANATOMY.items():
         if item_id in module.get("topics", {}):
             module_key = candidate_key
@@ -648,7 +650,7 @@ def get_group(
 ) -> dict:
     _check_subject_maintenance(tb, subject_id)
     if subject_id == static_content.ANATOMY_ID and section_id == static_content.ANATOMY_SECTION_ID:
-        if group_id not in tb.ANATOMY:
+        if group_id not in tb.ANATOMY and group_id not in static_content.anatomy_miniapp.GROUPS:
             raise HTTPException(status_code=404, detail=f"модуль {group_id!r} не найден в анатомии")
         reason = _anatomy_module_locked_reason(tb, user_id, group_id)
         if reason is not None:
