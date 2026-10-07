@@ -52,7 +52,9 @@ async function authenticateOnBoot(): Promise<void> {
     // доступ/подписку именно тогда, когда сервер не смог подтвердить личность пользователя.
     const message = err instanceof ApiError && err.status === 403
       ? err.message
-      : "Закройте мини-приложение и откройте его заново из бота VMEDA.";
+      : err instanceof ApiError && err.status === 401
+        ? "Сессия истекла. Закройте мини-приложение и откройте его заново из бота VMEDA."
+        : "Не удалось связаться с сервером VMEDA. Проверьте интернет и попробуйте снова через минуту.";
     useAuthStore.getState().setFailed(message);
   }
 }
@@ -100,10 +102,13 @@ export function Root() {
     return (
       <div style={{ minHeight: "var(--tg-viewport-height, 100dvh)", display: "grid", placeItems: "center", padding: 24, background: "var(--background)" }}>
         <div style={{ maxWidth: 360, textAlign: "center" }}>
-          <h1 style={{ fontSize: 20, marginBottom: 8 }}>Доступ пока закрыт</h1>
+          <h1 style={{ fontSize: 20, marginBottom: 8 }}>Не удалось войти</h1>
           <p style={{ fontSize: 14, color: "var(--ink-secondary)", lineHeight: 1.5 }}>
             {failureMessage}
           </p>
+          <button type="button" onClick={() => window.location.reload()} style={{ marginTop: 20, padding: "12px 20px", minHeight: 44, borderRadius: 14, border: "1px solid var(--ink-secondary)", background: "var(--background)", color: "var(--ink)", font: "inherit", cursor: "pointer" }}>
+            Попробовать снова
+          </button>
         </div>
       </div>
     );
