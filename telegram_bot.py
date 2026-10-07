@@ -2692,48 +2692,18 @@ async def cmd_stats(message: Message):
 
 @dp.message(Command("broadcast"))
 async def cmd_broadcast(message: Message):
-    if not is_admin(message.from_user.id):
-        return
+    from services import admin_broadcast
+    import telegram_bot as tb
+    await admin_broadcast.receive(tb, message, command=True)
 
-    text = message.html_text.split(maxsplit=1)
-    if len(text) < 2 or not text[1].strip():
-        await message.answer(
-            "✏️ <b>Публичное сообщение от администрации</b>\n\n"
-            "Использование:\n<code>/broadcast Текст сообщения</code>",
-            parse_mode="HTML"
-        )
-        return
 
-    announcement = text[1]
-    body = (
-        "📢 <b>Сообщение от администрации</b>\n"
-        f"{DIVIDER}\n\n"
-        f"{announcement}"
-    )
+@dp.message(F.photo | F.video)
+async def handle_admin_broadcast_media(message: Message):
+    from services import admin_broadcast
+    import telegram_bot as tb
+    if not await admin_broadcast.receive(tb, message):
+        raise SkipHandler
 
-    recipients = list(stats["total_users"])
-    status = await message.answer(f"⏳ Рассылка запущена для {len(recipients)} пользователей...")
-
-    sent, failed = 0, 0
-    for user_id in recipients:
-        try:
-            await bot.send_message(user_id, body, parse_mode="HTML")
-            sent += 1
-        except Exception:
-            failed += 1
-        await asyncio.sleep(0.05)
-
-    stats["broadcast_count"] = stats.get("broadcast_count", 0) + 1
-    save_stats()
-
-    await safe_edit_text(
-        status,
-        "✅ <b>Рассылка завершена</b>\n"
-        f"{DIVIDER}\n"
-        f"Доставлено: <b>{sent}</b>\n"
-        f"Не доставлено: <b>{failed}</b>",
-        parse_mode="HTML"
-    )
 
 # ==================== АДМИН-ПАНЕЛЬ ====================
 ADMIN_PENDING: dict = {}  # admin_id -> {"action": ...}
@@ -2849,6 +2819,9 @@ cb_payment_admin_panel = admin_handlers.cb_payment_admin_panel
 async def cmd_admin(message: Message):
     user_id = message.from_user.id
     if is_admin(user_id):
+        from services import admin_broadcast
+        admin_broadcast.drafts.pop(user_id, None)
+        ADMIN_PENDING.pop(user_id, None)
         await message.answer(
             f"🛠 <b>Админ-панель</b>\n{DIVIDER}\n\nВыбери действие:",
             parse_mode="HTML",
@@ -2885,6 +2858,12 @@ async def handle_admin_pending_action(message: Message):
 
     pending = ADMIN_PENDING[admin_id]
     action = pending["action"]
+
+    if action == 'broadcast_content':
+        from services import admin_broadcast
+        import telegram_bot as tb
+        await admin_broadcast.receive(tb, message)
+        return
 
     if action == 'sbp_resolution':
         text = message.text.strip()

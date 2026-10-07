@@ -176,6 +176,7 @@ def get_admin_announcements_keyboard(back_callback: str = "admin_panel"):
     полный админ возвращается в admin_panel, а админ платежей — в свою отдельную panel, см.
     cb_admin_announcements_menu, который выбирает нужное значение."""
     builder = InlineKeyboardBuilder()
+    builder.button(text="📝 Создать рассылку (текст, фото, видео)", callback_data="admin_broadcast_prompt")
     builder.button(text="📣 Оповещение о подписке", callback_data="admin_announce_subscription_confirm")
     builder.button(text="📣 Анонс раздела поддержки", callback_data="admin_announce_support_confirm")
     builder.button(text="📣 Анонс раздела Анатомия", callback_data="admin_announce_anatomy_confirm")
@@ -596,6 +597,8 @@ async def cb_admin_panel(callback: CallbackQuery):
         return
     await callback.answer()
     tb.ADMIN_PENDING.pop(callback.from_user.id, None)
+    from services import admin_broadcast
+    admin_broadcast.drafts.pop(callback.from_user.id, None)
     await tb.safe_edit_text(
         callback.message,
         f"🛠 <b>Админ-панель</b>\n{tb.DIVIDER}\n\nВыбери действие:",
@@ -2180,3 +2183,31 @@ async def cb_admin_tester_list(callback: CallbackQuery):
     if labels:
         text += f"\n\nВсего: {len(labels)}. Для отзыва используй @username или ID."
     await tb.safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=builder.as_markup())
+
+
+@router.callback_query(F.data == "admin_broadcast_prompt")
+async def cb_admin_broadcast_prompt(callback: CallbackQuery):
+    if not tb.is_admin(callback.from_user.id):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    from services import admin_broadcast
+    admin_broadcast.drafts.pop(callback.from_user.id, None)
+    tb.ADMIN_PENDING[callback.from_user.id] = {"action": "broadcast_content"}
+    await callback.message.answer(
+        "Пришли текст, фото, видео или альбом из фото и видео с подписью. "
+        "Сначала будет предпросмотр, затем кнопка отправки всем.\n"
+        "Для отмены открой /admin."
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("admin_broadcast_go:"))
+async def cb_admin_broadcast_go(callback: CallbackQuery):
+    from services import admin_broadcast
+    await admin_broadcast.confirm(tb, callback)
+
+
+@router.callback_query(F.data.startswith("admin_broadcast_cancel:"))
+async def cb_admin_broadcast_cancel(callback: CallbackQuery):
+    from services import admin_broadcast
+    await admin_broadcast.cancel(tb, callback)
