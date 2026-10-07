@@ -7,7 +7,7 @@ import argparse
 
 parser = argparse.ArgumentParser(description="Import the pinned Anatomapp content snapshot, without media or user data")
 parser.add_argument("source", type=Path, help="Directory containing index.html and the eight source *-data.json files")
-parser.add_argument("--output", type=Path, default=Path("generated_courses/anatomy_miniapp.json"))
+parser.add_argument("--output", type=Path, default=Path("services/data/anatomapp_course.json"))
 args = parser.parse_args()
 src = args.source
 html = (src / "index.html").read_text()

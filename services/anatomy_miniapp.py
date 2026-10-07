@@ -5,7 +5,7 @@ from html import escape
 from pathlib import Path
 
 COURSE = json.loads(
-    (Path(__file__).resolve().parents[1] / "generated_courses/anatomy_miniapp.json").read_text(encoding="utf-8")
+    (Path(__file__).resolve().parent / "data/anatomapp_course.json").read_text(encoding="utf-8")
 )
 GROUPS = COURSE["groups"]
 TOPICS = COURSE["topics"]
