@@ -39,3 +39,18 @@ def test_owner_requires_running_billing_when_sbp_enabled(monkeypatch):
     monkeypatch.setattr(readiness, 'remote_ready', AsyncMock(return_value=True))
     result = TestClient(app).get('/readyz')
     assert result.status_code == 503 and result.json()['checks']['billing'] is False
+
+
+def test_owner_admission_does_not_require_gateway_routing_during_rollout(monkeypatch):
+    import telegram_bot as tb
+    monkeypatch.setenv('BOT_SYNC_MODE', 'owner')
+    monkeypatch.setenv('BOT_SYNC_TOKEN', 'synthetic-readiness-token')
+    monkeypatch.setenv('CODEEPAY_ENABLED', 'false')
+    monkeypatch.setattr(tb, '_sync_owner_running', True, raising=False)
+    remote = AsyncMock(return_value=False)
+    monkeypatch.setattr(readiness, 'remote_ready', remote)
+    client = TestClient(app)
+    result = client.get('/internal/sync/owner-ready', headers={'X-Vmeda-Sync-Token': 'synthetic-readiness-token'})
+    assert result.status_code == 200
+    remote.assert_not_awaited()
+    assert client.get('/readyz').status_code == 503

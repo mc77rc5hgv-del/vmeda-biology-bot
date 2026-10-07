@@ -66,7 +66,7 @@ must not grant twice. Card-transfer and Stars flows remain available.
 
 /livez: process liveness, no dependency calls.
 /healthz and /readyz: 200 ready or 503 unavailable; cache disabled; no identities.
-Gateway checks its existing read-only learning DB and owner readiness.
+Gateway checks its existing read-only learning DB and token-protected owner admission (/internal/sync/owner-ready).
 Owner checks the running sync API, remote learning storage, and, if SBP is enabled,
 billing configuration, ledger integrity, polling task/heartbeat and observed
 provider health. Polling periodically reads a known invoice status without creating
@@ -74,7 +74,7 @@ invoices or moving money; an empty journal cannot independently attest upstream
 acceptance before the first request. Failures do not stop the Telegram bot.
 /internal/sync/storage: token-protected gateway storage readiness, no owner recursion.
 Railway's existing /healthz check now covers dependencies; do not use /livez as
-release readiness. Both owner and gateway must be upgraded for the new contract.
+release readiness. Owner admission checks local owner/billing without calling back into gateway readiness. This avoids a Railway rollout routing cycle; full owner /readyz still checks remote learning storage. Both services must be upgraded for the new contract.
 
 ## Validation
 

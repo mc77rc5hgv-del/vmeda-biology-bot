@@ -34,18 +34,18 @@ async def remote_ready(url, endpoint):
         return False
 
 
-async def checks():
+async def checks(*, include_learning=True):
     from ..sync_transport import mode
     current = mode()
     if current == 'gateway':
         storage, owner = await asyncio.gather(asyncio.to_thread(storage_ready), remote_ready(
-            os.environ.get('BOT_SYNC_URL', ''), '/readyz'))
+            os.environ.get('BOT_SYNC_URL', ''), '/internal/sync/owner-ready'))
         return {'learning': storage, 'owner': owner}
     if current == 'owner':
         from ..bot_state import get_bot_module
         tb = get_bot_module()
         owner = bool(getattr(tb, '_sync_owner_running', False) and isinstance(tb.stats.get('total_users'), set))
-        learning = await remote_ready(os.environ.get('LEARNING_BACKEND_URL', ''), '/internal/sync/storage')
+        learning = await remote_ready(os.environ.get('LEARNING_BACKEND_URL', ''), '/internal/sync/storage') if include_learning else True
         enabled = os.environ.get('CODEEPAY_ENABLED', 'false').lower().strip() in ('true', '1')
         billing = True
         if enabled:
@@ -62,6 +62,20 @@ async def checks():
                     billing = False
         return {'owner': owner, 'learning': learning, 'billing': billing}
     return {'learning': await asyncio.to_thread(storage_ready)}
+
+
+@router.get('/internal/sync/owner-ready')
+async def owner_ready(x_vmeda_sync_token: str = Header(default='')):
+    token = os.environ.get('BOT_SYNC_TOKEN', '')
+    if not token or not hmac.compare_digest(token.encode(), x_vmeda_sync_token.encode()):
+        raise HTTPException(403, detail='Нет доступа')
+    if os.environ.get('BOT_SYNC_MODE') != 'owner':
+        raise HTTPException(404, detail='Не найдено')
+    # Gateway already checks its local database. Owner admission MUST NOT
+    # require that gateway to be routed before its healthcheck has passed.
+    result = await checks(include_learning=False)
+    good = all(result.values())
+    return JSONResponse({'status': 'ready' if good else 'unavailable'}, status_code=200 if good else 503)
 
 
 @router.get('/internal/sync/storage')

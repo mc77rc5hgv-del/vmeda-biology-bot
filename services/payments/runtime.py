@@ -218,6 +218,8 @@ class BillingRuntime:
             self._checking.discard(row['id'])
 
     async def settle(self, row, payment):
+        from html import escape
+        from services.payment_notifications import buyer_label
         from web_api.subscriptions import _persist, grant_preserving_history, purchase_reason
         tb = self.tb
         async with self._lock:
@@ -256,8 +258,11 @@ class BillingRuntime:
                 else f'✅ Подписка «{tb.SUBSCRIPTION_TIERS[row["tier_id"]]["title"]}» активирована. Доступ обновлён в боте и miniapp.')
         for target in {row['user_id'], *tb.ADMIN_IDS}:
             try:
-                admin_text = f'{text}\nСБП codeePay · {row["amount_minor"] / 100:g} ₽\nПользователь: {row["user_id"]}\nПлатёж: {row["id"]}'
-                await tb.bot.send_message(target, text if target == row['user_id'] else admin_text)
+                admin_text = f'{escape(text)}\nСБП codeePay · {row["amount_minor"] / 100:g} ₽\nПользователь: {buyer_label(tb, row["user_id"], row.get("username"))}\nПлатёж: <code>{escape(row["id"])}</code>'
+                if target == row['user_id']:
+                    await tb.bot.send_message(target, text)
+                else:
+                    await tb.bot.send_message(target, admin_text, parse_mode='HTML')
             except Exception:
                 tb.logger.warning('Could not deliver SBP notification for order %s', row['id'])
 
