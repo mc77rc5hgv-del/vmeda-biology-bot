@@ -1,24 +1,2 @@
-# web_api/ -- отдельный процесс от бота, не входит в requirements.txt в корне репозитория (тот
-# же принцип, что и у scripts/postgres_migration.requirements.txt: свой набор зависимостей для
-# своего процесса). Устанавливать из корня репозитория:
-#   pip install -r requirements.txt -r web_api/requirements.txt
-# (оба файла сразу, не один web_api/requirements.txt -- см. bot_state.py: web_api импортирует
-# telegram_bot напрямую, поэтому реально нужны зависимости ОБОИХ процессов в одном окружении, а
-# не только fastapi/uvicorn/pydantic сами по себе.)
-#
-# Версии здесь НАМЕРЕННО не закреплены точным ==, как раньше (fastapi==0.141.1,
-# pydantic==2.13.4) -- живой прогон pip в среде, где ставятся ОБА requirements.txt разом, дал
-# точный, авторитетный конфликт (ResolutionImpossible), а не догадку:
-#   aiogram 3.7.0 (корневой requirements.txt) требует pydantic<2.8,>=2.4.1
-#   openai 2.53.0 (корневой requirements.txt) требует pydantic<3,>=1.9.0 -- совместим с обоими
-#   fastapi 0.141.1 требует pydantic>=2.9.0 -- НЕСОВМЕСТИМО с потолком aiogram
-# Даунгрейдить aiogram нельзя -- это зависимость самого бота (production), закреплённая во всём
-# коде и в CLAUDE.md; понижать fastapi/pydantic здесь безопаснее -- schemas.py использует только
-# BaseModel с обычными полями, main.py/routers/*.py -- только FastAPI()/APIRouter/Depends/
-# HTTPException/CORSMiddleware, стабильные примитивы, не завязанные на что-то из pydantic 2.8+.
-# Открытый диапазон ниже даёт pip'у самому подобрать версию fastapi, реально совместимую с
-# pydantic<2.8 (и, соответственно, с aiogram) -- вместо повторного угадывания точной версии.
-fastapi>=0.100,<0.116
-uvicorn[standard]>=0.29,<0.35
-pydantic>=2.4.1,<2.8
-httpx>=0.27,<1
+# Both services import the same bot and use one tested dependency graph.
+-r ../requirements.txt

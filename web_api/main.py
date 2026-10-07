@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from . import config
 from .routers import access, ai, auth, learning, me, subjects, sync, anatomy_runs, diagnostics, subscriptions
 from . import learning_rpc
+from .routers import readiness
 from .sync_transport import BotGateway, OwnerGuard, mode
 
 @asynccontextmanager
@@ -47,6 +48,7 @@ app.include_router(anatomy_runs.router)
 app.include_router(learning_rpc.router)
 app.include_router(diagnostics.router)
 app.include_router(subscriptions.router)
+app.include_router(readiness.router)
 
 sync_mode = mode()
 if sync_mode == 'gateway':
@@ -65,7 +67,7 @@ app.add_middleware(
 )
 
 
-@app.get("/healthz")
+@app.get("/livez")
 def healthz() -> dict:
-    """Не /api/v1/... -- служебный эндпоинт для Railway healthcheck, не часть публичного API."""
+    """Process liveness only; /healthz and /readyz check dependencies."""
     return {"status": "ok"}

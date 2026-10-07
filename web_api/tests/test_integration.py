@@ -51,9 +51,13 @@ def build_signed_init_data(bot_token: str, user: dict, auth_date: int | None = N
 
 
 def test_healthz():
+    from contextlib import closing
+    from web_api.learning import _connect
+    with closing(_connect()):
+        pass
     resp = client.get("/healthz")
     assert resp.status_code == 200
-    assert resp.json() == {"status": "ok"}
+    assert resp.json()["status"] == "ready"
 
 
 def test_full_auth_and_me_flow_for_unknown_user():

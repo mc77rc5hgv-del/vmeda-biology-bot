@@ -69,7 +69,7 @@ def ready(url, proc):
         if proc.poll() is not None:
             raise RuntimeError(f'Synthetic service exited: {proc.returncode}; logs in {folder}')
         try:
-            if client.get(url+'/healthz').status_code == 200:
+            if client.get(url+'/livez').status_code == 200:
                 return
         except httpx.HTTPError:
             pass
@@ -92,8 +92,10 @@ def auth():
 
 try:
     gateway = launch('web_api.main', gateway_port, gateway_env); ready(gateway_url, gateway)
-    assert client.get(f'http://[::1]:{gateway_port}/healthz').status_code == 200
+    assert client.get(f'http://[::1]:{gateway_port}/livez').status_code == 200
+    assert client.get(gateway_url+'/healthz').status_code == 503
     owner = launch('sync_tests.service_fixture', owner_port, owner_env); ready(owner_url, owner)
+    assert client.get(gateway_url+'/healthz').status_code == 200
     headers = auth()
     assert client.get(owner_url+'/api/v1/me').status_code == 403
     assert client.get(gateway_url+'/api/v1/me').status_code == 401

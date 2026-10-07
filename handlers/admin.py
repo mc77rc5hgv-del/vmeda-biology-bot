@@ -2054,10 +2054,10 @@ async def cb_admin_sbp(callback: CallbackQuery):
         offset = max(0, int(callback.data.split(":")[1]))
     except ValueError:
         return
-    labels = {'pending': 'ожидает оплаты', 'confirmed': 'оплачен, выдача доступа', 'applied': 'подписка активирована', 'review': 'оплачен, нужна проверка', 'creating': 'создание', 'creation_unknown': 'проверить создание'}
+    labels = {'pending': 'ожидает оплаты', 'confirmed': 'оплачен, выдача доступа', 'applied': 'подписка активирована', 'review': 'оплачен, нужна проверка', 'creating': 'создание', 'creation_unknown': 'проверить создание', 'creation_rejected': 'создание отклонено', 'creation_closed': 'создание сверено', 'resolved_keep': 'оплачено, решение согласовано'}
     lines = ['<b>🏦 СБП codeePay</b>', 'Суммы и комиссии подтверждаются API провайдера.']
     for item in service.ledger.summary()[:8]:
-        paid = item['state'] in ('applied', 'review', 'confirmed')
+        paid = item['state'] in ('applied', 'review', 'confirmed', 'resolved_keep')
         lines.append(f"{item['month']} · {labels.get(item['state'], item['state'])}: {item['count']} сч. · {item['amount_minor']/100:g}₽")
         if paid:
             lines.append(f"Зачислено: {(item['net_minor'] or 0)/100:g}₽ · комиссия: {(item['fee_minor'] or 0)/100:g}₽")
@@ -2068,6 +2068,14 @@ async def cb_admin_sbp(callback: CallbackQuery):
         created = tb.datetime.fromtimestamp(row['created'], tb.APP_TIMEZONE).strftime('%d.%m %H:%M')
         lines.append(f"\n{created} · {row['amount_minor']/100:g}₽ · тариф {row['tier_id']} · {row['source']}\n{row['user_id']} {username}\n{labels.get(row['state'], row['state'])}\n<code>{row['id']}</code>")
     builder = InlineKeyboardBuilder()
+    for row in rows:
+        if row['state'] in ('creation_unknown', 'review'):
+            builder.button(text=f"🔎 Сверить {row['id'][-8:]}", callback_data=f"sbpa:bind:{row['id']}")
+        if row['state'] == 'creation_unknown':
+            builder.button(text=f"Нет счёта в кабинете · {row['id'][-8:]}", callback_data=f"sbpa:close_not_created:{row['id']}")
+        if row['state'] == 'review':
+            builder.button(text=f"Безопасная выдача · {row['id'][-8:]}", callback_data=f"sbpa:apply_review:{row['id']}")
+            builder.button(text=f"Сохранить доступ по согласованию · {row['id'][-8:]}", callback_data=f"sbpa:keep_existing:{row['id']}")
     if offset:
         builder.button(text="← Предыдущие", callback_data=f"admin_sbp:{max(0, offset-8)}")
     if len(rows) == 8:
@@ -2075,6 +2083,56 @@ async def cb_admin_sbp(callback: CallbackQuery):
     builder.button(text="🔙 Админ-панель", callback_data="admin_panel")
     builder.adjust(1)
     await tb.safe_edit_text(callback.message, '\n'.join(lines), parse_mode='HTML', reply_markup=builder.as_markup())
+
+
+@router.callback_query(F.data.startswith('sbpa:'))
+async def cb_sbp_resolution_prompt(callback: CallbackQuery):
+    if not tb.is_admin(callback.from_user.id):
+        await callback.answer('Нет доступа', show_alert=True)
+        return
+    _, action, order_id = callback.data.split(':', 2)
+    if action not in ('bind', 'close_not_created', 'apply_review', 'keep_existing'):
+        return
+    tb.ADMIN_PENDING[callback.from_user.id] = {'action': 'sbp_resolution', 'resolution_action': action, 'order_id': order_id}
+    prompts = {
+        'bind': 'Пришли ID счёта из кабинета codeePay и через пробел основание сверки. Сумма и привязка будут проверены через API.',
+        'close_not_created': 'Сначала проверь кабинет codeePay: счёт точно не создан. Пришли основание и ссылку/номер проверки. Это разрешит новую оплату, не удаляя старую запись.',
+        'apply_review': 'Пришли основание выдачи. Оплата будет повторно проверена; уменьшение действующего доступа или срока запрещено.',
+        'keep_existing': 'Пришли основание согласованного с пользователем решения сохранить текущий доступ. Это не возврат денег и не новая выдача подписки.'}
+    await callback.answer()
+    await callback.message.answer(prompts[action] + '\nОт 10 до 1000 символов. Затем потребуется подтверждение решения.', reply_markup=get_admin_back_keyboard())
+
+
+@router.callback_query(F.data.startswith('sbpc:'))
+async def cb_sbp_resolution_confirm(callback: CallbackQuery):
+    if not tb.is_admin(callback.from_user.id):
+        await callback.answer('Нет доступа', show_alert=True)
+        return
+    pending = tb.ADMIN_PENDING.get(callback.from_user.id, {})
+    if pending.get('action') != 'sbp_resolution' or not pending.get('confirmed_input') or callback.data != 'sbpc:' + pending['order_id']:
+        await callback.answer('Решение устарело. Открой сверку заново.', show_alert=True)
+        return
+    from services.payments.runtime import runtime
+    from services.payments.contracts import ProviderNotReady, PaymentMismatch
+    service = runtime(tb)
+    await callback.answer()
+    if not service:
+        await callback.message.answer('Журнал СБП недоступен. Решение не выполнено.')
+        return
+    try:
+        row = await service.reconcile(pending['order_id'], callback.from_user.id, pending['resolution_action'],
+                                      provider_id=pending.get('provider_id'), note=pending['note'])
+    except ProviderNotReady:
+        await callback.message.answer('codeePay недоступен. Не создавай второй счёт; повтори сверку позже.')
+        return
+    except PaymentMismatch:
+        await callback.message.answer('Сумма или привязка не соответствует счёту. Изменения отклонены.')
+        return
+    except ValueError as exc:
+        await callback.message.answer(str(exc))
+        return
+    tb.ADMIN_PENDING.pop(callback.from_user.id, None)
+    await callback.message.answer(f"Решение записано в журнал. Счёт {row['id']}: {row['state']}. История сохранена.", reply_markup=get_admin_back_keyboard())
 
 
 @router.callback_query(F.data.in_({"admin_tester_grant", "admin_tester_revoke"}))

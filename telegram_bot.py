@@ -2886,6 +2886,26 @@ async def handle_admin_pending_action(message: Message):
     pending = ADMIN_PENDING[admin_id]
     action = pending["action"]
 
+    if action == 'sbp_resolution':
+        text = message.text.strip()
+        if pending['resolution_action'] == 'bind':
+            parts = text.split(maxsplit=1)
+            if len(parts) != 2 or len(parts[0]) > 256:
+                await message.answer('Пришли ID счёта codeePay и основание через пробел.')
+                return
+            pending['provider_id'], text = parts
+        if not 10 <= len(text) <= 1000:
+            await message.answer('Основание должно содержать от 10 до 1000 символов.')
+            return
+        pending.update(note=text, confirmed_input=True)
+        builder = InlineKeyboardBuilder()
+        builder.button(text='Подтвердить решение', callback_data='sbpc:' + pending['order_id'])
+        builder.button(text='Отмена', callback_data='admin_panel')
+        builder.adjust(1)
+        from html import escape
+        await message.answer(f"<b>Подтверждение сверки СБП</b>\nСчёт: <code>{escape(pending['order_id'])}</code>\nДействие: {escape(pending['resolution_action'])}\nОснование: {escape(text)}\nИстория не удаляется.", parse_mode='HTML', reply_markup=builder.as_markup())
+        return
+
     if action in {"grant_miniapp_tester", "revoke_miniapp_tester"}:
         from html import escape
         from services.miniapp_testers import set_test_access
@@ -4082,6 +4102,9 @@ async def cb_buy_sub_sbp(callback: CallbackQuery):
     except Exception:
         await callback.message.answer("Не удалось подтвердить создание счёта СБП. Проверь историю или напиши @vmeda_helper. Доступ не изменён.")
         return
+    if row['state'] in ('applied', 'review', 'resolved_keep'):
+        await callback.message.answer('Оплата уже подтверждена. Подписка активирована.' if row['state'] == 'applied' else 'Оплата подтверждена. Решение по доступу доступно через @vmeda_helper. Повторно платить не нужно.')
+        return
     builder = InlineKeyboardBuilder()
     builder.button(text=f"🏦 Оплатить СБП {row['amount_minor'] // 100}₽", url=row['url'])
     builder.button(text="🔄 Проверить оплату", callback_data="check_sbp:" + row['id'])
@@ -4102,7 +4125,7 @@ async def cb_sbp_history(callback: CallbackQuery):
     lines = ["🏦 Мои платежи СБП"]
     builder = InlineKeyboardBuilder()
     for row in rows:
-        label = 'оплачено, подписка активирована' if row['state'] == 'applied' else 'оплачено, проверка поддержки' if row['state'] == 'review' else 'счёт требует проверки' if row['state'] == 'creation_unknown' else 'ожидает оплаты'
+        label = 'оплачено, подписка активирована' if row['state'] == 'applied' else 'оплачено, проверка поддержки' if row['state'] == 'review' else 'оплачено, решение согласовано' if row['state'] == 'resolved_keep' else 'счёт не создан, можно повторить' if row['state'] == 'creation_rejected' else 'создание сверено поддержкой' if row['state'] == 'creation_closed' else 'не оплачен или отменён' if row['state'] in ('failed', 'cancelled') else 'счёт требует проверки' if row['state'] == 'creation_unknown' else 'ожидает оплаты'
         lines.append(f"\n{row['amount_minor']/100:g}₽ · тариф {row['tier_id']} · {label}\n{row['id']}")
         if row['state'] == 'pending' and row['url']:
             builder.button(text=f"СБП {row['amount_minor']/100:g}₽ · продолжить", url=row['url'])
@@ -4123,7 +4146,7 @@ async def cb_check_sbp(callback: CallbackQuery):
     await callback.answer()
     try:
         row = await service.check(row)
-        text = "✅ Подписка активирована в боте и miniapp." if row['state'] == 'applied' else "Оплата получена; нужна проверка @vmeda_helper." if row['state'] == 'review' else "Оплата ещё не подтверждена. Продолжаем проверять автоматически."
+        text = "✅ Подписка активирована в боте и miniapp." if row['state'] == 'applied' else "Оплата получена; решение по доступу через @vmeda_helper." if row['state'] in ('review', 'resolved_keep') else "Оплата ещё не подтверждена. Продолжаем проверять автоматически."
     except Exception:
         text = "Провайдер пока недоступен. Проверка продолжится автоматически; повторно оплачивать этот счёт не нужно."
     await callback.message.answer(text)

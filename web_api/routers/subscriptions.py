@@ -88,7 +88,7 @@ async def payment(payment_id: str, user_id: int = Depends(get_current_user_id), 
         row = service.ledger.get(payment_id) if service else None
         if not row or row['user_id'] != user_id:
             raise HTTPException(status_code=404, detail='Платёж не найден')
-        return {'status': row['state'] if row['state'] in ('applied', 'review', 'failed', 'cancelled') else 'processing', 'tier_id': row['tier_id']}
+        return {'status': 'review' if row['state'] == 'resolved_keep' else row['state'] if row['state'] in ('applied', 'review', 'failed', 'cancelled') else 'processing', 'tier_id': row['tier_id']}
     if not re.fullmatch(r'[a-f0-9]{12}', payment_id):
         raise HTTPException(status_code=404, detail='Платёж не найден')
     receipt = payment_receipt(tb, user_id, payment_id)
@@ -111,11 +111,11 @@ async def sbp(body: SbpRequest, user_id: int = Depends(get_current_user_id), tb=
         raise HTTPException(422, detail='Некорректный ключ запроса')
     try:
         row = await service.checkout(user_id, body.tier_id, body.subject, body.request_key, 'miniapp')
-    except ValueError as exc:
-        raise HTTPException(409, detail=str(exc)) from exc
     except (ProviderNotReady, PaymentMismatch) as exc:
         raise HTTPException(503, detail='Не удалось подтвердить создание счёта. Проверь историю платежей или напиши @vmeda_helper.') from exc
-    return {'url': row['url'], 'payment_id': row['id'], 'price_rub': row['amount_minor'] // 100, 'tier_id': row['tier_id']}
+    except ValueError as exc:
+        raise HTTPException(409, detail=str(exc)) from exc
+    return {'status': row['state'], 'url': row['url'], 'payment_id': row['id'], 'price_rub': row['amount_minor'] // 100, 'tier_id': row['tier_id']}
 
 
 @router.get('/history')
@@ -138,6 +138,34 @@ async def sbp_statistics(offset: int = 0, user_id: int = Depends(get_current_use
             for row in service.ledger.history(limit=50, offset=max(0, offset))]}
 
 
+class ReconcileRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    action: str
+    provider_id: str | None = None
+    note: str
+
+
+@router.post('/admin/sbp/{order_id}/reconcile')
+async def reconcile_payment(order_id: str, body: ReconcileRequest,
+                            user_id: int = Depends(get_current_user_id), tb=Depends(get_fresh_bot_module)):
+    from services.payments.runtime import runtime
+    from services.payments.contracts import PaymentMismatch, ProviderNotReady
+    if not tb.is_admin(user_id):
+        raise HTTPException(403, detail='Нет доступа')
+    service = runtime(tb)
+    if not service:
+        raise HTTPException(503, detail='Журнал СБП недоступен')
+    try:
+        row = await service.reconcile(order_id, user_id, body.action, provider_id=body.provider_id, note=body.note)
+    except ProviderNotReady as exc:
+        raise HTTPException(503, detail='Провайдер недоступен. Решение не подтверждено.') from exc
+    except PaymentMismatch as exc:
+        raise HTTPException(409, detail='Платёж не соответствует исходному счёту') from exc
+    except ValueError as exc:
+        raise HTTPException(409, detail=str(exc)) from exc
+    return {'payment': service.ledger.public(row), 'events': service.ledger.events(order_id)}
+
+
 @router.post('/codeepay/webhook/{secret}')
 async def codeepay_webhook(secret: str, request: Request, tb=Depends(get_fresh_bot_module)):
     import hmac
@@ -145,7 +173,7 @@ async def codeepay_webhook(secret: str, request: Request, tb=Depends(get_fresh_b
     from services.payments.runtime import runtime
     from services.payments.contracts import ProviderNotReady, PaymentMismatch
     service = runtime(tb)
-    if not service or not hmac.compare_digest(secret, service.provider.config.webhook_secret):
+    if not service or not hmac.compare_digest(secret.encode(), service.provider.config.webhook_secret.encode()):
         raise HTTPException(404, detail='Не найдено')
     body = await request.body()
     if len(body) > 16384:
@@ -153,17 +181,15 @@ async def codeepay_webhook(secret: str, request: Request, tb=Depends(get_fresh_b
     try:
         data = json.loads(body)
         provider_id = data['order_id']
-        if not isinstance(provider_id, str) or len(provider_id) > 256:
+        if not isinstance(provider_id, str) or not provider_id or len(provider_id) > 256:
             raise ValueError()
     except (ValueError, KeyError, TypeError) as exc:
         raise HTTPException(400, detail='Некорректное уведомление') from exc
-    row = service.ledger.by_provider(provider_id)
-    if row:
-        try:
-            await service.check(row, force=True)
-        except ProviderNotReady as exc:
-            raise HTTPException(503, detail='Повтори уведомление') from exc
-        except PaymentMismatch as exc:
-            raise HTTPException(409, detail='Платёж не соответствует счёту') from exc
-    # Unknown orders cannot be registered or granted by a callback. Provider retries safely.
+    try:
+        await service.recover_provider(provider_id)
+    except ProviderNotReady as exc:
+        raise HTTPException(503, detail='Повтори уведомление') from exc
+    except PaymentMismatch as exc:
+        raise HTTPException(409, detail='Платёж не соответствует счёту') from exc
+    # Only existing immutable quotes with matching authenticated metadata recover.
     return {'ok': True}

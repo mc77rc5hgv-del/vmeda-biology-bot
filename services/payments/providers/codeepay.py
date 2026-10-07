@@ -7,7 +7,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from ..config import CodeePayConfig
-from ..contracts import CheckoutSession, PaymentMismatch, PaymentOrder, PaymentStatus, ProviderNotReady, VerifiedPayment
+from ..contracts import CheckoutRejected, CheckoutSession, PaymentMismatch, PaymentOrder, PaymentStatus, ProviderNotReady, VerifiedPayment
 
 
 def minor(value) -> int:
@@ -43,6 +43,11 @@ class CodeePayProvider:
             async with httpx.AsyncClient(timeout=self.config.timeout_seconds, transport=self.transport, follow_redirects=False) as client:
                 response = await client.post(self.config.api_url.rstrip('/') + path,
                                              headers={'X-Api-Key': self.config.api_key}, json=data)
+                # Official schema documents 422 as request validation failure.
+                # Auth rejection likewise cannot issue a merchant invoice. All
+                # other errors, including 400/5xx/timeouts, remain ambiguous.
+                if path == '/initiate_payment' and response.status_code in (401, 403, 422):
+                    raise CheckoutRejected('codeePay отклонил создание счёта. Можно повторить после устранения причины.')
                 if response.status_code != 200:
                     # Do not expose provider bodies, URLs, API headers or exception request objects.
                     raise ProviderNotReady('codeePay не принял запрос. Попробуй позже или обратись в поддержку.')

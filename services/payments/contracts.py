@@ -15,6 +15,10 @@ class ProviderNotReady(RuntimeError):
     """Checkout / verification is unavailable until the real API contract is implemented."""
 
 
+class CheckoutRejected(ProviderNotReady):
+    """Provider definitively rejected creation before issuing an invoice."""
+
+
 class PaymentMismatch(ValueError):
     """A verified provider payment does not match the server's original order."""
 

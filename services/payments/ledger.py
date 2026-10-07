@@ -85,7 +85,7 @@ class BillingLedger:
             db.execute('INSERT INTO events(order_id,at,state,details) VALUES(?,?,?,?)', (row['id'], now, 'creating', '{}'))
         return self.get(row['id'])
 
-    def update(self, order_id, state, **values):
+    def update(self, order_id, state, *, resolve_review=False, **values):
         if not set(values) <= {'provider_id', 'url', 'reason', 'net_minor', 'fee_minor', 'charge_id', 'checked'}:
             raise ValueError('Immutable quote cannot change')
         with self.connect() as db:
@@ -94,7 +94,9 @@ class BillingLedger:
             if not old:
                 raise ValueError('Unknown order')
             # A callback / poll can never downgrade a durable settled receipt.
-            if old['state'] in ('applied', 'review') and state != old['state']:
+            if old['state'] in ('applied', 'resolved_keep') and state != old['state']:
+                return
+            if old['state'] == 'review' and state != 'review' and not (resolve_review and state in ('applied', 'resolved_keep')):
                 return
             sets = ','.join(f'{key}=?' for key in values)
             db.execute('UPDATE orders SET state=?,updated=?' + (',' + sets if sets else '') + ' WHERE id=?',  # noqa: S608 - column names strictly allowlisted above
@@ -106,8 +108,27 @@ class BillingLedger:
     def pending(self, limit=50):
         with self.connect() as db:
             # Keep failed/cancelled orders recoverable: delayed bank settlements are possible.
-            return [dict(row) for row in db.execute('SELECT * FROM orders WHERE provider_id IS NOT NULL AND state NOT IN ("applied","review") AND checked < ? - CASE WHEN created > ? - 3600 THEN 15 WHEN created > ? - 86400 THEN 300 ELSE 3600 END ORDER BY checked LIMIT ?',
+            return [dict(row) for row in db.execute('SELECT * FROM orders WHERE provider_id IS NOT NULL AND state NOT IN ("applied","review","resolved_keep") AND checked < ? - CASE WHEN created > ? - 3600 THEN 15 WHEN created > ? - 86400 THEN 300 ELSE 3600 END ORDER BY checked LIMIT ?',
                                                     (time.time(), time.time(), time.time(), limit))]
+
+    def uncertain_creation(self, user_id):
+        with self.connect() as db:
+            return db.execute('SELECT 1 FROM orders WHERE user_id=? AND state IN ("creating","creation_unknown") LIMIT 1', (user_id,)).fetchone() is not None
+
+    def record_event(self, order_id, state, details):
+        with self.connect() as db:
+            db.execute('INSERT INTO events(order_id,at,state,details) VALUES(?,?,?,?)',
+                       (order_id, time.time(), state, json.dumps(details, ensure_ascii=False)))
+
+    def events(self, order_id):
+        with self.connect() as db:
+            return [dict(row) for row in db.execute('SELECT * FROM events WHERE order_id=? ORDER BY id', (order_id,))]
+
+    def recover_interrupted_creation(self):
+        with self.connect() as db:
+            ids = [row[0] for row in db.execute('SELECT id FROM orders WHERE state="creating"')]
+        for order_id in ids:
+            self.update(order_id, 'creation_unknown', reason='Создание было прервано. Требуется сверка с codeePay.')
 
     def history(self, user_id=None, limit=50, offset=0):
         with self.connect() as db:
