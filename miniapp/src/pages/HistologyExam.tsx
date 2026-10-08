@@ -177,6 +177,8 @@ export function HistologyExamPage() {
   }
 
   const stats = statsQuery.data;
+  const totalSpecimens = catalogQuery.data?.totalSpecimens ?? 71;
+  const practicalCount = catalogQuery.data?.groups.reduce((sum, group) => sum + group.specimens.filter(item => item.practicalAvailable).length, 0) ?? 0;
   return (
     <div className={["screen", styles.examScreen].join(" ")}>
       {actionError && <p role="alert">{actionError}</p>}
@@ -184,11 +186,11 @@ export function HistologyExamPage() {
       <section className={styles.hero}>
         <div className={styles.heroTop}>
           <span className={styles.heroIcon}><Icon icon={Microscope} size={24} /></span>
-          <span className={styles.heroBadge}>71 препарат</span>
+          <span className={styles.heroBadge}>{totalSpecimens} препаратов</span>
         </div>
         <p className={styles.eyebrow}>Гистология</p>
         <h1>ЭКЗАМЕН</h1>
-        <p>Единое место для микрофотографий, теории, практического зачёта и работы над ошибками.</p>
+        <p>Каталог и теория: {totalSpecimens} препаратов. Практика распознавания: {practicalCount} препаратов с проверенными изображениями.</p>
         <div className={styles.statsGrid}>
           <div><strong>{stats?.mastered ?? 0}</strong><span>освоено</span></div>
           <div><strong>{stats?.accuracy ?? 0}%</strong><span>точность</span></div>
@@ -199,7 +201,7 @@ export function HistologyExamPage() {
       <div className={styles.actions}>
         <button type="button" disabled={loadingAction} onClick={() => startSession("all")}>
           <span><Icon icon={GraduationCap} size={21} /></span>
-          <div><strong>Практический зачёт</strong><small>10 случайных микрофотографий</small></div>
+          <div><strong>Практический зачёт</strong><small>10 микрофотографий из {practicalCount} доступных</small></div>
           <Icon icon={ChevronRight} size={18} />
         </button>
         <button type="button" disabled={loadingAction} onClick={() => startSession("mistakes")}>

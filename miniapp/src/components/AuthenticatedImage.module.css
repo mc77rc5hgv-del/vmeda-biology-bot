@@ -86,3 +86,7 @@
   font-size: 12px;
   font-weight: 600;
 }
+
+.zoomControls { display:flex; gap:12px; margin-top:12px; color:#fff; }
+.zoomControls button { min-width:44px; min-height:44px; padding:8px 14px; background:#253043; color:#fff; border:1px solid #60718b; border-radius:12px; }
+.zoomControls button:disabled { opacity:.45; }

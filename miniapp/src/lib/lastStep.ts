@@ -34,16 +34,17 @@ export const useLastStepStore = create<{
     if (previous === undefined) {
       try {
         const saved = JSON.parse(localStorage.getItem(storageKey(owner)) ?? "null");
-        previous = typeof saved?.path === "string" ? stepFromPath(saved.path) : null;
+        previous = typeof saved?.path === "string" ? {...stepFromPath(saved.path)!, updatedAt: saved.updatedAt} : null;
       } catch { previous = null; }
     }
     let next = stepFromPath(path);
+    if (next) next.updatedAt = new Date().toISOString();
     // Возврат из занятия к меню того же предмета не должен терять глубокую ссылку.
     if (!next || (path === `/subjects/${next.subjectId}` && previous?.subjectId === next.subjectId)) next = previous;
     if (get().steps[owner]?.path === next?.path && get().steps[owner] !== undefined) return;
     set((state) => ({ steps: { ...state.steps, [owner]: next ?? null } }));
     if (next) {
-      try { localStorage.setItem(storageKey(owner), JSON.stringify({ path: next.path })); } catch { /* Закладка работает в памяти при закрытом хранилище. */ }
+      try { localStorage.setItem(storageKey(owner), JSON.stringify({ path: next.path, updatedAt: next.updatedAt })); } catch { /* Закладка работает в памяти при закрытом хранилище. */ }
     }
   },
 }));

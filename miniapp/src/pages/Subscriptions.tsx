@@ -40,7 +40,7 @@ export function SubscriptionsPage() {
     if (receipt.data?.status === "applied") {
       try { localStorage.removeItem(storageKey); localStorage.removeItem(storageKey + ":url"); } catch { /* No pending payment. */ }
       queueMicrotask(() => { if (mounted.current) { setPending(null); setNotice("Подписка активирована! Доступ обновлён в боте и miniapp."); } });
-      for (const key of ["subscription", "subscriptions", "access", "me", "subjects", "subject", "learning", "dashboard"]) void client.invalidateQueries({queryKey: [key]});
+      for (const key of ["subscription", "subscriptions", "access", "me", "subjects", "subject", "section", "group", "material", "learning", "dashboard"]) void client.invalidateQueries({queryKey: [key]});
     }
   }, [receipt.data?.status, client, storageKey]);
   useEffect(() => {
@@ -78,7 +78,7 @@ export function SubscriptionsPage() {
       setNotice("Счёт СБП готов. После оплаты вернись сюда — подписка активируется автоматически. Повторно платить не нужно.");
       if (invoice.status === 'applied' || invoice.status === 'review' || invoice.status === 'resolved_keep') {
         setNotice(invoice.status === 'applied' ? 'Оплата подтверждена, доступ обновляется.' : 'Оплата подтверждена. Повторно платить не нужно.');
-        for (const queryKey of ['subscriptions', 'subscription', 'access', 'me', 'subjects', 'subject', 'section', 'group']) void client.invalidateQueries({queryKey: [queryKey]});
+        for (const queryKey of ['subscriptions', 'subscription', 'access', 'me', 'subjects', 'subject', 'section', 'group', 'material']) void client.invalidateQueries({queryKey: [queryKey]});
         void history.refetch();
         return;
       }
