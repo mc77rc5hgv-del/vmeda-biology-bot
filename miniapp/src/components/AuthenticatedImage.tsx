@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { fetchAuthorizedBlob } from "../lib/apiClient";
 import styles from "./AuthenticatedImage.module.css";
 
@@ -18,6 +18,9 @@ function AuthenticatedImageRequest({ src, alt, className }: AuthenticatedImagePr
   const [failed, setFailed] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [retry, setRetry] = useState(0);
+  const [scale, setScale] = useState(1);
+  const modal = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     let active = true;
@@ -42,13 +45,23 @@ function AuthenticatedImageRequest({ src, alt, className }: AuthenticatedImagePr
   useEffect(() => {
     if (!expanded) return;
     const previousOverflow = document.body.style.overflow;
+    const previousFocus = document.activeElement as HTMLElement | null;
+    const triggerElement = trigger.current;
+    modal.current?.querySelector<HTMLButtonElement>("button")?.focus();
     const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Tab") {
+        const buttons = Array.from(modal.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ?? []);
+        const first = buttons[0], last = buttons[buttons.length - 1];
+        if (event.shiftKey && document.activeElement === first) {event.preventDefault(); last?.focus();}
+        else if (!event.shiftKey && document.activeElement === last) {event.preventDefault(); first?.focus();}
+      }
       if (event.key === "Escape") setExpanded(false);
     };
     document.body.style.overflow = "hidden";
     window.addEventListener("keydown", closeOnEscape);
     return () => {
       document.body.style.overflow = previousOverflow;
+      (previousFocus ?? triggerElement)?.focus();
       window.removeEventListener("keydown", closeOnEscape);
     };
   }, [expanded]);
@@ -63,8 +76,9 @@ function AuthenticatedImageRequest({ src, alt, className }: AuthenticatedImagePr
     <>
       <button
         type="button"
+        ref={trigger}
         className={styles.zoomTrigger}
-        onClick={() => setExpanded(true)}
+        onClick={() => {setScale(1); setExpanded(true);}}
         aria-label={`Открыть изображение «${alt}» в полном размере`}
       >
         <img src={objectUrl} alt={alt} className={className} onError={() => { setFailed(true); setExpanded(false); }} />
@@ -73,6 +87,7 @@ function AuthenticatedImageRequest({ src, alt, className }: AuthenticatedImagePr
 
       {expanded && (
         <div
+          ref={modal}
           className={styles.backdrop}
           role="dialog"
           aria-modal="true"
@@ -92,10 +107,15 @@ function AuthenticatedImageRequest({ src, alt, className }: AuthenticatedImagePr
               src={objectUrl}
               alt={alt}
               className={styles.fullImage}
+              style={{width: `${scale * 100}%`, maxWidth: "none"}}
               onClick={(event) => event.stopPropagation()}
             />
           </div>
-          <span className={styles.fullImageHint}>Можно увеличивать жестом</span>
+          <div className={styles.zoomControls} onClick={event => event.stopPropagation()}>
+            <button type="button" disabled={scale <= 1} onClick={() => setScale(value => Math.max(1, value - .5))} aria-label="Уменьшить">−</button>
+            <button type="button" onClick={() => setScale(1)} aria-label="Исходный масштаб">{Math.round(scale * 100)}%</button>
+            <button type="button" disabled={scale >= 4} onClick={() => setScale(value => Math.min(4, value + .5))} aria-label="Увеличить">+</button>
+          </div>
         </div>
       )}
     </>

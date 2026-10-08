@@ -45,25 +45,38 @@ export class ApiError extends Error {
   }
 }
 
+async function deadlineFetch<T>(url: string, init: RequestInit | undefined, consume: (response: Response) => Promise<T>): Promise<T> {
+  const controller = new AbortController();
+  const forwardAbort = () => controller.abort();
+  if (init?.signal?.aborted) controller.abort();
+  init?.signal?.addEventListener("abort", forwardAbort, {once: true});
+  const timer = window.setTimeout(() => controller.abort(), 90_000);
+  try {
+    return await consume(await fetch(url, {...init, signal: controller.signal}));
+  } catch (error) {
+    if (controller.signal.aborted) throw new ApiError(408, "Сервер не успел ответить. Проверь историю оплаты перед повтором; статистика сохранена.");
+    throw error;
+  } finally {
+    window.clearTimeout(timer);
+    init?.signal?.removeEventListener("abort", forwardAbort);
+  }
+}
+
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const token = getStoredSessionToken();
   const headers = new Headers(init?.headers);
   if (token) headers.set("Authorization", `Bearer ${token}`);
   if (init?.body) headers.set("Content-Type", "application/json");
 
-  const response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers });
-  if (!response.ok) {
-    if (response.status === 401) expireSession();
-    let detail = response.statusText;
-    try {
-      const body = await response.json();
-      detail = body.detail ?? detail;
-    } catch {
-      // тело не JSON — оставляем statusText
+  return deadlineFetch(`${API_BASE_URL}${path}`, {...init, headers}, async response => {
+    if (!response.ok) {
+      if (response.status === 401) expireSession();
+      let detail = response.statusText;
+      try { const body = await response.json(); detail = body.detail ?? detail; } catch { /* non-JSON error */ }
+      throw new ApiError(response.status, detail);
     }
-    throw new ApiError(response.status, detail);
-  }
-  return response.json() as Promise<T>;
+    return response.json() as Promise<T>;
+  });
 }
 
 /** Загружает защищённое медиа с тем же session-токеном, что и JSON API. */
@@ -71,12 +84,13 @@ export async function fetchAuthorizedBlob(url: string): Promise<Blob> {
   const token = getStoredSessionToken();
   const headers = new Headers();
   if (token) headers.set("Authorization", `Bearer ${token}`);
-  const response = await fetch(url, { headers });
-  if (!response.ok) {
-    if (response.status === 401) expireSession();
-    throw new ApiError(response.status, response.statusText);
-  }
-  const blob = await response.blob();
+  const blob = await deadlineFetch(url, {headers}, async response => {
+    if (!response.ok) {
+      if (response.status === 401) expireSession();
+      throw new ApiError(response.status, response.statusText);
+    }
+    return response.blob();
+  });
   const bytes = new Uint8Array(await blob.arrayBuffer());
   const signature = [137, 80, 78, 71, 13, 10, 26, 10];
   if (signature.every((value, index) => bytes[index] === value)) {
@@ -441,11 +455,12 @@ export async function checkQuizAnswer(
   subjectId: string,
   sectionId: string,
   itemId: string,
-  selectedIndex: number
+  selectedIndex: number,
+  attemptId: string = crypto.randomUUID()
 ): Promise<QuizAnswerResult> {
   const wire: QuizAnswerResponseWire = await apiFetch(
     `/api/v1/materials/${encodeURIComponent(subjectId)}/${encodeURIComponent(sectionId)}/${encodeURIComponent(itemId)}/answer`,
-    { method: "POST", body: JSON.stringify({ selected_index: selectedIndex }) }
+    { method: "POST", body: JSON.stringify({ selected_index: selectedIndex, attempt_id: attemptId }) }
   );
   return { correct: wire.correct, correctIndex: wire.correct_index };
 }
@@ -739,6 +754,7 @@ interface LearningStateWire {
   completed_keys: string[];
   favorites: LearningMaterialWire[];
   last_material: LearningMaterialWire | null;
+  last_step?: {path: string; updated_at: string} | null;
   completed_by_subject: Record<string, number>;
   completed_total: number;
   quiz_attempts: number;
@@ -761,6 +777,7 @@ function toLearningMaterial(wire: LearningMaterialWire) {
 
 function toLearningState(wire: LearningStateWire): LearningState {
   return {
+    lastStep: wire.last_step ? {path: wire.last_step.path, updatedAt: wire.last_step.updated_at} : null,
     completedKeys: wire.completed_keys,
     favorites: wire.favorites.map(toLearningMaterial),
     lastMaterial: wire.last_material ? toLearningMaterial(wire.last_material) : null,
@@ -842,4 +859,11 @@ export function createSbpSubscription(tierId: number, requestKey: string, subjec
 export interface BillingPayment { id: string; tier_id: number; subject: string | null; amount_minor: number; created: number; state: string; reason: string | null; url: string | null }
 export function fetchBillingHistory(): Promise<{payments: BillingPayment[]}> {
   return apiFetch("/api/v1/subscriptions/history");
+}
+
+let navigationQueue: Promise<unknown> = Promise.resolve();
+export function saveLearningNavigation(path: string): Promise<{path: string; updated_at: string}> {
+  const next = navigationQueue.catch(() => undefined).then(() => apiFetch<{path: string; updated_at: string}>("/api/v1/learning/navigation", {method: "POST", body: JSON.stringify({path})}));
+  navigationQueue = next;
+  return next;
 }

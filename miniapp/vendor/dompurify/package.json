@@ -1,0 +1,15 @@
+{
+  "name": "dompurify",
+  "version": "3.4.16",
+  "type": "module",
+  "module": "./purify.es.mjs",
+  "main": "./purify.es.mjs",
+  "types": "./purify.es.d.mts",
+  "license": "(MPL-2.0 OR Apache-2.0)",
+  "exports": {
+    ".": {
+      "types": "./purify.es.d.mts",
+      "default": "./purify.es.mjs"
+    }
+  }
+}

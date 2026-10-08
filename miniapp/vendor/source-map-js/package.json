@@ -1,0 +1,18 @@
+{
+  "name": "source-map-js",
+  "description": "Generates and consumes source maps",
+  "version": "1.2.2",
+  "homepage": "https://github.com/7rulnik/source-map-js",
+  "repository": "7rulnik/source-map-js",
+  "main": "./source-map.js",
+  "files": [
+    "source-map.js",
+    "source-map.d.ts",
+    "lib/"
+  ],
+  "engines": {
+    "node": ">=0.10.0"
+  },
+  "license": "BSD-3-Clause",
+  "typings": "source-map.d.ts"
+}

@@ -2,19 +2,21 @@
 // sessionStorage, не localStorage — токен живёт ровно с сессией вкладки/окна Mini App, что
 // разумно соответствует его собственному TTL на сервере (несколько часов, не "навсегда") и не
 // переживает закрытие приложения, как и должен короткоживущий токен.
+let memoryToken: string | null = null;
 const STORAGE_KEY = "vmeda_session_token";
 
 export function getStoredSessionToken(): string | null {
   try {
-    return sessionStorage.getItem(STORAGE_KEY);
+    return memoryToken ?? sessionStorage.getItem(STORAGE_KEY);
   } catch {
     // sessionStorage недоступен (приватный режим/некоторые встроенные браузеры) — работаем так,
     // будто токена никогда не было, а не падаем.
-    return null;
+    return memoryToken;
   }
 }
 
 export function storeSessionToken(token: string): void {
+  memoryToken = token;
   try {
     sessionStorage.setItem(STORAGE_KEY, token);
   } catch {
@@ -23,6 +25,7 @@ export function storeSessionToken(token: string): void {
 }
 
 export function clearStoredSessionToken(): void {
+  memoryToken = null;
   try {
     sessionStorage.removeItem(STORAGE_KEY);
   } catch {

@@ -1,0 +1,15 @@
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {createHash} from 'node:crypto';
+import {createRequire} from 'node:module';
+const require = createRequire(import.meta.url);
+const manifest = JSON.parse(readFileSync('vendor/PROVENANCE.json'));
+for (const [path, digest] of Object.entries(manifest.sha256)) assert.equal(createHash('sha256').update(readFileSync(path)).digest('hex'), digest, path);
+assert.equal(JSON.parse(readFileSync('vendor/dompurify/package.json')).version, '3.4.16');
+assert.equal(require('source-map-js/package.json').version, '1.2.2');
+const {SourceMapConsumer} = require('source-map-js');
+const leaf = {version:3,sources:['a.js'],names:[],mappings:'AAAA'};
+for (const line of [-1, NaN, Infinity, 1e12]) assert.throws(() => new SourceMapConsumer({version:3,sections:[{offset:{line,column:0},map:leaf}]}));
+const valid = new SourceMapConsumer({version:3,sections:[{offset:{line:1,column:0},map:leaf}]});
+assert.equal(valid.originalPositionFor({line:2,column:1}).source, 'a.js');
+console.log('vendor hashes, patched versions and indexed sourcemap limits: passed');

@@ -20,6 +20,9 @@ export function MaterialPage() {
   const { subjectId = "", sectionId = "", materialId = "1" } = useParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const delivery = useRef({material: "", id: ""});
+  const deliveryMaterial = `${subjectId}/${sectionId}/${materialId}`;
+
   useTelegramBackButton(() => {
     const material = materialQuery.data;
     navigate(material?.groupId
@@ -96,11 +99,12 @@ export function MaterialPage() {
 
   async function handleSelectOption(optionIndex: number) {
     if (selectedIndex !== null || answering) return;
+    if (delivery.current.material !== deliveryMaterial) delivery.current = {material: deliveryMaterial, id: crypto.randomUUID()};
     const requestKey = quizKey;
     setAnswering(true);
     setSelectedIndex(optionIndex);
     try {
-      const result = await checkQuizAnswer(subjectId, sectionId, materialId, optionIndex);
+      const result = await checkQuizAnswer(subjectId, sectionId, materialId, optionIndex, delivery.current.id);
       if (activeQuizKey.current !== requestKey) return;
       setAnswerResult(result);
       queryClient.invalidateQueries({ queryKey: ["learning"] });
