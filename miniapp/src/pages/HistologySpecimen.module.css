@@ -3,10 +3,6 @@
 .imageGuide { padding: 15px 18px; border: 1px solid var(--border); border-radius: 16px; background: var(--surface-elevated); }
 .imageGuide > p:not(:first-child) { margin-top: 8px; font-size: 13px; line-height: 1.6; color: var(--ink); }
 .imageGuide .guideNote { color: var(--ink-secondary); font-size: 12px; }
-.sources { padding: 16px 18px; border: 1px solid var(--border); border-radius: 16px; background: var(--surface-elevated); color: var(--ink-secondary); font-size: 12px; }
-.sources summary { cursor: pointer; font-weight: 700; color: var(--ink); }
-.sources ul { padding-left: 18px; margin-top: 10px; display: grid; gap: 8px; }
-.sources a { color: var(--subject-ink, var(--subject-histology)); text-decoration: underline; }
 .specimenNavigation { display: flex; flex-direction: column; gap: 10px; }
 .specimenNavigation p { color: var(--ink-secondary); font-size: 12px; text-align: center; }
 .specimenNavigation > div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 8px; }
