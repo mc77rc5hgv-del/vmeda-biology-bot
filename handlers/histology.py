@@ -197,11 +197,6 @@ def get_histology_specimen_text(diag_key: str, spec_id: str) -> str:
         lines.append(escape(spec["metadata_note"]))
     lines.append("")
     lines.append(escape(spec["protocol"] or "Протокол-описание пока не добавлено."))
-    sources = spec.get("sources", [])
-    if sources:
-        lines.append("\nУчебные источники:")
-        lines.extend(f'<a href="{escape(source["url"], quote=True)}">{escape(source["title"])}</a>'
-                     for source in sources)
     return "\n".join(lines)
 
 def get_histology_specimen_keyboard(diag_key: str, spec_id: str):

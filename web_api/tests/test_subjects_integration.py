@@ -522,7 +522,7 @@ def test_histology_exam_catalog_practical_reveal_and_grade():
     assert detail.json()["images"]
     assert len(detail.json()['image_guides']) == len(detail.json()['images'])
     assert detail.json()['metadata_note']
-    assert detail.json()['sources']
+    assert detail.json()['sources'] == []
 
     reveal = client.post(f"/api/v1/histology/exam/specimens/{specimen_id}/reveal", headers=headers)
     assert reveal.status_code == 200
