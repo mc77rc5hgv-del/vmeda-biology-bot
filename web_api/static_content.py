@@ -11,7 +11,7 @@
 
 Подключены: «Нормальная физиология» (23 темы курса + 11 рубежных контролей), «Оперативная
 хирургия» (61 тема в 4 томах — БЕЗ инструментов/проекций/станций/контрольных вопросов, это
-отдельная задача на будущее), «Анатомия» (107 тем в 10 модулях — только непрерывный текст
+отдельная задача на будущее), «Анатомия» (143 темы Anatomapp в 6 модулях; старые 107 тем доступны по прежним ссылкам. Legacy: непрерывный текст
 material[], БЕЗ флеш-карточек/сопоставления/мнемоник/картиночных тестов/разбора по костям/атласа/
 латинских терминов/экзаменационных банков — те же "честный срез" резоны, что и у Оперативной
 хирургии), «Гистология» (71 препарат в 5 диагностиках — реальный протокол описания + реальные
@@ -41,6 +41,7 @@ import posixpath
 from html import escape
 
 from .content import ContentNotFoundError
+from services import anatomy_miniapp
 
 PHYSIOLOGY_ID = "physiology"
 OPERATIVE_SURGERY_ID = "operative_surgery"
@@ -104,7 +105,7 @@ def list_subject_summaries(tb) -> list[dict]:
             "id": ANATOMY_ID,
             "title": "Анатомия",
             "emoji": "🦴",
-            "description": "107 тем в 10 модулях — часть открыта всем, часть по подписке",
+            "description": "143 темы в 6 модулях — часть открыта всем, часть по подписке",
             "course": 1,
             "has_ai": True,
         })
@@ -157,7 +158,7 @@ def _summary_by_id(tb, subject_id: str) -> dict:
 def get_subject_detail(tb, subject_id: str) -> dict:
     summary = _summary_by_id(tb, subject_id)
     if subject_id == ANATOMY_ID:
-        total_topics = sum(len(module.get("topics", {})) for module in tb.ANATOMY.values())
+        total_topics = len(anatomy_miniapp.TOPICS)
         summary["sections"] = [
             {"id": ANATOMY_SECTION_ID, "title": "Курс", "item_count": total_topics, "kind": "grouped"},
         ]
@@ -302,10 +303,7 @@ def get_section_detail(tb, subject_id: str, section_id: str) -> dict:
             "id": section_id,
             "title": "Курс",
             "kind": "grouped",
-            "groups": [
-                {"id": module_key, "title": module["title"], "item_count": len(module.get("topics", {}))}
-                for module_key, module in tb.ANATOMY.items()
-            ],
+            "groups": [anatomy_miniapp.group_ref(gid) for gid in anatomy_miniapp.COURSE["roots"]],
         }
 
     if subject_id == PHYSIOLOGY_ID:
@@ -543,6 +541,8 @@ def get_group_detail(tb, subject_id: str, section_id: str, group_id: str) -> dic
     if subject_id == ANATOMY_ID:
         if section_id != ANATOMY_SECTION_ID:
             raise ContentNotFoundError(f"в разделе {section_id!r} нет групп")
+        if group_id in anatomy_miniapp.GROUPS:
+            return anatomy_miniapp.group_detail(group_id)
         module = tb.ANATOMY.get(group_id)
         if module is None:
             raise ContentNotFoundError(f"модуль {group_id!r} не найден в анатомии")
@@ -719,6 +719,8 @@ def get_material(tb, subject_id: str, section_id: str, item_id: str) -> dict:
     _summary_by_id(tb, subject_id)
 
     if subject_id == ANATOMY_ID:
+        if section_id == ANATOMY_SECTION_ID and item_id in anatomy_miniapp.TOPICS:
+            return anatomy_miniapp.material(item_id)
         return _anatomy_material(tb.ANATOMY, section_id, item_id)
     if subject_id == HISTOLOGY_ID:
         return _histology_material(tb.HISTOLOGY, section_id, item_id)
