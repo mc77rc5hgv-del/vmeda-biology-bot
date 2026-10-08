@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import DOMPurify from "dompurify";
 import { Bookmark, BookmarkCheck, Check, Lock } from "lucide-react";
@@ -20,7 +20,15 @@ export function MaterialPage() {
   const { subjectId = "", sectionId = "", materialId = "1" } = useParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  useTelegramBackButton(() => navigate(`/subjects/${subjectId}`));
+  const delivery = useRef({material: "", id: ""});
+  const deliveryMaterial = `${subjectId}/${sectionId}/${materialId}`;
+
+  useTelegramBackButton(() => {
+    const material = materialQuery.data;
+    navigate(material?.groupId
+      ? `/subjects/${subjectId}/sections/${sectionId}/groups/${material.groupId}`
+      : `/subjects/${subjectId}/sections/${sectionId}`);
+  });
   const needsTelegramSession = isRealBackedSubject(subjectId) && !hasContentSession();
 
   const materialQuery = useQuery({
@@ -40,7 +48,13 @@ export function MaterialPage() {
   // переходе на другой materialId -- компонент не размонтируется React Router'ом при смене
   // параметра одного и того же маршрута, поэтому сброс идёт прямо во время рендера (React-
   // рекомендуемый паттерн "adjusting state when a prop changes"), а не эффектом.
-  const [quizMaterialId, setQuizMaterialId] = useState(materialId);
+  const quizKey = `${subjectId}/${sectionId}/${materialId}`;
+  const activeQuizKey = useRef(quizKey);
+  useEffect(() => {
+    activeQuizKey.current = quizKey;
+    return () => { activeQuizKey.current = ""; };
+  }, [quizKey]);
+  const [quizMaterialId, setQuizMaterialId] = useState(quizKey);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [answerResult, setAnswerResult] = useState<QuizAnswerResult | null>(null);
   const [answering, setAnswering] = useState(false);
@@ -76,8 +90,8 @@ export function MaterialPage() {
     );
   }
 
-  if (materialId !== quizMaterialId) {
-    setQuizMaterialId(materialId);
+  if (quizKey !== quizMaterialId) {
+    setQuizMaterialId(quizKey);
     setSelectedIndex(null);
     setAnswerResult(null);
     setAnswering(false);
@@ -85,19 +99,22 @@ export function MaterialPage() {
 
   async function handleSelectOption(optionIndex: number) {
     if (selectedIndex !== null || answering) return;
+    if (delivery.current.material !== deliveryMaterial) delivery.current = {material: deliveryMaterial, id: crypto.randomUUID()};
+    const requestKey = quizKey;
     setAnswering(true);
     setSelectedIndex(optionIndex);
     try {
-      const result = await checkQuizAnswer(subjectId, sectionId, materialId, optionIndex);
+      const result = await checkQuizAnswer(subjectId, sectionId, materialId, optionIndex, delivery.current.id);
+      if (activeQuizKey.current !== requestKey) return;
       setAnswerResult(result);
       queryClient.invalidateQueries({ queryKey: ["learning"] });
       hapticImpact(result.correct ? "light" : "heavy");
     } catch {
       // Не удалось проверить ответ (сеть/сессия) -- откатываем выбор, чтобы можно было
       // попробовать снова, а не застрять с "выбранным, но непроверенным" вариантом.
-      setSelectedIndex(null);
+      if (activeQuizKey.current === requestKey) setSelectedIndex(null);
     } finally {
-      setAnswering(false);
+      if (activeQuizKey.current === requestKey) setAnswering(false);
     }
   }
 
@@ -113,6 +130,9 @@ export function MaterialPage() {
   }
 
   if (materialQuery.isError || !materialQuery.data) {
+    if (materialQuery.error instanceof ApiError && materialQuery.error.status === 503) {
+      return <div className="screen"><StateMessage title="Раздел временно недоступен" body={materialQuery.error.message} onRetry={() => materialQuery.refetch()} /></div>;
+    }
     const err = materialQuery.error;
     if (err instanceof ApiError && err.status === 403) {
       // Реально достижимо только прямой навигацией (напр. кнопкой "назад/вперёд" на теме,
@@ -138,7 +158,7 @@ export function MaterialPage() {
     item.subjectId === subjectId && item.sectionId === sectionId && item.materialId === materialId
   ) ?? false;
   const safeHtml = DOMPurify.sanitize(material.rawHtml ?? "", {
-    ALLOWED_TAGS: ["a", "b", "blockquote", "br", "code", "del", "em", "i", "p", "pre", "s", "strong", "u"],
+    ALLOWED_TAGS: ["a", "b", "blockquote", "br", "code", "del", "em", "i", "p", "pre", "s", "strong", "u", "ul", "ol", "li", "h2", "h3", "details", "summary"],
     ALLOWED_ATTR: ["href", "title"],
   });
   const order = material.order;
@@ -193,6 +213,7 @@ export function MaterialPage() {
           <button
             type="button"
             className={[styles.actionButton, isFavorite ? styles.actionButtonActive : ""].join(" ")}
+            disabled={learningMutation.isPending}
             aria-pressed={isFavorite}
             onClick={() => learningMutation.mutate({ flag: "favorite", value: !isFavorite })}
           >
@@ -202,6 +223,7 @@ export function MaterialPage() {
           <button
             type="button"
             className={[styles.actionButton, isCompleted ? styles.actionButtonDone : ""].join(" ")}
+            disabled={learningMutation.isPending}
             aria-pressed={isCompleted}
             onClick={() => learningMutation.mutate({ flag: "completed", value: !isCompleted })}
           >
@@ -210,6 +232,8 @@ export function MaterialPage() {
           </button>
         </div>
       </div>
+
+      {learningMutation.isError && <StateMessage title="Не удалось сохранить отметку" body="Проверь соединение и повтори действие. Прогресс сохранённых занятий не изменён." />}
 
       {isRealContent ? (
         <Card className={styles.block}>

@@ -5,13 +5,26 @@ import functools
 import hmac
 import inspect
 import os
+import atexit
+import threading
 
 import httpx
 from fastapi import APIRouter, Header, HTTPException
 
+_client = None
+_client_lock = threading.Lock()
+
+def rpc_client():
+    global _client
+    with _client_lock:
+        if _client is None:
+            _client = httpx.Client(timeout=httpx.Timeout(10, pool=2), trust_env=False, limits=httpx.Limits(max_connections=32, max_keepalive_connections=16))
+            atexit.register(_client.close)
+        return _client
+
 OPERATIONS = frozenset({
     'touch_material', 'set_material_flag', 'record_quiz_attempt', 'record_histology_attempt',
-    'get_histology_mistake_ids', 'get_histology_stats', 'get_state', 'get_dashboard',
+    'set_navigation', 'get_histology_mistake_ids', 'get_histology_stats', 'get_state', 'get_dashboard',
     'create_anatomy_run', 'get_anatomy_run', 'active_anatomy_run', 'answer_anatomy_run',
     'get_anatomy_mistakes', 'get_anatomy_scores',
 })
@@ -50,9 +63,9 @@ def install_remote_backend(namespace: dict) -> None:
         def remote(*args, _name=name, _signature=signature, **kwargs):
             payload = dict(_signature.bind(*args, **kwargs).arguments)
             try:
-                response = httpx.post(
+                response = rpc_client().post(
                     url.rstrip('/') + '/internal/sync/learning/' + _name,
-                    json=payload, headers={'X-Vmeda-Sync-Token': token}, timeout=10, trust_env=False,
+                    json=payload, headers={'X-Vmeda-Sync-Token': token},
                 )
                 if response.status_code in (400, 404, 409, 422):
                     raise HTTPException(status_code=response.status_code, detail=response.json().get('detail', 'Некорректный запрос'))

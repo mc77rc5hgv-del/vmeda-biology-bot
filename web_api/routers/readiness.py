@@ -53,7 +53,7 @@ async def checks(*, include_learning=True):
             service = runtime(tb)
             task = getattr(service, 'poll_task', None)
             billing = bool(service and task and not task.done() and service.provider.public_status()['available']
-                           and service.provider_healthy and time.time() - service.last_poll_at < 90)
+                           and service.provider_healthy and time.time() - max(service.last_poll_at, getattr(service, "last_poll_progress_at", 0)) < 90)
             if billing:
                 try:
                     with service.ledger.connect() as db:
@@ -99,3 +99,21 @@ async def readiness():
     ready = all(result.values())
     return JSONResponse({'status': 'ready' if ready else 'unavailable', 'checks': result},
                         status_code=200 if ready else 503, headers={'Cache-Control': 'no-store'})
+
+
+@router.get('/internal/sync/operations')
+async def operations(x_vmeda_sync_token: str = Header(default='')):
+    token = os.environ.get('BOT_SYNC_TOKEN', '')
+    if not token or not hmac.compare_digest(token.encode(), x_vmeda_sync_token.encode()):
+        raise HTTPException(403, detail='Нет доступа')
+    from services.offsite_backup import status as backup_status
+    result = {'backup': dict(backup_status), 'dependencies': await checks()}
+    if os.environ.get('BOT_SYNC_MODE') == 'owner':
+        from ..bot_state import get_bot_module
+        from services.payments.runtime import runtime
+        tb = get_bot_module()
+        service = runtime(tb)
+        result['billing'] = {'active_checkouts': service._create_waiting, 'checkout_limit': service._max_create_waiting, 'active_verifications': len(service._checking), 'poll_progress_age_seconds': max(0, time.time() - max(service.last_poll_at, service.last_poll_progress_at))} if service else None
+        writer = getattr(tb, '_stats_writer', None)
+        result['stats_writer'] = {'pending_barriers': len(writer._waiters), 'generation': writer._generation} if writer else None
+    return result

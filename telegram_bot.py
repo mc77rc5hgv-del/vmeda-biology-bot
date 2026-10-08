@@ -1,5 +1,5 @@
+from services.stats_writer import StatsWriter
 import asyncio
-import copy
 import html
 import io
 import json
@@ -9,7 +9,7 @@ import os
 import sys
 import time
 import urllib.parse
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import Future
 from datetime import date, datetime, timedelta, timezone
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import (
@@ -319,29 +319,18 @@ def load_stats() -> dict:
         "subscription_purchase_log": [],
     }
 
-# Один воркер сериализует записи на диск и не даёт им блокировать event loop бота.
-_stats_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="stats-writer")
+# One bounded writer coalesces saves; the event loop copies in small slices.
+_stats_writer = StatsWriter(lambda: stats, STATS_FILE, logger)
+_stats_executor = _stats_writer.executor  # retained for compatibility with old callers
 
-def _write_stats_file(data: dict) -> None:
-    tmp_path = f"{STATS_FILE}.tmp"
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp_path, STATS_FILE)
+def _log_stats_write_result(future):
+    # Media file-ID caches share the durable single-thread executor.
+    if not future.cancelled() and future.exception() is not None:
+        logger.error("Не удалось сохранить кеш: %s", future.exception())
 
-def _log_stats_write_result(future) -> None:
-    exc = future.exception()
-    if exc is not None:
-        logger.error("Не удалось сохранить статистику: %s", exc)
 
 def save_stats() -> Future[None]:
-    # Снимок делаем сразу (deepcopy — быстро), сама запись на диск уходит в отдельный поток.
-    data = copy.deepcopy(stats)
-    data["total_users"] = list(data["total_users"])
-    future = _stats_executor.submit(_write_stats_file, data)
-    future.add_done_callback(_log_stats_write_result)
-    return future
+    return _stats_writer.save()
 
 if __name__ == '__main__':
     # A second process on the SAME persistent volume must never read stale stats or poll.
@@ -1752,8 +1741,13 @@ async def safe_edit_text(message, text, **kwargs) -> None:
     удаляет его и отправляет новое вместо падения с ошибкой."""
     try:
         await message.edit_text(text, **kwargs)
-    except TelegramBadRequest:
-        await message.delete()
+    except TelegramBadRequest as exc:
+        if "message is not modified" in str(exc).lower():
+            return
+        try:
+            await message.delete()
+        except TelegramBadRequest:
+            pass  # old messages can be uneditable AND undeletable
         await message.answer(text, **kwargs)
 
 async def send_answer(target, body: str, short_caption: str, question: dict, keyboard, edit: bool) -> None:
@@ -1781,7 +1775,10 @@ async def send_answer(target, body: str, short_caption: str, question: dict, key
 
     photo = FSInputFile(image_path)
     if edit:
-        await target.delete()
+        try:
+            await target.delete()
+        except TelegramBadRequest:
+            pass
 
     if len(body) <= CAPTION_LIMIT:
         await target.answer_photo(photo, caption=body, parse_mode="HTML", reply_markup=keyboard)
@@ -1986,7 +1983,8 @@ def _histology_menu_label(user_id: int = None) -> str:
 
 def miniapp_launch_allowed(user_id: int) -> bool:
     from services.miniapp_testers import has_test_access
-    return is_admin(user_id) or has_test_access(__import__(__name__), user_id)
+    from services.miniapp_policy import public_launch
+    return public_launch() or is_admin(user_id) or has_test_access(__import__(__name__), user_id)
 
 
 async def sync_miniapp_menu_button(user_id: int) -> bool:
@@ -5442,6 +5440,8 @@ async def handle_ai_photo_input(message: Message):
                 "провайдера (так бывает на некоторых медицинских формулировках). Эта попытка не "
                 "списана с дневного лимита — попробуй прислать вопрос текстом или переформулировать."
             )
+        except ValueError as exc:
+            await safe_edit_text(thinking, "⚠️ " + str(exc))
         except Exception as exc:
             logger.exception("Ошибка при обработке AI-фото от пользователя %s", user_id)
             record_ai_attempts_cost(getattr(exc, "ai_attempts_log", []))
@@ -6182,9 +6182,13 @@ async def main():
     sync_server = start_optional_api()
     from services.payments.runtime import start as start_billing
     billing_task = start_billing(sys.modules[__name__])
+    from services.offsite_backup import periodic
+    backup_task = asyncio.create_task(periodic(sys.modules[__name__]), name='vmeda-offsite-backup')
     try:
         await dp.start_polling(bot)
     finally:
+        backup_task.cancel()
+        await asyncio.gather(backup_task, return_exceptions=True)
         if billing_task:
             billing_task.cancel()
             try:
@@ -6192,6 +6196,7 @@ async def main():
             except asyncio.CancelledError:
                 pass
         await stop_optional_api(sync_server)
+        await _stats_writer.flush()
         _stats_executor.shutdown(wait=True)
 
 if __name__ == "__main__":

@@ -166,15 +166,21 @@ async def reconcile_payment(order_id: str, body: ReconcileRequest,
     return {'payment': service.ledger.public(row), 'events': service.ledger.events(order_id)}
 
 
+@router.post('/codeepay/webhook')
 @router.post('/codeepay/webhook/{secret}')
-async def codeepay_webhook(secret: str, request: Request, tb=Depends(get_fresh_bot_module)):
+async def codeepay_webhook(request: Request, secret: str | None = None, tb=Depends(get_fresh_bot_module)):
     import hmac
     import json
     from services.payments.runtime import runtime
     from services.payments.contracts import ProviderNotReady, PaymentMismatch
     service = runtime(tb)
-    if not service or not hmac.compare_digest(secret.encode(), service.provider.config.webhook_secret.encode()):
+    if not service or secret is not None and not hmac.compare_digest(secret.encode(), service.provider.config.webhook_secret.encode()):
         raise HTTPException(404, detail='Не найдено')
+    from ..limits import user_limiter
+    if not user_limiter.allow('codeepay-callback-global', 120):
+        raise HTTPException(429, detail='Повтори уведомление позже', headers={'Retry-After': '60'})
+    if len(service._checking) >= 50:
+        raise HTTPException(503, detail='Сверка занята; уведомление можно повторить')
     body = await request.body()
     if len(body) > 16384:
         raise HTTPException(413, detail='Запрос слишком большой')

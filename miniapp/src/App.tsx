@@ -3,6 +3,8 @@ import { SubjectTheme } from "./components/SubjectTheme";
 import { useEffect } from "react";
 import { applyPreferredTheme } from "./lib/theme";
 import { useAuthStore } from "./lib/store";
+import { saveLearningNavigation } from "./lib/apiClient";
+import { useQueryClient } from "@tanstack/react-query";
 import { useLastStepStore } from "./lib/lastStep";
 import { BottomNav } from "./components/BottomNav";
 import { HomePage } from "./pages/Home";
@@ -25,7 +27,16 @@ export function App() {
   const { pathname } = useLocation();
   const owner = useAuthStore((state) => String(state.profile?.userId ?? "preview"));
   const remember = useLastStepStore((state) => state.remember);
-  useEffect(() => { remember(owner, pathname); }, [owner, pathname, remember]);
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    remember(owner, pathname);
+    const step = useLastStepStore.getState().steps[owner];
+    if (owner !== "preview" && step?.path === pathname) {
+      void saveLearningNavigation(pathname).then(() => {
+        void queryClient.invalidateQueries({queryKey: ["learning"]});
+      }).catch(() => { /* local dated bookmark remains on network failure */ });
+    }
+  }, [owner, pathname, remember, queryClient]);
   const subjectId = pathname.match(/^\/(?:subjects|materials|tests)\/([^/]+)/)?.[1]
     ?? (pathname.startsWith("/histology/") ? "histology" : undefined);
   useEffect(() => { applyPreferredTheme(); }, [subjectId]);

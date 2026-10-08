@@ -12,6 +12,7 @@ import hashlib
 import hmac
 import json
 import math
+import re
 import time
 
 SESSION_TTL_SECONDS = 6 * 60 * 60  # 6 часов -- короче, чем максимальная жизнь initData, но
@@ -49,9 +50,11 @@ def verify_session_token(token: str, secret: str, *, now: float | None = None) -
     """Возвращает user_id, если токен подлинный и не истёк, иначе бросает SessionTokenError."""
     if not secret:
         raise SessionTokenError("SESSION_SECRET не задан на сервере")
-    if not token or token.count(".") != 1:
+    if not token or len(token) > 2048 or token.count(".") != 1:
         raise SessionTokenError("некорректный формат токена")
     payload_b64, _, signature = token.partition(".")
+    if not re.fullmatch(r'[A-Za-z0-9_-]{1,1024}', payload_b64) or not re.fullmatch(r'[0-9a-f]{64}', signature):
+        raise SessionTokenError("некорректный формат токена")
     expected_signature = hmac.new(secret.encode("utf-8"), payload_b64.encode("ascii"), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(expected_signature, signature):
         raise SessionTokenError("подпись токена не совпадает")

@@ -29,7 +29,7 @@ async function copyText(value: string): Promise<void> {
 
 export function ReferralPage() {
   const navigate = useNavigate();
-  useTelegramBackButton(() => navigate(-1));
+  useTelegramBackButton(() => navigate("/profile"));
   const meQuery = useQuery({ queryKey: ["me"], queryFn: fetchMe });
   const [copied, setCopied] = useState(false);
 

@@ -254,6 +254,7 @@ export interface DashboardStats {
 export interface ContinueItem {
   /** Последний открытый экран; старые серверные материалы используют свои идентификаторы. */
   path?: string;
+  updatedAt?: string;
   subjectId: string;
   sectionId?: string;
   materialId?: string;
@@ -277,6 +278,7 @@ export interface LearningMaterialState {
 }
 
 export interface LearningState {
+  lastStep?: {path: string; updatedAt: string} | null;
   completedKeys: string[];
   favorites: LearningMaterialState[];
   lastMaterial: LearningMaterialState | null;

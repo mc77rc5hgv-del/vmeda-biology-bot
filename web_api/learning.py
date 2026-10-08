@@ -12,6 +12,8 @@ import sqlite3
 import threading
 from contextlib import closing
 from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+
 
 from .learning_rpc import install_remote_backend
 from .exam_journal import (
@@ -22,6 +24,8 @@ from .exam_journal import (
     get_anatomy_mistakes as get_anatomy_mistakes,
     get_anatomy_scores as get_anatomy_scores,
 )
+
+STUDY_TIMEZONE = ZoneInfo("Europe/Moscow")
 
 _backup_lock = threading.Lock()
 _backed_up_paths: set[str] = set()
@@ -98,6 +102,17 @@ def _connect() -> sqlite3.Connection:
         CREATE INDEX IF NOT EXISTS histology_practical_user_specimen
             ON histology_practical_attempts(user_id, specimen_id, answered_at DESC);
 
+        CREATE TABLE IF NOT EXISTS learning_activity_days (
+            user_id INTEGER NOT NULL, study_date TEXT NOT NULL, actions INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (user_id, study_date)
+        );
+        CREATE TABLE IF NOT EXISTS learning_quiz_delivery (
+            user_id INTEGER NOT NULL, event_id TEXT NOT NULL, payload TEXT NOT NULL,
+            PRIMARY KEY (user_id, event_id)
+        );
+        CREATE TABLE IF NOT EXISTS learning_navigation (
+            user_id INTEGER PRIMARY KEY, path TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS histology_sync_events (
             user_id INTEGER NOT NULL,
             event_id TEXT NOT NULL,
@@ -137,6 +152,7 @@ def touch_material(user_id: int, payload: dict) -> None:
                 payload.get("total_in_section", 1), now,
             ),
         )
+        _record_day(connection, user_id, now)
 
 
 def set_material_flag(user_id: int, subject_id: str, section_id: str, material_id: str, flag: str, value: bool) -> None:
@@ -164,14 +180,34 @@ def set_material_flag(user_id: int, subject_id: str, section_id: str, material_i
         )
 
 
-def record_quiz_attempt(user_id: int, subject_id: str, section_id: str, material_id: str, correct: bool) -> None:
+def _record_day(connection, user_id, now):
+    day = _activity_date(now).isoformat()
+    connection.execute("INSERT INTO learning_activity_days VALUES (?, ?, 1) ON CONFLICT(user_id, study_date) DO UPDATE SET actions=actions+1", (user_id, day))
+
+
+def set_navigation(user_id: int, path: str) -> dict:
+    now = _now()
     with closing(_connect()) as connection, connection:
-        connection.execute(
-            """INSERT INTO learning_quiz_attempts
-               (user_id, subject_id, section_id, material_id, correct, answered_at)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (user_id, subject_id, section_id, material_id, int(correct), _now()),
-        )
+        connection.execute("INSERT INTO learning_navigation VALUES (?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET path=excluded.path, updated_at=excluded.updated_at", (user_id, path, now))
+    return {'path': path, 'updated_at': now}
+
+
+def record_quiz_attempt(user_id: int, subject_id: str, section_id: str, material_id: str, correct: bool, event_id: str | None = None, selected_index: int | None = None) -> None:
+    import json
+    payload = json.dumps([subject_id, section_id, material_id, bool(correct), selected_index])
+    now = _now()
+    with closing(_connect()) as connection, connection:
+        if event_id:
+            connection.execute('BEGIN IMMEDIATE')
+            old = connection.execute('SELECT payload FROM learning_quiz_delivery WHERE user_id=? AND event_id=?', (user_id, event_id)).fetchone()
+            if old:
+                if old['payload'] != payload:
+                    from fastapi import HTTPException
+                    raise HTTPException(409, 'Ответ уже сохранён; изменить его нельзя')
+                return
+            connection.execute('INSERT INTO learning_quiz_delivery VALUES (?, ?, ?)', (user_id, event_id, payload))
+        connection.execute("INSERT INTO learning_quiz_attempts (user_id, subject_id, section_id, material_id, correct, answered_at) VALUES (?, ?, ?, ?, ?, ?)", (user_id, subject_id, section_id, material_id, int(correct), now))
+        _record_day(connection, user_id, now)
 
 
 def record_histology_attempt(user_id: int, specimen_id: str, known: bool, scope: str = "all", event_id: str | None = None) -> None:
@@ -192,6 +228,7 @@ def record_histology_attempt(user_id: int, specimen_id: str, known: bool, scope:
         )
         if event_id:
             connection.execute('INSERT INTO histology_sync_events VALUES (?, ?, ?)', (user_id, event_id, cursor.lastrowid))
+        _record_day(connection, user_id, _now())
 
 
 def get_histology_mistake_ids(user_id: int) -> list[str]:
@@ -276,6 +313,7 @@ def get_state(user_id: int) -> dict:
             attempts += anatomy[0]
             correct += anatomy[1]
 
+        navigation = connection.execute('SELECT path, updated_at FROM learning_navigation WHERE user_id=?', (user_id,)).fetchone()
     serialized = [dict(row) for row in materials]
     completed = [row for row in serialized if row["completed"]]
     favorites = [row for row in serialized if row["favorite"]]
@@ -283,6 +321,7 @@ def get_state(user_id: int) -> dict:
     for row in completed:
         by_subject[row["subject_id"]] = by_subject.get(row["subject_id"], 0) + 1
     return {
+        "last_step": dict(navigation) if navigation else None,
         "completed_keys": [f'{r["subject_id"]}/{r["section_id"]}/{r["material_id"]}' for r in completed],
         "favorites": favorites,
         "last_material": serialized[0] if serialized else None,
@@ -298,7 +337,10 @@ def _activity_date(value: str | None) -> date | None:
     if not value:
         return None
     try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00")).date()
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(STUDY_TIMEZONE).date()
     except (TypeError, ValueError):
         return None
 
@@ -307,7 +349,7 @@ def get_dashboard(user_id: int) -> dict:
     """Real profile metrics derived only from persisted Mini App activity."""
     with closing(_connect()) as connection:
         materials = connection.execute(
-            """SELECT completed, last_opened_at FROM learning_materials WHERE user_id=?""",
+            """SELECT completed, last_opened_at, completed_at FROM learning_materials WHERE user_id=?""",
             (user_id,),
         ).fetchall()
         attempts = connection.execute(
@@ -322,12 +364,14 @@ def get_dashboard(user_id: int) -> dict:
         if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='anatomy_answers'").fetchone():
             attempts += list(connection.execute('SELECT a.correct, a.answered_at FROM anatomy_answers a JOIN anatomy_runs r ON r.id=a.run_id WHERE r.user_id=?', (user_id,)).fetchall())
 
+        curriculum_total = connection.execute('SELECT COALESCE(SUM(total), 0) FROM (SELECT MAX(total_in_section) AS total FROM learning_materials WHERE user_id=? GROUP BY subject_id, section_id)', (user_id,)).fetchone()[0]
+        persisted_days = connection.execute('SELECT study_date, actions FROM learning_activity_days WHERE user_id=?', (user_id,)).fetchall()
     completed = sum(int(row["completed"]) for row in materials)
     correct = sum(int(row["correct"]) for row in attempts)
     wrong = len(attempts) - correct
     xp = completed * 40 + correct * 20 + wrong * 5
 
-    completion_percent = round(completed / len(materials) * 100) if materials else None
+    completion_percent = round(completed / max(curriculum_total, completed, 1) * 100) if materials else None
     accuracy_percent = round(correct / len(attempts) * 100) if attempts else None
     if completion_percent is not None and accuracy_percent is not None:
         readiness = round(completion_percent * 0.4 + accuracy_percent * 0.6)
@@ -341,21 +385,26 @@ def get_dashboard(user_id: int) -> dict:
     material_dates = [_activity_date(row["last_opened_at"]) for row in materials]
     attempt_dates = [_activity_date(row["answered_at"]) for row in attempts]
     activity_dates = {day for day in material_dates + attempt_dates if day is not None}
-    today = datetime.now(timezone.utc).date()
+    activity_dates |= {date.fromisoformat(row['study_date']) for row in persisted_days}
+    activity_dates |= {day for day in (_activity_date(row['completed_at']) for row in materials) if day is not None}
+    today = datetime.now(STUDY_TIMEZONE).date()
     cursor = today if today in activity_dates else today - timedelta(days=1)
     streak = 0
     while cursor in activity_dates:
         streak += 1
         cursor -= timedelta(days=1)
 
-    today_actions = sum(day == today for day in material_dates + attempt_dates if day is not None)
+    today_actions = next((row['actions'] for row in persisted_days if row['study_date'] == today.isoformat()), 0)
     daily_goal = 30
     return {
+        "curriculum_total": curriculum_total,
+        "daily_goal_actions": 6,
+        "actions_left_today": max(0, 6 - today_actions),
         "streak_days": streak,
         "xp": xp,
         "readiness_percent": max(0, min(100, readiness)),
         "daily_goal_minutes": daily_goal,
-        "minutes_left_today": max(0, daily_goal - today_actions * 5),
+        "minutes_left_today": daily_goal  # elapsed study time is not measured; never invent five minutes per action,
     }
 
 

@@ -1,0 +1,31 @@
+name: Dependency security
+on:
+  workflow_dispatch:
+  pull_request:
+  schedule:
+    - cron: '17 8 * * 1'
+permissions:
+  contents: read
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: miniapp/package-lock.json
+      - run: npm ci
+        working-directory: miniapp
+      - run: npm run verify-vendor && npm audit --audit-level=high
+        working-directory: miniapp
+  server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install pip-audit
+      - run: pip-audit -r requirements.txt --strict

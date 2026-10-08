@@ -1356,6 +1356,12 @@ async def cb_admin_export_stats(callback: CallbackQuery):
         await callback.answer()
         return
     await callback.answer()
+    from web_api.subscriptions import _persist
+    try:
+        await _persist(tb)
+    except Exception:
+        await callback.message.answer("Не удалось подтвердить запись статистики. Попробуй выгрузку позже; данные не сброшены.")
+        return
     if not os.path.exists(tb.STATS_FILE):
         await callback.message.answer("Файл stats.json ещё не создан.")
         return

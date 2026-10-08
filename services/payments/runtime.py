@@ -31,14 +31,20 @@ class BillingRuntime:
         self._checking = set()
         self.provider_healthy = True
         self.last_poll_at = 0
+        self.last_poll_progress_at = 0
+        self._recover_waiting = 0
+        self._create_waiting = 0
+        self._checkout_deadline = min(60, getattr(provider.config, 'timeout_seconds', 15) + 2)
+        self._max_create_waiting = max(4, min(8, 4 * int(60 / self._checkout_deadline)))
 
     async def fetch_provider(self, provider_id):
         try:
-            payment = await self.provider.fetch_payment(provider_id)
+            payment = await asyncio.wait_for(self.provider.fetch_payment(provider_id), timeout=min(30, self.provider.config.timeout_seconds + 2))
         except Exception:
             self.provider_healthy = False
             raise
         self.provider_healthy = True
+        self.last_poll_progress_at = time.time()
         return payment
 
     @staticmethod
@@ -46,6 +52,16 @@ class BillingRuntime:
         return PaymentOrder(row['id'], row['user_id'], row['tier_id'], row['subject'], 'codeepay', row['amount_minor'], 'RUB', row['proof'])
 
     async def checkout(self, user_id, tier_id, subject, request_key, source):
+        # Reject BEFORE reserving an invoice; no uncertain order is left behind.
+        if self._create_waiting >= self._max_create_waiting:
+            raise ProviderNotReady('Сервис оплаты занят. Повтори с тем же запросом через минуту; новый счёт не создан.')
+        self._create_waiting += 1
+        try:
+            return await self._checkout(user_id, tier_id, subject, request_key, source)
+        finally:
+            self._create_waiting -= 1
+
+    async def _checkout(self, user_id, tier_id, subject, request_key, source):
         from web_api.subscriptions import purchase_reason, validate_tier
         # Reserve durably under the lock; never hold a global lock across provider I/O.
         async with self._create_lock:
@@ -86,7 +102,7 @@ class BillingRuntime:
                      'source': source, 'username': self.tb.stats.get('user_username', {}).get(str(user_id))})
         try:
             async with self._create_gate:
-                session = await self.provider.create_checkout(self.order(row))
+                session = await asyncio.wait_for(self.provider.create_checkout(self.order(row)), timeout=self._checkout_deadline)
             self.provider_healthy = True
             async with self._lock:
                 current = self.ledger.get(row['id'])
@@ -114,6 +130,15 @@ class BillingRuntime:
             raise PaymentMismatch('Different provider invoice')
 
     async def recover_provider(self, provider_id, *, expected_order=None, actor=None, note=''):
+        if self._recover_waiting >= 8:
+            raise ProviderNotReady('Сверка занята. Оплата продолжит проверяться; повтори запрос позже.')
+        self._recover_waiting += 1
+        try:
+            return await self._recover_provider(provider_id, expected_order=expected_order, actor=actor, note=note)
+        finally:
+            self._recover_waiting -= 1
+
+    async def _recover_provider(self, provider_id, *, expected_order=None, actor=None, note=''):
         # User/callback supplied IDs are only hints. Fresh merchant-authenticated
         # metadata, proof, currency and amount must match an EXISTING local quote.
         async with self._poll_gate:
@@ -276,9 +301,12 @@ class BillingRuntime:
             except Exception:
                 self.tb.logger.warning('SBP check will retry for order %s', row['id'])
                 self.ledger.update(row['id'], self.ledger.get(row['id'])['state'], checked=time.time())
+            finally:
+                self.last_poll_progress_at = time.time()
         while True:
             try:
                 self.last_poll_at = time.time()
+                self.last_poll_progress_at = self.last_poll_at
                 # Read-only status probe: never creates an invoice or bank charge.
                 # Settled historical orders also keep provider health observable.
                 if time.time() - last_probe >= 60:
@@ -292,7 +320,11 @@ class BillingRuntime:
                         self.provider_healthy = False
                         self.tb.logger.warning('SBP provider readiness probe failed; pending verification continues')
                     last_probe = time.time()
-                await asyncio.gather(*(check_one(row) for row in self.ledger.pending()))
+                    self.last_poll_progress_at = last_probe
+                rows = self.ledger.pending()
+                # Do not put the entire background batch ahead of user/admin checks.
+                for offset in range(0, len(rows), 2):
+                    await asyncio.gather(*(check_one(row) for row in rows[offset:offset + 2]))
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -316,7 +348,7 @@ def start(tb):
         gateway = os.environ.get('CODEEPAY_CALLBACK_BASE_URL', '').rstrip('/')
         if not gateway.startswith('https://') or len(config.webhook_secret) < 32:
             raise ValueError('Callback HTTPS URL and secret are required')
-        provider = CodeePayProvider(config, notification_url=gateway + '/api/v1/subscriptions/codeepay/webhook/' + config.webhook_secret)
+        provider = CodeePayProvider(config, notification_url=gateway + '/api/v1/subscriptions/codeepay/webhook')
         tb._billing_runtime = BillingRuntime(tb, ledger, provider)
         tb.logger.info('SBP_BILLING_READY separate_owner_ledger=true')
         task = asyncio.create_task(tb._billing_runtime.poll(), name='vmeda-sbp-confirmation')

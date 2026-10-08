@@ -83,7 +83,10 @@ async def ai_solve(
                     raw_bytes = base64.b64decode(payload.image_base64, validate=True)
                 except (ValueError, binascii.Error) as exc:
                     raise HTTPException(status_code=400, detail="image_base64 повреждён") from exc
-                image_bytes = tb.resize_image_for_ai(raw_bytes)
+                try:
+                    image_bytes = tb.resize_image_for_ai(raw_bytes)
+                except ValueError as exc:
+                    raise HTTPException(status_code=400, detail=str(exc)) from exc
                 task_repr, parse_usage = await tb.ai_vision_parser.parse_task(image_bytes=image_bytes)
                 if parse_usage.get("input_tokens") or parse_usage.get("output_tokens"):
                     tb.record_ai_cost(parse_usage)

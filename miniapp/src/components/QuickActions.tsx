@@ -1,27 +1,15 @@
-import { Camera, RotateCcw, SquareCheckBig } from "lucide-react";
+import { Camera, RotateCcw } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { hapticSelection } from "../lib/telegram";
 import { PressableCard } from "./Card";
 import { Icon } from "./Icon";
 import styles from "./QuickActions.module.css";
 
-/** Три быстрых действия главного экрана (§8 ТЗ):
- * — «Тест» открывает рекомендованную тренировку;
- * — «Повторить» открывает темы, требующие повторения;
- * — «Фото в AI» запускает отправку фотографии задания.
- * На Этапе 2 (тестовые данные) ведут на заглушечные/ближайшие осмысленные экраны —
- * реальный подбор "рекомендованного теста"/"тем на повтор" появится вместе с API. */
+/** Быстрые переходы к повторению и разбору фотографии в AI. */
 export function QuickActions() {
   const navigate = useNavigate();
 
   const actions = [
-    {
-      key: "test",
-      icon: SquareCheckBig,
-      label: "Быстрый тест",
-      accent: "var(--academic-blue-tint)",
-      onClick: () => navigate("/subjects/biochemistry/sections/foundations"),
-    },
     {
       key: "repeat",
       icon: RotateCcw,

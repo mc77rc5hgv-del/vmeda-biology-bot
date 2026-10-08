@@ -19,6 +19,7 @@ from . import config
 from .routers import access, ai, auth, learning, me, subjects, sync, anatomy_runs, diagnostics, subscriptions
 from . import learning_rpc
 from .routers import readiness
+from .limits import RequestLimits
 from .sync_transport import BotGateway, OwnerGuard, mode
 
 @asynccontextmanager
@@ -31,7 +32,14 @@ async def lifespan(_app):
             with closing(_connect()):
                 pass
         await asyncio.to_thread(prepare_storage)
-    yield
+    from services.offsite_backup import periodic
+    backup_task = asyncio.create_task(periodic()) if mode() == 'gateway' else None
+    try:
+        yield
+    finally:
+        if backup_task:
+            backup_task.cancel()
+            await asyncio.gather(backup_task, return_exceptions=True)
 
 
 app = FastAPI(title="VMEDA web_api", version="0.2.0", lifespan=lifespan)
@@ -59,6 +67,7 @@ elif sync_mode == 'owner':
     app.add_middleware(OwnerGuard, token=os.environ.get('BOT_SYNC_TOKEN', ''))
 
 
+app.add_middleware(RequestLimits)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=config.ALLOWED_ORIGINS,

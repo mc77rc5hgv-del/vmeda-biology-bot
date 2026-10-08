@@ -3,12 +3,12 @@
   "course": 1,
   "title": "Латинский язык",
   "emoji": "🏛️",
-  "description": "Подготовка к зачёту и специализированный VMedA AI по материалам курса ВМедА.",
+  "description": "VMedA AI по латинскому языку. Ответы к зачёту ещё готовятся; раздел с готовыми ответами пока не опубликован.",
   "ai_mode": "latin",
   "sections": [
     {
       "id": "latin_credit",
-      "title": "Зачёт",
+      "title": "Зачёт · материалы готовятся",
       "lessons": [
         {
           "id": "credit_placeholder",

@@ -733,7 +733,9 @@ def answer_quiz(
     except content.InvalidQuizAnswerError as exc:
         raise _bad_quiz_answer(exc) from exc
     from .. import learning
-    learning.record_quiz_attempt(user_id, subject_id, section_id, item_id, result["correct"])
+    if os.environ.get('BOT_SYNC_MODE') == 'owner' and not body.attempt_id:
+        raise HTTPException(409, detail='Обнови мини-приложение перед ответом: требуется безопасный идентификатор попытки.')
+    learning.record_quiz_attempt(user_id, subject_id, section_id, item_id, result["correct"], event_id=body.attempt_id, selected_index=body.selected_index)
     return schemas.QuizAnswerResponse(**result)
 
 

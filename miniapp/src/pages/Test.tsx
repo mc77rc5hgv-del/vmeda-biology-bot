@@ -13,7 +13,7 @@ import { AnatomyExamPage } from "./AnatomyExam";
 export function TestPage() {
   const { subjectId = "" } = useParams();
   if (subjectId === "anatomy") return <AnatomyExamPage />;
-  return <GenericTestPage subjectId={subjectId} />;
+  return <GenericTestPage key={subjectId} subjectId={subjectId} />;
 }
 
 function GenericTestPage({ subjectId }: { subjectId: string }) {

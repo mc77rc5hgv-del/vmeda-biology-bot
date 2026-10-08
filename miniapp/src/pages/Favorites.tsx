@@ -13,7 +13,7 @@ import styles from "./ProfileDetails.module.css";
 export function FavoritesPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  useTelegramBackButton(() => navigate(-1));
+  useTelegramBackButton(() => navigate("/profile"));
   const learningQuery = useQuery({ queryKey: ["learning"], queryFn: fetchLearningState });
   const removeMutation = useMutation({
     mutationFn: (item: LearningMaterialState) => setLearningFlag({ subjectId: item.subjectId, sectionId: item.sectionId, materialId: item.materialId }, "favorite", false),
@@ -27,6 +27,7 @@ export function FavoritesPage() {
   return (
     <div className="screen">
       <header className={styles.intro}><h1 className={styles.title}>Избранное</h1><p className={styles.subtitle}>Сохранённые темы доступны здесь и на странице прогресса.</p></header>
+      {removeMutation.isError && <StateMessage title="Не удалось изменить избранное" body="Проверь соединение и повтори действие. Сохранённая тема остаётся в списке." />}
       {favorites.length === 0 ? (
         <StateMessage icon={Bookmark} title="В избранном пока пусто" body="Открой учебный материал и нажми на закладку — тема появится здесь." onRetry={() => navigate("/")} actionLabel="Перейти к предметам" />
       ) : (

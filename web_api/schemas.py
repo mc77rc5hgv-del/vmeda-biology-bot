@@ -1,8 +1,8 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class TelegramAuthRequest(BaseModel):
-    init_data: str
+    init_data: str = Field(min_length=1, max_length=16384)
 
 
 class TelegramAuthResponse(BaseModel):
@@ -23,6 +23,7 @@ class TelegramAuthResponse(BaseModel):
 
 class QuizAnswerRequest(BaseModel):
     selected_index: int
+    attempt_id: str | None = Field(default=None, min_length=8, max_length=128)
 
 
 class QuizAnswerResponse(BaseModel):
@@ -53,6 +54,10 @@ class HistologyPracticalGradeRequest(BaseModel):
     known: bool
     scope: str = "all"
     attempt_id: str | None = None
+
+
+class LearningNavigationRequest(BaseModel):
+    path: str = Field(min_length=2, max_length=512)
 
 
 class LearningFlagRequest(BaseModel):
@@ -110,8 +115,8 @@ class AiSolveRequest(BaseModel):
     префикса "data:image/...;base64," -- клиент срезает его сам, см. apiClient.ts)."""
     subject_id: str | None = None
     mode: str
-    text: str | None = None
-    image_base64: str | None = None
+    text: str | None = Field(default=None, max_length=20000)
+    image_base64: str | None = Field(default=None, max_length=8 * 1024 * 1024)
 
 
 class AiSolveResponse(BaseModel):

@@ -1,12 +1,12 @@
 from services.miniapp_testers import has_test_access
 
-from fastapi import Header, HTTPException
+from fastapi import Header, HTTPException, Request
 
 from . import bot_state, config
 from .session import SessionTokenError, verify_session_token
 
 
-def get_current_user_id(authorization: str | None = Header(default=None)) -> int:
+def get_current_user_id(request: Request, authorization: str | None = Header(default=None)) -> int:
     """Каждый защищённый эндпоинт объявляет `user_id: int = Depends(get_current_user_id)` --
     единственный способ узнать, кто спрашивает. Никогда не читай user_id из query-параметра или
     тела запроса напрямую (см. ТЗ §5/§16 -- "нельзя доверять данным от клиента"): он приходит
@@ -18,6 +18,14 @@ def get_current_user_id(authorization: str | None = Header(default=None)) -> int
         user_id = verify_session_token(token, config.SESSION_SECRET)
     except SessionTokenError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
+    from .limits import user_limiter
+    if not user_limiter.allow(str(user_id), 600):
+        raise HTTPException(status_code=429, detail="Слишком много запросов. Подожди минуту.", headers={"Retry-After": "60"})
+    path = request.url.path
+    if '/subscriptions/' in path:
+        limit = 12 if path.endswith('/sbp/checkout') else 120
+        if not user_limiter.allow(f"billing:{user_id}", limit):
+            raise HTTPException(429, detail="Слишком много запросов оплаты. Подожди минуту.", headers={"Retry-After": "60"})
     ensure_miniapp_access(user_id)
     return user_id
 
