@@ -197,6 +197,8 @@ async def roundtrip():
             resp=await client.get('/api/v1/access/biology',headers={'Authorization':'Bearer synthetic-user-session'})
             assert resp.status_code==200 and resp.headers['cache-control']=='no-store'
     def unavailable(request):raise httpx.ConnectError('synthetic outage')
+    await gateway._client.aclose()
+    gateway._client = None  # replace the transport of the now-shared connection pool
     with patch('web_api.sync_transport.httpx.AsyncClient',lambda **kw:real_client(transport=httpx.MockTransport(unavailable),**kw)):
         async with real_client(transport=httpx.ASGITransport(app=gateway),base_url='http://gateway') as client:
             assert (await client.get('/api/v1/me')).status_code==503
@@ -211,7 +213,8 @@ asyncio.run(roundtrip())
 namespace={name:getattr(learning,name) for name in importlib.import_module('web_api.learning_rpc').OPERATIONS}
 os.environ['BOT_SYNC_MODE']='owner'
 install_remote_backend(namespace)
-with patch('httpx.post',side_effect=httpx.ConnectError('synthetic outage')):
+with patch('web_api.learning_rpc.rpc_client') as mock_pool:
+    mock_pool.return_value.post.side_effect = httpx.ConnectError('synthetic outage')
     try:namespace['get_state'](11)
     except HTTPException as exc:assert exc.status_code==503
     else:raise AssertionError('Remote learning fell back to empty state')

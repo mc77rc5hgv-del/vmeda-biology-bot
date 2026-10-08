@@ -5,7 +5,7 @@ import hmac
 import os
 
 import httpx
-from starlette.responses import JSONResponse, Response
+from starlette.responses import JSONResponse
 
 HOP_HEADERS = {
     b'connection', b'keep-alive', b'proxy-authenticate', b'proxy-authorization',
@@ -18,40 +18,65 @@ class BotGateway:
         if not url.startswith(('http://', 'https://')) or not token:
             raise RuntimeError('BOT_SYNC_URL and BOT_SYNC_TOKEN are required for the gateway')
         self.app, self.url, self.token = app, url.rstrip('/'), token
+        self._client = None
+        self._active = 0
+        self.requests = self.rejected = self.failures = 0
 
     async def __call__(self, scope, receive, send):
+        if scope['type'] == 'lifespan':
+            async def lifecycle_receive():
+                message = await receive()
+                if message['type'] == 'lifespan.shutdown' and self._client:
+                    await self._client.aclose()
+                return message
+            return await self.app(scope, lifecycle_receive, send)
         if scope['type'] != 'http' or not scope['path'].startswith('/api/v1/'):
             return await self.app(scope, receive, send)
-        chunks, size = [], 0
-        while True:
-            message = await receive()
-            if message['type'] == 'http.disconnect':
-                return
-            chunk = message.get('body', b'')
-            size += len(chunk)
-            if size > 16 * 1024 * 1024:
-                return await JSONResponse({'detail': 'Запрос слишком большой'}, status_code=413, headers={'Cache-Control': 'no-store'})(scope, receive, send)
-            chunks.append(chunk)
-            if not message.get('more_body', False):
-                break
-        headers = [(k.decode('latin-1'), v.decode('latin-1')) for k, v in scope['headers']
-                   if k.lower() not in HOP_HEADERS | {b'x-vmeda-sync-token', b'content-length', b'accept-encoding'}]
-        headers.extend([('X-Vmeda-Sync-Token', self.token), ('Accept-Encoding', 'identity')])
-        path = scope.get('raw_path', scope['path'].encode()).decode('ascii')
-        query = scope.get('query_string', b'')
-        url = self.url + path + (('?' + query.decode('ascii')) if query else '')
+        self.requests += 1
+        if self._active >= 64:
+            self.rejected += 1
+            return await JSONResponse({'detail': 'Сервис занят. Подожди и повтори запрос.'}, status_code=503, headers={'Retry-After': '5', 'Cache-Control': 'no-store'})(scope, receive, send)
+        self._active += 1
+        upstream = None
         try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(120, connect=5), trust_env=False) as client:
-                upstream = await client.request(scope['method'], url, headers=headers, content=b''.join(chunks))
-        except httpx.HTTPError:
-            # Never fall back to a different, possibly empty stats.json.
-            return await JSONResponse({'detail': 'Связь с ботом временно недоступна. Повтори запрос.'}, status_code=503, headers={'Cache-Control': 'no-store'})(scope, receive, send)
-        response = Response(upstream.content, status_code=upstream.status_code)
-        response.raw_headers = [(k.lower(), v) for k, v in upstream.headers.raw
-                                if k.lower() not in HOP_HEADERS | {b'content-length', b'content-encoding', b'cache-control'}]
-        response.raw_headers.append((b'content-length', str(len(upstream.content)).encode()))
-        response.raw_headers.append((b'cache-control', b'no-store'))
-        await response(scope, receive, send)
+            chunks, size = [], 0
+            while True:
+                message = await receive()
+                if message['type'] == 'http.disconnect':
+                    return
+                chunk = message.get('body', b'')
+                size += len(chunk)
+                if size > 10 * 1024 * 1024:
+                    return await JSONResponse({'detail': 'Запрос слишком большой'}, status_code=413)(scope, receive, send)
+                chunks.append(chunk)
+                if not message.get('more_body', False):
+                    break
+            headers = [(k.decode('latin-1'), v.decode('latin-1')) for k, v in scope['headers'] if k.lower() not in HOP_HEADERS | {b'x-vmeda-sync-token', b'content-length', b'accept-encoding'}]
+            headers.extend([('X-Vmeda-Sync-Token', self.token), ('Accept-Encoding', 'identity')])
+            path = scope.get('raw_path', scope['path'].encode()).decode('ascii')
+            query = scope.get('query_string', b'')
+            url = self.url + path + (('?' + query.decode('ascii')) if query else '')
+            if self._client is None:
+                self._client = httpx.AsyncClient(timeout=httpx.Timeout(75, connect=5, pool=5), trust_env=False, limits=httpx.Limits(max_connections=64, max_keepalive_connections=32))
+            request = self._client.build_request(scope['method'], url, headers=headers, content=b''.join(chunks))
+            try:
+                upstream = await self._client.send(request, stream=True)
+            except httpx.HTTPError:
+                self.failures += 1
+                return await JSONResponse({'detail': 'Связь с ботом временно недоступна. Проверь историю оплаты перед повтором.'}, status_code=503, headers={'Cache-Control': 'no-store'})(scope, receive, send)
+            response_headers = [(k.lower(), v) for k, v in upstream.headers.raw if k.lower() not in HOP_HEADERS | {b'cache-control'}]
+            response_headers.append((b'cache-control', b'no-store'))
+            await send({'type': 'http.response.start', 'status': upstream.status_code, 'headers': response_headers})
+            if upstream.is_stream_consumed:  # in-process ASGI/mock transport already buffered
+                await send({'type': 'http.response.body', 'body': upstream.content, 'more_body': True})
+            else:
+                async for chunk in upstream.aiter_raw():
+                    await send({'type': 'http.response.body', 'body': chunk, 'more_body': True})
+            await send({'type': 'http.response.body', 'body': b'', 'more_body': False})
+        finally:
+            if upstream:
+                await upstream.aclose()
+            self._active -= 1
 
 
 class OwnerGuard:

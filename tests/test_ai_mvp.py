@@ -278,8 +278,13 @@ async def main():
     FAKE_TASK_TYPE.update(type="calculation", complexity=None)  # -> route_bucket == "problem"
     async def fake_get_file(file_id):
         return FakeTgFile(f"path/{file_id}")
+    import io
+    from PIL import Image
+    valid_photo = io.BytesIO()
+    Image.new("RGB", (10, 10), "white").save(valid_photo, "JPEG")
+    photo_bytes = valid_photo.getvalue()
     async def fake_download_file(file_path):
-        return FakeBytesBuf(b"fake-jpeg-bytes")
+        return FakeBytesBuf(photo_bytes)
     tb.bot.get_file = fake_get_file
     tb.bot.download_file = fake_download_file
     before2 = tb.ai_requests_left(uid)
@@ -287,7 +292,7 @@ async def main():
     await tb.handle_ai_photo_input(photo_msg)
     assert tb.is_ai_session_active(uid)
     assert len(parse_calls) == 1
-    assert parse_calls[0] == (b"fake-jpeg-bytes", None), "the resized photo bytes must reach the vision parser"
+    assert parse_calls[0] == (tb.resize_image_for_ai(photo_bytes), None), "the resized photo bytes must reach the vision parser"
     assert tb.AI_SESSIONS[uid]["bucket"] == "problem"
     assert solve_calls[-1]["task"] is tb.AI_SESSIONS[uid]["task"]
     assert solve_calls[-1]["quick"] is True

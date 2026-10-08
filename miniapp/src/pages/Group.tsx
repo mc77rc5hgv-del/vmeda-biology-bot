@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { CheckCircle2, ChevronRight, Lock } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
@@ -17,7 +17,9 @@ const PAGE_SIZE = 50; // см. Section.tsx за тем, почему это вр
 export function GroupPage() {
   const { subjectId = "", sectionId = "", groupId = "" } = useParams();
   const navigate = useNavigate();
-  useTelegramBackButton(() => navigate(`/subjects/${subjectId}/sections/${sectionId}`));
+  useTelegramBackButton(() => navigate(groupQuery.data?.parentId
+    ? `/subjects/${subjectId}/sections/${sectionId}/groups/${groupQuery.data.parentId}`
+    : `/subjects/${subjectId}/sections/${sectionId}`));
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const hasSession = hasContentSession();
 
@@ -68,16 +70,27 @@ export function GroupPage() {
 
   const group = groupQuery.data;
   const visibleItems = group.items.slice(0, visibleCount);
+  const headings = new Map(group.sections?.filter((section) => section.items.length).map((section) => [section.items[0].id, section.title]));
 
   return (
     <div className="screen">
       <h1 className={styles.header}>{group.title}</h1>
+      {group.subgroups?.map((subgroup) => (
+        <PressableCard key={subgroup.id} className={styles.row} onClick={() => {
+          hapticSelection();
+          navigate(`/subjects/${subjectId}/sections/${sectionId}/groups/${subgroup.id}`);
+        }}>
+          <div><div className={styles.rowTitle}>{subgroup.title}</div><div className={styles.rowMeta}>{subgroup.item_count} тем</div></div>
+          <Icon icon={ChevronRight} size={18} color="var(--ink-secondary)" />
+        </PressableCard>
+      ))}
       <div className={styles.list} role="list">
         {visibleItems.map((item) => {
           const done = learningQuery.data?.completedKeys.includes(`${subjectId}/${sectionId}/${item.id}`) ?? false;
           return (
+          <Fragment key={item.id}>
+          {headings.has(item.id) && <h2 className={styles.sectionHeading}>{headings.get(item.id)}</h2>}
           <PressableCard
-            key={item.id}
             className={styles.row}
             onClick={() => {
               hapticSelection();
@@ -92,6 +105,7 @@ export function GroupPage() {
             </div>
             <Icon icon={done ? CheckCircle2 : ChevronRight} size={18} color={done ? "var(--success)" : "var(--ink-secondary)"} />
           </PressableCard>
+          </Fragment>
           );
         })}
       </div>

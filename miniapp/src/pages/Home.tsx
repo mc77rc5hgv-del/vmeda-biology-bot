@@ -2,7 +2,7 @@ import { isSubjectOnCourse } from "../lib/subjectCourses";
 import { useQuery } from "@tanstack/react-query";
 import { fetchLearningState, fetchMe, fetchSubjects } from "../lib/api";
 import { useUiStore, useAuthStore } from "../lib/store";
-import { useLastStepStore } from "../lib/lastStep";
+import { stepFromPath, useLastStepStore } from "../lib/lastStep";
 import { useTelegramBackButton } from "../lib/telegram";
 import { TopBar } from "../components/TopBar";
 import { StatsBar } from "../components/StatsBar";
@@ -13,11 +13,6 @@ import { SubjectCard } from "../components/SubjectCard";
 import { Skeleton } from "../components/Skeleton";
 import { StateMessage } from "../components/StateMessage";
 import styles from "./Home.module.css";
-
-function greetingTime(minutesLeft: number): string {
-  if (minutesLeft <= 0) return "дневная цель уже выполнена";
-  return `сегодня осталось ${minutesLeft} минут`;
-}
 
 export function HomePage() {
   useTelegramBackButton(null); // главный экран — кнопка "Назад" Telegram скрыта
@@ -54,7 +49,11 @@ export function HomePage() {
   const learning = learningQuery.data;
   const accuracy = learning?.quizAttempts ? Math.round((learning.quizCorrect / learning.quizAttempts) * 100) : 0;
   const last = learning?.lastMaterial;
-  const continueItem = lastStep ?? (last ? {
+  const serverStep = learning?.lastStep ? {...stepFromPath(learning.lastStep.path)!, updatedAt: learning.lastStep.updatedAt} : null;
+  const datedSteps = [serverStep, lastStep].filter(item => item?.path);
+  const chosenStep = datedSteps.sort((a, b) => Date.parse(b?.updatedAt ?? "1970-01-01") - Date.parse(a?.updatedAt ?? "1970-01-01"))[0];
+  const stepNewer = chosenStep?.updatedAt && (!last || Date.parse(chosenStep.updatedAt) >= Date.parse(last.lastOpenedAt));
+  const continueItem = (stepNewer ? chosenStep : null) ?? (last ? {
     subjectId: last.subjectId,
     sectionId: last.sectionId,
     materialId: last.materialId,
@@ -83,7 +82,7 @@ export function HomePage() {
         <div className="page-intro">
           <h1 style={{ fontSize: 20, fontWeight: 700 }}>{meQuery.data.firstName}, продолжаем?</h1>
           <p style={{ fontSize: 13, color: "var(--ink-secondary)", marginTop: 4 }}>
-            {learning.completedTotal ? "продолжай в своём темпе" : greetingTime(15)}
+            {learning.completedTotal ? "продолжай в своём темпе" : "начни с одного материала или теста"}
           </p>
         </div>
       )}

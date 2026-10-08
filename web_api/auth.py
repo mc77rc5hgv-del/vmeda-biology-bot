@@ -15,6 +15,7 @@ verify_telegram_init_data() ниже — непроверенная строка
 import hashlib
 import hmac
 import json
+import re
 import time
 from urllib.parse import parse_qsl
 
@@ -58,7 +59,7 @@ def verify_telegram_init_data(
     fields = dict(pairs)
 
     received_hash = fields.pop("hash", None)
-    if not received_hash:
+    if not received_hash or not re.fullmatch(r'[0-9a-f]{64}', received_hash):
         raise InitDataError("в initData нет поля hash")
 
     data_check_string = _build_data_check_string([(k, v) for k, v in pairs if k != "hash"])

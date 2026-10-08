@@ -1,0 +1,29 @@
+name: Production readiness
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/15 * * * *'
+permissions:
+  contents: read
+jobs:
+  readiness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Read-only dependency readiness
+        run: |
+          python3 - <<'PY'
+          import json, time, urllib.request
+          url = 'https://vmeda-miniapp-api-preview-production.up.railway.app/healthz'
+          for attempt in range(3):
+              try:
+                  with urllib.request.urlopen(url, timeout=10) as response:
+                      data = json.load(response)
+                  assert data['status'] == 'ready' and all(data['checks'].values())
+                  print('owner, learning and billing dependency readiness: OK')
+                  break
+              except Exception:
+                  if attempt == 2:
+                      raise SystemExit('Production dependency readiness failed; inspect Railway health and bounded logs.')
+                  time.sleep(3)
+          PY

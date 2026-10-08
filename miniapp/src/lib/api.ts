@@ -48,7 +48,9 @@ export function isRealBackedSubject(subjectId: string): boolean {
 }
 
 function hasSession(): boolean {
-  return apiClient.hasStoredSession();
+  const present = apiClient.hasStoredSession();
+  if (!present && useAuthStore.getState().status === "authenticated") throw new apiClient.ApiError(401, "Сессия недоступна. Открой приложение заново из бота.");
+  return present;
 }
 
 /** Экранам глубокого контента нужен честный способ отличить браузерный preview от Telegram-сессии. */
@@ -141,9 +143,10 @@ export function checkQuizAnswer(
   subjectId: string,
   sectionId: string,
   itemId: string,
-  selectedIndex: number
+  selectedIndex: number,
+  attemptId?: string
 ) {
-  return apiClient.checkQuizAnswer(subjectId, sectionId, itemId, selectedIndex);
+  return apiClient.checkQuizAnswer(subjectId, sectionId, itemId, selectedIndex, attemptId);
 }
 
 export function fetchTestSummary(subjectId: string): Promise<TestSummary> {

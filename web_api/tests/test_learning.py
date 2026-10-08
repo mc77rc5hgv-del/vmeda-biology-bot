@@ -33,8 +33,9 @@ def test_learning_state_persists_progress_favorites_and_quiz(monkeypatch, tmp_pa
     dashboard = learning.get_dashboard(42)
     assert dashboard["streak_days"] == 1
     assert dashboard["xp"] == 60
-    assert dashboard["readiness_percent"] == 100
-    assert dashboard["minutes_left_today"] == 20
+    assert dashboard["readiness_percent"] == 64
+    assert dashboard["minutes_left_today"] == 30
+    assert dashboard["actions_left_today"] == 4
 
 
 def test_learning_state_is_isolated_per_user(monkeypatch, tmp_path):

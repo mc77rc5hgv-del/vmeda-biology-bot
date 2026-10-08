@@ -139,6 +139,26 @@ try:
     assert client.post(owner_url+'/internal/test/anatomy', headers=internal, json={'user_id': user_id}).status_code == 200
     rating = client.get(gateway_url+'/api/v1/anatomy/exam/ratings/part', headers=headers).json()['entries'][0]
     assert (rating['correct'], rating['total'], rating['attempts']) == (4, 6, 2)
+    # Bounded mixed HTTP load on isolated owner/gateway processes, never Railway.
+    from concurrent.futures import ThreadPoolExecutor
+    load_results = []
+    for concurrency in (20, 50, 100):
+        def request_one(index):
+            started = time.perf_counter()
+            if index % 4 == 0:
+                response = client.post(gateway_url+'/api/v1/learning/navigation', headers=headers, json={'path':'/histology/exam'})
+            else:
+                endpoint = ['/api/v1/me', '/api/v1/learning/state', '/api/v1/learning/dashboard'][index % 3]
+                response = client.get(gateway_url+endpoint, headers=headers)
+            return response.status_code, time.perf_counter()-started
+        with ThreadPoolExecutor(max_workers=concurrency) as pool:
+            batch = list(pool.map(request_one, range(concurrency * 2)))
+        assert all(code in (200, 503) for code, _ in batch), batch
+        assert any(code == 200 for code, _ in batch)
+        elapsed = sorted(duration for _, duration in batch)
+        load_results.append({'concurrency':concurrency, 'requests':len(batch), 'ok':sum(code==200 for code,_ in batch), 'busy':sum(code==503 for code,_ in batch), 'p95_seconds':elapsed[int(len(elapsed)*.95)-1]})
+    assert client.get(gateway_url+'/healthz').status_code == 200
+    print(json.dumps({'isolated_http_load':load_results, 'production_load_test':False}), flush=True)
     owner.terminate(); owner.wait(timeout=10)
     outage = client.get(gateway_url+'/api/v1/subscription', headers=headers)
     assert outage.status_code == 503 and outage.headers['cache-control'] == 'no-store'

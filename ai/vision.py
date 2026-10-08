@@ -13,22 +13,24 @@ MAX_DIM = 1280  # достаточно для чтения печатного/р
 DETAIL = "low"
 
 
+MAX_IMAGE_BYTES = 6 * 1024 * 1024
+MAX_IMAGE_PIXELS = 20_000_000
+
+
 def resize_image(image_bytes: bytes) -> bytes:
-    """Фото с телефона часто в разы больше, чем нужно vision-модели для распознавания текста —
-    у OpenAI цена фото считается по числу тайлов, то есть растёт с разрешением. Сжимаем перед
-    отправкой; при любой ошибке разбора шлём оригинал как есть, не роняя запрос."""
+    """Validate dimensions BEFORE decoding; never forward damaged originals."""
+    if not image_bytes or len(image_bytes) > MAX_IMAGE_BYTES:
+        raise ValueError('Фото слишком большое: максимум 6 MB')
+    from PIL import Image, ImageOps, UnidentifiedImageError
     try:
-        from PIL import Image, ImageOps
-        im = Image.open(io.BytesIO(image_bytes))
-        im = ImageOps.exif_transpose(im)
-        im = im.convert("RGB")
-        w, h = im.size
-        if max(w, h) > MAX_DIM:
-            scale = MAX_DIM / max(w, h)
-            im = im.resize((round(w * scale), round(h * scale)), Image.LANCZOS)
-        out = io.BytesIO()
-        im.save(out, "JPEG", quality=82, optimize=True)
-        return out.getvalue()
-    except Exception:
-        logger.exception("Не удалось сжать фото перед AI-запросом, отправляю оригинал")
-        return image_bytes
+        with Image.open(io.BytesIO(image_bytes)) as source:
+            w, h = source.size
+            if w <= 0 or h <= 0 or w * h > MAX_IMAGE_PIXELS:
+                raise ValueError('Слишком большое разрешение фото: максимум 20 мегапикселей')
+            source.thumbnail((MAX_DIM, MAX_DIM), Image.Resampling.LANCZOS)
+            im = ImageOps.exif_transpose(source).convert('RGB')
+            out = io.BytesIO()
+            im.save(out, 'JPEG', quality=82, optimize=True)
+            return out.getvalue()
+    except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
+        raise ValueError('Не удалось прочитать фото. Пришли JPEG или PNG меньшего размера.') from exc

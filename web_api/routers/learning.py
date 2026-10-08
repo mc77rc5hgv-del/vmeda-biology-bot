@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends
 
 from .. import learning
 from ..deps import get_current_user_id, get_fresh_bot_module
-from ..schemas import DashboardStatsResponse, LearningFlagRequest, LearningMaterialTouchRequest
+from ..schemas import DashboardStatsResponse, LearningFlagRequest, LearningMaterialTouchRequest, LearningNavigationRequest
 
 router = APIRouter(prefix="/api/v1/learning", tags=["learning"])
 
@@ -24,8 +24,27 @@ async def state(user_id: int = Depends(get_current_user_id), tb=Depends(get_fres
 
 
 @router.get("/dashboard", response_model=DashboardStatsResponse)
-def dashboard(user_id: int = Depends(get_current_user_id)) -> DashboardStatsResponse:
-    return DashboardStatsResponse(**learning.get_dashboard(user_id))
+async def dashboard(user_id: int = Depends(get_current_user_id), tb=Depends(get_fresh_bot_module)) -> DashboardStatsResponse:
+    combined = await state(user_id, tb)
+    result = await asyncio.to_thread(learning.get_dashboard, user_id)
+    completed, correct, attempts = combined['completed_total'], combined['quiz_correct'], combined['quiz_attempts']
+    result['xp'] = completed * 40 + correct * 20 + (attempts - correct) * 5
+    denominator = max(result.get('curriculum_total', 0), completed, 1)
+    # Native physiology can exist without a touched SQLite material.
+    if combined['completed_by_subject'].get('physiology'):
+        denominator = max(denominator, len(tb.PHYSIOLOGY.get('topics', [])))
+    completion = completed / denominator * 100
+    result['readiness_percent'] = round(completion * .4 + correct / attempts * 100 * .6) if attempts else round(completion)
+    return DashboardStatsResponse(**result)
+
+
+@router.post('/navigation')
+async def navigation(body: LearningNavigationRequest, user_id: int = Depends(get_current_user_id)):
+    import re
+    from fastapi import HTTPException
+    if not re.fullmatch(r'/(?:subjects/[a-z_-]+(?:/sections/[\w-]+(?:/groups/[\w-]+)?)?|materials/[a-z_-]+/[\w-]+/[\w-]+|tests/[a-z_-]+|histology/(?:exam|specimens/[\w-]+))', body.path):
+        raise HTTPException(422, 'Некорректный учебный экран')
+    return await asyncio.to_thread(learning.set_navigation, user_id, body.path)
 
 
 @router.post("/materials/touch")

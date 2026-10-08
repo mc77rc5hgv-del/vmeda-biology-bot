@@ -191,8 +191,7 @@ async def main():
     print("manually-granted (free) subscriptions excluded from payment revenue: OK")
 
     # stats.json export: admin gets the current file as a document, nothing is modified/reset
-    tb.save_stats()
-    tb._stats_executor.submit(lambda: None).result()  # barrier: wait for the queued write (single worker, FIFO) to land
+    await asyncio.wrap_future(tb.save_stats())  # wait for the actual durable snapshot
     referral_warnings_before = copy.deepcopy(tb.stats["referral_warnings"])
 
     cb_export = FakeCB("admin_export_stats")

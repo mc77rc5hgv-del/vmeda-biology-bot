@@ -23,7 +23,7 @@ class Grant(BaseModel):
 @app.post('/internal/test/grant')
 async def grant(body: Grant):
     tb.grant_subscription(body.user_id, body.tier, 'synthetic', 0, body.subject)
-    tb._stats_executor.submit(lambda: None).result()
+    await asyncio.wrap_future(tb.save_stats())
     return {'ok': True}
 
 
