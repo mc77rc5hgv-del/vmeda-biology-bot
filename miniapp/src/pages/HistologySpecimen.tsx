@@ -102,15 +102,6 @@ export function HistologySpecimenPage() {
         </div>
       </section>
 
-      {specimen.sources.length > 0 && (
-        <details className={styles.sources}>
-          <summary>Учебные источники</summary>
-          <ul>{specimen.sources.map((source) => (
-            <li key={source.url}><a href={source.url} target="_blank" rel="noopener noreferrer">{source.title}</a></li>
-          ))}</ul>
-        </details>
-      )}
-
       {specimen.markers.length > 0 && (
         <section className={styles.markerLegend}>
           <h2>Метки на изображении</h2>

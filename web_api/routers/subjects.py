@@ -145,7 +145,7 @@ def get_histology_exam_specimen(
         "images": [f"{media_base}/{index}" for index, _ in enumerate(specimen.get("images", []))],
         "image_guides": specimen.get("image_guides", []),
         "metadata_note": specimen.get("metadata_note", ""),
-        "sources": specimen.get("sources", []),
+        "sources": [],  # Keep editorial provenance internal; do not show student links.
         "markers": specimen.get("markers", []),
     }
 
