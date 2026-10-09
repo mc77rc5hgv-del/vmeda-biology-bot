@@ -1,3 +1,4 @@
+import { subscriptionPath } from "../lib/subscriptions";
 import { Fragment, useState } from "react";
 import { CheckCircle2, ChevronRight, Lock } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
@@ -57,7 +58,7 @@ export function GroupPage() {
       // должен показать ровно тот же locked-текст, что и клик по помеченной карточке.
       return (
         <div className="screen">
-          <StateMessage icon={Lock} title="Раздел закрыт" body={err.message} />
+          <StateMessage icon={Lock} title="Раздел закрыт" body={err.message} onRetry={() => navigate(subscriptionPath(subjectId, `/subjects/${subjectId}/sections/${sectionId}/groups/${groupId}`))} actionLabel="Выбрать подписку" />
         </div>
       );
     }

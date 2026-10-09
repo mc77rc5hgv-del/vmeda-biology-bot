@@ -1,3 +1,4 @@
+import { subscriptionPath } from "../lib/subscriptions";
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import DOMPurify from "dompurify";
@@ -140,7 +141,7 @@ export function MaterialPage() {
       // такую тему раньше (см. Group.tsx), не давая на неё вообще перейти.
       return (
         <div className="screen">
-          <StateMessage icon={Lock} title="Материал закрыт" body={err.message} />
+          <StateMessage icon={Lock} title="Материал закрыт" body={err.message} onRetry={() => navigate(subscriptionPath(subjectId, `/subjects/${subjectId}`))} actionLabel="Выбрать подписку" />
         </div>
       );
     }

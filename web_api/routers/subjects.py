@@ -1,7 +1,7 @@
 import os
 import random
 
-from services.miniapp_testers import has_test_access
+from services.miniapp_policy import full_content_access, promo_active, public_launch, require_subject, subscription_required
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
@@ -22,12 +22,12 @@ MAINTENANCE_REASON = (
 
 
 def _check_subject_maintenance(tb, subject_id: str) -> None:
-    if tb.dynamic_course_under_maintenance(subject_id):
+    if tb.dynamic_course_under_maintenance(subject_id) and not promo_active(tb):
         raise HTTPException(status_code=503, detail=MAINTENANCE_REASON)
 
 
 def _with_maintenance(tb, summary: dict) -> dict:
-    if tb.dynamic_course_under_maintenance(summary.get("id")):
+    if tb.dynamic_course_under_maintenance(summary.get("id")) and not promo_active(tb):
         return {**summary, "maintenance": True, "maintenance_reason": MAINTENANCE_REASON}
     return summary
 
@@ -332,7 +332,9 @@ def answer_anatomy_exam_question(
 
 
 def _anatomy_maintenance_locked_reason(tb, user_id: int) -> str | None:
-    if tb.anatomy_maintenance_mode_enabled() and not (tb.is_admin_or_assistant(user_id) or has_test_access(tb, user_id)):
+    if public_launch() or promo_active(tb):
+        return None
+    if tb.anatomy_maintenance_mode_enabled() and not (tb.is_admin_or_assistant(user_id) or full_content_access(tb, user_id)):
         # Тот же текст, что показывает боту get_anatomy_maintenance_text(), без HTML-обёртки —
         # раздел временно закрыт технически, это не платный гейт.
         return (
@@ -343,10 +345,12 @@ def _anatomy_maintenance_locked_reason(tb, user_id: int) -> str | None:
 
 
 def _anatomy_module_locked_reason(tb, user_id: int, module_key: str) -> str | None:
+    if subscription_required(tb, user_id, "anatomy"):
+        return "Этот раздел анатомии доступен по соответствующей подписке."
     maintenance_reason = _anatomy_maintenance_locked_reason(tb, user_id)
     if maintenance_reason is not None:
         return maintenance_reason
-    if has_test_access(tb, user_id) or tb.anatomy_section_access_ok(user_id, module_key):
+    if full_content_access(tb, user_id) or tb.anatomy_section_access_ok(user_id, module_key):
         return None
     cheapest = tb.cheapest_anatomy_tier()
     return (
@@ -380,6 +384,7 @@ def _check_anatomy_material_access(tb, user_id: int, section_id: str, item_id: s
 
 
 def _get_material_data(tb, user_id: int, subject_id: str, section_id: str, item_id: str) -> dict:
+    require_subject(tb, user_id, subject_id)
     _check_subject_maintenance(tb, subject_id)
     if subject_id == static_content.ANATOMY_ID:
         _check_anatomy_material_access(tb, user_id, section_id, item_id)
@@ -410,7 +415,9 @@ def _get_material_data(tb, user_id: int, subject_id: str, section_id: str, item_
 
 
 def _histology_locked_reason(tb, user_id: int) -> str | None:
-    if has_test_access(tb, user_id) or tb.histology_access_ok(user_id):
+    if subscription_required(tb, user_id, "histology"):
+        return "Для этого предмета нужна соответствующая подписка."
+    if full_content_access(tb, user_id) or tb.histology_access_ok(user_id):
         return None
     cheapest = tb.cheapest_histology_tier()
     return (
@@ -447,7 +454,9 @@ def _annotate_histology_groups(tb, user_id: int, section: dict) -> dict:
 
 
 def _biology_locked_reason(tb, user_id: int) -> str | None:
-    if has_test_access(tb, user_id) or can_visit(tb, user_id, "biology"):
+    if subscription_required(tb, user_id, "biology"):
+        return "Для этого предмета нужна соответствующая подписка."
+    if full_content_access(tb, user_id) or can_visit(tb, user_id, "biology"):
         return None
     cheapest = tb.cheapest_gated3_tier()
     return (
@@ -481,7 +490,9 @@ def _annotate_biology_section(tb, user_id: int, section: dict) -> dict:
 
 
 def _chemistry_locked_reason(tb, user_id: int) -> str | None:
-    if has_test_access(tb, user_id) or can_visit(tb, user_id, "chemistry"):
+    if subscription_required(tb, user_id, "chemistry"):
+        return "Для этого предмета нужна соответствующая подписка."
+    if full_content_access(tb, user_id) or can_visit(tb, user_id, "chemistry"):
         return None
     cheapest = tb.cheapest_gated3_tier()
     return (
@@ -491,7 +502,9 @@ def _chemistry_locked_reason(tb, user_id: int) -> str | None:
 
 
 def _chemistry_tickets_locked_reason(tb, user_id: int) -> str | None:
-    if has_test_access(tb, user_id) or tb.chemistry_tickets_access_ok(user_id):
+    if subscription_required(tb, user_id, "chemistry"):
+        return "Для этого предмета нужна соответствующая подписка."
+    if full_content_access(tb, user_id) or tb.chemistry_tickets_access_ok(user_id):
         return None
     return (
         "Билеты по химии закрыты дополнительным условием: нужно 2 реферала в этом месяце или "
@@ -535,7 +548,9 @@ def _annotate_chemistry_section(tb, user_id: int, section: dict) -> dict:
 
 
 def _physics_locked_reason(tb, user_id: int) -> str | None:
-    if has_test_access(tb, user_id) or can_visit(tb, user_id, "physics"):
+    if subscription_required(tb, user_id, "physics"):
+        return "Для этого предмета нужна соответствующая подписка."
+    if full_content_access(tb, user_id) or can_visit(tb, user_id, "physics"):
         return None
     cheapest = tb.cheapest_gated3_tier()
     return (

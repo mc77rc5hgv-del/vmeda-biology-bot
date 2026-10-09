@@ -77,7 +77,7 @@ async def main():
     # ---- 1b. production Mini App entry is visible only to a full admin while API is admin_only ----
     admin_app_buttons = [button for button in kb_buttons(tb.get_main_menu(user_id=ADMIN_ID)) if button.web_app]
     assert len(admin_app_buttons) == 1
-    assert admin_app_buttons[0].text == "🎓 Открыть VMEDA App"
+    assert admin_app_buttons[0].text == "🎓 Открыть MINI-App"
     assert admin_app_buttons[0].web_app.url == tb.MINIAPP_URL
     assert tb.MINIAPP_URL.startswith("https://")
     print("1b. admin gets one signed Telegram Mini App launch button; ordinary users get none: OK")

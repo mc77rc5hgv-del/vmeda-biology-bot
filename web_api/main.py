@@ -73,6 +73,7 @@ app.add_middleware(
     allow_origins=config.ALLOWED_ORIGINS,
     allow_methods=["GET", "POST"],
     allow_headers=["Authorization", "Content-Type"],
+    expose_headers=["X-VMEDA-Subscription-Required"],
 )
 
 

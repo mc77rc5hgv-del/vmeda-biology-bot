@@ -1,6 +1,7 @@
+import { paidSubjectTitles, subscriptionReturnPath, planSubject } from "../lib/subscriptions";
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { ArrowLeft, Check, ShieldCheck, Sparkles } from "lucide-react";
 import { ApiError, fetchSubscriptionCatalog, createSubscriptionInvoice, fetchSubscriptionPayment, createSbpSubscription, fetchBillingHistory, type SubscriptionPlan } from "../lib/apiClient";
 import { useAuthStore, useUiStore } from "../lib/store";
@@ -12,11 +13,15 @@ const date = (value: string) => new Date(value).toLocaleDateString("ru-RU", {day
 const term = (plan: SubscriptionPlan) => plan.duration_days ? `${plan.duration_days} дней` : plan.expires_at ? `до ${date(plan.expires_at)}` : "Без срока окончания";
 export function SubscriptionsPage() {
   const navigate = useNavigate();
-  useTelegramBackButton(() => navigate("/profile"));
+  const [params, setParams] = useSearchParams();
+  const requested = params.get("subject") ?? "";
+  const subjectId = Object.hasOwn(paidSubjectTitles, requested) ? requested : "";
+  const returnTo = subscriptionReturnPath(params.get("returnTo"));
+  useTelegramBackButton(() => navigate(returnTo));
   const userId = useAuthStore(state => state.profile?.userId);
   const authenticated = useAuthStore(state => state.status === "authenticated");
   const selectedCourse = useUiStore(state => state.selectedCourse);
-  const [course, setCourse] = useState<number>(selectedCourse);
+  const [course, setCourse] = useState<number>(subjectId ? 0 : selectedCourse);
   const [choices, setChoices] = useState<Record<number, string>>({});
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
@@ -50,11 +55,12 @@ export function SubscriptionsPage() {
       void client.invalidateQueries({queryKey: ["subscriptions", "history", userId]});
     }
   }, [receipt.data?.status, storageKey, client, userId]);
+  const chosenSubject = (plan: SubscriptionPlan) => planSubject(plan.subject_options, choices[plan.id], subjectId);
   const buy = async (plan: SubscriptionPlan) => {
     if (lock.current || pending) return;
     lock.current = true; setBusy(true); setNotice("");
     try {
-      const invoice = await createSubscriptionInvoice(plan.id, choices[plan.id]);
+      const invoice = await createSubscriptionInvoice(plan.id, chosenSubject(plan));
       remember(invoice.payment_id, invoice.url);
       openInvoice(invoice.url, status => {
         lock.current = false; if (mounted.current) setBusy(false);
@@ -66,12 +72,12 @@ export function SubscriptionsPage() {
   const buySbp = async (plan: SubscriptionPlan) => {
     if (lock.current || pending) return;
     lock.current = true; setBusy(true); setNotice("");
-    const key = `vmeda:sbp-request:${userId}:${plan.id}:${choices[plan.id] ?? "all"}`;
+    const key = `vmeda:sbp-request:${userId}:${plan.id}:${chosenSubject(plan) ?? "all"}`;
     try {
       let requestKey = requestKeys.current[key];
       try { requestKey = localStorage.getItem(key) ?? requestKey; } catch { /* Use session nonce. */ }
       if (!requestKey) { requestKey = crypto.randomUUID(); requestKeys.current[key] = requestKey; try { localStorage.setItem(key, requestKey); } catch { /* Use session nonce. */ } }
-      const invoice = await createSbpSubscription(plan.id, requestKey, choices[plan.id]);
+      const invoice = await createSbpSubscription(plan.id, requestKey, chosenSubject(plan));
       remember(invoice.payment_id, invoice.url);
       delete requestKeys.current[key];
       try { localStorage.removeItem(key); } catch { /* Saved server quote remains available. */ }
@@ -97,26 +103,27 @@ export function SubscriptionsPage() {
     finally { lock.current = false; if (mounted.current) setBusy(false); }
   };
   const transfer = (plan: SubscriptionPlan) => {
-    const subject = plan.subject_options.find(option => option.id === choices[plan.id]);
+    const subject = plan.subject_options.find(option => option.id === chosenSubject(plan));
     openTelegramLink(`https://t.me/vmeda_helper?text=${encodeURIComponent(`Здравствуйте! Хочу оформить подписку «${plan.title}»${subject ? ` (${subject.title})` : ""} за ${plan.price_rub}₽ в VMEDA. Пришлите реквизиты для перевода на карту.`)}`);
   };
   const support = () => openTelegramLink(`https://t.me/vmeda_helper?text=${encodeURIComponent("Здравствуйте! Нужна помощь с подпиской VMEDA." + (pending ? ` Платёж: ${pending}` : ""))}`);
   return <div className={`screen ${styles.page}`}>
-    <button className={styles.back} onClick={() => navigate("/profile")}><ArrowLeft size={18} /> Профиль</button>
-    <header className={styles.heading}><span className={styles.eyebrow}><Sparkles size={16} /> VMEDA</span><h1>Подписки</h1><p>Выбери доступ для своего курса и готовься в боте и miniapp.</p></header>
+    <button className={styles.back} onClick={() => navigate(returnTo)}><ArrowLeft size={18} /> {returnTo === "/profile" ? "Профиль" : "К предмету"}</button>
+    <header className={styles.heading}><span className={styles.eyebrow}><Sparkles size={16} /> VMEDA</span><h1>{subjectId ? `Доступ: ${paidSubjectTitles[subjectId]}` : "Подписки"}</h1><p>{subjectId ? "Выбери подписку, которая открывает этот предмет. Доступ обновится в боте и miniapp после подтверждения оплаты." : "Выбери доступ для своего курса и готовься в боте и miniapp."}</p></header>
     {!authenticated ? <StateMessage title="Открой miniapp из Telegram" body="Тарифы и оплата доступны после входа через бота." onRetry={() => openTelegramLink("https://t.me/VMEDA_examen_bot")} actionLabel="Открыть бота" /> : catalog.isLoading ? <><Skeleton height={160} radius="22px" /><Skeleton height={250} radius="22px" /></> : catalog.isError || !catalog.data ? <StateMessage title="Не удалось загрузить тарифы" onRetry={() => catalog.refetch()} /> : <>
       <section className={styles.current} aria-label="Текущая подписка"><span className={styles.eyebrow}><ShieldCheck size={18} /> Мой доступ</span><h2>{catalog.data.current.title ?? "Без подписки"}</h2><p>{catalog.data.current.active ? catalog.data.current.expires_at ? `Действует до ${date(catalog.data.current.expires_at)}` : "Без срока окончания" : "Можно выбрать подходящий тариф ниже"}</p><div className={styles.ai}><Sparkles size={18} /><span>AI-запросов осталось: <strong>{catalog.data.current.ai_remaining ?? "без ограничений"}</strong>{catalog.data.current.ai_period === "monthly" ? " в этом месяце" : ""}</span></div>{catalog.data.current.active && <details><summary>Что входит в мою подписку</summary><ul>{catalog.data.current.benefits.map((item, i) => <li key={i}>{item}</li>)}</ul></details>}</section>
       {(notice || pending) && <section className={styles.notice} role="status"><p>{receipt.data?.status === "review" ? "Оплата получена. Твоя текущая подписка сохранена. Обратись в поддержку для проверки платежа." : notice || "Проверяем оплату и активацию подписки…"}</p>{pending && <><button onClick={() => receipt.refetch()}>Проверить статус</button>{pendingUrl && !busy && receipt.data?.status !== "review" && <button disabled={!pending.startsWith("sbp_") && !canOpenInvoice()} onClick={() => { try { if (pending.startsWith("sbp_")) { openPaymentLink(pendingUrl); return; } openInvoice(pendingUrl, status => { if (status === "cancelled" || status === "failed") { remember(null); setNotice(status === "cancelled" ? "Оплата отменена. Можно выбрать тариф снова." : "Telegram не подтвердил оплату. Попробуй ещё раз."); } void receipt.refetch(); }); } catch (error) { setNotice(error instanceof Error ? error.message : "Не удалось открыть счёт"); } }}>Продолжить оплату</button>}<button onClick={support}>Помощь с оплатой</button>{<button onClick={() => { remember(null); setNotice("Можно выбрать тариф снова. Если предыдущий счёт оплачен, подписка активируется автоматически."); }}>Вернуться к тарифам</button>}{receipt.isError && <small>Не удалось проверить статус. Проверь соединение и повтори.</small>}</>}</section>}
+      {subjectId && <section className={styles.notice}><p>Показаны тарифы для предмета «{paidSubjectTitles[subjectId]}».</p><button onClick={() => { setParams({}); setCourse(0); }}>Посмотреть все тарифы</button>{catalog.data.current.access.some(item => item.id === subjectId && item.available) && <button onClick={() => navigate(returnTo)}>Открыть предмет</button>}</section>}
       <div className={styles.tabs} role="group" aria-label="Тарифы по курсу">{[{id: 1, title: "1 курс"}, {id: 2, title: "2 курс"}, {id: 0, title: "Все тарифы"}].map(item => <button key={item.id} aria-pressed={course === item.id} onClick={() => setCourse(item.id)}>{item.title}</button>)}</div>
-      <div className={styles.plans}>{catalog.data.plans.filter(plan => !course || plan.courses.includes(course)).map(plan => {
+      <div className={styles.plans}>{catalog.data.plans.filter(plan => (!subjectId || !plan.subjects || plan.subjects.includes(subjectId)) && (!course || plan.courses.includes(course))).map(plan => {
         const current = catalog.data.current.tier_id === plan.id;
-        const choice = plan.subject_options.find(option => option.id === choices[plan.id]);
+        const choice = plan.subject_options.find(option => option.id === chosenSubject(plan));
         const reason = plan.unavailable_reason || choice?.unavailable_reason;
         const missingChoice = plan.subject_options.length > 0 && !choice;
         return <article key={plan.id} className={`${styles.plan} ${current ? styles.active : ""}`}>
           <div className={styles.planTop}><span>{current ? "Текущий тариф" : plan.badge || "VMEDA"}</span><span>{term(plan)}</span></div><h2>{plan.title}</h2><div className={styles.price}><strong>{plan.price_rub} ₽</strong><span>или {plan.price_stars} Telegram Stars</span></div><p className={styles.caption}>Разовая оплата · без автоматических списаний</p>
           <ul className={styles.benefits}>{plan.benefits.map((benefit, i) => <li key={i}><Check size={16} /><span>{benefit}</span></li>)}</ul>
-          {plan.subject_options.length > 0 && <label className={styles.choice}>Выбери предмет<select value={choices[plan.id] ?? ""} onChange={event => setChoices({...choices, [plan.id]: event.target.value})}><option value="" disabled>Выбрать предмет</option>{plan.subject_options.map(option => <option key={option.id} value={option.id} disabled={Boolean(option.unavailable_reason)}>{option.title}</option>)}</select></label>}
+          {plan.subject_options.length > 0 && <label className={styles.choice}>Выбери предмет<select value={chosenSubject(plan) ?? ""} onChange={event => setChoices({...choices, [plan.id]: event.target.value})}><option value="" disabled>Выбрать предмет</option>{plan.subject_options.map(option => <option key={option.id} value={option.id} disabled={Boolean(option.unavailable_reason)}>{option.title}</option>)}</select></label>}
           <div className={styles.purchase}>{catalog.data.sbp_available && <button disabled={busy || Boolean(pending) || Boolean(reason) || missingChoice} onClick={() => void buySbp(plan)}>{current && plan.duration_days ? "Продлить" : "Оплатить"} по СБП · {plan.price_rub} ₽</button>}<button className={styles.secondary} disabled={busy || Boolean(pending) || Boolean(reason) || missingChoice || !canOpenInvoice()} onClick={() => void buy(plan)}>{current && plan.duration_days ? "Продлить" : current ? "Уже активен" : `Оформить за ${plan.price_stars} Stars`}</button><button className={styles.secondary} disabled={busy || Boolean(reason) || missingChoice} onClick={() => transfer(plan)}>Перевод на карту · {plan.price_rub} ₽</button>{reason && <small>{reason}</small>}{!canOpenInvoice() && <small>Для оплаты Stars нужен актуальный Telegram. СБП и перевод на карту доступны отдельно.</small>}</div>
         </article>;
       })}</div>

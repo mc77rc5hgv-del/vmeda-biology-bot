@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from services.content_access import can_visit, enter, trial_available
 
 from services.miniapp_testers import has_test_access
+from services.miniapp_policy import full_content_access, promo_active, public_launch, subscription_access, subscription_required
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -51,10 +52,12 @@ def _ai_fields(tb, user_id: int) -> tuple[bool, int | None]:
 
 
 def _subject_is_open(tb, user_id: int, subject_id: str) -> bool:
-    if tb.dynamic_course_under_maintenance(subject_id):
+    if tb.dynamic_course_under_maintenance(subject_id) and not promo_active(tb):
         return False
-    if has_test_access(tb, user_id):
+    if full_content_access(tb, user_id):
         return True
+    if public_launch() and subject_id in {'biology', 'physics', 'chemistry', 'anatomy', 'histology'}:
+        return subscription_access(tb, user_id, subject_id)
     if subject_id in GATED_SUBJECT_IDS:
         return can_visit(tb, user_id, subject_id)
     if subject_id == "histology":
@@ -87,8 +90,9 @@ def get_subscription_summary(
     can_use_ai, requests_left = _ai_fields(tb, user_id)
     return AccessStatusResponse(
         tester_access=has_test_access(tb, user_id),
-        can_open_subject=has_test_access(tb, user_id) or tb.has_free_access(user_id),
-        can_download=has_test_access(tb, user_id) or tb.biology_tickets_download_ok(user_id),
+        promo_access=promo_active(tb),
+        can_open_subject=full_content_access(tb, user_id) or tb.has_free_access(user_id),
+        can_download=full_content_access(tb, user_id) or tb.biology_tickets_download_ok(user_id),
         can_use_ai=can_use_ai,
         ai_requests_left=requests_left,
         subscription_expires_at=expires_at,
@@ -109,21 +113,23 @@ def get_subject_access(
     can_open = _subject_is_open(tb, user_id, subject_id)
     title, expires_at = _subscription_fields(tb, user_id)
     can_use_ai, requests_left = _ai_fields(tb, user_id)
-    can_download = can_open and (has_test_access(tb, user_id) or (
+    can_download = can_open and (full_content_access(tb, user_id) or (
         tb.biology_tickets_download_ok(user_id)
         if subject_id == "biology"
         else subject_id in {"physics", "chemistry"} and tb.has_subject_access(user_id, subject_id)
     ))
     return AccessStatusResponse(
         tester_access=has_test_access(tb, user_id),
+        promo_access=promo_active(tb),
+        subscription_required=subscription_required(tb, user_id, subject_id),
         can_open_subject=can_open,
         can_download=can_download,
         can_use_ai=can_use_ai,
         ai_requests_left=requests_left,
         subscription_expires_at=expires_at,
         subscription_title=title,
-        locked_reason=None if can_open else _locked_reason(tb, subject_id),
-        trial_available=subject_id == "histology" and not can_open and trial_available(tb, user_id),
+        locked_reason=None if can_open else 'Для этого предмета нужна соответствующая подписка.' if subscription_required(tb, user_id, subject_id) else _locked_reason(tb, subject_id),
+        trial_available=not public_launch() and subject_id == "histology" and not can_open and trial_available(tb, user_id),
     )
 
 
@@ -131,7 +137,7 @@ def get_subject_access(
 async def enter_subject(subject_id: str, user_id: int = Depends(get_current_user_id), tb=Depends(get_fresh_bot_module)):
     if subject_id not in SUBJECT_IDS:
         raise HTTPException(status_code=404, detail="предмет не найден")
-    if tb.dynamic_course_under_maintenance(subject_id):
+    if tb.dynamic_course_under_maintenance(subject_id) and not promo_active(tb):
         raise HTTPException(status_code=503, detail=MAINTENANCE_REASON)
-    decision = {"allowed": True, "warning": False, "trial_started": False} if has_test_access(tb, user_id) else enter(tb, user_id, subject_id)
+    decision = {"allowed": _subject_is_open(tb, user_id, subject_id), "warning": False, "trial_started": False} if public_launch() or full_content_access(tb, user_id) else enter(tb, user_id, subject_id)
     return {**decision, 'access': get_subject_access(subject_id, user_id, tb).model_dump()}
