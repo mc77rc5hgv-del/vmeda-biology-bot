@@ -1,3 +1,4 @@
+import { subscriptionPath } from "../lib/subscriptions";
 import { useState } from "react";
 import { CheckCircle2, ChevronRight, Layers, Lock } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
@@ -59,7 +60,7 @@ export function SectionPage() {
     }
     const error = sectionQuery.error;
     if (error instanceof ApiError && error.status === 403) {
-      return <div className="screen"><StateMessage icon={Lock} title="Раздел закрыт" body={error.message} onRetry={() => navigate("/profile/subscriptions")} actionLabel="Открыть подписки" /></div>;
+      return <div className="screen"><StateMessage icon={Lock} title="Раздел закрыт" body={error.message} onRetry={() => navigate(subscriptionPath(subjectId, `/subjects/${subjectId}/sections/${sectionId}`))} actionLabel="Открыть подписки" /></div>;
     }
     return (
       <div className="screen">
