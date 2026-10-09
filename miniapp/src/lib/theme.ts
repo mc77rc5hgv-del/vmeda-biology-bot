@@ -3,7 +3,7 @@ import { useSyncExternalStore } from "react";
 export type ThemePreference = "auto" | "light" | "dark";
 const key = "vmeda:theme:v1";
 const valid = (value: unknown): value is ThemePreference => value === "auto" || value === "light" || value === "dark";
-let preference: ThemePreference = "auto";
+let preference: ThemePreference = "light";
 try { const saved = localStorage.getItem(key); if (valid(saved)) preference = saved; } catch { /* Storage may be disabled. */ }
 const listeners = new Set<() => void>();
 
@@ -32,7 +32,7 @@ export function initializeTheme(): void {
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyPreferredTheme);
   window.addEventListener("storage", event => {
     if (event.key !== key && event.key !== null) return;
-    preference = valid(event.newValue) ? event.newValue : "auto";
+    preference = valid(event.newValue) ? event.newValue : "light";
     applyPreferredTheme();
     listeners.forEach(listener => listener());
   });
