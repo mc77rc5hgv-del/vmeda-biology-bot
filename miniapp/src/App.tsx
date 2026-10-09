@@ -1,4 +1,5 @@
-import { Route, Routes, useLocation } from "react-router-dom";
+import { paidSubjectTitles, subscriptionPath } from "./lib/subscriptions";
+import { Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { SubjectTheme } from "./components/SubjectTheme";
 import { useEffect } from "react";
 import { applyPreferredTheme } from "./lib/theme";
@@ -25,6 +26,20 @@ import { HistologySpecimenPage } from "./pages/HistologySpecimen";
 
 export function App() {
   const { pathname } = useLocation();
+  const navigate = useNavigate();
+  useEffect(() => {
+    const handle = (event: Event) => {
+      const subjectId = (event as CustomEvent<{subjectId: string}>).detail?.subjectId;
+      // Ignore late failures from requests belonging to a page already left.
+      const currentSubject = pathname.match(/^\/(?:subjects|materials|tests)\/([^/]+)/)?.[1]
+        ?? (pathname.startsWith("/histology/") ? "histology" : undefined);
+      if (subjectId && Object.hasOwn(paidSubjectTitles, subjectId) && currentSubject === subjectId) {
+        navigate(subscriptionPath(subjectId, pathname), {replace: true});
+      }
+    };
+    window.addEventListener("vmeda:subscription-required", handle);
+    return () => window.removeEventListener("vmeda:subscription-required", handle);
+  }, [pathname, navigate]);
   const owner = useAuthStore((state) => String(state.profile?.userId ?? "preview"));
   const remember = useLastStepStore((state) => state.remember);
   const queryClient = useQueryClient();
