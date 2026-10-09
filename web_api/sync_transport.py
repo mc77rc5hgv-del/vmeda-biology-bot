@@ -74,9 +74,16 @@ class BotGateway:
                     await send({'type': 'http.response.body', 'body': chunk, 'more_body': True})
             await send({'type': 'http.response.body', 'body': b'', 'more_body': False})
         finally:
-            if upstream:
-                await upstream.aclose()
-            self._active -= 1
+            try:
+                if upstream:
+                    try:
+                        await upstream.aclose()
+                    except httpx.HTTPError:
+                        self.failures += 1
+            finally:
+                # Cleanup errors and client cancellation must never consume a slot
+                # permanently. Do not replay requests, especially payment POSTs.
+                self._active -= 1
 
 
 class OwnerGuard:

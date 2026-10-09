@@ -54,7 +54,8 @@ async function deadlineFetch<T>(url: string, init: RequestInit | undefined, cons
   try {
     return await consume(await fetch(url, {...init, signal: controller.signal}));
   } catch (error) {
-    if (controller.signal.aborted) throw new ApiError(408, "Сервер не успел ответить. Проверь историю оплаты перед повтором; статистика сохранена.");
+    if (init?.signal?.aborted) throw error;
+    if (controller.signal.aborted) throw new ApiError(408, "Сервер не успел ответить. Проверь соединение. Если запрос касался оплаты, сначала проверь её историю.");
     throw error;
   } finally {
     window.clearTimeout(timer);
@@ -80,11 +81,11 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 /** Загружает защищённое медиа с тем же session-токеном, что и JSON API. */
-export async function fetchAuthorizedBlob(url: string): Promise<Blob> {
+export async function fetchAuthorizedBlob(url: string, signal?: AbortSignal): Promise<Blob> {
   const token = getStoredSessionToken();
   const headers = new Headers();
   if (token) headers.set("Authorization", `Bearer ${token}`);
-  const blob = await deadlineFetch(url, {headers}, async response => {
+  const blob = await deadlineFetch(url, {headers, signal}, async response => {
     if (!response.ok) {
       if (response.status === 401) expireSession();
       throw new ApiError(response.status, response.statusText);
