@@ -1,10 +1,19 @@
 <!doctype html>
-<html lang="ru">
+<html lang="ru" data-theme="light">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
     <meta name="color-scheme" content="light dark" />
+    <script>
+      try {
+        const saved = localStorage.getItem("vmeda:theme:v1");
+        const theme = saved === "dark" || saved === "light" ? saved
+          : saved === "auto" && matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        document.documentElement.dataset.theme = theme;
+        document.documentElement.style.colorScheme = theme;
+      } catch { /* Keep light when storage is unavailable. */ }
+    </script>
     <title>VMEDA</title>
     <!-- Официальный скрипт Telegram Mini Apps — даёт window.Telegram.WebApp.
          Намеренно НЕ используем @telegram-apps/sdk (пакет 2.x тянет уязвимую valibot через
