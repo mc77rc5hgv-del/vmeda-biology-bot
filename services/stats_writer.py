@@ -10,7 +10,7 @@ import json
 import os
 import threading
 import time
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import Future, InvalidStateError, ThreadPoolExecutor
 
 
 class ChangedDuringCopy(Exception):
@@ -60,11 +60,17 @@ class StatsWriter:
             done = [f for g, f in self._waiters if g <= generation]
             self._waiters = [(g, f) for g, f in self._waiters if g > generation]
         for future in done:
-            if not future.done():
-                if error:
-                    future.set_exception(error)
-                else:
-                    future.set_result(None)
+            try:
+                if not future.done():
+                    if error:
+                        future.set_exception(error)
+                    else:
+                        future.set_result(None)
+            except InvalidStateError:
+                # A caller can cancel between done() and set_result(). Other callers
+                # still need their own durability confirmation.
+                if not future.done():
+                    raise
 
     def _write(self, data):
         data['total_users'] = list(data.get('total_users', []))
@@ -112,15 +118,21 @@ class StatsWriter:
             await asyncio.sleep(.025)  # combine bursts, payments still await fsync
             generation = self._generation
             try:
-                snapshot = await self._snapshot(generation)
-            except (ChangedDuringCopy, RuntimeError):
-                retries += 1
-                if retries < 3:
-                    continue
-                # Never starve payment fsync under continuous mutations. Rare bounded
-                # fallback takes one consistent snapshot, rather than one per event.
-                generation = self._generation
-                snapshot = copy.deepcopy(self.source())
+                try:
+                    snapshot = await self._snapshot(generation)
+                except (ChangedDuringCopy, RuntimeError):
+                    retries += 1
+                    if retries < 3:
+                        continue
+                    # Never starve payment fsync under continuous mutations. Rare bounded
+                    # fallback takes one consistent snapshot, rather than one per event.
+                    generation = self._generation
+                    snapshot = copy.deepcopy(self.source())
+            except Exception as exc:
+                self.logger.error('Не удалось подготовить статистику к сохранению: %s', exc)
+                self._finish(generation, exc)
+                retries = 0
+                continue
             retries = 0
             try:
                 await asyncio.get_running_loop().run_in_executor(self.executor, self._write, snapshot)
