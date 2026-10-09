@@ -74,6 +74,8 @@ from web_api import bot_state, learning
 from web_api.routers import access as api_access
 checks=0
 
+# Legacy beta and bot retain their referral/trial contract. Public paid admission is checked below.
+os.environ["MINIAPP_ACCESS_MODE"] = "admin_only"
 # Every published and legacy tier: restrictions, expiry, explicit entitlement flags.
 for tier in real_access.SUBSCRIPTION_TIERS:
     cfg=real_access.SUBSCRIPTION_TIERS[tier]
@@ -115,6 +117,18 @@ assert not api_access._subject_is_open(tb,11,'biology')
 tb.stats['manual_access_granted'].add(11)
 assert api_access._subject_is_open(tb,11,'biology')
 tb.stats['manual_access_granted'].clear()
+
+# Public Mini App paid admission deliberately excludes beta trials/referrals/manual grants.
+os.environ['MINIAPP_ACCESS_MODE']='public'
+from services.miniapp_policy import PAID_SUBJECTS
+before=copy.deepcopy(tb.stats)
+for subject in PAID_SUBJECTS:
+    assert not api_access._subject_is_open(tb,11,subject)
+tb.stats['miniapp_public_promo']={'active':True, 'history':[]}
+assert all(api_access._subject_is_open(tb,11,subject) for subject in api_access.SUBJECT_IDS)
+tb.stats['miniapp_public_promo']['active']=False
+assert all(not api_access._subject_is_open(tb,11,subject) for subject in PAID_SUBJECTS)
+assert {k:v for k,v in tb.stats.items() if k!='miniapp_public_promo'}==before
 
 # Owner identity must be the live object. No reload of stats.json, even before disk flush.
 os.environ['BOT_SYNC_MODE']='owner'
