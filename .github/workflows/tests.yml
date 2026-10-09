@@ -45,5 +45,5 @@ jobs:
           cache-dependency-path: miniapp/package-lock.json
       - run: npm ci
         working-directory: miniapp
-      - run: npm run build && npm run lint
+      - run: npm run build && npm run lint && node tests/subscriptions.mjs
         working-directory: miniapp

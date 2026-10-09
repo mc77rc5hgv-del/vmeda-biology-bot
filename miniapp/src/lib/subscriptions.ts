@@ -17,3 +17,9 @@ export function notifySubscriptionRequired(response: Response): void {
     window.dispatchEvent(new CustomEvent("vmeda:subscription-required", { detail: { subjectId } }));
   }
 }
+
+
+export function planSubject(options: ReadonlyArray<{id: string}>, choice: string | undefined, requested: string): string | undefined {
+  if (!options.length) return undefined; // Bundles must omit subject, never send an empty string.
+  return choice ?? options.find(option => option.id === requested)?.id;
+}

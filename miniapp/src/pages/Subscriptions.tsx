@@ -1,4 +1,4 @@
-import { paidSubjectTitles, subscriptionReturnPath } from "../lib/subscriptions";
+import { paidSubjectTitles, subscriptionReturnPath, planSubject } from "../lib/subscriptions";
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -55,11 +55,12 @@ export function SubscriptionsPage() {
       void client.invalidateQueries({queryKey: ["subscriptions", "history", userId]});
     }
   }, [receipt.data?.status, storageKey, client, userId]);
+  const chosenSubject = (plan: SubscriptionPlan) => planSubject(plan.subject_options, choices[plan.id], subjectId);
   const buy = async (plan: SubscriptionPlan) => {
     if (lock.current || pending) return;
     lock.current = true; setBusy(true); setNotice("");
     try {
-      const invoice = await createSubscriptionInvoice(plan.id, (choices[plan.id] ?? (plan.subject_options.some(option => option.id === subjectId) ? subjectId : "")));
+      const invoice = await createSubscriptionInvoice(plan.id, chosenSubject(plan));
       remember(invoice.payment_id, invoice.url);
       openInvoice(invoice.url, status => {
         lock.current = false; if (mounted.current) setBusy(false);
@@ -71,12 +72,12 @@ export function SubscriptionsPage() {
   const buySbp = async (plan: SubscriptionPlan) => {
     if (lock.current || pending) return;
     lock.current = true; setBusy(true); setNotice("");
-    const key = `vmeda:sbp-request:${userId}:${plan.id}:${(choices[plan.id] ?? (plan.subject_options.some(option => option.id === subjectId) ? subjectId : "")) ?? "all"}`;
+    const key = `vmeda:sbp-request:${userId}:${plan.id}:${chosenSubject(plan) ?? "all"}`;
     try {
       let requestKey = requestKeys.current[key];
       try { requestKey = localStorage.getItem(key) ?? requestKey; } catch { /* Use session nonce. */ }
       if (!requestKey) { requestKey = crypto.randomUUID(); requestKeys.current[key] = requestKey; try { localStorage.setItem(key, requestKey); } catch { /* Use session nonce. */ } }
-      const invoice = await createSbpSubscription(plan.id, requestKey, (choices[plan.id] ?? (plan.subject_options.some(option => option.id === subjectId) ? subjectId : "")));
+      const invoice = await createSbpSubscription(plan.id, requestKey, chosenSubject(plan));
       remember(invoice.payment_id, invoice.url);
       delete requestKeys.current[key];
       try { localStorage.removeItem(key); } catch { /* Saved server quote remains available. */ }
@@ -102,7 +103,7 @@ export function SubscriptionsPage() {
     finally { lock.current = false; if (mounted.current) setBusy(false); }
   };
   const transfer = (plan: SubscriptionPlan) => {
-    const subject = plan.subject_options.find(option => option.id === (choices[plan.id] ?? (plan.subject_options.some(option => option.id === subjectId) ? subjectId : "")));
+    const subject = plan.subject_options.find(option => option.id === chosenSubject(plan));
     openTelegramLink(`https://t.me/vmeda_helper?text=${encodeURIComponent(`Здравствуйте! Хочу оформить подписку «${plan.title}»${subject ? ` (${subject.title})` : ""} за ${plan.price_rub}₽ в VMEDA. Пришлите реквизиты для перевода на карту.`)}`);
   };
   const support = () => openTelegramLink(`https://t.me/vmeda_helper?text=${encodeURIComponent("Здравствуйте! Нужна помощь с подпиской VMEDA." + (pending ? ` Платёж: ${pending}` : ""))}`);
@@ -116,13 +117,13 @@ export function SubscriptionsPage() {
       <div className={styles.tabs} role="group" aria-label="Тарифы по курсу">{[{id: 1, title: "1 курс"}, {id: 2, title: "2 курс"}, {id: 0, title: "Все тарифы"}].map(item => <button key={item.id} aria-pressed={course === item.id} onClick={() => setCourse(item.id)}>{item.title}</button>)}</div>
       <div className={styles.plans}>{catalog.data.plans.filter(plan => (!subjectId || !plan.subjects || plan.subjects.includes(subjectId)) && (!course || plan.courses.includes(course))).map(plan => {
         const current = catalog.data.current.tier_id === plan.id;
-        const choice = plan.subject_options.find(option => option.id === (choices[plan.id] ?? (plan.subject_options.some(option => option.id === subjectId) ? subjectId : "")));
+        const choice = plan.subject_options.find(option => option.id === chosenSubject(plan));
         const reason = plan.unavailable_reason || choice?.unavailable_reason;
         const missingChoice = plan.subject_options.length > 0 && !choice;
         return <article key={plan.id} className={`${styles.plan} ${current ? styles.active : ""}`}>
           <div className={styles.planTop}><span>{current ? "Текущий тариф" : plan.badge || "VMEDA"}</span><span>{term(plan)}</span></div><h2>{plan.title}</h2><div className={styles.price}><strong>{plan.price_rub} ₽</strong><span>или {plan.price_stars} Telegram Stars</span></div><p className={styles.caption}>Разовая оплата · без автоматических списаний</p>
           <ul className={styles.benefits}>{plan.benefits.map((benefit, i) => <li key={i}><Check size={16} /><span>{benefit}</span></li>)}</ul>
-          {plan.subject_options.length > 0 && <label className={styles.choice}>Выбери предмет<select value={(choices[plan.id] ?? (plan.subject_options.some(option => option.id === subjectId) ? subjectId : "")) ?? ""} onChange={event => setChoices({...choices, [plan.id]: event.target.value})}><option value="" disabled>Выбрать предмет</option>{plan.subject_options.map(option => <option key={option.id} value={option.id} disabled={Boolean(option.unavailable_reason)}>{option.title}</option>)}</select></label>}
+          {plan.subject_options.length > 0 && <label className={styles.choice}>Выбери предмет<select value={chosenSubject(plan) ?? ""} onChange={event => setChoices({...choices, [plan.id]: event.target.value})}><option value="" disabled>Выбрать предмет</option>{plan.subject_options.map(option => <option key={option.id} value={option.id} disabled={Boolean(option.unavailable_reason)}>{option.title}</option>)}</select></label>}
           <div className={styles.purchase}>{catalog.data.sbp_available && <button disabled={busy || Boolean(pending) || Boolean(reason) || missingChoice} onClick={() => void buySbp(plan)}>{current && plan.duration_days ? "Продлить" : "Оплатить"} по СБП · {plan.price_rub} ₽</button>}<button className={styles.secondary} disabled={busy || Boolean(pending) || Boolean(reason) || missingChoice || !canOpenInvoice()} onClick={() => void buy(plan)}>{current && plan.duration_days ? "Продлить" : current ? "Уже активен" : `Оформить за ${plan.price_stars} Stars`}</button><button className={styles.secondary} disabled={busy || Boolean(reason) || missingChoice} onClick={() => transfer(plan)}>Перевод на карту · {plan.price_rub} ₽</button>{reason && <small>{reason}</small>}{!canOpenInvoice() && <small>Для оплаты Stars нужен актуальный Telegram. СБП и перевод на карту доступны отдельно.</small>}</div>
         </article>;
       })}</div>
