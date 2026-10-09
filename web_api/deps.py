@@ -27,6 +27,16 @@ def get_current_user_id(request: Request, authorization: str | None = Header(def
         if not user_limiter.allow(f"billing:{user_id}", limit):
             raise HTTPException(429, detail="Слишком много запросов оплаты. Подожди минуту.", headers={"Retry-After": "60"})
     ensure_miniapp_access(user_id)
+    # Public entry does not grant paid content. Enforce even on direct media/exam URLs.
+    if config.MINIAPP_ACCESS_MODE == 'public':
+        import re
+        match = re.match(r'/api/v1/(?:subjects|materials)/([a-z_-]+)/', path)
+        subject = match.group(1) if match else (
+            'histology' if path.startswith('/api/v1/histology/') else
+            'anatomy' if path.startswith('/api/v1/anatomy/exam/') else None)
+        if subject:
+            from services.miniapp_policy import require_subject
+            require_subject(get_fresh_bot_module(), user_id, subject)
     return user_id
 
 

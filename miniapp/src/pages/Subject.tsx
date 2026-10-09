@@ -1,7 +1,8 @@
+import { subscriptionPath } from "../lib/subscriptions";
 import { useEffect, useRef } from "react";
 import { BookOpenCheck, ChevronRight, Lock, Microscope, Sparkles, SquareCheckBig } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate, useParams } from "react-router-dom";
+import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 import { enterSubject, hasContentSession, fetchAccessStatus, fetchLearningState, fetchSubjectDetail, isRealBackedSubject } from "../lib/api";
 import { formatMaterialCount } from "../lib/format";
 import { hapticSelection, useTelegramBackButton } from "../lib/telegram";
@@ -15,6 +16,7 @@ import styles from "./Subject.module.css";
 export function SubjectPage() {
   const { subjectId = "" } = useParams();
   const navigate = useNavigate();
+  const { pathname } = useLocation();
   const queryClient = useQueryClient();
   const visited = useRef("");
   const entryMutation = useMutation({mutationFn: () => enterSubject(subjectId), onSuccess: (data) => {
@@ -62,6 +64,9 @@ export function SubjectPage() {
   const subject = subjectQuery.data;
   if (accessQuery.isError || !accessQuery.data) {
     return <div className="screen"><StateMessage title="Не удалось проверить доступ" body="Повтори проверку. Твоя подписка не изменена." onRetry={() => accessQuery.refetch()} /></div>;
+  }
+  if (accessQuery.data.subscriptionRequired) {
+    return <Navigate to={subscriptionPath(subjectId, pathname)} replace />;
   }
   const locked = !accessQuery.data.canOpenSubject;
   const totalMaterials = subject.sections.reduce((sum, section) => sum + section.itemCount, 0);

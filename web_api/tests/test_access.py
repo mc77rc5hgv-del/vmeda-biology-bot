@@ -1,7 +1,15 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from web_api.deps import get_current_user_id, get_fresh_bot_module
 from web_api.main import app
+
+
+@pytest.fixture(autouse=True)
+def legacy_entitlement_contract(monkeypatch):
+    # These tests retain the referral/trial contract used by the private beta and bot.
+    # Public paid admission is covered end to end in test_public_promo.py.
+    monkeypatch.setenv('MINIAPP_ACCESS_MODE', 'admin_only')
 
 
 class FakeBot:

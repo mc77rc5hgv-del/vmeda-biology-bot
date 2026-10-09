@@ -48,3 +48,10 @@ async def tester(payload: dict):
     saved = set_test_access(tb, next(iter(tb.ADMIN_IDS)), payload['user_id'], active=payload['active'])
     await asyncio.wrap_future(saved)
     return {'ok': True}
+
+
+@app.post('/internal/test/promo')
+async def promo(payload: dict):
+    from services.miniapp_policy import set_promo
+    await asyncio.wrap_future(set_promo(tb, next(iter(tb.ADMIN_IDS)), payload['active']))
+    return {'ok': True}

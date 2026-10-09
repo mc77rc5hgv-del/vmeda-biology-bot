@@ -34,6 +34,7 @@ client = TestClient(app)
 @pytest.fixture(autouse=True)
 def _keep_content_contract_tests_independent_from_temporary_closure(monkeypatch):
     """Most tests below validate content shape, not the temporary operational switch."""
+    monkeypatch.setenv("MINIAPP_ACCESS_MODE", "admin_only")  # legacy content/gate contracts; public admission has its own suite
     monkeypatch.setattr(tb, "DYNAMIC_COURSE_MAINTENANCE_IDS", frozenset())
 
 

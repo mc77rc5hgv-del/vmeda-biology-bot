@@ -1,5 +1,6 @@
 """Authenticated subscription storefront. Invoices do not grant access."""
 import re
+import time
 
 from services.miniapp_testers import has_test_access
 
@@ -22,6 +23,16 @@ class InvoiceRequest(BaseModel):
     subject: str | None = None
 
 
+def _plan_subjects(cfg):
+    subjects = list(SUBJECTS)
+    rule = cfg.get('histology_until_rule')
+    if rule == 'expiry' or isinstance(rule, (int, float)) and rule > time.time() or cfg.get('scope') == 'all' or cfg.get('early_histology'):
+        subjects.append('histology')
+    if cfg.get('anatomy') or cfg.get('scope') == 'all':
+        subjects.append('anatomy')
+    return subjects
+
+
 def _catalog(tb, user_id):
     from services.payments.runtime import available
     plans = []
@@ -39,7 +50,7 @@ def _catalog(tb, user_id):
                       'benefits': cfg.get('benefits', []), 'badge': cfg.get('badge'),
                       'ai_limit': cfg.get('ai_limit'), 'ai_period': cfg.get('ai_limit_type'),
                       'courses': [course for course, name in [(1, 'year1'), (2, 'year2')] if tier_id in tb._course_tier_ids(name)],
-                      'subject_options': choices, 'unavailable_reason': reason, 'card_transfer_url': tb.get_sub_rubles_keyboard(tier_id).inline_keyboard[0][0].url})
+                      'subjects': _plan_subjects(cfg), 'subject_options': choices, 'unavailable_reason': reason, 'card_transfer_url': tb.get_sub_rubles_keyboard(tier_id).inline_keyboard[0][0].url})
     active = tb.has_active_subscription(user_id)
     sub = tb.get_subscription(user_id) if active else None
     cfg = tb.SUBSCRIPTION_TIERS.get(sub.get('tier'), {}) if sub else {}

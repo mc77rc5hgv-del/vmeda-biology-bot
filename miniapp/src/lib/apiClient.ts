@@ -1,3 +1,4 @@
+import { notifySubscriptionRequired } from "./subscriptions";
 // Тонкий слой поверх настоящего web_api (см. web_api/README.md в репозитории бота) — единственное
 // место, которое знает про формат данных на проводе (snake_case, ровно как в web_api/schemas.py)
 // и переводит его в app-типы из lib/types.ts. lib/api.ts (диспетчер, решающий mock vs реальный
@@ -72,6 +73,7 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   return deadlineFetch(`${API_BASE_URL}${path}`, {...init, headers}, async response => {
     if (!response.ok) {
       if (response.status === 401) expireSession();
+      notifySubscriptionRequired(response);
       let detail = response.statusText;
       try { const body = await response.json(); detail = body.detail ?? detail; } catch { /* non-JSON error */ }
       throw new ApiError(response.status, detail);
@@ -88,6 +90,7 @@ export async function fetchAuthorizedBlob(url: string, signal?: AbortSignal): Pr
   const blob = await deadlineFetch(url, {headers, signal}, async response => {
     if (!response.ok) {
       if (response.status === 401) expireSession();
+      notifySubscriptionRequired(response);
       throw new ApiError(response.status, response.statusText);
     }
     return response.blob();
@@ -229,6 +232,8 @@ export async function fetchRealDashboard(): Promise<DashboardStats> {
 
 interface AccessStatusWire {
   tester_access?: boolean;
+  promo_access?: boolean;
+  subscription_required?: boolean;
   trial_available?: boolean;
   can_open_subject: boolean;
   can_download: boolean;
@@ -242,6 +247,8 @@ interface AccessStatusWire {
 function toAccessStatus(wire: AccessStatusWire): AccessStatus {
   return {
     testerAccess: wire.tester_access ?? false,
+    promoAccess: wire.promo_access ?? false,
+    subscriptionRequired: wire.subscription_required ?? false,
     canOpenSubject: wire.can_open_subject,
     trialAvailable: wire.trial_available ?? false,
     canDownload: wire.can_download,
@@ -835,7 +842,7 @@ export async function setLearningFlag(
 export interface SubscriptionPlan {
   id: number; title: string; short: string; price_stars: number; price_rub: number; card_transfer_url: string; duration_days: number | null;
   expires_at: string | null; benefits: string[]; badge: string | null; ai_limit: number | null;
-  ai_period: string | null; courses: number[]; unavailable_reason: string | null;
+  ai_period: string | null; subjects?: string[]; courses: number[]; unavailable_reason: string | null;
   subject_options: { id: string; title: string; unavailable_reason: string | null }[];
 }
 export interface SubscriptionCatalog {

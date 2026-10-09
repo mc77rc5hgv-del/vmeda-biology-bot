@@ -74,6 +74,9 @@ def get_admin_menu():
     builder.button(text="🧪 Выдать тестовый доступ miniapp", callback_data="admin_tester_grant")
     builder.button(text="🧪 Отозвать тестовый доступ miniapp", callback_data="admin_tester_revoke")
     builder.button(text="🧪 Тестировщики miniapp", callback_data="admin_tester_list")
+    from services.miniapp_policy import promo_active
+    builder.button(text="🎁 Промо miniapp: " + ("ВКЛ — выключить" if promo_active(tb) else "ВЫКЛ — открыть всем"),
+                   callback_data="admin_miniapp_promo")
     builder.button(text="🔍 Поиск по контенту", callback_data="admin_content_search_prompt")
     builder.button(text="🔓 Дать доступ по username/ID", callback_data="admin_grant_prompt")
     builder.button(text="🚫 Отозвать доступ по username/ID", callback_data="admin_revoke_prompt")
@@ -2217,3 +2220,50 @@ async def cb_admin_broadcast_go(callback: CallbackQuery):
 async def cb_admin_broadcast_cancel(callback: CallbackQuery):
     from services import admin_broadcast
     await admin_broadcast.cancel(tb, callback)
+
+
+_miniapp_promo_lock = asyncio.Lock()
+
+
+@router.callback_query(F.data == "admin_miniapp_promo")
+async def cb_admin_miniapp_promo(callback: CallbackQuery):
+    if not tb.is_admin(callback.from_user.id):
+        await callback.answer("Недостаточно прав", show_alert=True)
+        return
+    from services.miniapp_policy import promo_active
+    active = promo_active(tb)
+    builder = InlineKeyboardBuilder()
+    builder.button(text="Выключить промо" if active else "Открыть все разделы всем",
+                   callback_data="admin_miniapp_promo_disable" if active else "admin_miniapp_promo_enable")
+    builder.button(text="🔙 Админ-панель", callback_data="admin_panel")
+    builder.adjust(1)
+    await callback.answer()
+    await tb.safe_edit_text(callback.message,
+        "🎁 <b>Общее промо miniapp</b>\n\nСтатус: " + ("ВКЛЮЧЕНО" if active else "ВЫКЛЮЧЕНО")
+        + "\nПромо открывает все доступные учебные разделы miniapp всем пользователям."
+        + "\nПосле выключения платные предметы доступны по соответствующей подписке."
+        + "\nКнопка входа остаётся у всех. Покупки, сроки подписок и статистика сохраняются."
+        + "\nПрава в боте и лимиты AI не изменяются; административные и тестовые права сохраняются.",
+        parse_mode="HTML", reply_markup=builder.as_markup())
+
+
+@router.callback_query(F.data.in_({"admin_miniapp_promo_enable", "admin_miniapp_promo_disable"}))
+async def cb_admin_miniapp_promo_set(callback: CallbackQuery):
+    if not tb.is_admin(callback.from_user.id):
+        await callback.answer("Недостаточно прав", show_alert=True)
+        return
+    from services.miniapp_policy import set_promo
+    await callback.answer()
+    active = callback.data == "admin_miniapp_promo_enable"
+    async with _miniapp_promo_lock:
+        try:
+            await asyncio.shield(asyncio.wrap_future(set_promo(tb, callback.from_user.id, active)))
+        except Exception:
+            tb.logger.exception("Не подтверждено сохранение общего промо miniapp")
+            await callback.message.answer("Не удалось подтвердить сохранение промо. Повтори действие. Подписки и платежи не изменены.", reply_markup=get_admin_back_keyboard())
+            return
+    await tb.safe_edit_text(callback.message,
+        ("🎁 Промо включено: все доступные учебные разделы miniapp открыты всем."
+         if active else "Промо выключено: платные предметы доступны по соответствующей подписке.")
+        + "\nКнопка miniapp остаётся у всех. Подписки и статистика сохранены.",
+        reply_markup=get_admin_menu())

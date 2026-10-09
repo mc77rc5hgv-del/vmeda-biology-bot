@@ -100,6 +100,8 @@ class DashboardStatsResponse(BaseModel):
 class AccessStatusResponse(BaseModel):
     """Права и лимиты уже рассчитаны сервером; клиент не выводит их из названия тарифа."""
     tester_access: bool = False
+    promo_access: bool = False
+    subscription_required: bool = False
     trial_available: bool = False
     can_open_subject: bool
     can_download: bool

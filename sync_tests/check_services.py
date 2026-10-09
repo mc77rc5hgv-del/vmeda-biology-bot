@@ -100,15 +100,26 @@ try:
     assert client.get(owner_url+'/api/v1/me').status_code == 403
     assert client.get(gateway_url+'/api/v1/me').status_code == 401
     response = client.get(gateway_url+'/api/v1/access/histology', headers=headers)
-    assert response.json()['trial_available'] and not response.json()['can_open_subject']
-    assert client.post(gateway_url+'/api/v1/access/histology/enter', headers=headers).json()['trial_started']
-    assert not client.post(gateway_url+'/api/v1/access/histology/enter', headers=headers).json()['trial_started']
+    assert response.json()['subscription_required'] and not response.json()['can_open_subject']
+    assert not response.json()['trial_available']
+    assert not client.post(gateway_url+'/api/v1/access/histology/enter', headers=headers).json()['allowed']
     internal = {'X-Vmeda-Sync-Token': token}
     assert client.get(gateway_url+'/internal/sync/status').status_code == 403
     safety = client.get(gateway_url+'/internal/sync/status', headers=internal).json()
     assert safety['backups']['learning']['verified']
     assert safety['owner']['backups']['stats']['loaded_data_preserved']
     assert safety['owner']['users'] == 1
+    # Public promo is persisted only by the owner and immediately enforced by the gateway.
+    assert client.post(owner_url+'/internal/test/promo', headers=internal, json={'active': True}).status_code == 200
+    state = client.get(gateway_url+'/api/v1/sync/state', headers=headers).json()
+    assert state['promo_access'] and all(item['can_open_subject'] for item in state['subjects'].values())
+    assert not state['subscription']['active']
+    assert client.get(gateway_url+'/api/v1/histology/exam/catalog', headers=headers).status_code == 200
+    assert client.post(owner_url+'/internal/test/promo', headers=internal, json={'active': False}).status_code == 200
+    response = client.get(gateway_url+'/api/v1/histology/exam/catalog', headers={**headers, 'Origin': 'https://synthetic-miniapp.test'})
+    assert response.status_code == 403 and response.headers['x-vmeda-subscription-required'] == 'histology'
+    assert 'x-vmeda-subscription-required' in response.headers['access-control-expose-headers'].lower()
+    assert client.get(gateway_url+'/api/v1/me', headers=headers).status_code == 200
     # Grant/revoke on the owner must be visible through the gateway without a restart.
     assert client.post(owner_url+'/internal/test/tester', headers=internal, json={'user_id': user_id, 'active': True}).status_code == 200
     state = client.get(gateway_url+'/api/v1/sync/state', headers=headers).json()
@@ -172,6 +183,8 @@ try:
         assert persisted[key] == baseline[key], key
     assert persisted['miniapp_tester_access'][str(user_id)]['active'] is False
     assert len(persisted['miniapp_tester_access'][str(user_id)]['history']) == 2
+    assert persisted['miniapp_public_promo']['active'] is False
+    assert len(persisted['miniapp_public_promo']['history']) == 2
     assert (gateway_data/'stats.json').read_bytes() == gateway_snapshot
     with sqlite3.connect(db) as conn:
         assert conn.execute('SELECT * FROM legacy_identity').fetchall() == [(user_id, 'preserved_username')]
@@ -179,7 +192,7 @@ try:
     if os.environ.get('VMEDA_BROWSER_SMOKE') == '1':
         from browser_smoke import run_browser_smoke
         print(json.dumps(run_browser_smoke(gateway_url, signed_init_data(), client, headers)))
-    print(json.dumps({'real_owner_gateway_http': True, 'tester_grant_revoke_synchronized': True, 'subscription_visible_immediately': True,
+    print(json.dumps({'real_owner_gateway_http': True, 'tester_grant_revoke_synchronized': True, 'public_promo_and_subscription_redirect_synchronized': True, 'subscription_visible_immediately': True,
                       'histology_retry_survives_restart': True, 'anatomy_resume_and_common_rating': True,
                       'outage_fails_closed_with_cors': True, 'legacy_identity_and_stats_preserved': True,
                       'synthetic_directory': str(folder)}, ensure_ascii=False, indent=2))

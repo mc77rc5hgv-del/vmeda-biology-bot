@@ -1989,7 +1989,7 @@ def miniapp_launch_allowed(user_id: int) -> bool:
 
 async def sync_miniapp_menu_button(user_id: int) -> bool:
     """Refresh the persistent Telegram launcher without sending messages or changing roles."""
-    menu = (MenuButtonWebApp(text="VMEDA App", web_app=WebAppInfo(url=MINIAPP_URL))
+    menu = (MenuButtonWebApp(text="Открыть MINI-App", web_app=WebAppInfo(url=MINIAPP_URL))
             if MINIAPP_URL and miniapp_launch_allowed(user_id) else MenuButtonCommands())
     try:
         await bot.set_chat_menu_button(chat_id=user_id, menu_button=menu)
@@ -2001,11 +2001,12 @@ async def sync_miniapp_menu_button(user_id: int) -> bool:
 
 def get_main_menu(user_id: int = None):
     builder = InlineKeyboardBuilder()
-    # Beta entry is available to admins and explicitly granted miniapp testers.
+    # Public launcher is independent of paid subject access.
     # Server-side initData and entitlement checks remain authoritative.
-    if user_id is not None and miniapp_launch_allowed(user_id) and MINIAPP_URL:
+    from services.miniapp_policy import public_launch
+    if MINIAPP_URL and (public_launch() or user_id is not None and miniapp_launch_allowed(user_id)):
         builder.row(InlineKeyboardButton(
-            text="🎓 Открыть VMEDA App",
+            text="🎓 Открыть MINI-App",
             web_app=WebAppInfo(url=MINIAPP_URL),
         ))
     builder.button(text="🤖 VMedA AI (бета)", callback_data="ai_menu")
@@ -2040,7 +2041,7 @@ def get_miniapp_keyboard():
     """
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(
-        text="🎓 Открыть VMEDA App",
+        text="🎓 Открыть MINI-App",
         web_app=WebAppInfo(url=MINIAPP_URL),
     ))
     return builder.as_markup()
@@ -6127,6 +6128,7 @@ cb_phys_rk_page = physiology_handlers.cb_phys_rk_page
 # ==================== ЗАПУСК ====================
 async def setup_bot_commands() -> None:
     default_commands = [
+        BotCommand(command="app", description="Открыть VMEDA Mini App"),
         BotCommand(command="start", description="Начать работу с ботом"),
         BotCommand(command="random", description="Получить случайный билет"),
         BotCommand(command="help", description="Помощь и инструкция"),
@@ -6134,7 +6136,6 @@ async def setup_bot_commands() -> None:
     await bot.set_my_commands(default_commands, scope=BotCommandScopeDefault())
 
     admin_commands = default_commands + [
-        BotCommand(command="app", description="Открыть VMEDA Mini App"),
         BotCommand(command="admin", description="Админ-панель"),
     ]
     for admin_id in ADMIN_IDS:
@@ -6146,8 +6147,18 @@ async def setup_bot_commands() -> None:
     from services.miniapp_testers import has_test_access
     testers = {int(uid) for uid in stats.get("miniapp_tester_access", {})
                if has_test_access(__import__(__name__), int(uid))}
-    # Existing testers also receive the launcher after a deploy; no mass notifications.
+    from services.miniapp_policy import public_launch
+    # The default menu makes the launcher visible to everyone without a broadcast.
+    # Refresh former testers too: a previous revoke may have left a chat override.
     if MINIAPP_URL:
+        if public_launch():
+            try:
+                await bot.set_chat_menu_button(menu_button=MenuButtonWebApp(
+                    text="Открыть MINI-App", web_app=WebAppInfo(url=MINIAPP_URL)))
+                logger.info("Public Mini App default menu enabled")
+            except Exception:
+                logger.exception("Не удалось установить общую кнопку Mini App; /app и главное меню доступны")
+            testers |= {int(uid) for uid in stats.get('miniapp_tester_access', {})}
         for user_id in sorted(ADMIN_IDS | testers):
             await sync_miniapp_menu_button(user_id)
 
