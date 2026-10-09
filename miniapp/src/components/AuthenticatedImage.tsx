@@ -25,8 +25,9 @@ function AuthenticatedImageRequest({ src, alt, className }: AuthenticatedImagePr
   useEffect(() => {
     let active = true;
     let createdUrl: string | null = null;
+    const controller = new AbortController();
 
-    fetchAuthorizedBlob(src)
+    fetchAuthorizedBlob(src, controller.signal)
       .then((blob) => {
         if (!active) return;
         createdUrl = URL.createObjectURL(blob);
@@ -38,6 +39,7 @@ function AuthenticatedImageRequest({ src, alt, className }: AuthenticatedImagePr
 
     return () => {
       active = false;
+      controller.abort();
       if (createdUrl) URL.revokeObjectURL(createdUrl);
     };
   }, [src, retry]);
