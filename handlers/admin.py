@@ -29,6 +29,7 @@ from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 import telegram_bot as tb
+from services.telegram_ui import escaped_text_pages
 
 router = Router()
 
@@ -1230,32 +1231,46 @@ async def cb_admin_ai_breaker_reset(callback: CallbackQuery):
 
 _AI_CACHE_CONFIDENCE_LABEL = {"escalate": "🔴 высокий риск ошибки", "verify": "🟡 стоит проверить внимательнее", "serve": "🟢 без замечаний"}
 
-def get_ai_cache_queue_text(fingerprint: str, entry: dict) -> str:
+def get_ai_cache_queue_pages(entry: dict) -> list[str]:
     subject = entry.get("subject") or "не определён"
-    confidence_action = entry.get("confidence_action", "serve")
-    confidence_line = _AI_CACHE_CONFIDENCE_LABEL.get(confidence_action, confidence_action)
+    action = entry.get("confidence_action", "serve")
+    confidence = _AI_CACHE_CONFIDENCE_LABEL.get(action, action)
     reasons = entry.get("confidence_reasons") or []
-    reasons_block = ("\n" + "\n".join(f"  • {r}" for r in reasons)) if reasons else ""
-    return (
-        f"🤖 <b>Модерация AI-кэша</b>\n{tb.DIVIDER}\n\n"
-        f"На очереди: <b>{tb.get_pending_ai_cache_count()}</b>\n"
-        f"Предмет: <b>{subject}</b>\n"
-        f"Автопроверка: {confidence_line}{reasons_block}\n\n"
-        f"❓ <b>Вопрос:</b>\n{entry['question_preview']}\n\n"
-        f"💬 <b>Сгенерированный ответ:</b>\n{entry['answer']}\n\n"
-        "Одобрить — этот ответ будет бесплатно и мгновенно отдаваться любому пользователю, "
-        "задавшему точно такой же вопрос (без обращения к модели). Отклонить — ответ не "
-        "сохранится в кэше, но при следующем таком же вопросе будет сгенерирован заново и "
-        "снова предложен на модерацию."
-    )
+    body = (f"На очереди: {tb.get_pending_ai_cache_count()}\nПредмет: {subject}\n"
+            f"Автопроверка: {confidence}\n" + "\n".join(f"  • {reason}" for reason in reasons)
+            + f"\n\n❓ Вопрос:\n{entry['question_preview']}\n\n💬 Сгенерированный ответ:\n{entry['answer']}"
+            + "\n\nОдобрить — сохранить ответ для повторных вопросов. Отклонить — при следующем вопросе будет создан новый ответ.")
+    return escaped_text_pages(body)
 
-def get_ai_cache_queue_keyboard(fingerprint: str):
+
+def get_ai_cache_queue_text(fingerprint: str, entry: dict, page: int = 0) -> str:
+    pages = get_ai_cache_queue_pages(entry)
+    page = min(max(page, 0), len(pages) - 1)
+    return (f"🤖 <b>Модерация AI-кэша</b>\n{tb.DIVIDER}\n"
+            f"Страница {page + 1}/{len(pages)}\n\n{pages[page]}")
+
+
+def get_ai_cache_queue_keyboard(fingerprint: str, page: int = 0, page_count: int = 1):
     builder = InlineKeyboardBuilder()
-    builder.button(text="✅ Одобрить", callback_data=f"admin_ai_cache_approve:{fingerprint}")
-    builder.button(text="❌ Отклонить", callback_data=f"admin_ai_cache_reject:{fingerprint}")
-    builder.button(text="🔙 В админ-панель", callback_data="admin_panel")
-    builder.adjust(1)
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"admin_ai_cache_page:{fingerprint}:{page - 1}"))
+    if page + 1 < page_count:
+        nav.append(InlineKeyboardButton(text="Далее ➡️", callback_data=f"admin_ai_cache_page:{fingerprint}:{page + 1}"))
+    if nav:
+        builder.row(*nav)
+    builder.row(InlineKeyboardButton(text="✅ Одобрить", callback_data=f"admin_ai_cache_approve:{fingerprint}"),
+                InlineKeyboardButton(text="❌ Отклонить", callback_data=f"admin_ai_cache_reject:{fingerprint}"))
+    builder.row(InlineKeyboardButton(text="🔙 В админ-панель", callback_data="admin_panel"))
     return builder.as_markup()
+
+
+async def render_ai_cache_entry(callback: CallbackQuery, fingerprint: str, entry: dict, page: int = 0):
+    count = len(get_ai_cache_queue_pages(entry))
+    page = min(max(page, 0), count - 1)
+    await tb.safe_edit_text(callback.message, get_ai_cache_queue_text(fingerprint, entry, page),
+                            parse_mode="HTML", reply_markup=get_ai_cache_queue_keyboard(fingerprint, page, count))
+
 
 @router.callback_query(F.data == "admin_ai_cache_queue")
 async def cb_admin_ai_cache_queue(callback: CallbackQuery):
@@ -1265,20 +1280,33 @@ async def cb_admin_ai_cache_queue(callback: CallbackQuery):
     await callback.answer()
     fingerprint, entry = tb.get_next_pending_ai_cache_entry()
     if fingerprint is None:
-        await tb.safe_edit_text(
-            callback.message,
-            f"🤖 <b>Модерация AI-кэша</b>\n{tb.DIVIDER}\n\nОчередь пуста — все сгенерированные "
-            "ответы уже промодерированы.",
-            parse_mode="HTML",
-            reply_markup=get_admin_back_keyboard(),
-        )
+        await tb.safe_edit_text(callback.message,
+            f"🤖 <b>Модерация AI-кэша</b>\n{tb.DIVIDER}\n\nОчередь пуста — все сгенерированные ответы уже промодерированы.",
+            parse_mode="HTML", reply_markup=get_admin_back_keyboard())
         return
-    await tb.safe_edit_text(
-        callback.message,
-        get_ai_cache_queue_text(fingerprint, entry),
-        parse_mode="HTML",
-        reply_markup=get_ai_cache_queue_keyboard(fingerprint),
-    )
+    await render_ai_cache_entry(callback, fingerprint, entry)
+
+
+@router.callback_query(F.data.startswith("admin_ai_cache_page:"))
+async def cb_admin_ai_cache_page(callback: CallbackQuery):
+    if not tb.is_admin(callback.from_user.id):
+        await callback.answer("Недостаточно прав", show_alert=True)
+        return
+    parts = callback.data.split(":")
+    if len(parts) != 3:
+        await callback.answer("Страница не найдена", show_alert=True)
+        return
+    try:
+        page = int(parts[2])
+    except ValueError:
+        await callback.answer("Страница не найдена", show_alert=True)
+        return
+    entry = tb.stats.get("ai_answer_cache", {}).get(parts[1])
+    if not entry or entry.get("status") != "pending":
+        await callback.answer("Запись уже обработана. Открой очередь заново.", show_alert=True)
+        return
+    await callback.answer()
+    await render_ai_cache_entry(callback, parts[1], entry, page)
 
 @router.callback_query(F.data.startswith("admin_ai_cache_approve:"))
 async def cb_admin_ai_cache_approve(callback: CallbackQuery):

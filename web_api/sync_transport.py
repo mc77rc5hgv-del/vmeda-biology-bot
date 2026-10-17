@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hmac
+import asyncio
 import os
 
 import httpx
@@ -14,13 +15,36 @@ HOP_HEADERS = {
 
 
 class BotGateway:
-    def __init__(self, app, url: str, token: str):
+    def __init__(self, app, url: str, token: str, *, max_active=64, max_waiting=64, queue_timeout=2.0):
         if not url.startswith(('http://', 'https://')) or not token:
             raise RuntimeError('BOT_SYNC_URL and BOT_SYNC_TOKEN are required for the gateway')
         self.app, self.url, self.token = app, url.rstrip('/'), token
         self._client = None
         self._active = 0
+        self._waiting = 0
+        self._slots = asyncio.Semaphore(max_active)
+        self._max_waiting = max_waiting
+        self._queue_timeout = queue_timeout
         self.requests = self.rejected = self.failures = 0
+
+    async def _admit(self):
+        # Absorb short bursts without raising the upstream connection limit.
+        # Queue before reading request bodies, and never replay a submitted POST.
+        if self._slots.locked():
+            if self._waiting >= self._max_waiting:
+                return False
+            self._waiting += 1
+            try:
+                async with asyncio.timeout(self._queue_timeout):
+                    await self._slots.acquire()
+            except TimeoutError:
+                return False
+            finally:
+                self._waiting -= 1
+        else:
+            await self._slots.acquire()
+        self._active += 1
+        return True
 
     async def __call__(self, scope, receive, send):
         if scope['type'] == 'lifespan':
@@ -33,10 +57,9 @@ class BotGateway:
         if scope['type'] != 'http' or not scope['path'].startswith('/api/v1/'):
             return await self.app(scope, receive, send)
         self.requests += 1
-        if self._active >= 64:
+        if not await self._admit():
             self.rejected += 1
             return await JSONResponse({'detail': 'Сервис занят. Подожди и повтори запрос.'}, status_code=503, headers={'Retry-After': '5', 'Cache-Control': 'no-store'})(scope, receive, send)
-        self._active += 1
         upstream = None
         try:
             chunks, size = [], 0
@@ -84,6 +107,7 @@ class BotGateway:
                 # Cleanup errors and client cancellation must never consume a slot
                 # permanently. Do not replay requests, especially payment POSTs.
                 self._active -= 1
+                self._slots.release()
 
 
 class OwnerGuard:

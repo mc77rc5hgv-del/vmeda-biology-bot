@@ -41,6 +41,7 @@ from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton, Inpu
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 import telegram_bot as tb
+from services.telegram_ui import safe_delete_message
 
 router = Router()
 
@@ -115,7 +116,6 @@ async def send_oh_instrument_album(callback: CallbackQuery, group: dict, idx: in
     total_pages = oh_instrument_page_count(len(items))
     start = page * OH_INSTR_ALBUM_PAGE_SIZE
     chunk = items[start:start + OH_INSTR_ALBUM_PAGE_SIZE]
-    await callback.message.delete()
     cache_changed = False
     if len(chunk) == 1:
         # sendMediaGroup requires 2-10 items — a lone photo must go through answer_photo instead.
@@ -146,6 +146,7 @@ async def send_oh_instrument_album(callback: CallbackQuery, group: dict, idx: in
         parse_mode="HTML", reply_markup=builder.as_markup()
     )
 
+    await safe_delete_message(callback.message)
 
 # ==================== data lookups ====================
 

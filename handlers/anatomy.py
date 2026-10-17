@@ -23,6 +23,7 @@ from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton, Inpu
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 import telegram_bot as tb
+from services.telegram_ui import safe_delete_message
 
 router = Router()
 
@@ -327,7 +328,6 @@ async def send_anatomy_album(callback: CallbackQuery, images: list, page: int, h
     total_pages = anatomy_page_count(len(images))
     start = page * ANATOMY_ALBUM_PAGE_SIZE
     chunk = images[start:start + ANATOMY_ALBUM_PAGE_SIZE]
-    await callback.message.delete()
     cache_changed = False
     if len(chunk) == 1:
         # Telegram's sendMediaGroup requires 2-10 items — a lone photo must go through
@@ -356,6 +356,7 @@ async def send_anatomy_album(callback: CallbackQuery, images: list, page: int, h
     builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data=back_callback))
     page_info = f" (стр. {page + 1}/{total_pages})" if total_pages > 1 else ""
     await callback.message.answer(f"{header}{page_info}", parse_mode="HTML", reply_markup=builder.as_markup())
+    await safe_delete_message(callback.message)
 
 # ---- Атлас темы (для тем без разбора по костям — артрология/миология/спланхнология/...) ----
 def get_topic_atlas_images(topic_key: str) -> list:
@@ -1443,7 +1444,6 @@ async def cb_anatomy_exam_practice_question(callback: CallbackQuery):
     body = get_anatomy_exam_practice_question_text(section, num)
     keyboard = get_anatomy_exam_practice_question_keyboard(section_id, num, len(section["questions"]))
     images = question["images"]
-    await callback.message.delete()
 
     if len(images) > 1:
         # sendMediaGroup can't carry a reply_markup, so the album is followed by a
@@ -1453,6 +1453,7 @@ async def cb_anatomy_exam_practice_question(callback: CallbackQuery):
         for img, sent in zip(images, sent_list):
             _cache_anatomy_file_id(img, sent)
         await callback.message.answer(body, parse_mode="HTML", reply_markup=keyboard)
+        await safe_delete_message(callback.message)
         return
 
     img = images[0]
@@ -1461,6 +1462,7 @@ async def cb_anatomy_exam_practice_question(callback: CallbackQuery):
     if len(body) <= tb.CAPTION_LIMIT:
         sent = await callback.message.answer_photo(photo, caption=body, parse_mode="HTML", reply_markup=keyboard)
         _cache_anatomy_file_id(img, sent)
+        await safe_delete_message(callback.message)
         return
 
     short_caption = f"<b>{question['question']}</b>"
@@ -1469,6 +1471,7 @@ async def cb_anatomy_exam_practice_question(callback: CallbackQuery):
     sent = await callback.message.answer_photo(photo, caption=short_caption, parse_mode="HTML")
     _cache_anatomy_file_id(img, sent)
     await callback.message.answer(body, parse_mode="HTML", reply_markup=keyboard)
+    await safe_delete_message(callback.message)
 
 def get_anatomy_exam_theory_section(section_id: int):
     return next((s for s in tb.ANATOMY_EXAM_THEORY_SECTIONS if s["id"] == section_id), None)

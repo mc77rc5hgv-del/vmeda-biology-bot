@@ -411,3 +411,8 @@ async def cb_dynamic_lesson(callback: CallbackQuery):
                 caption=html.escape(media.get("caption", "")),
                 parse_mode="HTML",
             )
+
+
+@router.callback_query(F.data == "noop")
+async def cb_dynamic_page_indicator(callback: CallbackQuery):
+    await callback.answer()

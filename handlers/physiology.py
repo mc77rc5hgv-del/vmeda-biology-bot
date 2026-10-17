@@ -73,6 +73,7 @@ from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 import telegram_bot as tb
+from services.telegram_ui import safe_delete_message
 
 router = Router()
 
@@ -923,15 +924,16 @@ async def send_rk_page(callback: CallbackQuery, control: dict, idx: int, pages: 
     resend on ⬅️/➡️"; edit_text не умеет превратить текстовое сообщение в фото и обратно)."""
     page = pages[idx]
     keyboard = get_rk_page_keyboard(control["control_id"], idx, len(pages))
-    await callback.message.delete()
     if page["kind"] == "image":
         sent = await callback.message.answer_photo(
             _phys_rk_image_media(page["path"]), reply_markup=keyboard
         )
         _cache_phys_rk_file_id(page["path"], sent)
+        await safe_delete_message(callback.message)
         return
     header = f"📋 <b>{esc(control['title'])}</b> ({idx + 1}/{len(pages)})\n{tb.DIVIDER}\n\n"
     await callback.message.answer(header + page["text"], parse_mode="HTML", reply_markup=keyboard)
+    await safe_delete_message(callback.message)
 
 
 @router.callback_query(F.data == "phys:rk_menu")

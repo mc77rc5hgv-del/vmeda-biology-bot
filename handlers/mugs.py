@@ -17,6 +17,7 @@ from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton, Inpu
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 import telegram_bot as tb
+from services.telegram_ui import safe_delete_message
 
 router = Router()
 
@@ -369,7 +370,6 @@ async def cb_mugs_model(callback: CallbackQuery):
         )
         quantity = max(1, int(confirmed_order.get("quantity", 1)))
     await callback.answer()
-    await callback.message.delete()
     sent = await callback.message.answer_photo(
         get_mug_photo(model_id),
         caption=get_mug_model_text(model_id, request_exists, already_confirmed, quantity),
@@ -378,6 +378,7 @@ async def cb_mugs_model(callback: CallbackQuery):
     )
     if cache_mug_photo(model_id, sent):
         tb.save_stats()
+    await safe_delete_message(callback.message)
 
 
 @router.callback_query(F.data.startswith("mugs_qty:"))

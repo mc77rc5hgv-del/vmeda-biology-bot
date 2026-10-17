@@ -19,6 +19,7 @@ from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 import telegram_bot as tb
+from services.telegram_ui import safe_delete_message
 
 router = Router()
 
@@ -228,8 +229,8 @@ async def render_histology_image(callback: CallbackQuery, diag_key: str, spec_id
     caption = f"🔬 №{spec['number']}. " + image_caption(spec, idx) + f"\n\n{idx + 1}/{len(images)}"
     keyboard = get_histology_image_keyboard(diag_key, spec_id, idx, len(images))
     photo = FSInputFile(os.path.join(tb.HISTOLOGY_IMAGES_DIR, images[idx]))
-    await callback.message.delete()
     await callback.message.answer_photo(photo, caption=caption, reply_markup=keyboard)
+    await safe_delete_message(callback.message)
 
 @router.callback_query(F.data == "histology_menu")
 async def cb_histology_menu(callback: CallbackQuery):
@@ -409,15 +410,27 @@ def get_histology_guess_summary_keyboard(scope: str):
 
 async def render_histology_guess_question(callback: CallbackQuery, user_id: int):
     session = HISTOLOGY_GUESS_SESSIONS[user_id]
-    total = len(session["items"])
-    diag_key, spec_id = session["items"][session["index"]]
-    spec = get_histology_specimen(diag_key, spec_id)
-    mode = "Работа над ошибками" if session["scope"] == "mistakes" else "Практический зачёт"
-    caption = f"🎓 {mode} — {session['index'] + 1}/{total}\n\nЧто это за препарат?"
-    photo = FSInputFile(os.path.join(tb.HISTOLOGY_IMAGES_DIR, spec["guess_image"]))
-    await callback.message.delete()
-    sent = await callback.message.answer_photo(photo, caption=caption, reply_markup=get_histology_guess_question_keyboard(session))
-    session["msg"] = sent
+    if session.get("rendering"):
+        return
+    session["rendering"] = True
+    try:
+        total = len(session["items"])
+        index = session["index"]
+        diag_key, spec_id = session["items"][index]
+        spec = get_histology_specimen(diag_key, spec_id)
+        mode = "Работа над ошибками" if session["scope"] == "mistakes" else "Практический зачёт"
+        caption = f"🎓 {mode} — {index + 1}/{total}\n\nЧто это за препарат?"
+        photo = FSInputFile(os.path.join(tb.HISTOLOGY_IMAGES_DIR, spec["guess_image"]))
+        sent = await callback.message.answer_photo(photo, caption=caption, reply_markup=get_histology_guess_question_keyboard(session))
+        session["msg"] = sent
+        session["displayed_index"] = index
+        session["delivery_failed"] = False
+        await safe_delete_message(callback.message)
+    except BaseException:
+        session["delivery_failed"] = session.get("displayed_index") != session["index"]
+        raise
+    finally:
+        session["rendering"] = False
 
 async def render_histology_guess_answer(user_id: int):
     session = HISTOLOGY_GUESS_SESSIONS[user_id]
@@ -478,6 +491,17 @@ async def cb_histology_guess_answer(callback: CallbackQuery):
         await callback.answer("Сессия истекла, начни заново", show_alert=True)
         return
     fields = callback.data.split(':')
+    if session.get('rendering'):
+        await callback.answer('Показываю текущий препарат…')
+        return
+    # A previous answer can be durable even if sending the next photo failed.
+    # Retrying its old button resumes delivery, never records the answer again.
+    if (len(fields) == 3 and fields[1] == session.get('id') and fields[2].isdigit()
+            and int(fields[2]) < session['index'] < len(session['items'])
+            and session.get('delivery_failed') and not session.get('saving')):
+        await callback.answer('Ответ сохранён. Показываю следующий препарат.')
+        await render_histology_guess_question(callback, user_id)
+        return
     if len(fields) != 3 or fields[1] != session.get('id') or fields[2] != str(session['index']) or session.get('saving'):
         await callback.answer('Этот ответ уже обработан или вопрос устарел')
         return
