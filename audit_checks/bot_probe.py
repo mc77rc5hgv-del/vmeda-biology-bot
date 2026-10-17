@@ -25,7 +25,7 @@ def extract(path, name, environment):
     line = node.lineno
     node.decorator_list = []
     module = ast.Module(body=[ast.ImportFrom(module='__future__', names=[ast.alias(name='annotations')], level=0), node], type_ignores=[])
-    exec(compile(ast.fix_missing_locations(module), path, 'exec'), environment)
+    exec(compile(ast.fix_missing_locations(module), path, 'exec'), environment)  # noqa: S102 - trusted source AST, isolated audit stubs
     return environment[name], line
 
 
