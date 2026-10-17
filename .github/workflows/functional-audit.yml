@@ -1,0 +1,20 @@
+name: Functional audit probes
+on:
+  push:
+    branches: ['audit/full-bot-2026-10-17']
+jobs:
+  telegram-navigation-faults:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Reproduce denied Telegram deletion on synthetic callbacks
+        run: python3 audit_checks/bot_probe.py
+      - name: Preserve audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: functional-audit-findings
+          path: audit_checks/result.json
