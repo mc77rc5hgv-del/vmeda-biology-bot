@@ -10,7 +10,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Check callback routing\n        run: python3 audit_checks/callback_map.py\n      - name: Reproduce denied Telegram deletion on synthetic callbacks
+      - name: Check callback routing
+        run: python3 audit_checks/callback_map.py
+      - name: Reproduce denied Telegram deletion on synthetic callbacks
         run: python3 audit_checks/bot_probe.py
       - name: Preserve audit evidence
         if: always()
