@@ -5,7 +5,7 @@ from copy import deepcopy
 from html import unescape
 from html.parser import HTMLParser
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 from _bootstrap import tb
 from aiogram.exceptions import TelegramBadRequest
