@@ -12,7 +12,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 import telegram_bot as tb
 from services.badge_orders import (
-    FIELDS, RECIPIENT_ID, customer_url, helper_url,
+    FIELDS, RECIPIENT_ID, ROLES, SCHEMA_VERSION, SPECIALTIES, customer_url, helper_url,
     order_template, preview, validate_value, validated_details,
 )
 
@@ -27,7 +27,24 @@ async def persist():
 
 
 def draft_for(uid):
-    return tb.stats.get("badge_drafts", {}).get(str(uid))
+    draft = tb.stats.get("badge_drafts", {}).get(str(uid))
+    if draft and not draft.get("submitted") and draft.get("schema_version") != SCHEMA_VERSION:
+        old = draft["details"]
+        draft["legacy_details"] = dict(old)
+        draft["details"] = {
+            "fio": " ".join(old.get(key, "") for key in ("surname", "name", "patronymic")).strip(),
+            "role": old.get("role", ""), "quantity": old.get("quantity", ""),
+        }
+        draft["schema_version"] = SCHEMA_VERSION
+        draft.pop("editing", None)
+        draft["step"] = 0
+        for index, field in enumerate(FIELDS):
+            try:
+                validate_value(index, draft["details"].get(field[0], ""))
+            except ValueError:
+                draft["step"] = index
+                break
+    return draft
 
 
 def has_active_draft(uid):
@@ -58,9 +75,8 @@ async def show_menu(message, uid):
         "Заполни данные точно так, как они должны быть напечатаны. "
         "В конце можно проверить и исправить каждое поле.\n\n"
         "<b>Образец заполнения</b>\n"
-        "Фамилия: Иванов\nИмя: Иван\nОтчество: Иванович\n"
-        "Должность / статус: Курсант\nОрганизация: Военно-медицинская академия\n"
-        "Количество: 1\nКонтакт: @username\n\n"
+        "Фамилия Имя Отчество: Иванов Иван Иванович\n"
+        "Статус: Курсант\nСпециальность: Лечебное дело\nКоличество: 1\n\n"
         "После подтверждения передадим заявку @vmeda_helper. "
         "Стоимость, макет и получение согласовываются отдельно. Это не оплата.",
         parse_mode="HTML", reply_markup=menu_keyboard(uid),
@@ -72,16 +88,19 @@ async def show_step(message, draft):
     if index >= len(FIELDS):
         await show_review(message, draft)
         return
-    _, label, example, _, optional = FIELDS[index]
+    key, label, example, _, _ = FIELDS[index]
     builder = InlineKeyboardBuilder()
-    if optional:
-        builder.row(InlineKeyboardButton(text="Без отчества", callback_data="badges:skip"))
+    choices = ROLES if key == "role" else SPECIALTIES if key == "specialty" else ()
+    for choice_index, choice in enumerate(choices):
+        builder.row(InlineKeyboardButton(text=choice, callback_data=f"badges:choose:{key}:{choice_index}"))
+    if key == "role":
+        builder.row(InlineKeyboardButton(text="Свой вариант — ввести текстом", callback_data="badges:custom"))
     if index:
         builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="badges:back"))
     builder.row(InlineKeyboardButton(text="Сохранить и выйти", callback_data="badges:cancel"))
     await message.answer(f"🪪 Шаг {index + 1} из {len(FIELDS)}\n\n"
                          f"<b>{html.escape(label)}</b>\nПример: {html.escape(example)}\n\n"
-                         "Отправь значение одним сообщением.", parse_mode="HTML", reply_markup=builder.as_markup())
+                         "Выбери вариант кнопкой или отправь значение одним сообщением.", parse_mode="HTML", reply_markup=builder.as_markup())
 
 
 async def show_review(message, draft):
@@ -111,6 +130,10 @@ async def handle_input(message):
     except ValueError as exc:
         await message.answer(str(exc))
         return
+    await accept_value(message, draft, value)
+
+
+async def accept_value(message, draft, value):
     draft["details"][FIELDS[draft["step"]][0]] = value
     draft["step"] = len(FIELDS) if draft.pop("editing", False) else draft["step"] + 1
     await persist()
@@ -166,7 +189,7 @@ async def submit(callback, token):
                 await callback.answer("Проверь заполнение всех полей", show_alert=True)
                 return
             order = {"id": token, "user_id": uid, "username": callback.from_user.username,
-                     "full_name": callback.from_user.full_name, "details": details,
+                     "full_name": callback.from_user.full_name, "details": details, "schema_version": SCHEMA_VERSION,
                      "created_at": time.time(), "delivery": "prepared"}
             orders[token] = order
         await callback.answer()
@@ -227,7 +250,7 @@ async def callback_badges(callback):
             await persist()
         await show_menu(callback.message, uid)
     elif action == "start":
-        draft = {"id": secrets.token_hex(8), "details": {}, "step": 0, "active": True}
+        draft = {"id": secrets.token_hex(8), "details": {}, "step": 0, "active": True, "schema_version": SCHEMA_VERSION}
         tb.stats.setdefault("badge_drafts", {})[str(uid)] = draft
         await persist()
         await show_step(callback.message, draft)
@@ -247,9 +270,23 @@ async def callback_badges(callback):
             draft["active"] = True
         elif action == "back":
             draft["step"] = max(0, draft["step"] - 1)
-        elif action == "skip" and draft["step"] == 2:
-            draft["details"]["patronymic"] = ""
-            draft["step"] = len(FIELDS) if draft.pop("editing", False) else 3
+        elif action == "choose" and len(parts) == 4 and parts[3].isdigit():
+            index = draft["step"]
+            if index >= len(FIELDS) or FIELDS[index][0] != parts[2]:
+                await show_step(callback.message, draft)
+                return
+            choices = ROLES if parts[2] == "role" else SPECIALTIES if parts[2] == "specialty" else ()
+            choice = int(parts[3])
+            if choice >= len(choices):
+                return
+            draft["active"] = True
+            await accept_value(callback.message, draft, validate_value(index, choices[choice]))
+            return
+        elif action == "custom" and draft["step"] == 1:
+            draft["active"] = True
+            await persist()
+            await callback.message.answer("Введи свой статус одним сообщением, как он должен быть напечатан на бейдже.")
+            return
         elif action == "edit" and len(parts) == 3 and parts[2].isdigit() and int(parts[2]) < len(FIELDS):
             draft["step"] = int(parts[2])
             draft["editing"] = True

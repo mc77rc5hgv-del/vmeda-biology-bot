@@ -5,7 +5,7 @@ from urllib.parse import quote
 
 RECIPIENT_ID = 8928384363
 RECIPIENT_USERNAME = "vmeda_helper"
-FIELDS = (
+LEGACY_FIELDS = (
     ("surname", "Фамилия", "Иванов", 60, False),
     ("name", "Имя", "Иван", 60, False),
     ("patronymic", "Отчество", "Иванович", 60, True),
@@ -14,6 +14,21 @@ FIELDS = (
     ("quantity", "Количество", "1", 3, False),
     ("contact", "Контакт для связи", "@username или номер телефона", 80, False),
 )
+
+
+SCHEMA_VERSION = 2
+SPECIALTIES = ("Лечебное дело", "Стоматология", "Медико-профилактическое дело")
+ROLES = ("Студент", "Курсант")
+FIELDS = (
+    ("fio", "Фамилия Имя Отчество", "Иванов Иван Иванович", 180, False),
+    ("role", "Статус", "Студент / Курсант / свой вариант", 100, False),
+    ("specialty", "Специальность", " / ".join(SPECIALTIES), 60, False),
+    ("quantity", "Количество", "1", 3, False),
+)
+
+
+def display_fields(details):
+    return LEGACY_FIELDS if "surname" in details and "fio" not in details else FIELDS
 
 
 def validate_value(index, raw):
@@ -27,13 +42,13 @@ def validate_value(index, raw):
         if not value.isascii() or not value.isdigit() or not 1 <= int(value) <= 100:
             raise ValueError("Количество: целое число от 1 до 100.")
         return str(int(value))
-    if key in {"surname", "name", "patronymic"} and not any(c.isalpha() for c in value):
+    if key == "fio" and not any(c.isalpha() for c in value):
         raise ValueError("Укажи имя текстом, как оно должно быть напечатано.")
-    if key == "contact":
-        username = re.fullmatch(r"@[A-Za-z][A-Za-z0-9_]{4,31}", value)
-        phone = re.fullmatch(r"\+?[\d ()-]{7,30}", value)
-        if not username and not (phone and 7 <= sum(c.isdigit() for c in value) <= 15):
-            raise ValueError("Укажи @username или номер телефона с кодом страны.")
+    if key == "specialty":
+        for specialty in SPECIALTIES:
+            if value.casefold() == specialty.casefold():
+                return specialty
+        raise ValueError("Выбери специальность: " + ", ".join(SPECIALTIES) + ".")
     return value
 
 
@@ -43,9 +58,9 @@ def validated_details(details):
 
 
 def order_template(order):
-    details = validated_details(order["details"])
+    details = order["details"]
     lines = ["ЗАКАЗ МЕДИЦИНСКИХ БЕЙДЖИКОВ", f"Заявка: {order['id']}", ""]
-    lines.extend(f"{label}: {details[key] or 'не указывать'}" for key, label, *_ in FIELDS)
+    lines.extend(f"{label}: {details[key] or 'не указывать'}" for key, label, *_ in display_fields(details))
     lines += ["", f"Заказчик: {order.get('full_name', '')}", f"Telegram ID: {order['user_id']}"]
     if order.get("username"):
         lines.append(f"Telegram: @{order['username']}")
@@ -64,4 +79,4 @@ def customer_url(order):
 
 def preview(details):
     return "\n".join(f"<b>{html.escape(label)}:</b> {html.escape(str(details.get(key) or 'не указывать'))}"
-                     for key, label, *_ in FIELDS)
+                     for key, label, *_ in display_fields(details))

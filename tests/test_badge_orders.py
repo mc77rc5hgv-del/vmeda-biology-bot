@@ -44,7 +44,7 @@ class Callback:
 async def fill(user=None):
     user = user or User()
     await b.callback_badges(Callback("start", user))
-    for value in ["Иванов", "Иван", "—", "Курсант <1>", "ВМедА & кафедра", "2", "@badge_buyer"]:
+    for value in ["Иванов Иван Иванович", "Курсант <1>", "Лечебное дело", "2"]:
         await b.handle_input(Message(user, value))
     draft = b.draft_for(user.id)
     assert draft["step"] == len(FIELDS)
@@ -66,28 +66,56 @@ async def main():
 
     for value in ["0", "101", "-1", "1.5", "abc", "١"]:
         try:
-            validate_value(5, value)
+            validate_value(3, value)
         except ValueError as exc:
             assert str(exc)
         else:
             raise AssertionError("quantity must be a bounded ASCII integer")
-    assert validate_value(2, "-") == ""
-    assert validate_value(6, "+7 (999) 123-45-67")
-    for value in ["someone", "@a", "x" * 81]:
+    assert validate_value(2, "стоматология") == "Стоматология"
+    for index, value in [(0, "123"), (1, ""), (2, "Другая"), (2, "")]:
         try:
-            validate_value(6, value)
+            validate_value(index, value)
         except ValueError as exc:
             assert str(exc)
         else:
-            raise AssertionError("invalid contact accepted")
+            raise AssertionError("invalid field accepted")
+
+    # Choices, custom role and stale buttons cannot skip required fields.
+    await b.callback_badges(Callback("start"))
+    await b.handle_input(Message(text="Иванов Иван Иванович"))
+    await b.callback_badges(Callback("choose:role:0"))
+    assert b.draft_for(User().id)["details"]["role"] == "Студент"
+    await b.callback_badges(Callback("choose:role:1"))
+    assert b.draft_for(User().id)["step"] == 2
+    await b.callback_badges(Callback("choose:specialty:2"))
+    await b.handle_input(Message(text="3"))
+    assert b.draft_for(User().id)["details"]["specialty"] == "Медико-профилактическое дело"
+    await b.callback_badges(Callback("edit:1"))
+    await b.callback_badges(Callback("custom"))
+    await b.handle_input(Message(text="Врач"))
+    assert b.draft_for(User().id)["details"]["role"] == "Врач"
+
+    # Old drafts retain original inputs and require the newly requested specialty.
+    old_details = {"surname": "Иванов", "name": "Иван", "patronymic": "Иванович",
+                   "role": "Курсант", "organization": "ВМедА", "quantity": "2", "contact": "@badge_buyer"}
+    tb.stats.setdefault("badge_drafts", {})["4444444"] = {
+        "id": "legacy", "details": copy.deepcopy(old_details), "step": 7, "active": True}
+    migrated = b.draft_for(4444444)
+    assert migrated["step"] == 2 and migrated["legacy_details"] == old_details
+    assert migrated["details"]["fio"] == "Иванов Иван Иванович"
+    legacy = {"id": "old", "user_id": 4444444, "details": copy.deepcopy(old_details)}
+    snapshot = copy.deepcopy(legacy)
+    assert "Организация: ВМедА" in order_template(legacy)
+    assert "Контакт для связи" in b.preview(legacy["details"])
+    assert legacy == snapshot
 
     draft = await fill()
     assert not send.called, "filling/previewing must not notify the recipient"
     assert not tb.stats["badge_orders"]
     token = draft["id"]
-    await b.callback_badges(Callback("edit:4"))
-    await b.handle_input(Message(text="Другая организация"))
-    assert draft["details"]["organization"] == "Другая организация"
+    await b.callback_badges(Callback("edit:2"))
+    await b.handle_input(Message(text="Стоматология"))
+    assert draft["details"]["specialty"] == "Стоматология"
     assert draft["step"] == len(FIELDS)
     await b.callback_badges(Callback("cancel"))
     assert not b.has_active_draft(User().id)
@@ -102,6 +130,8 @@ async def main():
     assert "не подтверждает оплату" in args[1]
     order = tb.stats["badge_orders"][token]
     assert order["delivery"] == "sent"
+    assert set(order["details"]) == {"fio", "role", "specialty", "quantity"}
+    assert "Организация" not in order_template(order) and "Контакт для связи" not in order_template(order)
     assert not b.has_active_draft(User().id)
     url = next(button.url for row in b.result_keyboard(order).inline_keyboard for button in row if button.url)
     assert urlparse(url).path == "/vmeda_helper"
