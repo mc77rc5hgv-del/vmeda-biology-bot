@@ -1,0 +1,22 @@
+name: Vicegram single-owner access
+on:
+  push:
+    branches:
+      - verify/vicegram-single-owner
+      - claude/vicegram-telegram-bot-52crh3
+    paths:
+      - vicegram_bot.py
+      - vicegram_access.py
+      - test_vicegram_access.py
+      - .github/workflows/vicegram-owner-access.yml
+jobs:
+  access:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install aiogram==3.7.0
+      - run: python -m py_compile vicegram_bot.py vicegram_access.py
+      - run: python -m unittest -v test_vicegram_access.py

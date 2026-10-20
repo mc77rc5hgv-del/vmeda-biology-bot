@@ -42,6 +42,7 @@ import pytesseract
 from PIL import Image
 from pypdf import PdfReader, PdfWriter
 
+from vicegram_access import SingleOwnerAccess
 from aiogram import Bot, Dispatcher, F
 from aiogram.enums import ChatMemberStatus, ChatType
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
@@ -89,6 +90,8 @@ def is_bot_admin(user_id: int) -> bool:
     return user_id in ADMIN_IDS
 
 DB_PATH = os.getenv("VICEGRAM_DB_PATH", "vicegram.db")
+owner_access = SingleOwnerAccess(DB_PATH)
+
 MEDIA_CACHE_DIR = os.getenv("VICEGRAM_MEDIA_CACHE_DIR", "vicegram_media_cache")
 os.makedirs(MEDIA_CACHE_DIR, exist_ok=True)
 DIVIDER = "━━━━━━━━━━━━━━"
@@ -578,6 +581,8 @@ async def gate_by_trial(owner_id: int, require_group_access: bool = False) -> bo
     False — владелец забанен (молча), ничего не активно (уведомление про
     триал), либо у него PRO, а нужен доступ к группам, то есть MAX
     (уведомление с предложением апгрейда)."""
+    if not owner_access.permits(owner_id):
+        return False
     if is_user_banned(owner_id):
         return False
     tier = get_active_tier(owner_id)
@@ -1716,7 +1721,7 @@ def get_all_user_ids() -> list:
     conn = db_connect()
     rows = conn.execute("SELECT user_id FROM users").fetchall()
     conn.close()
-    return [r["user_id"] for r in rows]
+    return [r["user_id"] for r in rows if owner_access.permits(r["user_id"])]
 
 
 USER_LIST_PAGE_SIZE = 10
@@ -2632,8 +2637,8 @@ def delete_reminder(reminder_id: int, user_id: int) -> None:
 def get_due_reminders(now: int, limit: int = 20):
     conn = db_connect()
     rows = conn.execute(
-        "SELECT * FROM reminders WHERE sent = 0 AND remind_at <= ? ORDER BY remind_at ASC LIMIT ?",
-        (now, limit),
+        "SELECT * FROM reminders WHERE sent = 0 AND remind_at <= ? AND user_id = ? ORDER BY remind_at ASC LIMIT ?",
+        (now, owner_access.owner_id, limit),
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
@@ -3231,9 +3236,10 @@ async def deleted_message_poller() -> None:
                 """
                 SELECT * FROM messages
                 WHERE source = 'group_bot' AND deleted = 0 AND expired = 0 AND next_check_at <= ?
+                  AND chat_id IN (SELECT chat_id FROM settings WHERE owner_id = ?)
                 ORDER BY next_check_at ASC LIMIT 15
                 """,
-                (now,),
+                (now, owner_access.owner_id),
             ).fetchall()
             conn.close()
 
@@ -3279,14 +3285,14 @@ async def deleted_message_poller() -> None:
             # чистим совсем старые записи кэша (7 дней) — и файлы медиа личных чатов;
             # не на каждом 20-секундном тике, иначе полное сканирование растущей
             # таблицы messages регулярно подвешивает ответ бота на команды
-            if now - last_cleanup_at >= CLEANUP_INTERVAL_SECONDS:
+            if owner_access.owner_id is not None and now - last_cleanup_at >= CLEANUP_INTERVAL_SECONDS:
                 last_cleanup_at = now
                 cutoff = now - 7 * 24 * 3600
                 conn = db_connect()
-                conn.execute("DELETE FROM messages WHERE source = 'group_bot' AND date < ?", (cutoff,))
+                conn.execute("DELETE FROM messages WHERE source = 'group_bot' AND date < ? AND chat_id IN (SELECT chat_id FROM settings WHERE owner_id = ?)", (cutoff, owner_access.owner_id))
                 old_media = conn.execute(
-                    "SELECT media_path FROM messages WHERE source = 'business' AND date < ? AND media_path IS NOT NULL",
-                    (cutoff,),
+                    "SELECT media_path FROM messages WHERE source = 'business' AND date < ? AND media_path IS NOT NULL AND owner_id = ?",
+                    (cutoff, owner_access.owner_id),
                 ).fetchall()
                 for old_row in old_media:
                     try:
@@ -3294,7 +3300,7 @@ async def deleted_message_poller() -> None:
                             os.remove(old_row["media_path"])
                     except OSError:
                         pass
-                conn.execute("DELETE FROM messages WHERE source = 'business' AND date < ?", (cutoff,))
+                conn.execute("DELETE FROM messages WHERE source = 'business' AND date < ? AND owner_id = ?", (cutoff, owner_access.owner_id))
                 conn.commit()
                 conn.close()
         except Exception:
@@ -4178,6 +4184,10 @@ async def public_user_count_updater() -> None:
 
 async def main() -> None:
     init_db()
+    await owner_access.resolve_existing(bot)
+    dp["vicegram_register_connection"] = upsert_business_connection
+    dp.update.outer_middleware(owner_access)
+    logger.info("VICEGRAM single-owner mode: @vmeda_helper; identity=%s", owner_access.owner_id or "awaiting verified Telegram update")
     logger.info("VICEGRAM запускается...")
     await setup_bot_commands()
     asyncio.create_task(start_health_server())
@@ -4202,3 +4212,4 @@ async def main() -> None:
 
 if __name__ == "__main__":
     asyncio.run(main())
+
