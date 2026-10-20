@@ -103,7 +103,7 @@ async def main():
     cb_panel = FakeCB("payment_admin_panel", uid=payer_id)
     await tb.cb_payment_admin_panel(cb_panel)
     panel_texts = kb_texts(cb_panel.message.edits[-1][1])
-    assert panel_texts == ["☕ Заказы кружек (0)", "📣 Анонсы"]
+    assert panel_texts == ["🪪 Заявки на бейджики (0)", "📣 Анонсы"]
     cb_mugs = FakeCB("admin_mug_orders:0", uid=payer_id)
     await tb.cb_admin_mug_orders(cb_mugs)
     assert cb_mugs.message.edits and "Подтверждённые заказы кружек" in cb_mugs.message.edits[-1][0]
@@ -183,3 +183,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+

@@ -92,10 +92,9 @@ def get_admin_menu():
     builder.button(text="💰 Записать донат рублями", callback_data="admin_donation_prompt")
     builder.button(text="💎 Выдать подписку по username/ID", callback_data="admin_subscription_prompt")
     builder.button(text="💎👥 Выдать подписку нескольким сразу", callback_data="admin_bulk_subscription_prompt")
-    mug_orders_count = tb.get_confirmed_mug_order_count()
     builder.button(
-        text=f"☕ Заказы кружек ({mug_orders_count})",
-        callback_data="admin_mug_orders:0",
+        text=f"🪪 Заявки на бейджики ({len(tb.stats.get('badge_orders', {}))})",
+        callback_data="badges:admin:0",
     )
     builder.button(text="🎁 Восстановить доступ исчерпавшим (7 дней)", callback_data="admin_restore_access_confirm")
     builder.button(
@@ -188,11 +187,6 @@ def get_admin_announcements_keyboard(back_callback: str = "admin_panel"):
     builder.button(text="📣 Анонс теста по латыни", callback_data="admin_announce_anatomy_latin_confirm")
     builder.button(text="📣 Анонс VMedA AI", callback_data="admin_announce_ai_confirm")
     builder.button(text="📋 Анонс переклички первого курса", callback_data="admin_announce_rollcall_confirm")
-    builder.button(text="☕ Анонс лимитированной коллекции", callback_data="admin_announce_mugs_confirm")
-    builder.button(
-        text="🎁 Анонс «Подарок преподавателю»",
-        callback_data="admin_announce_teacher_mug_confirm",
-    )
     builder.button(text="🔙 Назад", callback_data=back_callback)
     builder.adjust(1)
     return builder.as_markup()
@@ -2058,8 +2052,8 @@ def get_payment_admin_menu_text() -> str:
 def get_payment_admin_menu_keyboard():
     builder = InlineKeyboardBuilder()
     builder.button(
-        text=f"☕ Заказы кружек ({tb.get_confirmed_mug_order_count()})",
-        callback_data="admin_mug_orders:0",
+        text=f"🪪 Заявки на бейджики ({len(tb.stats.get('badge_orders', {}))})",
+        callback_data="badges:admin:0",
     )
     builder.button(text="📣 Анонсы", callback_data="admin_announcements_menu")
     builder.adjust(1)
@@ -2295,3 +2289,4 @@ async def cb_admin_miniapp_promo_set(callback: CallbackQuery):
          if active else "Промо выключено: платные предметы доступны по соответствующей подписке.")
         + "\nКнопка miniapp остаётся у всех. Подписки и статистика сохранены.",
         reply_markup=get_admin_menu())
+

@@ -690,6 +690,9 @@ async def broadcast_teacher_gift_announcement() -> tuple[int, int]:
 
 @router.callback_query(F.data == "admin_announce_mugs_confirm")
 async def cb_admin_announce_mugs_confirm(callback: CallbackQuery):
+    if not tb.MUG_PREORDER_ENABLED:
+        await callback.answer("Заказ кружек закрыт. В меню доступен заказ бейджиков.", show_alert=True)
+        return
     if not (tb.is_admin(callback.from_user.id) or tb.is_payment_admin(callback.from_user.id)):
         await callback.answer()
         return
@@ -711,6 +714,9 @@ async def cb_admin_announce_mugs_confirm(callback: CallbackQuery):
 
 @router.callback_query(F.data == "admin_announce_mugs_go")
 async def cb_admin_announce_mugs_go(callback: CallbackQuery):
+    if not tb.MUG_PREORDER_ENABLED:
+        await callback.answer("Заказ кружек закрыт. В меню доступен заказ бейджиков.", show_alert=True)
+        return
     if not (tb.is_admin(callback.from_user.id) or tb.is_payment_admin(callback.from_user.id)):
         await callback.answer()
         return
@@ -730,6 +736,9 @@ async def cb_admin_announce_mugs_go(callback: CallbackQuery):
 
 @router.callback_query(F.data == "admin_announce_teacher_mug_confirm")
 async def cb_admin_announce_teacher_mug_confirm(callback: CallbackQuery):
+    if not tb.MUG_PREORDER_ENABLED:
+        await callback.answer("Заказ кружек закрыт. В меню доступен заказ бейджиков.", show_alert=True)
+        return
     if not (tb.is_admin(callback.from_user.id) or tb.is_payment_admin(callback.from_user.id)):
         await callback.answer()
         return
@@ -757,6 +766,9 @@ async def cb_admin_announce_teacher_mug_confirm(callback: CallbackQuery):
 
 @router.callback_query(F.data == "admin_announce_teacher_mug_go")
 async def cb_admin_announce_teacher_mug_go(callback: CallbackQuery):
+    if not tb.MUG_PREORDER_ENABLED:
+        await callback.answer("Заказ кружек закрыт. В меню доступен заказ бейджиков.", show_alert=True)
+        return
     if not (tb.is_admin(callback.from_user.id) or tb.is_payment_admin(callback.from_user.id)):
         await callback.answer()
         return
@@ -772,3 +784,4 @@ async def cb_admin_announce_teacher_mug_go(callback: CallbackQuery):
         parse_mode="HTML",
         reply_markup=tb.get_admin_announcements_keyboard(back_callback),
     )
+

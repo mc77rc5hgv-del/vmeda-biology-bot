@@ -69,7 +69,7 @@ CHANNEL_ID = "@Vmeda_examen"
 ADMIN_IDS = {1326779223, 8601892147}
 STATS_DIR = os.getenv("STATS_DIR", ".")
 STATS_FILE = os.path.join(STATS_DIR, "stats.json")
-MUG_PREORDER_ENABLED = os.environ.get("MUG_PREORDER_ENABLED", "1") != "0"
+MUG_PREORDER_ENABLED = False  # retired: keep historical orders, disable new mug sales
 MINIAPP_URL = os.getenv(
     "MINIAPP_URL",
     "https://vmeda-miniapp-preview-production.up.railway.app/",
@@ -236,6 +236,8 @@ def load_stats() -> dict:
             data.setdefault("histology_temp_access", {})
             data.setdefault("histology_learning", {})
             data.setdefault("rollcall_confirmed", {})
+            data.setdefault("badge_drafts", {})
+            data.setdefault("badge_orders", {})
             data.setdefault("mug_order_requests", {})
             data.setdefault("mug_orders", [])
             data.setdefault("mug_file_ids", {})
@@ -296,6 +298,8 @@ def load_stats() -> dict:
         "histology_temp_access": {},
         "histology_learning": {},
         "rollcall_confirmed": {},
+        "badge_drafts": {},
+        "badge_orders": {},
         "mug_order_requests": {},
         "mug_orders": [],
         "mug_file_ids": {},
@@ -1050,6 +1054,11 @@ async def referral_gate_middleware(handler, event: Update, data):
     if event.message and event.message.successful_payment:
         return await handler(event, data)
     if user.id in DONATION_PENDING:
+        return await handler(event, data)
+
+    # Order details are not paid educational content.
+    if (event.message and stats.get("badge_drafts", {}).get(str(user.id), {}).get("active")
+            and getattr(getattr(event.message, "chat", None), "type", None) == "private"):
         return await handler(event, data)
 
     # гейт касается только разделов Биология/Физика/Химия — остальные кнопки
@@ -2019,8 +2028,7 @@ def get_main_menu(user_id: int = None):
         text=f"📋 Перекличка ({rollcall_confirmed_count}/{ROLLCALL_GROUP_COUNT})",
         callback_data="rollcall_menu"
     )
-    if MUG_PREORDER_ENABLED:
-        builder.button(text="☕ Кружки VMEDA — предзаказ", callback_data="mugs_menu")
+    builder.button(text="🪪 Медицинские бейджики", callback_data="badges:menu")
     battle_label = "⚔️ Битва рефералов 🔥" if is_battle_active() else "⚔️ Битва рефералов"
     builder.button(text=battle_label, callback_data="referral_battle")
     if user_id is not None and has_active_subscription(user_id):
@@ -2598,6 +2606,13 @@ SECTION_DEEPLINKS = {
 }
 
 # ==================== ОБРАБОТЧИКИ ====================
+@dp.message(F.chat.type == "private", ~F.successful_payment, lambda message: bool(
+    message.from_user and stats.get("badge_drafts", {}).get(str(message.from_user.id), {}).get("active")
+))
+async def handle_badge_order_input(message: Message):
+    await badges_handlers.handle_input(message)
+
+
 @dp.message(CommandStart())
 async def cmd_start(message: Message):
     user_id = message.from_user.id
@@ -6021,7 +6036,13 @@ cb_dynamic_section = dynamic_course_handlers.cb_dynamic_section
 cb_dynamic_lesson = dynamic_course_handlers.cb_dynamic_lesson
 cb_dynamic_ai = dynamic_course_handlers.cb_dynamic_ai
 
-# ==================== КРУЖКИ VMEDA — ВРЕМЕННЫЙ ПРЕДЗАКАЗ ====================
+# ==================== МЕДИЦИНСКИЕ БЕЙДЖИКИ ====================
+from handlers import badges as badges_handlers  # noqa: E402
+
+dp.include_router(badges_handlers.router)
+dp.callback_query.outer_middleware(badges_handlers.navigation_middleware)
+
+# ==================== КРУЖКИ — АРХИВ СТАРЫХ ЗАКАЗОВ ====================
 from handlers import mugs as mugs_handlers  # noqa: E402 — deliberately late
 
 dp.include_router(mugs_handlers.router)
@@ -6212,3 +6233,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+

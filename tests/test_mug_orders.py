@@ -70,8 +70,10 @@ async def main():
         "mugs_model:1", "mugs_model:2", "mugs_model:3", "mugs_model:4", "back_to_main",
     ]
     assert "0" in tb.get_mugs_menu_text() and str(tb.MUG_SALES_TARGET) in tb.get_mugs_menu_text()
-    assert "mugs_menu" in callback_data(tb.get_main_menu())
-    assert "admin_mug_orders:0" in callback_data(tb.get_admin_menu())
+    assert not tb.MUG_PREORDER_ENABLED
+    assert "mugs_menu" not in callback_data(tb.get_main_menu())
+    assert "badges:menu" in callback_data(tb.get_main_menu())
+    assert "badges:admin:0" in callback_data(tb.get_admin_menu())
     assert {spec["title"] for spec in tb.MUG_MODELS.values()} == {
         "Классика ВМедА", "Наследие Академии", "Штаб ВМедА", "ПОДАРОК ПРЕПОДАВАТЕЛЮ",
     }
@@ -274,7 +276,7 @@ async def main():
     teacher_text = tb.get_teacher_gift_announcement_text()
     assert "ПОДАРОК ПРЕПОДАВАТЕЛЮ" in teacher_text and "999 ₽" in teacher_text
     assert callback_data(tb.get_teacher_gift_announcement_keyboard()) == ["mugs_model:4"]
-    assert "admin_announce_teacher_mug_confirm" in callback_data(tb.get_admin_announcements_keyboard())
+    assert "admin_announce_teacher_mug_confirm" not in callback_data(tb.get_admin_announcements_keyboard())
     teacher_preview = FakeCallback("admin_announce_teacher_mug_confirm", uid=ADMIN_ID)
     photos_before_preview = len(sent_photos)
     await tb.cb_admin_announce_teacher_mug_confirm(teacher_preview)
@@ -302,3 +304,4 @@ async def main():
 
 
 asyncio.run(main())
+
