@@ -12,7 +12,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 import telegram_bot as tb
 from services.badge_orders import (
-    BULK_THRESHOLD, BULK_UNIT_PRICE_RUB, FIELDS, RECIPIENT_ID, ROLES, SCHEMA_VERSION, SPECIALTIES, UNIT_PRICE_RUB, customer_url, helper_url,
+    BULK_THRESHOLD, BULK_UNIT_PRICE_RUB, FIELDS, RECIPIENT_ID, RECIPIENT_USERNAME, ROLES, SCHEMA_VERSION, SPECIALTIES, UNIT_PRICE_RUB, customer_url, helper_url,
     order_template, preview, price_quote, pricing_text, validate_value, validated_details,
 )
 
@@ -60,6 +60,8 @@ def keyboard(*rows):
 
 def menu_keyboard(uid):
     builder = keyboard(("📝 Заполнить данные", "badges:start"))
+    builder.row(InlineKeyboardButton(text=f"👥 Заказать на группу ({BULK_THRESHOLD} шт.)",
+                                     url=f"https://t.me/{RECIPIENT_USERNAME}"))
     if draft_for(uid) and not draft_for(uid).get("submitted"):
         builder.row(InlineKeyboardButton(text="Продолжить заполнение", callback_data="badges:resume"))
     builder.row(InlineKeyboardButton(text="📋 Мои заявки", callback_data="badges:mine"))
@@ -80,7 +82,8 @@ async def show_menu(message, uid):
         f"<b>Стоимость</b>\n1–{BULK_THRESHOLD - 1} шт. — {UNIT_PRICE_RUB} ₽ за штуку\n"
         f"От {BULK_THRESHOLD} шт. — {BULK_UNIT_PRICE_RUB} ₽ за каждую\n\n"
         "После проверки данных можно оплатить заказ через СБП CodeePay. "
-        "Макет и получение согласовываются с @vmeda_helper.",
+        "Макет и получение согласовываются с @vmeda_helper.\n\n"
+        "👥 Заказ на группу — сразу в чат @vmeda_helper, без заполнения формы.",
         parse_mode="HTML", reply_markup=menu_keyboard(uid),
     )
 
