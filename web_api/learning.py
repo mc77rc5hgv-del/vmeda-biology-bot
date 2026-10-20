@@ -27,6 +27,7 @@ from .exam_journal import (
 
 STUDY_TIMEZONE = ZoneInfo("Europe/Moscow")
 
+_connection_init_lock = threading.Lock()
 _backup_lock = threading.Lock()
 _backed_up_paths: set[str] = set()
 
@@ -41,6 +42,13 @@ def _db_path() -> str:
 
 
 def _connect() -> sqlite3.Connection:
+    # Initial WAL conversion needs an exclusive lock. Serialize connection setup,
+    # not the transactions callers perform after obtaining their connection.
+    with _connection_init_lock:
+        return _open_connection()
+
+
+def _open_connection() -> sqlite3.Connection:
     path = _db_path()
     if os.environ.get('BOT_SYNC_MODE') == 'gateway' and os.environ.get('SYNC_REQUIRE_EXISTING_DB', '1') == '1' and not os.path.isfile(path):
         raise RuntimeError('Существующая база обучения отсутствует; создание пустой базы запрещено')

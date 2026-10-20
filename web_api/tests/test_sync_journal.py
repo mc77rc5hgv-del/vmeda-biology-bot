@@ -55,15 +55,18 @@ def test_common_bot_and_miniapp_rating_preserves_baseline():
     assert learning.get_dashboard(123)['xp'] == 40
 
 
-def test_histology_signed_attempt_is_bound_and_survives_registry_loss():
+def test_histology_signed_attempt_is_bound_and_survives_registry_loss(monkeypatch, tmp_path):
     token = attempt_tokens.issue(123, 'd1_01', 'all')
     attempt_tokens.verify(token, 123, 'd1_01', 'all')
     for uid, material, scope in [(456, 'd1_01', 'all'), (123, 'd1_02', 'all'), (123, 'd1_01', 'mistakes')]:
         with pytest.raises(HTTPException):
             attempt_tokens.verify(token, uid, material, scope)
-    with ThreadPoolExecutor(max_workers=4) as workers:
-        list(workers.map(lambda _: learning.record_histology_attempt(123, 'd1_01', True, 'all', token), range(8)))
-    assert learning.get_histology_stats(123, 71)['attempts'] == 1
+    # Exercise simultaneous cold opens repeatedly, not just a preinitialized database.
+    for index in range(8):
+        monkeypatch.setenv('MINIAPP_LEARNING_DB', str(tmp_path / f'cold-{index}.sqlite3'))
+        with ThreadPoolExecutor(max_workers=4) as workers:
+            list(workers.map(lambda _: learning.record_histology_attempt(123, 'd1_01', True, 'all', token), range(8)))
+        assert learning.get_histology_stats(123, 71)['attempts'] == 1
     with pytest.raises(HTTPException):
         learning.record_histology_attempt(123, 'd1_01', False, 'all', token)
 
