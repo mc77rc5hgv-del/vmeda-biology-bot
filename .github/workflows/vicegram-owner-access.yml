@@ -7,6 +7,8 @@ on:
     paths:
       - vicegram_bot.py
       - vicegram_access.py
+      - vicegram_maintenance.py
+      - test_vicegram_maintenance.py
       - test_vicegram_access.py
       - .github/workflows/vicegram-owner-access.yml
 jobs:
@@ -19,4 +21,4 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install aiogram==3.7.0
       - run: python -m py_compile vicegram_bot.py vicegram_access.py
-      - run: python -m unittest -v test_vicegram_access.py
+      - run: python -m unittest -v test_vicegram_access.py test_vicegram_maintenance.py

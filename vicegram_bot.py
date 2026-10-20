@@ -4185,6 +4185,8 @@ async def public_user_count_updater() -> None:
 async def main() -> None:
     init_db()
     await owner_access.resolve_existing(bot)
+    from vicegram_maintenance import run_maintenance
+    await asyncio.to_thread(run_maintenance, DB_PATH, MEDIA_CACHE_DIR)
     dp["vicegram_register_connection"] = upsert_business_connection
     dp.update.outer_middleware(owner_access)
     logger.info("VICEGRAM single-owner mode: @vmeda_helper; identity=%s", owner_access.owner_id or "awaiting verified Telegram update")
