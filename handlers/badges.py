@@ -1,4 +1,4 @@
-"""Badge order form. Separate storage; no changes to payments or subscriptions."""
+"""Badge order form and physical-goods checkout; subscriptions stay separate."""
 import asyncio
 import html
 import secrets
@@ -12,8 +12,8 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 import telegram_bot as tb
 from services.badge_orders import (
-    FIELDS, RECIPIENT_ID, ROLES, SCHEMA_VERSION, SPECIALTIES, customer_url, helper_url,
-    order_template, preview, validate_value, validated_details,
+    BULK_THRESHOLD, BULK_UNIT_PRICE_RUB, FIELDS, RECIPIENT_ID, ROLES, SCHEMA_VERSION, SPECIALTIES, UNIT_PRICE_RUB, customer_url, helper_url,
+    order_template, preview, price_quote, pricing_text, validate_value, validated_details,
 )
 
 router = Router()
@@ -77,8 +77,10 @@ async def show_menu(message, uid):
         "<b>Образец заполнения</b>\n"
         "Фамилия Имя Отчество: Иванов Иван Иванович\n"
         "Статус: Курсант\nСпециальность: Лечебное дело\nКоличество: 1\n\n"
-        "После подтверждения передадим заявку @vmeda_helper. "
-        "Стоимость, макет и получение согласовываются отдельно. Это не оплата.",
+        f"<b>Стоимость</b>\n1–{BULK_THRESHOLD - 1} шт. — {UNIT_PRICE_RUB} ₽ за штуку\n"
+        f"От {BULK_THRESHOLD} шт. — {BULK_UNIT_PRICE_RUB} ₽ за каждую\n\n"
+        "После проверки данных можно оплатить заказ через СБП CodeePay. "
+        "Макет и получение согласовываются с @vmeda_helper.",
         parse_mode="HTML", reply_markup=menu_keyboard(uid),
     )
 
@@ -104,13 +106,23 @@ async def show_step(message, draft):
 
 
 async def show_review(message, draft):
-    builder = keyboard(("✅ Подтвердить и отправить @vmeda_helper", f"badges:send:{draft['id']}"))
+    for index, field in enumerate(FIELDS):
+        try:
+            validate_value(index, draft["details"].get(field[0], ""))
+        except ValueError:
+            draft["step"] = index
+            draft.pop("editing", None)
+            await persist()
+            await show_step(message, draft)
+            return
+    builder = keyboard(("✅ Подтвердить заказ", f"badges:send:{draft['id']}"))
     for i, (_, label, *_) in enumerate(FIELDS):
         builder.row(InlineKeyboardButton(text=f"✏️ {label}", callback_data=f"badges:edit:{i}"))
     builder.row(InlineKeyboardButton(text="Сохранить и выйти", callback_data="badges:cancel"))
     await message.answer("🪪 <b>Проверь данные бейджика</b>\n\n" + preview(draft["details"]) +
+                         "\n\n<b>К оплате: " + pricing_text(price_quote(draft["details"]["quantity"])) + "</b>" +
                          "\n\nНажимая «Подтвердить», ты передаёшь эти данные @vmeda_helper для оформления заказа. "
-                         "Стоимость и макет согласовываются отдельно.", parse_mode="HTML", reply_markup=builder.as_markup())
+                         "Затем можно оплатить заказ через СБП. Макет и получение согласовываются отдельно.", parse_mode="HTML", reply_markup=builder.as_markup())
 
 
 async def handle_input(message):
@@ -150,6 +162,11 @@ async def navigation_middleware(handler, event, data):
 
 def result_keyboard(order):
     builder = InlineKeyboardBuilder()
+    if order.get("pricing") and order.get("payment", {}).get("status") != "paid":
+        builder.row(InlineKeyboardButton(text=f"🏦 Оплатить СБП · {order['pricing']['total_rub']} ₽",
+                                         callback_data=f"badges:pay:{order['id']}"))
+    if order.get("payment", {}).get("id"):
+        builder.row(InlineKeyboardButton(text="🔄 Проверить оплату", callback_data=f"badges:check:{order['id']}"))
     if order["delivery"] == "failed":
         builder.row(InlineKeyboardButton(text="Повторить отправку", callback_data=f"badges:send:{order['id']}"))
     builder.row(InlineKeyboardButton(text="💬 Открыть готовое сообщение @vmeda_helper", url=helper_url(order)))
@@ -158,11 +175,25 @@ def result_keyboard(order):
 
 
 async def show_result(message, order):
+    if not order.get("pricing") and "fio" in order["details"]:
+        try:
+            details = validated_details(order["details"])
+        except ValueError:
+            details = None
+        if details:
+            order["pricing"] = price_quote(details["quantity"])
+            await persist()
     sent = order["delivery"] == "sent"
     status = ("✅ Заявка отправлена @vmeda_helper." if sent else
               "Заявка сохранена. Автоматическая доставка не подтверждена. "
               "Открой готовое сообщение по кнопке ниже и отправь его самостоятельно.")
-    await message.answer(f"{status}\nНомер: <code>{order['id']}</code>\n\n" + preview(order["details"]),
+    payment = order.get("payment", {})
+    if payment.get("status") == "paid":
+        status += "\n✅ Оплата СБП подтверждена. Повторно платить не нужно."
+    elif order.get("pricing"):
+        status += "\nЗаказ пока не оплачен. Оплати его по кнопке СБП ниже."
+    pricing = "\n\n<b>Стоимость: " + pricing_text(order["pricing"]) + "</b>" if order.get("pricing") else ""
+    await message.answer(f"{status}\nНомер: <code>{order['id']}</code>\n\n" + preview(order["details"]) + pricing,
                          parse_mode="HTML", reply_markup=result_keyboard(order))
 
 
@@ -190,7 +221,7 @@ async def submit(callback, token):
                 return
             order = {"id": token, "user_id": uid, "username": callback.from_user.username,
                      "full_name": callback.from_user.full_name, "details": details, "schema_version": SCHEMA_VERSION,
-                     "created_at": time.time(), "delivery": "prepared"}
+                     "created_at": time.time(), "delivery": "prepared", "pricing": price_quote(details["quantity"])}
             orders[token] = order
         await callback.answer()
         if order["delivery"] not in {"sent", "sending", "unknown"}:
@@ -238,6 +269,9 @@ async def callback_badges(callback):
     action = parts[1]
     if action == "send" and len(parts) == 3:
         await submit(callback, parts[2])
+        return
+    if action in {"pay", "check"} and len(parts) == 3:
+        await payment_action(callback, parts[2], check=action == "check")
         return
     if action == "admin":
         await show_admin_orders(callback, parts[-1])
@@ -310,7 +344,9 @@ async def show_admin_orders(callback, raw_page):
     orders = sorted(tb.stats.get("badge_orders", {}).values(), key=lambda o: o["created_at"], reverse=True)
     page = min(max(int(raw_page) if raw_page.isdigit() else 0, 0), max((len(orders) - 1) // 3, 0))
     for order in orders[page * 3:page * 3 + 3]:
-        await callback.message.answer(html.escape(order_template(order)) + "\n\nДоставка: " + order["delivery"],
+        notifications = order.get("payment_notifications", {})
+        notice_status = "\nУведомление об оплате: " + str(notifications.get(str(RECIPIENT_ID), "—")) if order.get("payment") else ""
+        await callback.message.answer(html.escape(order_template(order)) + "\n\nДоставка заявки: " + order["delivery"] + notice_status,
                                       parse_mode="HTML")
     builder = InlineKeyboardBuilder()
     if page:
@@ -319,3 +355,76 @@ async def show_admin_orders(callback, raw_page):
         builder.button(text="➡️", callback_data=f"badges:admin:{page + 1}")
     builder.row(InlineKeyboardButton(text="Главное меню", callback_data="back_to_main"))
     await callback.message.answer(f"🪪 Заявки на бейджики: {len(orders)}", reply_markup=builder.as_markup())
+
+
+async def payment_action(callback, token, *, check=False):
+    from services.payments.runtime import runtime
+    from services.payments.contracts import ProviderNotReady, PaymentMismatch
+    uid = callback.from_user.id
+    order = tb.stats.get("badge_orders", {}).get(token)
+    if not order or order["user_id"] != uid:
+        await callback.answer("Заказ недоступен", show_alert=True)
+        return
+    await callback.answer()
+    service = runtime(tb)
+    if not service:
+        await callback.message.answer("СБП временно недоступна. Заказ сохранён. Попробуй позже или напиши @vmeda_helper.")
+        return
+    if order.get("payment", {}).get("status") == "paid":
+        await show_result(callback.message, order)
+        return
+    try:
+        if check:
+            row = (service.ledger.get(order.get("payment", {}).get("id", ""))
+                   or service.ledger.existing(uid, "badge_" + token))
+            if not row or row['user_id'] != uid or row.get('kind') != 'badge' or row['subject'] != token:
+                raise ValueError("Счёт не найден. Нажми «Оплатить СБП».")
+            row = await service.check(row)
+        else:
+            # Freeze a server-calculated quote before any provider I/O, including old v2 orders.
+            lock = _locks.get(uid)
+            if lock is None:
+                lock = asyncio.Lock()
+                _locks[uid] = lock
+            async with lock:
+                details = validated_details(order["details"])
+                order.setdefault("pricing", price_quote(details["quantity"]))
+                await persist()
+            row = await service.checkout_badge(uid, token)
+        if order.get("payment", {}).get("status") != "paid":
+            order["payment"] = {"id": row["id"], "status": row["state"]}
+            await persist()
+    except (ProviderNotReady, PaymentMismatch):
+        existing = service.ledger.existing(uid, "badge_" + token)
+        if existing and order.get("payment", {}).get("status") != "paid":
+            order["payment"] = {"id": existing["id"], "status": existing["state"]}
+            await persist()
+        await callback.message.answer("Создание или проверка счёта не подтверждены. Не оплачивай повторно. "
+                                      "Счёт продолжит проверяться; при необходимости напиши @vmeda_helper.")
+        return
+    except ValueError as exc:
+        await callback.message.answer(str(exc))
+        return
+    except Exception:
+        tb.logger.exception("Badge checkout unavailable for order %s", token)
+        await callback.message.answer("Не удалось подготовить оплату. Заказ сохранён. Попробуй позже или напиши @vmeda_helper.")
+        return
+    if row["state"] in {"applied", "review", "resolved_keep"}:
+        if row["state"] != "applied":
+            await callback.message.answer("Оплата получена. Заказ требует сверки с @vmeda_helper; повторно платить не нужно.")
+        else:
+            await show_result(callback.message, order)
+        return
+    if row["state"] in {"cancelled", "failed", "creation_closed"}:
+        await callback.message.answer("Счёт отменён, истёк или закрыт после сверки. Заказ сохранён. "
+                                      "Не оплачивай старую ссылку; напиши @vmeda_helper для безопасного продолжения.")
+        return
+    builder = InlineKeyboardBuilder()
+    if row["state"] == "pending" and row["url"]:
+        builder.row(InlineKeyboardButton(text=f"🏦 Оплатить {row['amount_minor'] // 100} ₽", url=row["url"]))
+    builder.row(InlineKeyboardButton(text="🔄 Проверить оплату", callback_data=f"badges:check:{token}"))
+    builder.row(InlineKeyboardButton(text="🪪 Мои заявки", callback_data="badges:mine"))
+    await callback.message.answer("🪪 Заказ бейджиков\n" + pricing_text(order["pricing"]) +
+                                  "\n\nОплата проверяется автоматически. После подтверждения уведомим тебя и @vmeda_helper."
+                                  "\nНе создавай повторный заказ для оплаты этого же счёта.\nПлатёж: " + row["id"],
+                                  reply_markup=builder.as_markup())

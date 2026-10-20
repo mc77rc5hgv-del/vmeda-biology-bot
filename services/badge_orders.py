@@ -17,6 +17,9 @@ LEGACY_FIELDS = (
 
 
 SCHEMA_VERSION = 2
+UNIT_PRICE_RUB = 530
+BULK_UNIT_PRICE_RUB = 430
+BULK_THRESHOLD = 15
 SPECIALTIES = ("Лечебное дело", "Стоматология", "Медико-профилактическое дело")
 ROLES = ("Студент", "Курсант")
 FIELDS = (
@@ -64,7 +67,14 @@ def order_template(order):
     lines += ["", f"Заказчик: {order.get('full_name', '')}", f"Telegram ID: {order['user_id']}"]
     if order.get("username"):
         lines.append(f"Telegram: @{order['username']}")
-    lines.append("Стоимость, макет и получение — по согласованию. Заявка не подтверждает оплату.")
+    if order.get("pricing"):
+        lines.append("Стоимость: " + pricing_text(order["pricing"]))
+    payment = order.get("payment", {})
+    if payment.get("status") == "paid":
+        lines += ["ОПЛАЧЕНО · СБП CodeePay", f"Платёж: {payment['id']}"]
+        lines.append("Макет и получение согласовываются отдельно.")
+    else:
+        lines.append("Макет и получение согласовываются отдельно. Заявка не подтверждает оплату.")
     return "\n".join(lines)
 
 
@@ -80,3 +90,13 @@ def customer_url(order):
 def preview(details):
     return "\n".join(f"<b>{html.escape(label)}:</b> {html.escape(str(details.get(key) or 'не указывать'))}"
                      for key, label, *_ in display_fields(details))
+
+
+def price_quote(quantity):
+    count = int(validate_value(3, str(quantity)))
+    unit = BULK_UNIT_PRICE_RUB if count >= BULK_THRESHOLD else UNIT_PRICE_RUB
+    return {"quantity": count, "unit_price_rub": unit, "total_rub": count * unit}
+
+
+def pricing_text(pricing):
+    return f"{pricing['quantity']} шт. × {pricing['unit_price_rub']} ₽ = {pricing['total_rub']} ₽"

@@ -4119,7 +4119,10 @@ async def cb_sbp_history(callback: CallbackQuery):
     builder = InlineKeyboardBuilder()
     for row in rows:
         label = 'оплачено, подписка активирована' if row['state'] == 'applied' else 'оплачено, проверка поддержки' if row['state'] == 'review' else 'оплачено, решение согласовано' if row['state'] == 'resolved_keep' else 'счёт не создан, можно повторить' if row['state'] == 'creation_rejected' else 'создание сверено поддержкой' if row['state'] == 'creation_closed' else 'не оплачен или отменён' if row['state'] in ('failed', 'cancelled') else 'счёт требует проверки' if row['state'] == 'creation_unknown' else 'ожидает оплаты'
-        lines.append(f"\n{row['amount_minor']/100:g}₽ · тариф {row['tier_id']} · {label}\n{row['id']}")
+        product = 'бейджики' if row.get('kind') == 'badge' else f"тариф {row['tier_id']}"
+        if row.get('kind') == 'badge' and row['state'] == 'applied':
+            label = 'оплачено, заказ подтверждён'
+        lines.append(f"\n{row['amount_minor']/100:g}₽ · {product} · {label}\n{row['id']}")
         if row['state'] == 'pending' and row['url']:
             builder.button(text=f"СБП {row['amount_minor']/100:g}₽ · продолжить", url=row['url'])
             builder.button(text="Проверить " + row['id'][-6:], callback_data='check_sbp:' + row['id'])
@@ -4139,7 +4142,8 @@ async def cb_check_sbp(callback: CallbackQuery):
     await callback.answer()
     try:
         row = await service.check(row)
-        text = "✅ Подписка активирована в боте и miniapp." if row['state'] == 'applied' else "Оплата получена; решение по доступу через @vmeda_helper." if row['state'] in ('review', 'resolved_keep') else "Оплата ещё не подтверждена. Продолжаем проверять автоматически."
+        success = "✅ Оплата бейджиков подтверждена." if row.get('kind') == 'badge' else "✅ Подписка активирована в боте и miniapp."
+        text = success if row['state'] == 'applied' else "Оплата получена; решение по доступу через @vmeda_helper." if row['state'] in ('review', 'resolved_keep') else "Оплата ещё не подтверждена. Продолжаем проверять автоматически."
     except Exception:
         text = "Провайдер пока недоступен. Проверка продолжится автоматически; повторно оплачивать этот счёт не нужно."
     await callback.message.answer(text)

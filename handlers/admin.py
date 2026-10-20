@@ -2088,11 +2088,12 @@ async def cb_admin_sbp(callback: CallbackQuery):
         offset = max(0, int(callback.data.split(":")[1]))
     except ValueError:
         return
-    labels = {'pending': 'ожидает оплаты', 'confirmed': 'оплачен, выдача доступа', 'applied': 'подписка активирована', 'review': 'оплачен, нужна проверка', 'creating': 'создание', 'creation_unknown': 'проверить создание', 'creation_rejected': 'создание отклонено', 'creation_closed': 'создание сверено', 'resolved_keep': 'оплачено, решение согласовано'}
+    labels = {'pending': 'ожидает оплаты', 'confirmed': 'оплачен, выдача доступа', 'applied': 'оплачено, завершено', 'review': 'оплачен, нужна проверка', 'creating': 'создание', 'creation_unknown': 'проверить создание', 'creation_rejected': 'создание отклонено', 'creation_closed': 'создание сверено', 'resolved_keep': 'оплачено, решение согласовано'}
     lines = ['<b>🏦 СБП codeePay</b>', 'Суммы и комиссии подтверждаются API провайдера.']
     for item in service.ledger.summary()[:8]:
         paid = item['state'] in ('applied', 'review', 'confirmed', 'resolved_keep')
-        lines.append(f"{item['month']} · {labels.get(item['state'], item['state'])}: {item['count']} сч. · {item['amount_minor']/100:g}₽")
+        product = 'бейджики' if item.get('kind') == 'badge' else 'подписки'
+        lines.append(f"{item['month']} · {product} · {labels.get(item['state'], item['state'])}: {item['count']} сч. · {item['amount_minor']/100:g}₽")
         if paid:
             lines.append(f"Зачислено: {(item['net_minor'] or 0)/100:g}₽ · комиссия: {(item['fee_minor'] or 0)/100:g}₽")
     rows = service.ledger.history(limit=8, offset=offset)
@@ -2100,7 +2101,8 @@ async def cb_admin_sbp(callback: CallbackQuery):
     for row in rows:
         username = '@' + escape(row['username']) if row['username'] else 'без username'
         created = tb.datetime.fromtimestamp(row['created'], tb.APP_TIMEZONE).strftime('%d.%m %H:%M')
-        lines.append(f"\n{created} · {row['amount_minor']/100:g}₽ · тариф {row['tier_id']} · {row['source']}\n{row['user_id']} {username}\n{labels.get(row['state'], row['state'])}\n<code>{row['id']}</code>")
+        product = f"бейджики · заказ {row['subject']}" if row.get('kind') == 'badge' else f"тариф {row['tier_id']}"
+        lines.append(f"\n{created} · {row['amount_minor']/100:g}₽ · {product} · {row['source']}\n{row['user_id']} {username}\n{labels.get(row['state'], row['state'])}\n<code>{row['id']}</code>")
     builder = InlineKeyboardBuilder()
     for row in rows:
         if row['state'] in ('creation_unknown', 'review'):

@@ -26,6 +26,7 @@ class BillingRuntime:
         self.tb, self.ledger, self.provider = tb, ledger, provider
         self._lock = asyncio.Lock()
         self._create_lock = asyncio.Lock()
+        self._badge_notice_lock = asyncio.Lock()
         self._poll_gate = asyncio.Semaphore(2)
         self._create_gate = asyncio.Semaphore(4)
         self._checking = set()
@@ -49,7 +50,10 @@ class BillingRuntime:
 
     @staticmethod
     def order(row):
-        return PaymentOrder(row['id'], row['user_id'], row['tier_id'], row['subject'], 'codeepay', row['amount_minor'], 'RUB', row['proof'])
+        return PaymentOrder(row['id'], row['user_id'], row['tier_id'], row['subject'], 'codeepay', row['amount_minor'], 'RUB', row['proof'], row.get('kind', 'subscription'))
+
+    async def checkout_badge(self, user_id, token):
+        return await self.checkout(user_id, 0, token, 'badge_' + token, 'bot_badge')
 
     async def checkout(self, user_id, tier_id, subject, request_key, source):
         # Reject BEFORE reserving an invoice; no uncertain order is left behind.
@@ -63,11 +67,13 @@ class BillingRuntime:
 
     async def _checkout(self, user_id, tier_id, subject, request_key, source):
         from web_api.subscriptions import purchase_reason, validate_tier
+        kind = 'badge' if tier_id == 0 and source == 'bot_badge' else 'subscription'
         # Reserve durably under the lock; never hold a global lock across provider I/O.
         async with self._create_lock:
             existing = self.ledger.existing(user_id, request_key)
             if existing:
-                if existing['tier_id'] != tier_id or existing['subject'] != subject:
+                if (existing['tier_id'] != tier_id or existing['subject'] != subject
+                        or existing.get('kind', 'subscription') != kind):
                     raise ValueError('Ключ запроса уже связан с другим тарифом')
                 if existing['state'] == 'pending' and existing['url']:
                     return existing
@@ -77,14 +83,18 @@ class BillingRuntime:
                     raise ProviderNotReady('Счёт требует сверки. Проверь историю или напиши @vmeda_helper. Повторно не оплачивай.')
                 if existing['state'] != 'creation_rejected':
                     raise ValueError('Этот счёт завершён. Обнови историю и создай новый при необходимости.')
-            cfg = validate_tier(self.tb, tier_id, subject)
-            reason = purchase_reason(self.tb, user_id, tier_id, subject)
-            if reason:
-                raise ValueError(reason)
+            if kind == 'badge':
+                from .badges import checkout_quote
+                cfg = {'price_rub': checkout_quote(self.tb, user_id, subject)['total_rub']}
+            else:
+                cfg = validate_tier(self.tb, tier_id, subject)
+                reason = purchase_reason(self.tb, user_id, tier_id, subject)
+                if reason:
+                    raise ValueError(reason)
             if not self.provider.public_status()['available']:
                 raise ProviderNotReady('СБП временно недоступна')
             for previous in self.ledger.history(user_id, limit=50):
-                if previous['state'] == 'pending' and previous['tier_id'] == tier_id and previous['subject'] == subject and previous['created'] > time.time() - 900 and previous['url']:
+                if previous.get('kind', 'subscription') == kind and previous['state'] == 'pending' and previous['tier_id'] == tier_id and previous['subject'] == subject and previous['created'] > time.time() - 900 and previous['url']:
                     return previous
             if self.ledger.uncertain_creation(user_id):
                 raise ProviderNotReady('Предыдущий счёт требует сверки с codeePay. Напиши @vmeda_helper перед повторной оплатой.')
@@ -99,7 +109,7 @@ class BillingRuntime:
             else:
                 row = self.ledger.create({'id': 'sbp_' + secrets.token_hex(16), 'user_id': user_id, 'request_key': request_key,
                      'tier_id': tier_id, 'subject': subject, 'amount_minor': price * 100, 'proof': secrets.token_hex(24),
-                     'source': source, 'username': self.tb.stats.get('user_username', {}).get(str(user_id))})
+                     'source': source, 'kind': kind, 'username': self.tb.stats.get('user_username', {}).get(str(user_id))})
         try:
             async with self._create_gate:
                 session = await asyncio.wait_for(self.provider.create_checkout(self.order(row)), timeout=self._checkout_deadline)
@@ -176,6 +186,14 @@ class BillingRuntime:
             if not isinstance(provider_id, str) or not 1 <= len(provider_id) <= 256:
                 raise ValueError('Укажи ID счёта из кабинета codeePay')
             return await self.recover_provider(provider_id, expected_order=order_id, actor=actor, note=note)
+        if action == 'apply_review' and row.get('kind') == 'badge':
+            if not row['provider_id']:
+                raise ValueError('Сначала сверь счёт провайдера')
+            async with self._poll_gate:
+                payment = await self.fetch_provider(row['provider_id'])
+            from .badges import settle_badge
+            await settle_badge(self, row, payment, resolution={'actor': actor, 'action': action, 'note': note.strip(), 'at': time.time()})
+            return self.ledger.get(order_id)
         if action in ('apply_review', 'keep_existing'):
             if not row['provider_id']:
                 raise ValueError('Сначала сверь счёт провайдера')
@@ -243,6 +261,10 @@ class BillingRuntime:
             self._checking.discard(row['id'])
 
     async def settle(self, row, payment):
+        if row.get('kind') == 'badge':
+            from .badges import settle_badge
+            await settle_badge(self, row, payment)
+            return
         from html import escape
         from services.payment_notifications import buyer_label
         from web_api.subscriptions import _persist, grant_preserving_history, purchase_reason
@@ -321,6 +343,8 @@ class BillingRuntime:
                         self.tb.logger.warning('SBP provider readiness probe failed; pending verification continues')
                     last_probe = time.time()
                     self.last_poll_progress_at = last_probe
+                from .badges import flush_notifications
+                await flush_notifications(self)
                 rows = self.ledger.pending()
                 # Do not put the entire background batch ahead of user/admin checks.
                 for offset in range(0, len(rows), 2):

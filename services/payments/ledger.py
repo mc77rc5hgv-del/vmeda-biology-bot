@@ -29,6 +29,11 @@ class BillingLedger:
               state TEXT NOT NULL, details TEXT NOT NULL);
             ''')
 
+            # Additive migration: the verified backup above retains every original row.
+            columns = {row['name'] for row in db.execute('PRAGMA table_info(orders)')}
+            if 'kind' not in columns:
+                db.execute("ALTER TABLE orders ADD COLUMN kind TEXT NOT NULL DEFAULT 'subscription'")
+
         os.chmod(self.path, 0o600)
 
     def backup(self):
@@ -80,8 +85,8 @@ class BillingLedger:
     def create(self, row):
         now = time.time()
         with self.connect() as db:
-            db.execute('INSERT INTO orders(id,user_id,request_key,tier_id,subject,amount_minor,proof,source,username,created,updated,state) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
-                       tuple(row[k] for k in ('id', 'user_id', 'request_key', 'tier_id', 'subject', 'amount_minor', 'proof', 'source', 'username')) + (now, now, 'creating'))
+            db.execute('INSERT INTO orders(id,user_id,request_key,tier_id,subject,amount_minor,proof,source,username,created,updated,state,kind) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                       tuple(row[k] for k in ('id', 'user_id', 'request_key', 'tier_id', 'subject', 'amount_minor', 'proof', 'source', 'username')) + (now, now, 'creating', row.get('kind', 'subscription')))
             db.execute('INSERT INTO events(order_id,at,state,details) VALUES(?,?,?,?)', (row['id'], now, 'creating', '{}'))
         return self.get(row['id'])
 
@@ -140,10 +145,10 @@ class BillingLedger:
     def summary(self):
         with self.connect() as db:
             return [dict(row) for row in db.execute('''SELECT strftime('%Y-%m', created+10800, 'unixepoch') AS month,
-                      state, count(*) AS count, sum(amount_minor) AS amount_minor,
+                      kind, state, count(*) AS count, sum(amount_minor) AS amount_minor,
                       sum(net_minor) AS net_minor, sum(fee_minor) AS fee_minor
-                      FROM orders GROUP BY month,state ORDER BY month DESC,state''')]
+                      FROM orders GROUP BY month,kind,state ORDER BY month DESC,kind,state''')]
 
     @staticmethod
     def public(row):
-        return {key: row[key] for key in ('id', 'tier_id', 'subject', 'amount_minor', 'source', 'created', 'state', 'reason', 'net_minor', 'fee_minor', 'url')}
+        return {'kind': row.get('kind', 'subscription'), **{key: row[key] for key in ('id', 'tier_id', 'subject', 'amount_minor', 'source', 'created', 'state', 'reason', 'net_minor', 'fee_minor', 'url')}}

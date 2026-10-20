@@ -34,11 +34,15 @@ class PaymentOrder:
     amount_minor: int
     currency: str
     idempotency_key: str
+    kind: str = "subscription"
 
     def __post_init__(self):
         if any(not isinstance(value, str) or not value.strip() for value in (self.order_id, self.idempotency_key, self.provider)):
             raise ValueError('Order identity is required')
-        if type(self.user_id) is not int or self.user_id <= 0 or type(self.tier_id) is not int or self.tier_id <= 0:
+        if (type(self.user_id) is not int or self.user_id <= 0 or type(self.tier_id) is not int
+                or self.kind not in ('subscription', 'badge')
+                or (self.tier_id <= 0 if self.kind == 'subscription' else self.tier_id != 0)
+                or self.kind == 'badge' and not self.subject):
             raise ValueError('User and tier must be positive integers')
         if type(self.amount_minor) is not int or self.amount_minor <= 0:
             raise ValueError('Amount must be a positive integer in minor currency units')

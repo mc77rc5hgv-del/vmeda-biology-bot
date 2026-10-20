@@ -65,7 +65,7 @@ class CodeePayProvider:
         if self.notification_url:
             metadata['notification_url'] = self.notification_url
         data = await self._post('/initiate_payment', {'method_slug': 'sbp', 'amount': order.amount_minor / 100,
-                 'description': f'VMEDA: подписка {order.tier_id}', 'shop_name': 'VMEDA',
+                 'description': ('VMEDA: медицинские бейджики' if order.kind == 'badge' else f'VMEDA: подписка {order.tier_id}'), 'shop_name': 'VMEDA',
                  'metadata': metadata})
         url = urlsplit(data.get('url', ''))
         if (url.scheme != 'https' or url.hostname not in {'codeepay.ru', 'payment.codeepay.xyz'} or url.username or url.password

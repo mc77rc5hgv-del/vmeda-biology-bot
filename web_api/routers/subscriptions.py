@@ -97,7 +97,7 @@ async def payment(payment_id: str, user_id: int = Depends(get_current_user_id), 
         from services.payments.runtime import runtime
         service = runtime(tb)
         row = service.ledger.get(payment_id) if service else None
-        if not row or row['user_id'] != user_id:
+        if not row or row['user_id'] != user_id or row.get('kind', 'subscription') != 'subscription':
             raise HTTPException(status_code=404, detail='Платёж не найден')
         return {'status': 'review' if row['state'] == 'resolved_keep' else row['state'] if row['state'] in ('applied', 'review', 'failed', 'cancelled') else 'processing', 'tier_id': row['tier_id']}
     if not re.fullmatch(r'[a-f0-9]{12}', payment_id):
@@ -133,7 +133,7 @@ async def sbp(body: SbpRequest, user_id: int = Depends(get_current_user_id), tb=
 async def history(user_id: int = Depends(get_current_user_id), tb=Depends(get_fresh_bot_module)):
     from services.payments.runtime import runtime
     service = runtime(tb)
-    return {'payments': [service.ledger.public(row) for row in service.ledger.history(user_id)] if service else []}
+    return {'payments': [service.ledger.public(row) for row in service.ledger.history(user_id) if row.get('kind', 'subscription') == 'subscription'] if service else []}
 
 
 @router.get('/admin/sbp')

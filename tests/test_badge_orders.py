@@ -130,6 +130,35 @@ async def main():
     assert "не подтверждает оплату" in args[1]
     order = tb.stats["badge_orders"][token]
     assert order["delivery"] == "sent"
+    assert order["pricing"]["total_rub"] == 1060
+    assert "badges:pay:" in str(b.result_keyboard(order))
+    # Checkout is tied to this persisted order, never to client-supplied amounts.
+    from services.payments.ledger import BillingLedger
+    import tempfile
+    from pathlib import Path
+    ledger = BillingLedger(Path(tempfile.mkdtemp()) / "billing.sqlite3")
+    async def checkout_badge(uid, order_token):
+        assert uid == order['user_id'] and order_token == token
+        row = ledger.existing(uid, "badge_" + token)
+        if not row:
+            row = ledger.create(dict(id='sbp_' + 'a' * 32, user_id=uid, request_key="badge_" + token,
+                                     tier_id=0, subject=token, amount_minor=106000, proof='synthetic',
+                                     source='bot_badge', username=None, kind='badge'))
+            ledger.update(row['id'], 'pending', provider_id='provider', url='https://payment.codeepay.xyz/transfer/test')
+        return ledger.get(row['id'])
+    original_runtime = getattr(tb, '_billing_runtime', None)
+    tb._billing_runtime = SimpleNamespace(ledger=ledger, checkout_badge=AsyncMock(side_effect=checkout_badge),
+                                         check=AsyncMock(side_effect=lambda row: row))
+    checkout = Callback("pay:" + token)
+    await b.callback_badges(checkout)
+    assert "1060 ₽" in str(checkout.message.sent)
+    assert "https://payment.codeepay.xyz/transfer/test" in str(checkout.message.sent)
+    forged = Callback("pay:" + token, User(999999))
+    await b.callback_badges(forged)
+    assert tb._billing_runtime.checkout_badge.await_count == 1
+    await b.callback_badges(Callback("check:" + token))
+    tb._billing_runtime.check.assert_awaited_once()
+    tb._billing_runtime = original_runtime
     assert set(order["details"]) == {"fio", "role", "specialty", "quantity"}
     assert "Организация" not in order_template(order) and "Контакт для связи" not in order_template(order)
     assert not b.has_active_draft(User().id)
