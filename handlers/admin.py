@@ -180,6 +180,7 @@ def get_admin_announcements_keyboard(back_callback: str = "admin_panel"):
     cb_admin_announcements_menu, который выбирает нужное значение."""
     builder = InlineKeyboardBuilder()
     builder.button(text="📝 Создать рассылку (текст, фото, видео)", callback_data="admin_broadcast_prompt")
+    builder.button(text="🪪 Анонс медицинских бейджиков", callback_data="admin_announce_badges_confirm")
     builder.button(text="📣 Оповещение о подписке", callback_data="admin_announce_subscription_confirm")
     builder.button(text="📣 Анонс раздела поддержки", callback_data="admin_announce_support_confirm")
     builder.button(text="📣 Анонс раздела Анатомия", callback_data="admin_announce_anatomy_confirm")
@@ -2292,3 +2293,21 @@ async def cb_admin_miniapp_promo_set(callback: CallbackQuery):
         + "\nКнопка miniapp остаётся у всех. Подписки и статистика сохранены.",
         reply_markup=get_admin_menu())
 
+
+
+@router.callback_query(F.data == "admin_announce_badges_confirm")
+async def cb_admin_announce_badges_confirm(callback: CallbackQuery):
+    uid = callback.from_user.id
+    if not (tb.is_admin(uid) or tb.is_payment_admin(uid)):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    await callback.answer()
+    from services.admin_broadcast import preview_preset
+    from services.badge_announcement import build_preset
+    try:
+        draft = build_preset()
+    except (OSError, ValueError):
+        tb.logger.exception("Badge announcement assets unavailable")
+        await callback.message.answer("Фото анонса недоступны. Рассылка не запускалась.")
+        return
+    await preview_preset(tb, callback.message, draft, uid)

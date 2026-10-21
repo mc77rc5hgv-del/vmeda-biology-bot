@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from html import unescape
 
 from aiogram.exceptions import TelegramRetryAfter
-from aiogram.types import InputMediaPhoto, InputMediaVideo
+from aiogram.types import InlineKeyboardMarkup, InputMediaPhoto, InputMediaVideo
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 
@@ -15,6 +15,8 @@ class Draft:
     token: str
     text: str
     media: list
+    reply_markup: InlineKeyboardMarkup | None = None
+    allow_payment_admin: bool = False
 
 
 drafts: dict[int, Draft] = {}
@@ -56,7 +58,24 @@ def build_draft(messages, override=None):
     return Draft(secrets.token_hex(8), text, media)
 
 
+async def _preset_request(method, *args, **kwargs):
+    # Retry just the throttled stage, never an already delivered photo album.
+    try:
+        return await method(*args, **kwargs)
+    except TelegramRetryAfter as exc:
+        await asyncio.sleep(exc.retry_after + 0.1)
+        try:
+            return await method(*args, **kwargs)
+        except TelegramRetryAfter as retry:
+            raise RuntimeError('Preset rate limit persists; no album replay') from retry
+
+
 async def deliver(bot, chat_id, draft):
+    if draft.reply_markup is not None:
+        messages = await _preset_request(bot.send_media_group, chat_id, media=draft.media)
+        await _preset_request(bot.send_message, chat_id, draft.text, parse_mode='HTML',
+                              reply_markup=draft.reply_markup, disable_web_page_preview=True)
+        return messages
     if len(draft.media) > 1:
         return await bot.send_media_group(chat_id, media=draft.media)
     if draft.media:
@@ -92,6 +111,36 @@ async def preview(tb, message, messages, override=None):
         'Фото и видео отправятся с подписью; несколько файлов — одним альбомом.',
         reply_markup=keyboard.as_markup(),
     )
+
+
+def can_confirm(tb, admin_id, draft=None):
+    return tb.is_admin(admin_id) or bool(draft and draft.allow_payment_admin and tb.is_payment_admin(admin_id))
+
+
+async def preview_preset(tb, message, draft, admin_id):
+    if not can_confirm(tb, admin_id, draft):
+        return False
+    drafts.pop(admin_id, None)
+    try:
+        sent = await deliver(tb.bot, message.chat.id, draft)
+        if len(sent) != len(draft.media) or any(not item.photo for item in sent):
+            raise ValueError('Telegram did not return the preset photo album')
+        # Only Telegram file IDs enter the broadcast queue: no repeated local uploads.
+        draft.media = [InputMediaPhoto(media=item.photo[-1].file_id) for item in sent]
+    except Exception:
+        tb.logger.exception('Preset broadcast preview failed')
+        await message.answer('Не удалось показать весь анонс. Рассылка не запускалась; открой предпросмотр ещё раз.')
+        return False
+    drafts[admin_id] = draft
+    tb.ADMIN_PENDING.pop(admin_id, None)
+    builder = InlineKeyboardBuilder()
+    builder.button(text='✅ Отправить всем', callback_data='admin_broadcast_go:' + draft.token)
+    builder.button(text='❌ Отмена', callback_data='admin_broadcast_cancel:' + draft.token)
+    builder.adjust(1)
+    await message.answer(f'👆 Предпросмотр анонса. Получателей: {len(tb.stats["total_users"])}.\n'
+                         'Отправятся оба фото альбомом и текст с кнопками заказа.\n'
+                         'Нажми «Отправить всем» для запуска рассылки.', reply_markup=builder.as_markup())
+    return True
 
 
 async def collect(tb, message, *, selected=False):
@@ -177,11 +226,11 @@ async def send_all(tb, status, draft, recipients):
 async def confirm(tb, callback):
     global busy
     admin_id = callback.from_user.id
-    if not tb.is_admin(admin_id):
+    draft = drafts.get(admin_id)
+    if not can_confirm(tb, admin_id, draft):
         await callback.answer('Нет доступа', show_alert=True)
         return
     token = callback.data.split(':', 1)[1]
-    draft = drafts.get(admin_id)
     if not draft or draft.token != token:
         await callback.answer('Этот предпросмотр уже неактуален.', show_alert=True)
         return
@@ -202,7 +251,8 @@ async def confirm(tb, callback):
 
 
 async def cancel(tb, callback):
-    if not tb.is_admin(callback.from_user.id):
+    draft = drafts.get(callback.from_user.id)
+    if not can_confirm(tb, callback.from_user.id, draft):
         await callback.answer('Нет доступа', show_alert=True)
         return
     draft = drafts.get(callback.from_user.id)

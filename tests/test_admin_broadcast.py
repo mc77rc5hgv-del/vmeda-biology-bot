@@ -76,6 +76,70 @@ async def main():
     cb=SimpleNamespace(from_user=SimpleNamespace(id=outsider),data='admin_broadcast_go:x',message=status,answer=AsyncMock())
     await b.confirm(tb,cb)
     assert cb.answer.await_args.kwargs['show_alert'] is True
+    # Preset photos are previewed only to the admin; buttons and text follow the album.
+    from services.badge_announcement import build_preset, PHOTOS
+    from aiogram.types import FSInputFile
+    preset = build_preset()
+    assert len(PHOTOS) == 2 and all(path.is_file() for path in PHOTOS)
+    assert all(isinstance(item.media, FSInputFile) for item in preset.media)
+    assert '530' in preset.text and '430' in preset.text and '6450' in preset.text
+    assert preset.reply_markup.inline_keyboard[0][0].callback_data == 'badges:menu'
+    assert preset.reply_markup.inline_keyboard[1][0].url == 'https://t.me/vmeda_helper'
+    menu = tb.get_admin_announcements_keyboard()
+    assert any(button.callback_data == 'admin_announce_badges_confirm' for row in menu.inline_keyboard for button in row)
+    for method in vars(mocked).values():
+        method.reset_mock()
+    mocked.send_media_group.return_value = [message(20, kind='photo'), message(21, kind='photo')]
+    preview_message = SimpleNamespace(chat=SimpleNamespace(id=ADMIN), answer=AsyncMock())
+    before_preview = copy.deepcopy(tb.stats)
+    await b.preview_preset(tb, preview_message, preset, ADMIN)
+    assert mocked.send_media_group.await_count == 1
+    assert mocked.send_message.await_count == 1
+    assert mocked.send_media_group.await_args.args[0] == ADMIN
+    assert mocked.send_message.await_args.args[0] == ADMIN
+    assert mocked.send_message.await_args.kwargs['reply_markup'] == preset.reply_markup
+    assert [item.media for item in preset.media] == ['photo-20', 'photo-21']
+    assert b.drafts[ADMIN] is preset and tb.stats == before_preview
+    assert not b.jobs and not b.busy
+    # An outsider cannot reach even the preset preview, despite forging callback data.
+    outsider_cb = SimpleNamespace(from_user=SimpleNamespace(id=outsider), data='admin_announce_badges_confirm',
+                                  message=preview_message, answer=AsyncMock())
+    count = mocked.send_media_group.await_count
+    await tb.admin_handlers.cb_admin_announce_badges_confirm(outsider_cb)
+    assert mocked.send_media_group.await_count == count
+    assert outsider_cb.answer.await_args.kwargs['show_alert'] is True
+    # Text-stage rate limiting must not resend the two photos.
+    mocked.send_media_group.reset_mock(); mocked.send_message.reset_mock()
+    mocked.send_message.side_effect = [TelegramRetryAfter(method=SendPhoto(chat_id=111,photo='photo'),message='Retry',retry_after=0),None]
+    async def instant(_): pass
+    with patch.object(b.asyncio, 'sleep', instant):
+        await b.deliver(mocked,111,preset)
+    assert mocked.send_media_group.await_count == 1 and mocked.send_message.await_count == 2
+    # Even persistent throttling never replays a delivered album through send_all's retry.
+    mocked.send_media_group.reset_mock(); mocked.send_message.reset_mock()
+    mocked.send_message.side_effect = TelegramRetryAfter(method=SendPhoto(chat_id=111,photo='photo'),message='Retry',retry_after=0)
+    with patch.object(b.asyncio, 'sleep', instant), patch.object(tb, 'safe_edit_text', AsyncMock()), patch.object(tb, 'save_stats', Mock()):
+        await b.send_all(tb, status, preset, (111,))
+    assert mocked.send_media_group.await_count == 1 and mocked.send_message.await_count == 2
+    mocked.send_message.side_effect = None
+    tb.stats.clear(); tb.stats.update(copy.deepcopy(before_preview))
+    # Payment admins can confirm a ready-made badge ad, but not arbitrary broadcasts.
+    payment_admin = 7654321
+    payment_cb = SimpleNamespace(from_user=SimpleNamespace(id=payment_admin),message=status,
+                                 data='admin_broadcast_go:' + preset.token,answer=AsyncMock())
+    with patch.object(tb, 'is_payment_admin', lambda uid: uid == payment_admin):
+        b.drafts[payment_admin] = photo
+        await b.confirm(tb, payment_cb)
+        assert payment_cb.answer.await_args.kwargs['show_alert'] is True
+        b.drafts[payment_admin] = preset
+        done_preset = AsyncMock()
+        with patch.object(b, 'send_all', done_preset):
+            await b.confirm(tb, payment_cb)
+            await b.confirm(tb, payment_cb)
+            await asyncio.gather(*b.jobs)
+            assert done_preset.await_count == 1
+    b.busy = False
+    b.drafts.clear()
     # Rate limits retry the same recipient; failures never remove users/data.
     tb.stats['total_users']={111,222}; before=copy.deepcopy(tb.stats)
     attempts=[]
