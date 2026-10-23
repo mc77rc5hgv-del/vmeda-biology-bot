@@ -1,0 +1,24 @@
+{
+  "synthetic": true,
+  "dimensions": 1536,
+  "results": [
+    {
+      "mode": "legacy",
+      "vectors": 1000,
+      "sha256": "5dd9ddf5827988828ab960f55176af219216d4abf6254d68826201f672e000ca",
+      "heap_bytes": 49661922,
+      "rss_bytes": 73502720,
+      "load_seconds": 0.49008902100001706,
+      "peak_rss_bytes": 105234432
+    },
+    {
+      "mode": "compact",
+      "vectors": 1000,
+      "sha256": "5dd9ddf5827988828ab960f55176af219216d4abf6254d68826201f672e000ca",
+      "heap_bytes": 12437922,
+      "rss_bytes": 25923584,
+      "load_seconds": 0.5786622480000005,
+      "peak_rss_bytes": 25952256
+    }
+  ]
+}

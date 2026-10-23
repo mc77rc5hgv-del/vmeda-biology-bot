@@ -19,13 +19,14 @@ IDF-весами (0 токенов, чистый Python, работает все
 STATS_DIR) тоже передаётся снаружи, а не берётся из окружения напрямую."""
 import hashlib
 import html
-import json
+from array import array
 import logging
 import math
 import re
 import unicodedata
 
 from ai.providers import openai as openai_provider
+from ai.embedding_cache import load_vectors, save_vectors
 
 logger = logging.getLogger(__name__)
 
@@ -278,21 +279,19 @@ MAX_EMBEDDING_BUILD_ITEMS_PER_START = 500  # верхний бюджет build_e
 # записей, а уже посчитанные (см. incremental-сохранение по батчам в build_embeddings) остаются
 # в кэше и не переоплачиваются следующим рестартом.
 
-_embeddings: dict = {}  # entry["key"] -> vector (list[float])
+_embeddings: dict = {}  # entry["key"] -> compact float64 vector, exact Python float values
 
 
 def _load_embeddings_cache(path: str) -> dict:
     try:
-        with open(path, encoding="utf-8") as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return load_vectors(path)
+    except (ValueError, TypeError, OverflowError, OSError):
         return {}
 
 
 def _save_embeddings_cache(path: str, embeddings: dict) -> None:
     try:
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(embeddings, f)
+        save_vectors(path, embeddings)
     except OSError:
         logger.exception("Не удалось сохранить кэш эмбеддингов RAG на диск")
 
@@ -339,7 +338,7 @@ async def build_embeddings(cache_path: str = None, max_items: int = None) -> int
             texts = [f"{e['title']}: {e['text'][:2000]}" for e in batch]
             response = await client.embeddings.create(model=EMBEDDING_MODEL, input=texts)
             for entry, item in zip(batch, response.data):
-                _embeddings[entry["key"]] = item.embedding
+                _embeddings[entry["key"]] = array("d", item.embedding)
             embedded += len(batch)
             if cache_path:
                 _save_embeddings_cache(cache_path, _embeddings)  # сохраняем инкрементально, батч
@@ -507,3 +506,4 @@ def format_context(snippets: list) -> str:
         "Не приписывай кафедре добавленные сведения; при прямом противоречии приоритет у материалов "
         "ВМедА. Если фрагмент не относится к вопросу, игнорируй его:\n" + "\n\n".join(blocks)
     )
+
