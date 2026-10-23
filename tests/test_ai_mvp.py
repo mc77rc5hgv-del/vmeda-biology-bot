@@ -1228,7 +1228,7 @@ async def main():
     sample_cache = {"key1": [0.1, 0.2], "key2": [0.3, 0.4]}
     tb.ai_rag._save_embeddings_cache(cache_path, sample_cache)
     loaded = tb.ai_rag._load_embeddings_cache(cache_path)
-    assert loaded == sample_cache
+    assert {key: list(vector) for key, vector in loaded.items()} == sample_cache
     missing = tb.ai_rag._load_embeddings_cache(os.path.join(tmp_dir, "does_not_exist.json"))
     assert missing == {}
     print("32. embeddings cache save/load round trip works, missing file degrades to {}: OK")
