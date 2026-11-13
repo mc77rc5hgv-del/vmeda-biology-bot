@@ -1,4 +1,4 @@
-"""Official https://codeepay.ru/openapi.json API. Webhooks are hints, never proof."""
+"""Official https://codeepay.xyz API. Webhooks are hints, never proof."""
 import json
 from decimal import Decimal, InvalidOperation
 from typing import Mapping
@@ -68,7 +68,7 @@ class CodeePayProvider:
                  'description': ('VMEDA: медицинские бейджики' if order.kind == 'badge' else f'VMEDA: подписка {order.tier_id}'), 'shop_name': 'VMEDA',
                  'metadata': metadata})
         url = urlsplit(data.get('url', ''))
-        if (url.scheme != 'https' or url.hostname not in {'codeepay.ru', 'payment.codeepay.xyz'} or url.username or url.password
+        if (url.scheme != 'https' or url.hostname not in {'codeepay.xyz', 'payment.codeepay.xyz'} or url.username or url.password
                 or not url.path.startswith(('/payment/', '/transfer/')) or minor(data.get('amount')) != order.amount_minor
                 or not isinstance(data.get('order_id'), str) or not data['order_id']):
             raise PaymentMismatch('Invalid checkout response')

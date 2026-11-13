@@ -1,7 +1,7 @@
 # СБП codeePay
 
-API: https://codeepay.ru/docs и https://codeepay.ru/openapi.json. Ключ передаётся только
-сервером через `X-Api-Key` на `https://codeepay.ru`. `POST /initiate_payment` создаёт счёт
+API: `https://codeepay.xyz`. Ключ передаётся только
+сервером через `X-Api-Key` на `https://codeepay.xyz`. `POST /initiate_payment` создаёт счёт
 с `method_slug=sbp` и суммой в рублях. `POST /get_payment` возвращает финансовое подтверждение.
 Реальный API также возвращает checkout на `https://payment.codeepay.xyz/transfer/...`.
 Ключ никогда не передаётся платёжной странице, клиенту или журналу приложения.
@@ -45,7 +45,7 @@ creation_unknown и не вызывает слепого повторного с
 ## Настройка (только на owner-сервисе)
 
 - `CODEEPAY_ENABLED=true` (по умолчанию false).
-- `CODEEPAY_API_URL=https://codeepay.ru`.
+- `CODEEPAY_API_URL=https://codeepay.xyz`.
 - `CODEEPAY_API_KEY` — приватный ключ продавца.
 - `CODEEPAY_WEBHOOK_SECRET` — случайная строка не короче 32 символов.
 - `CODEEPAY_CALLBACK_BASE_URL` — публичный HTTPS URL существующего API gateway.

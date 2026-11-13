@@ -50,6 +50,12 @@ def test_only_official_api_accepts_credentials():
     assert CodeePayProvider(settings).public_status()['available'] is False
 
 
+def test_current_official_api_domain_accepts_credentials():
+    settings = CodeePayConfig(enabled=True, api_url='https://codeepay.xyz', api_key='synthetic-value')
+    settings.validate_checkout_configuration()
+    assert CodeePayProvider(settings).public_status()['available'] is True
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize('enabled', [False, True])
 async def test_unimplemented_provider_never_accepts_money_or_webhooks(enabled, tmp_path, monkeypatch):
@@ -101,7 +107,7 @@ async def test_documented_api_units_headers_and_provider_confirmed_settlement():
             assert body['method_slug'] == 'sbp' and body['amount'] == 129
             assert not {'shop_url', 'success_url', 'failure_url'} & body.keys(), 'Return URLs must use merchant defaults to avoid api:error.url_not_allowed'
             assert body['metadata']['vmeda_order'] == 'order-test'
-            return httpx.Response(200, json={'url': 'https://payment.codeepay.xyz/transfer/test', 'order_id': 'provider-test', 'amount': 129})
+            return httpx.Response(200, json={'url': 'https://codeepay.xyz/transfer/test', 'order_id': 'provider-test', 'amount': 129})
         assert body == {'order_id': 'provider-test'}
         return httpx.Response(200, json={'payment_order_id': 'provider-test', 'payment_id': 'charge-test', 'payment_method': 'sbp',
             'payment_status': 'success', 'payment_deposited': True, 'payment_amount': 129,
