@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, ArrowRight, Images, Lock, Microscope } from "lucide-react";
 import { useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { Icon } from "../components/Icon";
 import { Skeleton } from "../components/Skeleton";
 import { StateMessage } from "../components/StateMessage";
@@ -13,13 +13,16 @@ import styles from "./HistologySpecimen.module.css";
 export function HistologySpecimenPage() {
   const { specimenId = "" } = useParams();
   const navigate = useNavigate();
+  const { state } = useLocation();
+  const catalogPath = state?.catalogPath === "/histology/diagnostics"
+    ? "/histology/diagnostics" : "/histology/exam/specimens";
   const [imageIndex, setImageIndex] = useState(0);
   const [imageSpecimenId, setImageSpecimenId] = useState(specimenId);
   if (imageSpecimenId !== specimenId) {
     setImageSpecimenId(specimenId);
     setImageIndex(0);
   }
-  useTelegramBackButton(() => navigate("/histology/exam"));
+  useTelegramBackButton(() => navigate(catalogPath));
 
   const query = useQuery({
     queryKey: ["histology-specimen", specimenId],
@@ -40,7 +43,7 @@ export function HistologySpecimenPage() {
   const previous = position > 0 ? specimens[position - 1] : undefined;
   const next = position >= 0 ? specimens[position + 1] : undefined;
   function openSpecimen(id: string) {
-    navigate(`/histology/specimens/${encodeURIComponent(id)}`);
+    navigate(`/histology/specimens/${encodeURIComponent(id)}`, { state: { catalogPath } });
     window.scrollTo({ top: 0, behavior: "auto" });
   }
   const paragraphs = specimen.protocol.split(/\n\s*\n/).map((item) => item.trim()).filter(Boolean);
@@ -48,8 +51,8 @@ export function HistologySpecimenPage() {
 
   return (
     <div className={["screen", styles.screen].join(" ")}>
-      <button type="button" className={styles.backButton} onClick={() => navigate("/histology/exam")}>
-        <Icon icon={ArrowLeft} size={18} /> ЭКЗАМЕН
+      <button type="button" className={styles.backButton} onClick={() => navigate(catalogPath)}>
+        <Icon icon={ArrowLeft} size={18} /> {catalogPath === "/histology/diagnostics" ? "ДИАГНОСТИКИ" : "Препараты"}
       </button>
 
       <header className={styles.header}>
@@ -119,7 +122,7 @@ export function HistologySpecimenPage() {
             <button type="button" disabled={!previous} onClick={() => previous && openSpecimen(previous.id)}>
               <Icon icon={ArrowLeft} size={18} /> Предыдущий
             </button>
-            <button type="button" className={styles.nextButton} onClick={() => next ? openSpecimen(next.id) : navigate("/histology/exam")}>
+            <button type="button" className={styles.nextButton} onClick={() => next ? openSpecimen(next.id) : navigate(catalogPath)}>
               {next ? "Следующий препарат" : "К списку препаратов"}<Icon icon={ArrowRight} size={18} />
             </button>
           </div>
