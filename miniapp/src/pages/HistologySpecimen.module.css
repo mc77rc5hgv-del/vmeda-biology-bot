@@ -1,31 +1,87 @@
-.screen { gap: 15px; }
-.metadataNote { margin-top: 10px; color: var(--ink-secondary); font-size: 11px; line-height: 1.5; }
-.imageGuide { padding: 15px 18px; border: 1px solid var(--border); border-radius: 16px; background: var(--surface-elevated); }
-.imageGuide > p:not(:first-child) { margin-top: 8px; font-size: 13px; line-height: 1.6; color: var(--ink); }
-.imageGuide .guideNote { color: var(--ink-secondary); font-size: 12px; }
-.specimenNavigation { display: flex; flex-direction: column; gap: 10px; }
-.specimenNavigation p { color: var(--ink-secondary); font-size: 12px; text-align: center; }
-.specimenNavigation > div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 8px; }
-.specimenNavigation button { display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 52px; padding: 10px 8px; color: var(--subject-ink, var(--subject-histology)); background: var(--surface-elevated); border: 1px solid var(--border); border-radius: 16px; font-size: 12px; font-weight: 750; }
-.specimenNavigation button:disabled { opacity: .45; }
-.specimenNavigation .nextButton { color: #fff; border-color: transparent; background: linear-gradient(135deg, var(--subject-histology), var(--subject-deep)); }
-.backButton { display: flex; align-items: center; align-self: flex-start; gap: 6px; padding: 8px 10px; color: var(--ink-secondary); font-size: 11px; font-weight: 750; border: 1px solid var(--border); border-radius: 11px; background: var(--surface-elevated); }
-.header { padding: 5px 2px 2px; }
-.kicker { display: flex; align-items: center; gap: 6px; color: var(--subject-ink, var(--subject-histology)); font-size: 10px; font-weight: 850; letter-spacing: .11em; text-transform: uppercase; }
-.header h1 { max-width: 19ch; margin-top: 7px; font-size: 26px; line-height: 1.12; letter-spacing: -.04em; }
-.meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
-.meta span { padding: 6px 9px; color: var(--ink-secondary); font-size: 9px; line-height: 1.3; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-elevated); }
-.imagePicker { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 13px; border: 1px solid var(--border); border-radius: 15px; background: var(--surface-elevated); }
-.imagePicker > span { display: flex; align-items: center; gap: 6px; color: var(--ink-secondary); font-size: 10px; font-weight: 750; }
-.imagePicker > div { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; }
-.imagePicker button { width: 29px; height: 29px; padding: 0; color: var(--ink-secondary); font-size: 10px; font-weight: 800; border-radius: 9px; background: var(--surface); }
-.imagePicker button.active { color: #fff; background: linear-gradient(145deg, var(--subject-histology), var(--subject-deep)); }
-.theory, .markerLegend { padding: 19px; border: 1px solid var(--border); border-radius: 21px; background: var(--surface-elevated); box-shadow: var(--shadow-card); }
-.eyebrow { color: var(--subject-ink, var(--subject-histology)); font-size: 9px; font-weight: 850; letter-spacing: .14em; text-transform: uppercase; }
-.theory h2, .markerLegend h2 { margin-top: 5px; font-size: 19px; letter-spacing: -.025em; }
-.protocol { display: grid; gap: 12px; margin-top: 15px; }
-.protocol p { color: var(--ink-secondary); font-size: 12px; line-height: 1.58; }
-.protocol p:first-child { color: var(--ink); font-weight: 620; }
+.screen { --histo: var(--subject-ink, var(--subject-histology)); gap: 16px; }
+.backButton {
+  display: flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 7px;
+  min-height: 44px;
+  padding: 8px 11px;
+  color: var(--ink-secondary);
+  font-size: 13px;
+  font-weight: 700;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-elevated);
+}
+.header { padding: 0 2px; }
+.kicker { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--histo); font-size: 13px; font-weight: 750; }
+.kicker span { color: var(--ink-secondary); }
+.header h1 { max-width: 34ch; margin-top: 6px; font-size: clamp(23px, 4vw, 34px); line-height: 1.18; letter-spacing: -.035em; overflow-wrap: anywhere; }
+.meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 11px; }
+.meta span { padding: 5px 9px; color: var(--ink-secondary); font-size: 12px; line-height: 1.35; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-elevated); }
+
+.studyLayout, .gallery { display: grid; gap: 14px; min-width: 0; }
+.studyLayout > *, .gallery > * { min-width: 0; }
+.imagePicker, .imageGuide, .theory, .markerLegend {
+  padding: clamp(13px, 2vw, 18px);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--surface-elevated);
+  box-shadow: var(--shadow-card);
+}
+.imagePicker > p { display: flex; align-items: center; gap: 7px; color: var(--ink-secondary); font-size: 13px; font-weight: 700; }
+.imagePicker > p svg, .imageGuide h2 svg, .theory h2 svg { flex: none; color: var(--histo); }
+.imagePicker > div { display: grid; grid-template-columns: repeat(auto-fit, minmax(44px, 1fr)); gap: 8px; margin-top: 9px; }
+.imagePicker button {
+  min-height: 44px;
+  padding: 6px;
+  color: var(--histo);
+  font-size: 14px;
+  font-weight: 750;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--surface);
+}
+.imagePicker button[aria-pressed="true"] { color: #fff; border-color: transparent; background: linear-gradient(145deg, var(--subject-histology), var(--subject-deep)); }
+.imageGuide { border-inline-start: 3px solid var(--histo); }
+.imageGuide h2, .theory h2 { display: flex; align-items: center; gap: 8px; }
+.imageGuide h2, .theory h2, .markerLegend h2 { font-size: 17px; line-height: 1.35; }
+.imageGuide > p { margin-top: 7px; color: var(--ink); font-size: 14px; line-height: 1.55; overflow-wrap: anywhere; }
+.imageGuide .guideNote { color: var(--ink-secondary); font-size: 13px; }
+.protocol { display: grid; gap: 14px; margin-top: 12px; }
+.protocol > div + div { padding-top: 13px; border-top: 1px solid var(--border); }
+.protocol h3 { margin-bottom: 4px; color: var(--histo); font-size: 14px; line-height: 1.4; }
+.protocol p { color: var(--ink); font-size: 15px; line-height: 1.6; overflow-wrap: anywhere; }
+.metadataNote { margin-top: 14px; padding-top: 13px; color: var(--ink-secondary); font-size: 12px; line-height: 1.55; border-top: 1px solid var(--border); }
 .markerLegend { display: grid; gap: 9px; }
-.markerLegend div { display: flex; align-items: center; gap: 9px; color: var(--ink-secondary); font-size: 11px; }
-.markerLegend div span { display: grid; flex: 0 0 25px; width: 25px; height: 25px; place-items: center; color: #16081b; font-size: 10px; font-weight: 900; border-radius: 50%; background: #f3a8ff; }
+.markerLegend div { display: flex; align-items: center; gap: 9px; color: var(--ink-secondary); font-size: 13px; }
+.markerLegend div span { display: grid; flex: 0 0 25px; width: 25px; height: 25px; place-items: center; color: #16081b; font-size: 11px; font-weight: 800; border-radius: 50%; background: #f3a8ff; }
+
+.specimenNavigation {
+  position: sticky;
+  bottom: calc(var(--safe-bottom) + var(--bottom-nav-height) + 5px);
+  z-index: 2;
+  display: grid;
+  gap: 6px;
+  padding: 7px;
+  border: 1px solid var(--border);
+  border-radius: 17px;
+  background: var(--surface-elevated);
+  box-shadow: var(--shadow-card);
+}
+.specimenNavigation p { color: var(--ink-secondary); font-size: 12px; text-align: center; }
+.specimenNavigation > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.specimenNavigation button { display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 46px; padding: 7px; color: var(--histo); background: var(--surface); border: 1px solid var(--border); border-radius: 12px; font-size: 13px; font-weight: 750; }
+.specimenNavigation button svg { flex: none; }
+.specimenNavigation button:disabled { opacity: .55; }
+.specimenNavigation .nextButton { color: #fff; border-color: transparent; background: linear-gradient(135deg, var(--subject-histology), var(--subject-deep)); }
+
+@media (min-width: 900px) {
+  .screen:global(.screen) { max-width: 1080px; }
+  .studyLayout { grid-template-columns: minmax(0, 1.12fr) minmax(0, 1fr); align-items: start; gap: 18px; }
+  .specimenNavigation { grid-template-columns: auto minmax(0, 330px); align-items: center; justify-content: space-between; padding-inline-start: 14px; }
+}
+
+@media (max-width: 360px) {
+  .imagePicker > div:has(button:nth-child(5)) { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}

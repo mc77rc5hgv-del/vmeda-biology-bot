@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, ArrowRight, Images, Lock, Microscope } from "lucide-react";
+import { ArrowLeft, ArrowRight, BookOpen, Images, Lock, Microscope, ScanSearch } from "lucide-react";
 import { useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { Icon } from "../components/Icon";
@@ -7,103 +7,50 @@ import { Skeleton } from "../components/Skeleton";
 import { StateMessage } from "../components/StateMessage";
 import { ZoomableMicrograph } from "../components/ZoomableMicrograph";
 import { ApiError, fetchHistologyCatalog, fetchHistologySpecimen } from "../lib/apiClient";
+import { filterHistologyGroups, type HistologyCatalogLocation } from "../lib/histologyCatalog";
 import { useTelegramBackButton } from "../lib/telegram";
+import type { HistologySpecimen } from "../lib/types";
 import styles from "./HistologySpecimen.module.css";
 
-export function HistologySpecimenPage() {
-  const { specimenId = "" } = useParams();
-  const navigate = useNavigate();
-  const { state } = useLocation();
-  const catalogPath = state?.catalogPath === "/histology/diagnostics"
-    ? "/histology/diagnostics" : "/histology/exam/specimens";
+function SpecimenImages({ specimen }: { specimen: HistologySpecimen }) {
   const [imageIndex, setImageIndex] = useState(0);
-  const [imageSpecimenId, setImageSpecimenId] = useState(specimenId);
-  if (imageSpecimenId !== specimenId) {
-    setImageSpecimenId(specimenId);
-    setImageIndex(0);
-  }
-  useTelegramBackButton(() => navigate(catalogPath));
-
-  const query = useQuery({
-    queryKey: ["histology-specimen", specimenId],
-    queryFn: () => fetchHistologySpecimen(specimenId),
-  });
-  const catalogQuery = useQuery({ queryKey: ["histology-catalog"], queryFn: fetchHistologyCatalog });
-
-  if (query.isLoading) return <div className="screen"><Skeleton height={34} width="55%" /><Skeleton height={360} radius="22px" /></div>;
-  if (query.isError || !query.data) {
-    if (query.error instanceof ApiError && query.error.status === 403) {
-      return <div className="screen"><StateMessage icon={Lock} title="Препарат закрыт" body={query.error.message} onRetry={() => navigate("/profile/subscriptions")} actionLabel="Открыть подписки" /></div>;
-    }
-    return <div className="screen"><StateMessage title="Препарат не найден" onRetry={() => query.refetch()} /></div>;
-  }
-  const specimen = query.data;
-  const specimens = catalogQuery.data?.groups.flatMap((group) => group.specimens) ?? [];
-  const position = specimens.findIndex((item) => item.id === specimenId);
-  const previous = position > 0 ? specimens[position - 1] : undefined;
-  const next = position >= 0 ? specimens[position + 1] : undefined;
-  function openSpecimen(id: string) {
-    navigate(`/histology/specimens/${encodeURIComponent(id)}`, { state: { catalogPath } });
-    window.scrollTo({ top: 0, behavior: "auto" });
-  }
-  const paragraphs = specimen.protocol.split(/\n\s*\n/).map((item) => item.trim()).filter(Boolean);
   const guide = specimen.imageGuides[imageIndex];
+  const src = specimen.images[imageIndex];
 
   return (
-    <div className={["screen", styles.screen].join(" ")}>
-      <button type="button" className={styles.backButton} onClick={() => navigate(catalogPath)}>
-        <Icon icon={ArrowLeft} size={18} /> {catalogPath === "/histology/diagnostics" ? "ДИАГНОСТИКИ" : "Препараты"}
-      </button>
-
-      <header className={styles.header}>
-        <div className={styles.kicker}><Icon icon={Microscope} size={15} /> Препарат №{specimen.number}</div>
-        <h1>{specimen.title}</h1>
-        <div className={styles.meta}>
-          {specimen.stain && <span>{specimen.stain}</span>}
-          {specimen.magnification && <span>Исходный препарат ×{specimen.magnification}</span>}
-          <span>{specimen.groupTitle}</span>
-        </div>
-        {specimen.metadataNote && <p className={styles.metadataNote}>{specimen.metadataNote}</p>}
-      </header>
-
-      <ZoomableMicrograph
-        key={specimen.images[imageIndex]}
-        src={specimen.images[imageIndex]}
-        alt={`${specimen.title}, изображение ${imageIndex + 1}`}
-        markers={specimen.markers}
-      />
-
-      {guide && (
-        <section className={styles.imageGuide} aria-live="polite">
-          <p className={styles.eyebrow}>{guide.kind === "diagram" ? "Учебная схема · не в масштабе" : `Кадр ${imageIndex + 1} · ориентиры`}</p>
-          <p>{guide.visible}</p>
-          {guide.note && <p className={styles.guideNote}>{guide.note}</p>}
-        </section>
-      )}
-
+    <div className={styles.gallery}>
       {specimen.images.length > 1 && (
-        <div className={styles.imagePicker}>
-          <span><Icon icon={Images} size={15} /> Поля зрения</span>
+        <div className={styles.imagePicker} role="group" aria-label="Выбор изображения">
+          <p><Icon icon={Images} size={18} /> Изображение {imageIndex + 1} из {specimen.images.length}</p>
           <div>
-            {specimen.images.map((_, index) => (
-              <button
-                type="button"
-                key={index}
-                className={index === imageIndex ? styles.active : undefined}
-                onClick={() => setImageIndex(index)}
-              >{index + 1}</button>
+            {specimen.images.map((image, index) => (
+              <button type="button" key={image} aria-pressed={index === imageIndex}
+                aria-label={`${specimen.imageGuides[index]?.kind === "diagram" ? "Схема" : "Изображение"} ${index + 1}`}
+                onClick={() => setImageIndex(index)}>
+                {index + 1}
+              </button>
             ))}
           </div>
         </div>
       )}
 
-      <section className={styles.theory}>
-        <p className={styles.eyebrow}>Теория и ориентиры</p>
-        <h2>Как распознать препарат</h2>
-        <div className={styles.protocol}>
-          {paragraphs.map((paragraph, index) => <p key={index}>{paragraph}</p>)}
-        </div>
-      </section>
+      {src ? (
+        <ZoomableMicrograph
+          key={src}
+          src={src}
+          alt={`${specimen.title} · ${guide?.kind === "diagram" ? "схема" : "микрофотография"} ${imageIndex + 1}`}
+          markers={specimen.markers}
+        />
+      ) : <StateMessage icon={Images} title="Изображений пока нет" />}
+
+      {guide && (
+        <section className={styles.imageGuide} aria-live="polite">
+          <h2><Icon icon={ScanSearch} size={20} /> {guide.kind === "diagram" ? "Что показано на схеме" : "Что видно на снимке"}</h2>
+          <p>{guide.visible}</p>
+          {guide.kind === "diagram" && <p className={styles.guideNote}>Учебная схема · не в масштабе</p>}
+          {guide.note && <p className={styles.guideNote}>{guide.note}</p>}
+        </section>
+      )}
 
       {specimen.markers.length > 0 && (
         <section className={styles.markerLegend}>
@@ -113,6 +60,91 @@ export function HistologySpecimenPage() {
           ))}
         </section>
       )}
+    </div>
+  );
+}
+
+export function HistologySpecimenPage() {
+  const { specimenId = "" } = useParams();
+  const navigate = useNavigate();
+  const state = useLocation().state as HistologyCatalogLocation | null;
+  const catalogPath = state?.catalogPath === "/histology/diagnostics"
+    ? "/histology/diagnostics" : "/histology/exam/specimens";
+  const catalogSearch = state?.catalogSearch ?? "";
+  function backToCatalog() {
+    if (typeof state?.catalogSearch === "string") navigate(-1);
+    else navigate(catalogPath);
+  }
+  useTelegramBackButton(backToCatalog);
+
+  const query = useQuery({
+    queryKey: ["histology-specimen", specimenId],
+    queryFn: () => fetchHistologySpecimen(specimenId),
+  });
+  const catalogQuery = useQuery({ queryKey: ["histology-catalog"], queryFn: fetchHistologyCatalog });
+
+  const specimen = query.data;
+  const specimens = filterHistologyGroups(catalogQuery.data?.groups ?? [], new URLSearchParams(catalogSearch))
+    .flatMap((group) => group.specimens);
+  const position = specimens.findIndex((item) => item.id === specimenId);
+  const previous = position > 0 ? specimens[position - 1] : undefined;
+  const next = position >= 0 ? specimens[position + 1] : undefined;
+  function openSpecimen(id: string) {
+    navigate(`/histology/specimens/${encodeURIComponent(id)}`, { state, replace: true });
+    window.scrollTo({ top: 0, behavior: "instant" });
+  }
+  const backButton = (
+    <button type="button" className={styles.backButton} onClick={backToCatalog}>
+      <Icon icon={ArrowLeft} size={18} /> {catalogPath === "/histology/diagnostics" ? "Диагностики" : "Препараты"}
+    </button>
+  );
+  if (query.isError || !specimen) {
+    return (
+      <div className={`screen ${styles.screen}`}>
+        {backButton}
+        {query.isLoading ? (
+          <><Skeleton height={36} width="55%" /><Skeleton height={360} radius="22px" /></>
+        ) : query.error instanceof ApiError && query.error.status === 403 ? (
+          <StateMessage icon={Lock} title="Препарат закрыт" body={query.error.message} onRetry={() => navigate("/profile/subscriptions")} actionLabel="Открыть подписки" />
+        ) : <StateMessage title="Не удалось открыть препарат" onRetry={() => query.refetch()} />}
+      </div>
+    );
+  }
+  const paragraphs = specimen.protocol.split(/\n\s*\n/).map((item) => item.trim()).filter(Boolean);
+
+  return (
+    <div className={`screen ${styles.screen}`}>
+      {backButton}
+      <header className={styles.header}>
+        <div className={styles.kicker}><Icon icon={Microscope} size={17} /> Препарат №{specimen.number} <span>· {specimen.groupTitle.split(": ")[0]}</span></div>
+        <h1>{specimen.title}</h1>
+        {(specimen.stain || specimen.magnification) && (
+          <div className={styles.meta}>
+            {specimen.stain && <span>{specimen.stain}</span>}
+            {specimen.magnification && <span>Исходный препарат ×{specimen.magnification}</span>}
+          </div>
+        )}
+      </header>
+
+      <div className={styles.studyLayout}>
+        <SpecimenImages key={specimen.id} specimen={specimen} />
+        <section className={styles.theory}>
+          <h2><Icon icon={BookOpen} size={20} /> Как распознать препарат</h2>
+          <div className={styles.protocol}>
+            {paragraphs.map((paragraph, index) => {
+              const heading = /^(Ориентиры[^:\n]*|Отличие[^:\n]*):\s*/.exec(paragraph);
+              return (
+                <div key={index}>
+                  {heading && <h3>{heading[1]}</h3>}
+                  <p>{heading ? paragraph.slice(heading[0].length) : paragraph}</p>
+                </div>
+              );
+            })}
+          </div>
+          {specimen.metadataNote && <p className={styles.metadataNote}>{specimen.metadataNote}</p>}
+        </section>
+      </div>
+
       {catalogQuery.isError ? (
         <StateMessage title="Не удалось загрузить переходы между препаратами" onRetry={() => catalogQuery.refetch()} />
       ) : catalogQuery.isLoading ? <Skeleton height={52} /> : position >= 0 && (
@@ -122,8 +154,8 @@ export function HistologySpecimenPage() {
             <button type="button" disabled={!previous} onClick={() => previous && openSpecimen(previous.id)}>
               <Icon icon={ArrowLeft} size={18} /> Предыдущий
             </button>
-            <button type="button" className={styles.nextButton} onClick={() => next ? openSpecimen(next.id) : navigate(catalogPath)}>
-              {next ? "Следующий препарат" : "К списку препаратов"}<Icon icon={ArrowRight} size={18} />
+            <button type="button" className={styles.nextButton} onClick={() => next ? openSpecimen(next.id) : backToCatalog()}>
+              {next ? "Следующий" : "К списку"}<Icon icon={ArrowRight} size={18} />
             </button>
           </div>
         </nav>
