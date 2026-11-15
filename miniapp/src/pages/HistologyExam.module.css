@@ -134,3 +134,35 @@
 .testOptions button[aria-pressed="true"] { border-color: var(--histo); }
 .testFeedback { margin-top: 16px; border-top: 1px solid var(--border); }
 .studyAnswer .primaryButton { margin-top: 16px; }
+
+
+
+.testProgress { font-size: 25px; }
+.testNavigation {
+  position: sticky;
+  bottom: calc(var(--safe-bottom) + var(--bottom-nav-height) + 5px);
+  z-index: 2;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  margin-top: auto;
+  padding: 7px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--surface-elevated);
+  box-shadow: var(--shadow-card);
+}
+.testNavigation button:disabled { opacity: .55; }
+.testPrevious {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 44px;
+  padding: 0 12px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.testOptions button[data-verdict="correct"] { border-color: #32855a; }
+.testOptions button[data-verdict="wrong"] { border-color: #c85454; }
