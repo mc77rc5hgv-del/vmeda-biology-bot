@@ -1,7 +1,8 @@
 import os
 import random
+from typing import Literal
 
-from services import histology_exam
+from services import histology_content, histology_exam
 from services.miniapp_policy import full_content_access, promo_active, public_launch, require_subject, subscription_required
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -49,16 +50,7 @@ def _histology_stats(tb, user_id: int) -> dict:
     if os.environ.get('BOT_SYNC_MODE') == 'owner':
         from services.histology_sync import summary
         return summary(tb, user_id)
-    total = sum(len(group.get('specimens', [])) for group in tb.HISTOLOGY.values())
-    return learning.get_histology_stats(user_id, total)
-
-
-def _histology_specimen_by_id(tb, specimen_id: str) -> tuple[str, dict, dict] | None:
-    for group_id, group in tb.HISTOLOGY.items():
-        for specimen in group.get("specimens", []):
-            if specimen.get("id") == specimen_id:
-                return group_id, group, specimen
-    return None
+    return histology_content.exam_progress(learning.get_histology_stats(user_id))
 
 
 def _histology_specimen_payload(group_id: str, group: dict, specimen: dict) -> dict:
@@ -75,20 +67,22 @@ def _histology_specimen_payload(group_id: str, group: dict, specimen: dict) -> d
     }
 
 
-def _histology_practical_pool(tb, scope: str, user_id: int) -> list[tuple[str, dict, dict]]:
-
+def _histology_practical_pool(tb, scope: str, user_id: int) -> list[dict]:
     mistake_ids = set(_histology_stats(tb, user_id)['mistake_ids']) if scope == "mistakes" else None
-    pool = []
-    for group_id, group in tb.HISTOLOGY.items():
-        if scope not in {"all", "mistakes"} and scope != group_id:
-            continue
-        for specimen in group.get("specimens", []):
-            if not specimen.get("guess_image"):
-                continue
-            if mistake_ids is not None and specimen["id"] not in mistake_ids:
-                continue
-            pool.append((group_id, group, specimen))
-    return pool
+    return [
+        specimen
+        for group_id, group in histology_content.exam_groups(tb.HISTOLOGY).items()
+        if scope in {"all", "mistakes", group_id}
+        for specimen in group["specimens"]
+        if specimen.get("guess_image") and (mistake_ids is None or specimen["id"] in mistake_ids)
+    ]
+
+
+def _histology_exam_item(tb, specimen_id: str) -> tuple[str, dict, dict]:
+    found = histology_content.find_specimen(histology_content.exam_groups(tb.HISTOLOGY), specimen_id)
+    if found is None:
+        raise HTTPException(status_code=404, detail="Препарата нет в экзаменационном перечне")
+    return found
 
 
 @router.get("/histology/exam/theory")
@@ -149,12 +143,14 @@ def answer_histology_test(question_id: str, body: schemas.HistologyTestAnswerReq
 
 @router.get("/histology/exam/catalog")
 def get_histology_exam_catalog(
+    scope: Literal["exam", "diagnostics"] = "exam",
     user_id: int = Depends(get_current_user_id),
     tb=Depends(get_fresh_bot_module),
 ) -> dict:
     _check_histology_access(tb, user_id)
     groups = []
-    for group_id, group in tb.HISTOLOGY.items():
+    bank = histology_content.exam_groups(tb.HISTOLOGY) if scope == "exam" else tb.HISTOLOGY
+    for group_id, group in bank.items():
         specimens = [
             _histology_specimen_payload(group_id, group, specimen)
             for specimen in group.get("specimens", [])
@@ -165,7 +161,8 @@ def get_histology_exam_catalog(
             "menu_title": group.get("menu_title", group.get("title", "")),
             "specimens": specimens,
         })
-    return {"title": "ЭКЗАМЕН", "total_specimens": sum(len(g["specimens"]) for g in groups), "groups": groups}
+    title = "ЭКЗАМЕН" if scope == "exam" else "ДИАГНОСТИКИ"
+    return {"title": title, "total_specimens": sum(len(g["specimens"]) for g in groups), "groups": groups}
 
 
 @router.get("/histology/exam/stats")
@@ -181,6 +178,7 @@ def get_histology_exam_stats(
 @router.get("/histology/exam/specimens/{specimen_id}")
 def get_histology_exam_specimen(
     specimen_id: str,
+    scope: Literal["exam", "diagnostics"] = "exam",
     user_id: int = Depends(get_current_user_id),
     tb=Depends(get_fresh_bot_module),
 ) -> dict:
@@ -191,11 +189,15 @@ def get_histology_exam_specimen(
     выдумывает поверх изображения новые анатомические ориентиры.
     """
     _check_histology_access(tb, user_id)
-    found = _histology_specimen_by_id(tb, specimen_id)
-    if found is None:
-        raise HTTPException(status_code=404, detail="препарат не найден")
-    group_id, group, specimen = found
-    media_base = f"/api/v1/materials/histology/specimens/{specimen_id}/media"
+    if scope == "exam":
+        group_id, group, specimen = _histology_exam_item(tb, specimen_id)
+        media_base = f"/api/v1/histology/exam/specimens/{specimen_id}/media"
+    else:
+        found = histology_content.find_specimen(tb.HISTOLOGY, specimen_id)
+        if found is None:
+            raise HTTPException(status_code=404, detail="Препарат не найден")
+        group_id, group, specimen = found
+        media_base = f"/api/v1/materials/histology/specimens/{specimen_id}/media"
     return {
         **_histology_specimen_payload(group_id, group, specimen),
         "protocol": specimen.get("protocol", ""),
@@ -223,7 +225,7 @@ def get_histology_practical_questions(
     if not pool:
         return []
     picked = random.sample(pool, min(limit, len(pool)))
-    attempts = [attempt_tokens.issue(user_id, specimen['id'], scope) for _, _, specimen in picked]
+    attempts = [attempt_tokens.issue(user_id, specimen['id'], scope) for specimen in picked]
     return [
         {
             'attempt_id': attempts[index],
@@ -231,8 +233,30 @@ def get_histology_practical_questions(
             "position": index + 1,
             "image_url": f"/api/v1/histology/exam/specimens/{specimen['id']}/guess-image",
         }
-        for index, (_, _, specimen) in enumerate(picked)
+        for index, specimen in enumerate(picked)
     ]
+
+
+@router.get("/histology/exam/specimens/{specimen_id}/media/{index}")
+def get_histology_exam_specimen_image(
+    specimen_id: str,
+    index: int,
+    user_id: int = Depends(get_current_user_id),
+    tb=Depends(get_fresh_bot_module),
+):
+    _check_histology_access(tb, user_id)
+    _, _, specimen = _histology_exam_item(tb, specimen_id)
+    images = specimen.get("images", [])
+    if not 0 <= index < len(images):
+        raise HTTPException(status_code=404, detail="Изображение не найдено")
+    return _histology_image_response(images[index])
+
+
+def _histology_image_response(image: str) -> FileResponse:
+    path = os.path.join(REPO_ROOT, "images", "histology", image)
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="Файл изображения не найден")
+    return FileResponse(path)
 
 
 @router.get("/histology/exam/specimens/{specimen_id}/guess-image")
@@ -242,17 +266,11 @@ def get_histology_guess_image(
     tb=Depends(get_fresh_bot_module),
 ):
     _check_histology_access(tb, user_id)
-    found = _histology_specimen_by_id(tb, specimen_id)
-    if found is None:
-        raise HTTPException(status_code=404, detail="препарат не найден")
-    _, _, specimen = found
+    _, _, specimen = _histology_exam_item(tb, specimen_id)
     guess_image = specimen.get("guess_image")
     if not guess_image:
         raise HTTPException(status_code=404, detail="изображение для зачёта не подготовлено")
-    path = os.path.join(REPO_ROOT, "images", "histology", guess_image)
-    if not os.path.isfile(path):
-        raise HTTPException(status_code=404, detail="файл микрофотографии не найден")
-    return FileResponse(path)
+    return _histology_image_response(guess_image)
 
 
 @router.post("/histology/exam/specimens/{specimen_id}/reveal")
@@ -262,13 +280,11 @@ def reveal_histology_practical_answer(
     tb=Depends(get_fresh_bot_module),
 ) -> dict:
     _check_histology_access(tb, user_id)
-    found = _histology_specimen_by_id(tb, specimen_id)
-    if found is None:
-        raise HTTPException(status_code=404, detail="препарат не найден")
-    group_id, group, specimen = found
+    group_id, group, specimen = _histology_exam_item(tb, specimen_id)
     return {
         **_histology_specimen_payload(group_id, group, specimen),
         "protocol": specimen.get("protocol", ""),
+        "guess_image_note": specimen.get("guess_image_note", ""),
     }
 
 
@@ -282,8 +298,7 @@ def grade_histology_practical_answer(
     from .. import learning
 
     _check_histology_access(tb, user_id)
-    if _histology_specimen_by_id(tb, specimen_id) is None:
-        raise HTTPException(status_code=404, detail="препарат не найден")
+    _histology_exam_item(tb, specimen_id)
     if os.environ.get('BOT_SYNC_MODE') == 'owner' or body.attempt_id:
         attempt_tokens.verify(body.attempt_id, user_id, specimen_id, body.scope)
     learning.record_histology_attempt(user_id, specimen_id, body.known, body.scope, event_id=body.attempt_id)

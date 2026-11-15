@@ -495,6 +495,8 @@ def test_histology_specimen_material_round_trip_once_referral_threshold_is_met()
 
 
 def test_histology_exam_catalog_practical_reveal_and_grade():
+    import hashlib
+
     unlocked_user_id = 900_444_555_777
     tb.stats["total_users"].add(unlocked_user_id)
     current_month = tb.local_today().strftime("%Y-%m")
@@ -507,8 +509,29 @@ def test_histology_exam_catalog_practical_reveal_and_grade():
     assert catalog.status_code == 200, catalog.text
     body = catalog.json()
     assert body["title"] == "ЭКЗАМЕН"
-    assert body["total_specimens"] == 71
-    assert len(body["groups"]) == 5
+    assert body["total_specimens"] == 50
+    assert [len(group["specimens"]) for group in body["groups"]] == [3, 21, 19, 7]
+    exam_items = [item for group in body["groups"] for item in group["specimens"]]
+    assert [item["number"] for item in exam_items] == list(range(1, 51))
+    assert all(item["practical_available"] for item in exam_items)
+    assert exam_items[15]["id"] == "exam-duodenum"
+    assert [(exam_items[n - 1]["id"], exam_items[n - 1]["stain"]) for n in (27, 29)] == [
+        ("exam-lung-azan", "Азан"), ("exam-kidney-azan", "Азан"),
+    ]
+
+    guess_images = set()
+    for group in body["groups"]:
+        scope = group["id"]
+        session = client.get(f"/api/v1/histology/exam/practical?limit=30&scope={scope}", headers=headers)
+        assert session.status_code == 200, session.text
+        assert {q["id"] for q in session.json()} == {item["id"] for item in group["specimens"]}
+        for q in session.json():
+            image = client.get(q["image_url"], headers=headers)
+            assert image.status_code == 200 and image.headers["content-type"].startswith("image/"), q["id"]
+            guess_images.add(hashlib.sha256(image.content).digest())
+    assert len(guess_images) == 50
+    assert client.get("/api/v1/histology/exam/specimens/d1_01/guess-image", headers=headers).status_code == 404
+    assert client.get("/api/v1/histology/exam/specimens/d1_01", headers=headers).status_code == 404
 
     practical = client.get("/api/v1/histology/exam/practical?limit=10", headers=headers)
     assert practical.status_code == 200, practical.text
@@ -522,8 +545,8 @@ def test_histology_exam_catalog_practical_reveal_and_grade():
     assert detail.json()["protocol"]
     assert detail.json()["images"]
     assert len(detail.json()['image_guides']) == len(detail.json()['images'])
-    assert detail.json()['metadata_note']
     assert detail.json()['sources'] == []
+    assert client.get(detail.json()["images"][0], headers=headers).status_code == 200
 
     reveal = client.post(f"/api/v1/histology/exam/specimens/{specimen_id}/reveal", headers=headers)
     assert reveal.status_code == 200
@@ -535,6 +558,7 @@ def test_histology_exam_catalog_practical_reveal_and_grade():
         json={"known": False, "scope": "all"},
     )
     assert grade.status_code == 200
+    assert grade.json()["total_specimens"] == 50
     assert specimen_id in grade.json()["mistake_ids"]
 
     repeated = client.get("/api/v1/histology/exam/practical?scope=mistakes&limit=10", headers=headers)
@@ -553,12 +577,12 @@ def test_all_reviewed_histology_cards_and_media_preserve_previous_learning():
     tb.save_stats()
     tb._stats_executor.submit(lambda: None).result()
     headers = _auth_headers(user_id)
-    catalog = client.get('/api/v1/histology/exam/catalog', headers=headers).json()
+    catalog = client.get('/api/v1/histology/exam/catalog?scope=diagnostics', headers=headers).json()
     summaries = [s for g in catalog['groups'] for s in g['specimens']]
     assert len(summaries) == 71
     media_count = 0
     for summary in summaries:
-        response = client.get(f'/api/v1/histology/exam/specimens/{summary["id"]}', headers=headers)
+        response = client.get(f'/api/v1/histology/exam/specimens/{summary["id"]}?scope=diagnostics', headers=headers)
         assert response.status_code == 200
         card = response.json()
         assert len(card['image_guides']) == len(card['images'])

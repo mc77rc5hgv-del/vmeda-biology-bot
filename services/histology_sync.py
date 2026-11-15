@@ -1,12 +1,12 @@
 """Combine preserved bot history and the existing Mini App journal without migration."""
 from __future__ import annotations
 
+from services.histology_content import exam_progress
 from web_api import learning
 
 
 def summary(tb, user_id: int) -> dict:
-    total = sum(len(g.get('specimens', [])) for g in tb.HISTOLOGY.values())
-    journal = learning.get_histology_stats(user_id, total)
+    journal = learning.get_histology_stats(user_id)
     baseline = tb.stats.get('histology_learning', {}).get(str(user_id), {})
     attempts = int(baseline.get('attempts', 0)) + journal['attempts']
     known = int(baseline.get('known', 0)) + journal['known']
@@ -19,12 +19,11 @@ def summary(tb, user_id: int) -> dict:
             mistakes.discard(specimen_id)
         else:
             mistakes.add(specimen_id)
-    return {
-        'total_specimens': total, 'attempts': attempts, 'known': known,
+    return exam_progress({
+        'attempts': attempts, 'known': known,
         'wrong': attempts - known, 'accuracy_percent': round(known / attempts * 100) if attempts else 0,
-        'mastered_specimens': len(mastered), 'mastered_ids': sorted(mastered),
-        'active_mistakes': len(mistakes), 'mistake_ids': sorted(mistakes),
-    }
+        'mastered_ids': mastered, 'mistake_ids': mistakes,
+    })
 
 
 def entry(tb, user_id: int) -> dict:

@@ -6,7 +6,7 @@ import { Icon } from "../components/Icon";
 import { Skeleton } from "../components/Skeleton";
 import { StateMessage } from "../components/StateMessage";
 import { ZoomableMicrograph } from "../components/ZoomableMicrograph";
-import { ApiError, fetchHistologyCatalog, fetchHistologySpecimen } from "../lib/apiClient";
+import { ApiError, fetchHistologyCatalog, fetchHistologySpecimen, type HistologyCatalogScope } from "../lib/apiClient";
 import { filterHistologyGroups, type HistologyCatalogLocation } from "../lib/histologyCatalog";
 import { useTelegramBackButton } from "../lib/telegram";
 import type { HistologySpecimen } from "../lib/types";
@@ -67,9 +67,26 @@ function SpecimenImages({ specimen }: { specimen: HistologySpecimen }) {
 export function HistologySpecimenPage() {
   const { specimenId = "" } = useParams();
   const navigate = useNavigate();
-  const state = useLocation().state as HistologyCatalogLocation | null;
-  const catalogPath = state?.catalogPath === "/histology/diagnostics"
-    ? "/histology/diagnostics" : "/histology/exam/specimens";
+  const location = useLocation();
+  const state = location.state as HistologyCatalogLocation | null;
+  const param = new URLSearchParams(location.search).get("scope");
+  const requestedScope = param === "diagnostics" || state?.catalogPath === "/histology/diagnostics" ? "diagnostics" : "exam";
+  const legacyLink = !param && !state;
+  const query = useQuery({
+    queryKey: ["histology-specimen", specimenId, requestedScope, legacyLink],
+    queryFn: async () => {
+      let scope: HistologyCatalogScope = requestedScope;
+      try {
+        return { scope, specimen: await fetchHistologySpecimen(specimenId, scope) };
+      } catch (error) {
+        if (!legacyLink || !(error instanceof ApiError) || error.status !== 404) throw error;
+        scope = "diagnostics";
+        return { scope, specimen: await fetchHistologySpecimen(specimenId, scope) };
+      }
+    },
+  });
+  const scope = query.data?.scope ?? requestedScope;
+  const catalogPath = scope === "diagnostics" ? "/histology/diagnostics" : "/histology/exam/specimens";
   const catalogSearch = state?.catalogSearch ?? "";
   function backToCatalog() {
     if (typeof state?.catalogSearch === "string") navigate(-1);
@@ -77,20 +94,16 @@ export function HistologySpecimenPage() {
   }
   useTelegramBackButton(backToCatalog);
 
-  const query = useQuery({
-    queryKey: ["histology-specimen", specimenId],
-    queryFn: () => fetchHistologySpecimen(specimenId),
-  });
-  const catalogQuery = useQuery({ queryKey: ["histology-catalog"], queryFn: fetchHistologyCatalog });
+  const catalogQuery = useQuery({ queryKey: ["histology-catalog", scope], queryFn: () => fetchHistologyCatalog(scope) });
 
-  const specimen = query.data;
+  const specimen = query.data?.specimen;
   const specimens = filterHistologyGroups(catalogQuery.data?.groups ?? [], new URLSearchParams(catalogSearch))
     .flatMap((group) => group.specimens);
   const position = specimens.findIndex((item) => item.id === specimenId);
   const previous = position > 0 ? specimens[position - 1] : undefined;
   const next = position >= 0 ? specimens[position + 1] : undefined;
   function openSpecimen(id: string) {
-    navigate(`/histology/specimens/${encodeURIComponent(id)}`, { state, replace: true });
+    navigate(`/histology/specimens/${encodeURIComponent(id)}?scope=${scope}`, { state, replace: true });
     window.scrollTo({ top: 0, behavior: "instant" });
   }
   const backButton = (

@@ -121,18 +121,18 @@ async def main():
             check_html(tb.get_histology_specimen_text(diag_key, spec["id"]))
     print("all specimen/topic texts HTML-balanced and within length limit: OK")
 
-    # 3. Two entrances to the same specimen catalog, with independent back navigation.
+    # 3. The official list and the full diagnostics catalog keep independent navigation.
     assert kb_texts(tb.get_histology_menu_keyboard())[:2] == ["Экзамен", "ДИАГНОСТИКИ"]
     assert kb_texts(histology.get_histology_exam_keyboard())[:4] == [
         "Препараты", "Тесты", "Теоретические вопросы", "УГАДАЙ ПРЕПАРАТ",
     ]
     exam_groups = histology.get_histology_catalog_keyboard(exam=True).inline_keyboard
     diagnostics_groups = histology.get_histology_catalog_keyboard().inline_keyboard
-    assert len(exam_groups) == len(diagnostics_groups) == len(tb.HISTOLOGY) + 1
-    assert [row[0].text for row in exam_groups[:-1]] == [row[0].text for row in diagnostics_groups[:-1]]
+    assert len(diagnostics_groups) == len(tb.HISTOLOGY) + 1
+    assert len(exam_groups) == 5
     assert all(
         exam[0].callback_data == diagnostics[0].callback_data + ":exam"
-        for exam, diagnostics in zip(exam_groups[:-1], diagnostics_groups[:-1])
+        for exam, diagnostics in zip(exam_groups[:-1], diagnostics_groups[1:-1])
     )
     exam_topic = FakeCB(exam_groups[0][0].callback_data)
     await tb.cb_histology_topic(exam_topic)
@@ -142,8 +142,12 @@ async def main():
                  if button.callback_data.startswith("histology_specimen:"))
     exam_specimen = FakeCB(first.callback_data)
     await tb.cb_histology_specimen(exam_specimen)
+    assert "№1. Мазок крови человека" in exam_specimen.message.edits[0][0]
     assert exam_specimen.message.edits[0][1].inline_keyboard[-1][0].callback_data == exam_topic.data
-    print("histology main menu, exam order and shared catalogs: OK")
+    excluded = FakeCB("histology_specimen:diagnostika_1:d1_01:exam")
+    await tb.cb_histology_specimen(excluded)
+    assert not excluded.message.edits and excluded._answers[0][1]
+    print("histology main menu, official exam list and diagnostics navigation: OK")
 
     theory = FakeCB("histology_theory_q:100:98")
     await histology.cb_histology_theory_answer(theory)
@@ -408,23 +412,23 @@ async def main():
     tb.stats["histology_warnings"].pop(str(non_admin), None)
     print("guess mode blocked once trial exhausted: OK")
 
-    # 13. Guess mode: scoped to a single diagnostika (diagnostika_1, 10 specimens -> full session size 10)
+    # 13. Guess mode: a diagnostic group with 21 exam specimens supplies a session of 10.
     assert ADMIN_ID not in tb.HISTOLOGY_GUESS_SESSIONS
-    cb_g1 = FakeCB("histology_guess_start:diagnostika_1")
+    cb_g1 = FakeCB("histology_guess_start:diagnostika_3")
     await tb.cb_histology_guess_start(cb_g1)
     assert cb_g1.message.deleted
     assert cb_g1.message.photos, "expected a question photo to be sent"
     session = tb.HISTOLOGY_GUESS_SESSIONS[ADMIN_ID]
-    assert session["scope"] == "diagnostika_1"
+    assert session["scope"] == "diagnostika_3"
     assert len(session["items"]) == 10
-    assert all(diag_key == "diagnostika_1" for diag_key, _ in session["items"])
+    assert all(diag_key == "diagnostika_3" for diag_key, _ in session["items"])
     q_photo, q_caption, q_kb = cb_g1.message.photos[0]
     assert isinstance(q_photo, FSInputFile)
     assert "1/10" in q_caption
     assert "Практический зачёт" in q_caption
     # question caption must not leak the answer (title)
     diag_key0, spec_id0 = session["items"][0]
-    spec0 = tb.get_histology_specimen(diag_key0, spec_id0)
+    spec0 = tb.get_histology_specimen(diag_key0, spec_id0, exam=True)
     assert spec0["title"] not in q_caption
     assert any("Показать ответ" in t for t in kb_texts(q_kb))
     print("guess mode session start (scoped): OK")
@@ -462,16 +466,19 @@ async def main():
     assert ADMIN_ID not in tb.HISTOLOGY_GUESS_SESSIONS
     print("guess mode unknown scope handled: OK")
 
-    # 17b. Pool excludes specimens without guess_image (diagnostika_3: only 2 of 23
-    # eligible -- most of that deck's photos still show labels in every available
-    # source image, so the honest choice was to leave them out of guess mode)
+    # 17b. The practical pool and bot catalog share the 2026–2027 exam list.
+    from services.histology_content import exam_specimens
+    assert {sid for _, sid in tb.get_histology_guess_pool("all")} == set(exam_specimens())
+    assert len(exam_specimens()) == 50
+    assert tb.get_histology_guess_pool("diagnostika_1") == []
     pool3 = tb.get_histology_guess_pool("diagnostika_3")
-    assert {sid for _, sid in pool3} == {"d3_11", "d3_27"}, pool3
+    assert len(pool3) == 21
+    assert "exam-duodenum" in {sid for _, sid in pool3}
     cb_g3s = FakeCB("histology_guess_start:diagnostika_3")
     await tb.cb_histology_guess_start(cb_g3s)
-    assert len(tb.HISTOLOGY_GUESS_SESSIONS[ADMIN_ID]["items"]) == 2
+    assert len(tb.HISTOLOGY_GUESS_SESSIONS[ADMIN_ID]["items"]) == tb.HISTOLOGY_GUESS_SESSION_SIZE
     await tb.cb_histology_guess_stop(FakeCB("histology_guess_stop"))
-    print("guess mode pool excludes unreliable-deck specimens: OK")
+    print("guess mode pool matches the official exam list: OK")
 
     # 18. Full run-through to completion (scope=all) tallies know/dont_know and ends with summary
     cb_start = FakeCB("histology_guess_start:all")

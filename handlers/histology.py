@@ -19,7 +19,7 @@ from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 import telegram_bot as tb
-from services import histology_exam
+from services import histology_content, histology_exam
 from services.telegram_ui import safe_delete_message
 
 router = Router()
@@ -111,8 +111,9 @@ async def histology_gate_ok(callback: CallbackQuery) -> bool:
 
     return True
 
-def get_histology_specimen(diag_key: str, spec_id: str):
-    diag = tb.HISTOLOGY.get(diag_key)
+def get_histology_specimen(diag_key: str, spec_id: str, exam: bool = False):
+    bank = histology_content.exam_groups(tb.HISTOLOGY) if exam else tb.HISTOLOGY
+    diag = bank.get(diag_key)
     if not diag:
         return None
     for spec in diag["specimens"]:
@@ -179,16 +180,18 @@ def get_histology_exam_keyboard():
 
 def get_histology_catalog_keyboard(exam: bool = False):
     suffix = ":exam" if exam else ""
+    bank = histology_content.exam_groups(tb.HISTOLOGY) if exam else tb.HISTOLOGY
     return _menu([
         (diag.get("menu_title", diag["title"]), f"histology_topic:{key}{suffix}")
-        for key, diag in tb.HISTOLOGY.items()
+        for key, diag in bank.items()
     ], "histology_exam" if exam else "histology_menu")
 
 
-def get_histology_topic_text(diag_key: str) -> str:
-    diag = tb.HISTOLOGY[diag_key]
+def get_histology_topic_text(diag_key: str, exam: bool = False) -> str:
+    bank = histology_content.exam_groups(tb.HISTOLOGY) if exam else tb.HISTOLOGY
+    diag = bank[diag_key]
     n = len(diag["specimens"])
-    total = diag.get("total_official")
+    total = diag.get("total_official") if not exam else n
     progress = f"{n}" if not total or n >= total else f"{n} из {total}"
     note = "" if not total or n >= total else "\n\nОстальные препараты добавим по мере поступления презентаций."
     return (
@@ -199,9 +202,10 @@ def get_histology_topic_text(diag_key: str) -> str:
 
 def get_histology_topic_keyboard(diag_key: str, exam: bool = False):
     suffix = ":exam" if exam else ""
-    diag = tb.HISTOLOGY[diag_key]
+    bank = histology_content.exam_groups(tb.HISTOLOGY) if exam else tb.HISTOLOGY
+    diag = bank[diag_key]
     builder = InlineKeyboardBuilder()
-    if not exam:
+    if not exam and get_histology_guess_pool(diag_key):
         builder.button(text="🎯 Угадай препарат", callback_data=f"histology_guess_start:{diag_key}")
     for spec in diag["specimens"]:
         builder.button(text=f"№{spec['number']}. {spec['title']}", callback_data=f"histology_specimen:{diag_key}:{spec['id']}{suffix}")
@@ -211,8 +215,8 @@ def get_histology_topic_keyboard(diag_key: str, exam: bool = False):
     ))
     return builder.as_markup()
 
-def get_histology_specimen_text(diag_key: str, spec_id: str) -> str:
-    spec = get_histology_specimen(diag_key, spec_id)
+def get_histology_specimen_text(diag_key: str, spec_id: str, exam: bool = False) -> str:
+    spec = get_histology_specimen(diag_key, spec_id, exam)
     lines = [f"🔬 <b>№{spec['number']}. {escape(spec['title'])}</b>\n{tb.DIVIDER}\n"]
     if spec.get("stain"):
         lines.append(f"Окраска исходного препарата: {escape(spec['stain'])}")
@@ -226,7 +230,7 @@ def get_histology_specimen_text(diag_key: str, spec_id: str) -> str:
 
 def get_histology_specimen_keyboard(diag_key: str, spec_id: str, exam: bool = False):
     suffix = ":exam" if exam else ""
-    spec = get_histology_specimen(diag_key, spec_id)
+    spec = get_histology_specimen(diag_key, spec_id, exam)
     builder = InlineKeyboardBuilder()
     n_img = len(spec.get("images", []))
     if n_img:
@@ -250,7 +254,7 @@ def get_histology_image_keyboard(diag_key: str, spec_id: str, idx: int, total: i
 
 async def render_histology_image(callback: CallbackQuery, diag_key: str, spec_id: str, idx: int,
                                  exam: bool = False):
-    spec = get_histology_specimen(diag_key, spec_id)
+    spec = get_histology_specimen(diag_key, spec_id, exam)
     images = spec.get("images", [])
     from services.histology_content import image_caption
     caption = f"🔬 №{spec['number']}. " + image_caption(spec, idx) + f"\n\n{idx + 1}/{len(images)}"
@@ -287,7 +291,7 @@ async def cb_histology_catalog(callback: CallbackQuery):
     exam = callback.data == "histology_exam_specimens"
     await callback.answer()
     await tb.safe_edit_text(
-        callback.message, "🔬 Препараты" if exam else "🔬 ДИАГНОСТИКИ",
+        callback.message, f"🔬 Экзаменационные препараты · {len(histology_content.exam_specimens())}" if exam else "🔬 ДИАГНОСТИКИ",
         reply_markup=get_histology_catalog_keyboard(exam),
     )
 
@@ -297,7 +301,8 @@ async def cb_histology_guess_menu(callback: CallbackQuery):
     if not await histology_gate_ok(callback):
         return
     await callback.answer()
-    await tb.safe_edit_text(callback.message, "🎯 УГАДАЙ ПРЕПАРАТ", reply_markup=_menu([
+    count = len(get_histology_guess_pool("all"))
+    await tb.safe_edit_text(callback.message, f"🎯 УГАДАЙ ПРЕПАРАТ\n\nВ базе: {count} экзаменационных препаратов", reply_markup=_menu([
         ("Начать · 10 микрофотографий", "histology_guess_start:all"),
         ("Работа над ошибками", "histology_guess_start:mistakes"),
         ("Моя статистика", "histology_stats"),
@@ -309,15 +314,17 @@ async def cb_histology_topic(callback: CallbackQuery):
     if not await histology_gate_ok(callback):
         return
     _, diag_key, *context = callback.data.split(":")
-    if diag_key not in tb.HISTOLOGY:
+    exam = context == ["exam"]
+    bank = histology_content.exam_groups(tb.HISTOLOGY) if exam else tb.HISTOLOGY
+    if diag_key not in bank:
         await callback.answer("Раздел не найден", show_alert=True)
         return
     await callback.answer()
     await tb.safe_edit_text(
         callback.message,
-        get_histology_topic_text(diag_key),
+        get_histology_topic_text(diag_key, exam),
         parse_mode="HTML",
-        reply_markup=get_histology_topic_keyboard(diag_key, context == ["exam"])
+        reply_markup=get_histology_topic_keyboard(diag_key, exam)
     )
 
 @router.callback_query(F.data.startswith("histology_specimen:"))
@@ -325,16 +332,17 @@ async def cb_histology_specimen(callback: CallbackQuery):
     if not await histology_gate_ok(callback):
         return
     _, diag_key, spec_id, *context = callback.data.split(":")
-    spec = get_histology_specimen(diag_key, spec_id)
+    exam = context == ["exam"]
+    spec = get_histology_specimen(diag_key, spec_id, exam)
     if not spec:
         await callback.answer("Препарат не найден", show_alert=True)
         return
     await callback.answer()
     await tb.safe_edit_text(
         callback.message,
-        get_histology_specimen_text(diag_key, spec_id),
+        get_histology_specimen_text(diag_key, spec_id, exam),
         parse_mode="HTML",
-        reply_markup=get_histology_specimen_keyboard(diag_key, spec_id, context == ["exam"])
+        reply_markup=get_histology_specimen_keyboard(diag_key, spec_id, exam)
     )
 
 @router.callback_query(F.data.startswith("histology_img:"))
@@ -343,13 +351,14 @@ async def cb_histology_img(callback: CallbackQuery):
         return
     _, diag_key, spec_id, idx_s, *context = callback.data.split(":")
     idx = int(idx_s)
-    spec = get_histology_specimen(diag_key, spec_id)
+    exam = context == ["exam"]
+    spec = get_histology_specimen(diag_key, spec_id, exam)
     images = spec.get("images", []) if spec else []
     if not images or not (0 <= idx < len(images)):
         await callback.answer("Фото для этого препарата пока нет", show_alert=True)
         return
     await callback.answer()
-    await render_histology_image(callback, diag_key, spec_id, idx, context == ["exam"])
+    await render_histology_image(callback, diag_key, spec_id, idx, exam)
 
 # ---- ЭКЗАМЕН: практический зачёт, ошибки и статистика ----
 HISTOLOGY_GUESS_SESSION_SIZE = 10
@@ -393,6 +402,7 @@ def record_histology_result(user_id: int, specimen_id: str, known: bool, event_i
 
 def get_histology_stats_text(user_id: int) -> str:
     entry = get_histology_learning(user_id)
+    exam_ids = histology_content.exam_specimens().keys()
     attempts = entry["attempts"]
     accuracy = round(entry["known"] / attempts * 100) if attempts else 0
     return (
@@ -401,25 +411,18 @@ def get_histology_stats_text(user_id: int) -> str:
         f"Узнано правильно: <b>{entry['known']}</b>\n"
         f"Ошибок: <b>{entry['wrong']}</b>\n"
         f"Точность: <b>{accuracy}%</b>\n"
-        f"Освоено препаратов: <b>{len(entry['mastered'])} из 71</b>\n"
-        f"В активной работе над ошибками: <b>{len(entry['mistakes'])}</b>"
+        f"Освоено препаратов: <b>{len(exam_ids & entry['mastered'])} из {len(exam_ids)}</b>\n"
+        f"В активной работе над ошибками: <b>{len(exam_ids & entry['mistakes'])}</b>"
     )
 
 def get_histology_guess_pool(scope: str):
-    # only specimens with a verified label-free "guess_image" are eligible --
-    # many source slides bake the answer or structure labels into every available
-    # photo, so those specimens are deliberately left out of this mode.
-    if scope == "all":
-        return [(diag_key, spec["id"]) for diag_key, diag in tb.HISTOLOGY.items()
-                 for spec in diag["specimens"] if spec.get("guess_image")]
-    if scope == "mistakes":
-        # user-specific filtering is done in start_histology_guess_session, where user_id exists.
-        return [(diag_key, spec["id"]) for diag_key, diag in tb.HISTOLOGY.items()
-                for spec in diag["specimens"] if spec.get("guess_image")]
-    diag = tb.HISTOLOGY.get(scope)
-    if not diag:
-        return []
-    return [(scope, spec["id"]) for spec in diag["specimens"] if spec.get("guess_image")]
+    return [
+        (diag_key, spec["id"])
+        for diag_key, diag in histology_content.exam_groups(tb.HISTOLOGY).items()
+        if scope in {"all", "mistakes", diag_key}
+        for spec in diag["specimens"]
+        if spec.get("guess_image")
+    ]
 
 def start_histology_guess_session(user_id: int, scope: str) -> bool:
     pool = get_histology_guess_pool(scope)
@@ -475,7 +478,7 @@ async def render_histology_guess_question(callback: CallbackQuery, user_id: int)
         total = len(session["items"])
         index = session["index"]
         diag_key, spec_id = session["items"][index]
-        spec = get_histology_specimen(diag_key, spec_id)
+        spec = get_histology_specimen(diag_key, spec_id, exam=True)
         mode = "Работа над ошибками" if session["scope"] == "mistakes" else "Практический зачёт"
         caption = f"🎓 {mode} — {index + 1}/{total}\n\nЧто это за препарат?"
         photo = FSInputFile(os.path.join(tb.HISTOLOGY_IMAGES_DIR, spec["guess_image"]))
@@ -494,12 +497,12 @@ async def render_histology_guess_answer(user_id: int):
     session = HISTOLOGY_GUESS_SESSIONS[user_id]
     total = len(session["items"])
     diag_key, spec_id = session["items"][session["index"]]
-    spec = get_histology_specimen(diag_key, spec_id)
+    spec = get_histology_specimen(diag_key, spec_id, exam=True)
     lines = [f"🎓 Практический зачёт — {session['index'] + 1}/{total}", "", f"№{spec['number']}. {spec['title']}"]
     if spec.get("stain"):
         lines.append(f"Окраска: {spec['stain']}")
-    if spec.get("magnification"):
-        lines.append(f"Увеличение: {spec['magnification']}")
+    if spec.get("guess_image_note"):
+        lines.append(spec["guess_image_note"])
     lines.append("")
     lines.append("Ты угадал(а)?")
     await session["msg"].edit_caption(caption="\n".join(lines), reply_markup=get_histology_guess_answer_keyboard(session))
