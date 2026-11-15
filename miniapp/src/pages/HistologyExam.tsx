@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Check, ChevronRight, GraduationCap, Microscope, RotateCcw, Search, X } from "lucide-react";
+import { ArrowLeft, BookOpen, Check, ChevronRight, ClipboardList, GraduationCap, Microscope, RotateCcw, ScanSearch, Search, X } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "../components/Icon";
@@ -21,21 +21,39 @@ type Scope = "all" | "mistakes";
 
 export function HistologyExamPage() {
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
+  const links = [
+    { title: "Препараты", to: "specimens", icon: Microscope },
+    { title: "Тесты", to: "tests", icon: ClipboardList },
+    { title: "Теоретические вопросы", to: "theory", icon: BookOpen },
+    { title: "УГАДАЙ ПРЕПАРАТ", to: "guess", icon: ScanSearch },
+  ];
+  useTelegramBackButton(() => navigate("/subjects/histology"));
+  return (
+    <div className={["screen", styles.examScreen].join(" ")}>
+      <button type="button" className={styles.backButton} onClick={() => navigate("/subjects/histology")}>
+        <Icon icon={ArrowLeft} size={18} /> Гистология
+      </button>
+      <h1>Экзамен</h1>
+      <div className={styles.actions}>
+        {links.map(({ title, to, icon }) => (
+          <button key={to} type="button" onClick={() => navigate(`/histology/exam/${to}`)}>
+            <span><Icon icon={icon} size={21} /></span>
+            <strong>{title}</strong>
+            <Icon icon={ChevronRight} size={18} />
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function HistologyCatalogPage({ diagnostics = false }: { diagnostics?: boolean }) {
+  const navigate = useNavigate();
   const [search, setSearch] = useState("");
-  const [session, setSession] = useState<{ scope: Scope; items: HistologyPracticalQuestion[] } | null>(null);
-  const [index, setIndex] = useState(0);
-  const [answer, setAnswer] = useState<(HistologySpecimenSummary & { protocol: string }) | null>(null);
-  const [sessionKnown, setSessionKnown] = useState(0);
-  const [loadingAction, setLoadingAction] = useState(false);
-  const busy = useRef(false);
-  const [pendingGrade, setPendingGrade] = useState<boolean | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
-
-  useTelegramBackButton(() => session ? setSession(null) : navigate("/subjects/histology"));
-
+  const back = diagnostics ? "/subjects/histology" : "/histology/exam";
+  const catalogPath = diagnostics ? "/histology/diagnostics" : "/histology/exam/specimens";
+  useTelegramBackButton(() => navigate(back));
   const catalogQuery = useQuery({ queryKey: ["histology-catalog"], queryFn: fetchHistologyCatalog });
-  const statsQuery = useQuery({ queryKey: ["histology-stats"], queryFn: fetchHistologyStats });
 
   const filteredGroups = useMemo(() => {
     const groups = catalogQuery.data?.groups ?? [];
@@ -50,6 +68,66 @@ export function HistologyExamPage() {
       }))
       .filter((group) => group.specimens.length > 0);
   }, [catalogQuery.data, search]);
+
+  if (catalogQuery.isLoading) {
+    return <div className="screen"><Skeleton height={190} radius="24px" /><Skeleton height={112} radius="20px" /></div>;
+  }
+  if (catalogQuery.isError || !catalogQuery.data) {
+    return <div className="screen"><StateMessage title="Не удалось загрузить препараты" onRetry={() => catalogQuery.refetch()} /></div>;
+  }
+
+  return (
+    <div className={["screen", styles.examScreen].join(" ")}>
+      <button type="button" className={styles.backButton} onClick={() => navigate(back)}>
+        <Icon icon={ArrowLeft} size={18} /> {diagnostics ? "Гистология" : "Экзамен"}
+      </button>
+      <div className={styles.catalogHead}>
+        <h1>{diagnostics ? "ДИАГНОСТИКИ" : "Препараты"}</h1>
+        <span>{catalogQuery.data.totalSpecimens}</span>
+      </div>
+      <label className={styles.searchBox}>
+        <Icon icon={Search} size={18} />
+        <input value={search} onChange={(event) => setSearch(event.target.value)} aria-label="Найти препарат или окраску" placeholder="Найти препарат или окраску" />
+      </label>
+
+      {filteredGroups.length === 0 && <StateMessage title="Препараты не найдены" />}
+      <div className={styles.catalog}>
+        {filteredGroups.map((group) => (
+          <section key={group.id} className={styles.group}>
+            <div className={styles.groupHead}><h3>{group.menuTitle}</h3><span>{group.specimens.length}</span></div>
+            {group.specimens.map((specimen) => (
+              <button key={specimen.id} type="button" onClick={() => navigate(`/histology/specimens/${specimen.id}`, { state: { catalogPath } })}>
+                <span className={styles.specimenNumber}>{specimen.number}</span>
+                <div>
+                  <strong>{specimen.title}</strong>
+                  <small>{[specimen.stain, specimen.magnification ? `×${specimen.magnification}` : null].filter(Boolean).join(" · ")}</small>
+                </div>
+                <Icon icon={ChevronRight} size={17} />
+              </button>
+            ))}
+          </section>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function HistologyGuessPage() {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [session, setSession] = useState<{ scope: Scope; items: HistologyPracticalQuestion[] } | null>(null);
+  const [index, setIndex] = useState(0);
+  const [answer, setAnswer] = useState<(HistologySpecimenSummary & { protocol: string }) | null>(null);
+  const [sessionKnown, setSessionKnown] = useState(0);
+  const [loadingAction, setLoadingAction] = useState(false);
+  const busy = useRef(false);
+  const [pendingGrade, setPendingGrade] = useState<boolean | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  useTelegramBackButton(() => session ? setSession(null) : navigate("/histology/exam"));
+
+  const catalogQuery = useQuery({ queryKey: ["histology-catalog"], queryFn: fetchHistologyCatalog });
+  const statsQuery = useQuery({ queryKey: ["histology-stats"], queryFn: fetchHistologyStats });
 
   const startSession = async (scope: Scope) => {
     setLoadingAction(true);
@@ -108,7 +186,7 @@ export function HistologyExamPage() {
     return <div className="screen"><Skeleton height={190} radius="24px" /><Skeleton height={112} radius="20px" /></div>;
   }
   if (catalogQuery.isError || !catalogQuery.data) {
-    return <div className="screen"><StateMessage title="Не удалось открыть ЭКЗАМЕН" onRetry={() => catalogQuery.refetch()} /></div>;
+    return <div className="screen"><StateMessage title="Не удалось открыть тренажёр" onRetry={() => catalogQuery.refetch()} /></div>;
   }
 
   if (session) {
@@ -116,7 +194,7 @@ export function HistologyExamPage() {
       <div className={["screen", styles.examScreen].join(" ")}>
         {actionError && <p role="alert">{actionError}</p>}
         <button type="button" className={styles.backButton} onClick={() => setSession(null)}>
-          <Icon icon={ArrowLeft} size={18} /> К каталогу
+          <Icon icon={ArrowLeft} size={18} /> К тренажёру
         </button>
 
         {session.items.length === 0 ? (
@@ -132,7 +210,7 @@ export function HistologyExamPage() {
             <h1>{sessionKnown} из {session.items.length}</h1>
             <p>Результат сохранён. Нераспознанные препараты уже добавлены в работу над ошибками.</p>
             <button type="button" onClick={() => startSession(session.scope)}>Пройти ещё раз</button>
-            <button type="button" className={styles.secondaryButton} onClick={() => setSession(null)}>Вернуться в ЭКЗАМЕН</button>
+            <button type="button" className={styles.secondaryButton} onClick={() => setSession(null)}>К тренажёру</button>
           </div>
         ) : current ? (
           <>
@@ -177,20 +255,21 @@ export function HistologyExamPage() {
   }
 
   const stats = statsQuery.data;
-  const totalSpecimens = catalogQuery.data?.totalSpecimens ?? 71;
   const practicalCount = catalogQuery.data?.groups.reduce((sum, group) => sum + group.specimens.filter(item => item.practicalAvailable).length, 0) ?? 0;
   return (
     <div className={["screen", styles.examScreen].join(" ")}>
       {actionError && <p role="alert">{actionError}</p>}
+      <button type="button" className={styles.backButton} onClick={() => navigate("/histology/exam")}>
+        <Icon icon={ArrowLeft} size={18} /> Экзамен
+      </button>
       {statsQuery.isError && <StateMessage title="Статистика временно недоступна" body="Это ошибка загрузки, а не обнуление данных." onRetry={() => statsQuery.refetch()} />}
       <section className={styles.hero}>
         <div className={styles.heroTop}>
           <span className={styles.heroIcon}><Icon icon={Microscope} size={24} /></span>
-          <span className={styles.heroBadge}>{totalSpecimens} препаратов</span>
+          <span className={styles.heroBadge}>{practicalCount} препаратов</span>
         </div>
         <p className={styles.eyebrow}>Гистология</p>
-        <h1>ЭКЗАМЕН</h1>
-        <p>Каталог и теория: {totalSpecimens} препаратов. Практика распознавания: {practicalCount} препаратов с проверенными изображениями.</p>
+        <h1>УГАДАЙ ПРЕПАРАТ</h1>
         <div className={styles.statsGrid}>
           <div><strong>{stats?.mastered ?? 0}</strong><span>освоено</span></div>
           <div><strong>{stats?.accuracy ?? 0}%</strong><span>точность</span></div>
@@ -211,32 +290,6 @@ export function HistologyExamPage() {
         </button>
       </div>
 
-      <div className={styles.catalogHead}>
-        <div><p className={styles.eyebrow}>Атлас</p><h2>Каталог препаратов</h2></div>
-        <span>{catalogQuery.data.totalSpecimens}</span>
-      </div>
-      <label className={styles.searchBox}>
-        <Icon icon={Search} size={18} />
-        <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Найти препарат или окраску" />
-      </label>
-
-      <div className={styles.catalog}>
-        {filteredGroups.map((group) => (
-          <section key={group.id} className={styles.group}>
-            <div className={styles.groupHead}><h3>{group.menuTitle}</h3><span>{group.specimens.length}</span></div>
-            {group.specimens.map((specimen) => (
-              <button key={specimen.id} type="button" onClick={() => navigate(`/histology/specimens/${specimen.id}`)}>
-                <span className={styles.specimenNumber}>{specimen.number}</span>
-                <div>
-                  <strong>{specimen.title}</strong>
-                  <small>{[specimen.stain, specimen.magnification ? `×${specimen.magnification}` : null].filter(Boolean).join(" · ")}</small>
-                </div>
-                <Icon icon={ChevronRight} size={17} />
-              </button>
-            ))}
-          </section>
-        ))}
-      </div>
     </div>
   );
 }

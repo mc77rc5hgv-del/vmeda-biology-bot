@@ -21,6 +21,10 @@ class TelegramAuthResponse(BaseModel):
     photo_url: str | None = None
 
 
+class HistologyTestAnswerRequest(BaseModel):
+    option: int = Field(ge=1, le=4)
+
+
 class QuizAnswerRequest(BaseModel):
     selected_index: int
     attempt_id: str | None = Field(default=None, min_length=8, max_length=128)

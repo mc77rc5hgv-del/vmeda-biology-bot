@@ -10,9 +10,15 @@ const titles: Record<string, string> = {
 
 export function stepFromPath(path: string): ContinueItem | null {
   const match = path.match(/^\/(subjects|materials|tests)\/([\w-]+)(?:\/[^?#]*)?$/);
-  const subjectId = match?.[2] ?? (path.match(/^\/histology\/(exam|specimens\/[^/?#]+)$/) ? "histology" : "");
+  const histology = path.match(/^\/histology\/(diagnostics|specimens\/[^/?#]+|exam(?:\/(?:specimens|guess|tests(?:\/[^/?#]+)?|theory(?:\/\d+)?))?)$/);
+  const subjectId = match?.[2] ?? (histology ? "histology" : "");
   if (!titles[subjectId]) return null;
-  const sectionTitle = path === "/histology/exam" ? "Диагностика препаратов"
+  const sectionTitle = path === "/histology/exam" ? "Экзамен"
+    : path === "/histology/diagnostics" ? "Диагностики"
+    : path === "/histology/exam/specimens" ? "Препараты"
+    : path === "/histology/exam/guess" ? "Угадай препарат"
+    : path.startsWith("/histology/exam/theory") ? "Теоретические вопросы"
+    : path.startsWith("/histology/exam/tests") ? "Тесты"
     : path.startsWith("/histology/specimens/") ? "Препарат"
     : match?.[1] === "tests" ? "Тестирование"
     : match?.[1] === "materials" ? "Учебный материал"

@@ -875,3 +875,55 @@ export function saveLearningNavigation(path: string): Promise<{path: string; upd
   navigationQueue = next;
   return next;
 }
+
+
+
+export type HistologyTheorySection = {
+  id: number;
+  title: string;
+  questions: { number: number; title: string }[];
+};
+export type HistologyTheoryAnswer = HistologyTheorySection["questions"][number] & {
+  paragraphs: { label: string; text: string }[];
+};
+type HistologyTestSummary = { id: string; number: number; question: string; module_id: string };
+export type HistologyTestQuestion = Omit<HistologyTestSummary, "module_id"> & { options: string[] };
+export type HistologyTestAnswer = {
+  correct: boolean | null;
+  correct_option: number | null;
+  source_correct_option: number;
+  explanation: string;
+};
+
+export function fetchHistologyTheory() {
+  return apiFetch<HistologyTheorySection[]>("/api/v1/histology/exam/theory");
+}
+
+export function fetchHistologyTheoryAnswer(number: string) {
+  return apiFetch<HistologyTheoryAnswer>(`/api/v1/histology/exam/theory/${encodeURIComponent(number)}`);
+}
+
+export function fetchHistologyTestCatalog() {
+  return apiFetch<{
+    modules: { id: string; title: string }[];
+    questions: HistologyTestSummary[];
+    rules: {
+      questions_per_attempt: number;
+      thresholds: { grade: string; min_correct: number; max_correct: number }[];
+    };
+  }>("/api/v1/histology/exam/tests");
+}
+
+export function startHistologyTest() {
+  return apiFetch<HistologyTestQuestion[]>("/api/v1/histology/exam/tests/start", { method: "POST" });
+}
+
+export function fetchHistologyTestQuestion(id: string) {
+  return apiFetch<HistologyTestQuestion>(`/api/v1/histology/exam/tests/${encodeURIComponent(id)}`);
+}
+
+export function answerHistologyTest(id: string, option: number) {
+  return apiFetch<HistologyTestAnswer>(`/api/v1/histology/exam/tests/${encodeURIComponent(id)}/answer`, {
+    method: "POST", body: JSON.stringify({ option }),
+  });
+}

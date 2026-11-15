@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import os, asyncio, random
 from _bootstrap import tb
+from handlers import histology
 from html.parser import HTMLParser
 from aiogram.types import FSInputFile
 
@@ -120,14 +121,51 @@ async def main():
             check_html(tb.get_histology_specimen_text(diag_key, spec["id"]))
     print("all specimen/topic texts HTML-balanced and within length limit: OK")
 
-    # 3. Menu keyboard has all 3 diagnostika
-    kb = tb.get_histology_menu_keyboard()
-    texts = kb_texts(kb)
-    assert any("Цитология" in t for t in texts)
-    assert len(tb.HISTOLOGY) == 5
-    for n in range(2, 6):
-        assert any(f"№{n}" in t for t in texts), (n, texts)
-    print("menu keyboard OK:", texts)
+    # 3. Two entrances to the same specimen catalog, with independent back navigation.
+    assert kb_texts(tb.get_histology_menu_keyboard())[:2] == ["Экзамен", "ДИАГНОСТИКИ"]
+    assert kb_texts(histology.get_histology_exam_keyboard())[:4] == [
+        "Препараты", "Тесты", "Теоретические вопросы", "УГАДАЙ ПРЕПАРАТ",
+    ]
+    exam_groups = histology.get_histology_catalog_keyboard(exam=True).inline_keyboard
+    diagnostics_groups = histology.get_histology_catalog_keyboard().inline_keyboard
+    assert len(exam_groups) == len(diagnostics_groups) == len(tb.HISTOLOGY) + 1
+    assert [row[0].text for row in exam_groups[:-1]] == [row[0].text for row in diagnostics_groups[:-1]]
+    assert all(
+        exam[0].callback_data == diagnostics[0].callback_data + ":exam"
+        for exam, diagnostics in zip(exam_groups[:-1], diagnostics_groups[:-1])
+    )
+    exam_topic = FakeCB(exam_groups[0][0].callback_data)
+    await tb.cb_histology_topic(exam_topic)
+    markup = exam_topic.message.edits[0][1]
+    assert markup.inline_keyboard[-1][0].callback_data == "histology_exam_specimens"
+    first = next(button for row in markup.inline_keyboard for button in row
+                 if button.callback_data.startswith("histology_specimen:"))
+    exam_specimen = FakeCB(first.callback_data)
+    await tb.cb_histology_specimen(exam_specimen)
+    assert exam_specimen.message.edits[0][1].inline_keyboard[-1][0].callback_data == exam_topic.data
+    print("histology main menu, exam order and shared catalogs: OK")
+
+    theory = FakeCB("histology_theory_q:100:98")
+    await histology.cb_histology_theory_answer(theory)
+    assert "Роль кафедры" in theory.message.edits[0][0]
+    check_html(theory.message.edits[0][0])
+    review = FakeCB("histology_test_review:455")
+    await histology.cb_histology_test_review(review)
+    assert "Спорное задание" in review.message.edits[0][0]
+    start = FakeCB("histology_test_start")
+    await histology.cb_histology_tests(start)
+    session = histology._TEST_SESSIONS[ADMIN_ID]
+    assert len(session["questions"]) == 30
+    for index, item in enumerate(session["questions"]):
+        choice = FakeCB(f"histology_test_pick:{session['id']}:{index}:{item['correct_option']}")
+        await histology.cb_histology_test_session(choice)
+        assert "Верно." in choice.message.edits[0][0]
+        await histology.cb_histology_test_session(choice)  # retry must not count twice
+        advance = FakeCB(f"histology_test_next:{session['id']}:{index}")
+        await histology.cb_histology_test_session(advance)
+    assert "30 из 30" in advance.message.edits[0][0]
+    assert ADMIN_ID not in histology._TEST_SESSIONS
+    print("theory, test review and complete 30-question session: OK")
 
     # 4. Access control: first-ever visit silently grants a free trial week (like the others'
     # grace period), so a brand-new non-admin sees the REAL menu, not a locked screen.
@@ -139,7 +177,7 @@ async def main():
     await tb.cb_histology_menu(cb)
     assert cb.message.edits, "expected menu render, not locked screen, on first-ever visit"
     first_text, first_kb = cb.message.edits[0]
-    assert "Выбери режим или раздел каталога" in first_text
+    assert "Гистология" in first_text and "Экзамен" in kb_texts(first_kb)
     assert tb.has_histology_temp_access(non_admin), "first visit should silently grant a trial"
     assert str(non_admin) not in tb.stats["histology_warnings"], "no warning yet on the granting visit"
     days_left = (tb.get_histology_temp_expiry(non_admin) - tb.time.time()) / 86400
@@ -154,7 +192,7 @@ async def main():
     warn_sent_text = cb2.message.edits[0][0]
     check_html(warn_sent_text)
     assert "Гистология скоро закроется" in warn_sent_text
-    assert "Выбери режим или раздел каталога" in cb2.message.edits[-1][0], "content should still render during the trial"
+    assert "Экзамен" in kb_texts(cb2.message.edits[-1][1]), "content should still render during the trial"
     warn_entry = tb.stats["histology_warnings"][str(non_admin)]
     assert warn_entry["count"] == 1
     print("second visit fires warning 1/3 but still lets content through: OK")
@@ -188,7 +226,7 @@ async def main():
     assert tb.histology_access_ok(referral_uid)
     cb_ref = FakeCB("histology_menu", uid=referral_uid)
     await tb.cb_histology_menu(cb_ref)
-    assert "Выбери режим или раздел каталога" in cb_ref.message.edits[0][0]
+    assert "Экзамен" in kb_texts(cb_ref.message.edits[0][1])
     assert str(referral_uid) not in tb.stats["histology_temp_access"], "referral access shouldn't touch the trial"
     tb.stats["referrals"].pop(str(referral_uid), None)
     tb.stats["referral_monthly"].pop(str(referral_uid), None)
@@ -205,7 +243,7 @@ async def main():
     cb_promo = FakeCB("histology_menu", uid=promo_uid)
     await tb.cb_histology_menu(cb_promo)
     promo_text, promo_kb = cb_promo.message.edits[0]
-    assert "Гистология" in promo_text and "Выбери режим или раздел каталога" in promo_text
+    assert "Гистология" in promo_text
     # expire it (simulate time passing) -> access reverts to referral/subscription rule
     tb.stats["section_promos"]["histology"] = tb.time.time() - 1
     assert not tb.is_section_promo_active("histology")

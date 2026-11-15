@@ -1283,7 +1283,7 @@ async def main():
     cb_hist_unlocked = FakeCB("histology_menu", uid=non_admin)
     await tb.cb_histology_menu(cb_hist_unlocked)
     assert cb_hist_unlocked.message.edits
-    assert "Гистология · ЭКЗАМЕН" in cb_hist_unlocked.message.edits[0][0]
+    assert kb_texts(cb_hist_unlocked.message.edits[0][1])[:2] == ["Экзамен", "ДИАГНОСТИКИ"]
     tb.stats["subscriptions"].pop(str(non_admin), None)
     print("histology_menu shows locked screen with dynamic subscription CTA when access is missing: OK")
 

@@ -21,7 +21,8 @@ import { ReferralPage } from "./pages/Referral";
 import { FavoritesPage } from "./pages/Favorites";
 import { ProgressPage } from "./pages/Progress";
 import { NotFoundPage } from "./pages/NotFound";
-import { HistologyExamPage } from "./pages/HistologyExam";
+import { HistologyCatalogPage, HistologyExamPage, HistologyGuessPage } from "./pages/HistologyExam";
+import { HistologyTestPage, HistologyTheoryPage } from "./pages/HistologyStudy";
 import { HistologySpecimenPage } from "./pages/HistologySpecimen";
 
 export function App() {
@@ -66,6 +67,11 @@ export function App() {
         <Route path="/materials/:subjectId/:sectionId/:materialId" element={<MaterialPage />} />
         <Route path="/tests/:subjectId" element={<TestPage />} />
         <Route path="/histology/exam" element={<HistologyExamPage />} />
+        <Route path="/histology/exam/specimens" element={<HistologyCatalogPage key="exam" />} />
+        <Route path="/histology/exam/tests/:questionId?" element={<HistologyTestPage />} />
+        <Route path="/histology/exam/theory/:number?" element={<HistologyTheoryPage />} />
+        <Route path="/histology/exam/guess" element={<HistologyGuessPage />} />
+        <Route path="/histology/diagnostics" element={<HistologyCatalogPage key="diagnostics" diagnostics />} />
         <Route path="/histology/specimens/:specimenId" element={<HistologySpecimenPage />} />
         <Route path="/ai" element={<AiPage />} />
         <Route path="/progress" element={<ProgressPage />} />

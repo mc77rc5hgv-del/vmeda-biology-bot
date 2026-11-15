@@ -19,6 +19,7 @@ from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 import telegram_bot as tb
+from services import histology_exam
 from services.telegram_ui import safe_delete_message
 
 router = Router()
@@ -154,16 +155,35 @@ async def announce_histology_promo_start() -> None:
     )
     await tb._broadcast(text, builder.as_markup())
 
-def get_histology_menu_keyboard():
+def _menu(rows, back):
     builder = InlineKeyboardBuilder()
-    builder.button(text="🎓 Практический зачёт · 10", callback_data="histology_guess_start:all")
-    builder.button(text="🩺 Работа над ошибками", callback_data="histology_guess_start:mistakes")
-    builder.button(text="📊 Моя статистика", callback_data="histology_stats")
-    for diag_key, diag in tb.HISTOLOGY.items():
-        builder.button(text=diag.get("menu_title", diag["title"]), callback_data=f"histology_topic:{diag_key}")
+    for label, data in rows:
+        builder.button(text=label, callback_data=data)
     builder.adjust(1)
-    builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data=back))
     return builder.as_markup()
+
+
+def get_histology_menu_keyboard():
+    return _menu([("Экзамен", "histology_exam"), ("ДИАГНОСТИКИ", "histology_diagnostics")], "back_to_main")
+
+
+def get_histology_exam_keyboard():
+    return _menu([
+        ("Препараты", "histology_exam_specimens"),
+        ("Тесты", "histology_tests"),
+        ("Теоретические вопросы", "histology_theory"),
+        ("УГАДАЙ ПРЕПАРАТ", "histology_guess_menu"),
+    ], "histology_menu")
+
+
+def get_histology_catalog_keyboard(exam: bool = False):
+    suffix = ":exam" if exam else ""
+    return _menu([
+        (diag.get("menu_title", diag["title"]), f"histology_topic:{key}{suffix}")
+        for key, diag in tb.HISTOLOGY.items()
+    ], "histology_exam" if exam else "histology_menu")
+
 
 def get_histology_topic_text(diag_key: str) -> str:
     diag = tb.HISTOLOGY[diag_key]
@@ -177,14 +197,18 @@ def get_histology_topic_text(diag_key: str) -> str:
         "Выбери препарат:"
     )
 
-def get_histology_topic_keyboard(diag_key: str):
+def get_histology_topic_keyboard(diag_key: str, exam: bool = False):
+    suffix = ":exam" if exam else ""
     diag = tb.HISTOLOGY[diag_key]
     builder = InlineKeyboardBuilder()
-    builder.button(text="🎯 Угадай препарат", callback_data=f"histology_guess_start:{diag_key}")
+    if not exam:
+        builder.button(text="🎯 Угадай препарат", callback_data=f"histology_guess_start:{diag_key}")
     for spec in diag["specimens"]:
-        builder.button(text=f"№{spec['number']}. {spec['title']}", callback_data=f"histology_specimen:{diag_key}:{spec['id']}")
+        builder.button(text=f"№{spec['number']}. {spec['title']}", callback_data=f"histology_specimen:{diag_key}:{spec['id']}{suffix}")
     builder.adjust(1)
-    builder.row(InlineKeyboardButton(text="🔙 К разделу", callback_data="histology_menu"))
+    builder.row(InlineKeyboardButton(
+        text="🔙 К списку", callback_data="histology_exam_specimens" if exam else "histology_diagnostics"
+    ))
     return builder.as_markup()
 
 def get_histology_specimen_text(diag_key: str, spec_id: str) -> str:
@@ -200,34 +224,37 @@ def get_histology_specimen_text(diag_key: str, spec_id: str) -> str:
     lines.append(escape(spec["protocol"] or "Протокол-описание пока не добавлено."))
     return "\n".join(lines)
 
-def get_histology_specimen_keyboard(diag_key: str, spec_id: str):
+def get_histology_specimen_keyboard(diag_key: str, spec_id: str, exam: bool = False):
+    suffix = ":exam" if exam else ""
     spec = get_histology_specimen(diag_key, spec_id)
     builder = InlineKeyboardBuilder()
     n_img = len(spec.get("images", []))
     if n_img:
-        builder.button(text=f"🖼 Изображения ({n_img})", callback_data=f"histology_img:{diag_key}:{spec_id}:0")
+        builder.button(text=f"🖼 Изображения ({n_img})", callback_data=f"histology_img:{diag_key}:{spec_id}:0{suffix}")
     builder.adjust(1)
-    builder.row(InlineKeyboardButton(text="🔙 К списку препаратов", callback_data=f"histology_topic:{diag_key}"))
+    builder.row(InlineKeyboardButton(text="🔙 К списку препаратов", callback_data=f"histology_topic:{diag_key}{suffix}"))
     return builder.as_markup()
 
-def get_histology_image_keyboard(diag_key: str, spec_id: str, idx: int, total: int):
+def get_histology_image_keyboard(diag_key: str, spec_id: str, idx: int, total: int, exam: bool = False):
+    suffix = ":exam" if exam else ""
     builder = InlineKeyboardBuilder()
     nav = []
     if idx > 0:
-        nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"histology_img:{diag_key}:{spec_id}:{idx-1}"))
+        nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"histology_img:{diag_key}:{spec_id}:{idx-1}{suffix}"))
     if idx < total - 1:
-        nav.append(InlineKeyboardButton(text="➡️", callback_data=f"histology_img:{diag_key}:{spec_id}:{idx+1}"))
+        nav.append(InlineKeyboardButton(text="➡️", callback_data=f"histology_img:{diag_key}:{spec_id}:{idx+1}{suffix}"))
     if nav:
         builder.row(*nav)
-    builder.row(InlineKeyboardButton(text="🔙 К препарату", callback_data=f"histology_specimen:{diag_key}:{spec_id}"))
+    builder.row(InlineKeyboardButton(text="🔙 К препарату", callback_data=f"histology_specimen:{diag_key}:{spec_id}{suffix}"))
     return builder.as_markup()
 
-async def render_histology_image(callback: CallbackQuery, diag_key: str, spec_id: str, idx: int):
+async def render_histology_image(callback: CallbackQuery, diag_key: str, spec_id: str, idx: int,
+                                 exam: bool = False):
     spec = get_histology_specimen(diag_key, spec_id)
     images = spec.get("images", [])
     from services.histology_content import image_caption
     caption = f"🔬 №{spec['number']}. " + image_caption(spec, idx) + f"\n\n{idx + 1}/{len(images)}"
-    keyboard = get_histology_image_keyboard(diag_key, spec_id, idx, len(images))
+    keyboard = get_histology_image_keyboard(diag_key, spec_id, idx, len(images), exam)
     photo = FSInputFile(os.path.join(tb.HISTOLOGY_IMAGES_DIR, images[idx]))
     await callback.message.answer_photo(photo, caption=caption, reply_markup=keyboard)
     await safe_delete_message(callback.message)
@@ -239,18 +266,49 @@ async def cb_histology_menu(callback: CallbackQuery):
     await callback.answer()
     await tb.safe_edit_text(
         callback.message,
-        f"🔬 <b>Гистология · ЭКЗАМЕН</b>\n{tb.DIVIDER}\n\n"
-        "Здесь связаны протоколы, микрофотографии, практический зачёт, работа над ошибками и статистика.\n\n"
-        "Выбери режим или раздел каталога:",
+        f"🔬 <b>Гистология</b>\n{tb.DIVIDER}",
         parse_mode="HTML",
-        reply_markup=get_histology_menu_keyboard()
+        reply_markup=get_histology_menu_keyboard(),
     )
+
+
+@router.callback_query(F.data == "histology_exam")
+async def cb_histology_exam(callback: CallbackQuery):
+    if not await histology_gate_ok(callback):
+        return
+    await callback.answer()
+    await tb.safe_edit_text(callback.message, "🎓 Экзамен по гистологии", reply_markup=get_histology_exam_keyboard())
+
+
+@router.callback_query(F.data.in_({"histology_exam_specimens", "histology_diagnostics"}))
+async def cb_histology_catalog(callback: CallbackQuery):
+    if not await histology_gate_ok(callback):
+        return
+    exam = callback.data == "histology_exam_specimens"
+    await callback.answer()
+    await tb.safe_edit_text(
+        callback.message, "🔬 Препараты" if exam else "🔬 ДИАГНОСТИКИ",
+        reply_markup=get_histology_catalog_keyboard(exam),
+    )
+
+
+@router.callback_query(F.data == "histology_guess_menu")
+async def cb_histology_guess_menu(callback: CallbackQuery):
+    if not await histology_gate_ok(callback):
+        return
+    await callback.answer()
+    await tb.safe_edit_text(callback.message, "🎯 УГАДАЙ ПРЕПАРАТ", reply_markup=_menu([
+        ("Начать · 10 микрофотографий", "histology_guess_start:all"),
+        ("Работа над ошибками", "histology_guess_start:mistakes"),
+        ("Моя статистика", "histology_stats"),
+    ], "histology_exam"))
+
 
 @router.callback_query(F.data.startswith("histology_topic:"))
 async def cb_histology_topic(callback: CallbackQuery):
     if not await histology_gate_ok(callback):
         return
-    diag_key = callback.data.split(":")[1]
+    _, diag_key, *context = callback.data.split(":")
     if diag_key not in tb.HISTOLOGY:
         await callback.answer("Раздел не найден", show_alert=True)
         return
@@ -259,14 +317,14 @@ async def cb_histology_topic(callback: CallbackQuery):
         callback.message,
         get_histology_topic_text(diag_key),
         parse_mode="HTML",
-        reply_markup=get_histology_topic_keyboard(diag_key)
+        reply_markup=get_histology_topic_keyboard(diag_key, context == ["exam"])
     )
 
 @router.callback_query(F.data.startswith("histology_specimen:"))
 async def cb_histology_specimen(callback: CallbackQuery):
     if not await histology_gate_ok(callback):
         return
-    _, diag_key, spec_id = callback.data.split(":")
+    _, diag_key, spec_id, *context = callback.data.split(":")
     spec = get_histology_specimen(diag_key, spec_id)
     if not spec:
         await callback.answer("Препарат не найден", show_alert=True)
@@ -276,14 +334,14 @@ async def cb_histology_specimen(callback: CallbackQuery):
         callback.message,
         get_histology_specimen_text(diag_key, spec_id),
         parse_mode="HTML",
-        reply_markup=get_histology_specimen_keyboard(diag_key, spec_id)
+        reply_markup=get_histology_specimen_keyboard(diag_key, spec_id, context == ["exam"])
     )
 
 @router.callback_query(F.data.startswith("histology_img:"))
 async def cb_histology_img(callback: CallbackQuery):
     if not await histology_gate_ok(callback):
         return
-    _, diag_key, spec_id, idx_s = callback.data.split(":")
+    _, diag_key, spec_id, idx_s, *context = callback.data.split(":")
     idx = int(idx_s)
     spec = get_histology_specimen(diag_key, spec_id)
     images = spec.get("images", []) if spec else []
@@ -291,7 +349,7 @@ async def cb_histology_img(callback: CallbackQuery):
         await callback.answer("Фото для этого препарата пока нет", show_alert=True)
         return
     await callback.answer()
-    await render_histology_image(callback, diag_key, spec_id, idx)
+    await render_histology_image(callback, diag_key, spec_id, idx, context == ["exam"])
 
 # ---- ЭКЗАМЕН: практический зачёт, ошибки и статистика ----
 HISTOLOGY_GUESS_SESSION_SIZE = 10
@@ -402,7 +460,7 @@ def get_histology_guess_summary_keyboard(scope: str):
     builder = InlineKeyboardBuilder()
     builder.button(text="🔁 Пройти ещё раз", callback_data=f"histology_guess_start:{scope}")
     if scope in {"all", "mistakes"}:
-        builder.button(text="🔙 К разделу", callback_data="histology_menu")
+        builder.button(text="🔙 К тренажёру", callback_data="histology_guess_menu")
     else:
         builder.button(text="🔙 К разделу", callback_data=f"histology_topic:{scope}")
     builder.adjust(1)
@@ -549,11 +607,194 @@ async def cb_histology_stats(callback: CallbackQuery):
     if (await _learning_call(get_histology_learning, callback.from_user.id))["mistakes"]:
         builder.button(text="🩺 Повторить ошибки", callback_data="histology_guess_start:mistakes")
     builder.button(text="🎓 Практический зачёт", callback_data="histology_guess_start:all")
-    builder.button(text="🔙 К экзамену", callback_data="histology_menu")
+    builder.button(text="🔙 К тренажёру", callback_data="histology_guess_menu")
     builder.adjust(1)
     await tb.safe_edit_text(
         callback.message,
         await _learning_call(get_histology_stats_text, callback.from_user.id),
         parse_mode="HTML",
         reply_markup=builder.as_markup(),
+    )
+
+
+
+@router.callback_query(F.data.regexp(r"^histology_theory(?::\d{1,3})?$"))
+async def cb_histology_theory(callback: CallbackQuery):
+    if not await histology_gate_ok(callback):
+        return
+    _, _, number = callback.data.partition(":")
+    sections = histology_exam.theory_catalog()
+    section = next((s for s in sections if str(s["id"]) == number), None)
+    if number and section is None:
+        await callback.answer("Тема не найдена", show_alert=True)
+        return
+    await callback.answer()
+    if section is None:
+        title = "Теоретические вопросы"
+        rows = [(s["title"], f"histology_theory:{s['id']}") for s in sections]
+        back = "histology_exam"
+    else:
+        title = section["title"]
+        rows = [(f"{q['number']}. {q['title'][:65]}", f"histology_theory_q:{q['number']}:{section['id']}")
+                for q in section["questions"]]
+        back = "histology_theory"
+    await tb.safe_edit_text(callback.message, escape(title), reply_markup=_menu(rows, back))
+
+
+@router.callback_query(F.data.regexp(r"^histology_theory_q:\d{1,3}:\d{1,3}$"))
+async def cb_histology_theory_answer(callback: CallbackQuery):
+    if not await histology_gate_ok(callback):
+        return
+    _, number, section = callback.data.split(":")
+    question = histology_exam.theory_questions().get(int(number))
+    if question is None:
+        await callback.answer("Вопрос не найден", show_alert=True)
+        return
+    await callback.answer()
+    paragraphs = [f"<b>{escape(p['label'])}</b> {escape(p['text'])}" for p in question["paragraphs"]]
+    title = f"<b>{number}. {escape(question['title'])}</b>"
+    await tb.safe_edit_text(
+        callback.message, "\n\n".join([title, *paragraphs]), parse_mode="HTML",
+        reply_markup=_menu([], f"histology_theory:{section}"),
+    )
+
+
+_TEST_SESSIONS: dict[int, dict] = {}
+_TEST_LETTERS = "АБВГ"
+
+
+def _test_text(question):
+    lines = [f"<b>№{question['number']}. {escape(question['question'])}</b>", ""]
+    lines.extend(f"{letter}. {escape(option)}" for letter, option in zip(_TEST_LETTERS, question["options"]))
+    return "\n".join(lines)
+
+
+def _test_explanation(question):
+    answer = histology_exam.review_answer(question)
+    option = answer["correct_option"]
+    source = answer["source_correct_option"]
+    lines = []
+    if option is None:
+        lines.append("<b>Спорное задание. Балл не начисляется.</b>")
+    else:
+        lines.append(f"<b>Учебный ответ — {_TEST_LETTERS[option - 1]}.</b>")
+    if source != option:
+        lines.append(f"Ключ в сборнике — {_TEST_LETTERS[source - 1]}.")
+    lines.append(escape(answer["explanation"]))
+    return "\n".join(lines)
+
+
+async def _render_test_question(message, session):
+    index = session["index"]
+    questions = session["questions"]
+    q = questions[index]
+    prefix = f"histology_test_pick:{session['id']}:{index}"
+    markup = InlineKeyboardBuilder()
+    for i, letter in enumerate(_TEST_LETTERS, 1):
+        markup.button(text=letter, callback_data=f"{prefix}:{i}")
+    markup.adjust(4)
+    markup.row(InlineKeyboardButton(text="Завершить", callback_data="histology_tests"))
+    await tb.safe_edit_text(
+        message, f"Вопрос {index + 1} из {len(questions)}\n\n{_test_text(q)}", parse_mode="HTML",
+        reply_markup=markup.as_markup(),
+    )
+
+
+@router.callback_query(F.data.in_({"histology_tests", "histology_test_start", "histology_test_topics"}))
+async def cb_histology_tests(callback: CallbackQuery):
+    if not await histology_gate_ok(callback):
+        return
+    user_id = callback.from_user.id
+    await callback.answer()
+    if callback.data == "histology_test_start":
+        session = {
+            "id": uuid.uuid4().hex[:12], "index": 0, "correct": 0,
+            "answered": False, "questions": histology_exam.start_test(),
+        }
+        _TEST_SESSIONS[user_id] = session
+        await _render_test_question(callback.message, session)
+    elif callback.data == "histology_test_topics":
+        modules = histology_exam.test_bank()["modules"]
+        rows = [(m["title"], f"histology_test_topic:{m['id']}") for m in modules]
+        await tb.safe_edit_text(callback.message, "Банк заданий по темам", reply_markup=_menu(rows, "histology_tests"))
+    else:
+        _TEST_SESSIONS.pop(user_id, None)
+        size = histology_exam.test_bank()["exam_rules"]["questions_per_attempt"]
+        rows = [(f"Начать тест · {size} вопросов", "histology_test_start"), ("Банк заданий", "histology_test_topics")]
+        await tb.safe_edit_text(callback.message, "Тесты по гистологии", reply_markup=_menu(rows, "histology_exam"))
+
+
+@router.callback_query(F.data.regexp(r"^histology_test_(?:pick|next):[a-f0-9]{12}:\d{1,2}(?::[1-4])?$"))
+async def cb_histology_test_session(callback: CallbackQuery):
+    if not await histology_gate_ok(callback):
+        return
+    action, ident, index, *selected = callback.data.split(":")
+    user_id = callback.from_user.id
+    session = _TEST_SESSIONS.get(user_id)
+    picking = action == "histology_test_pick"
+    if (
+        session is None or session["id"] != ident or session["index"] != int(index)
+        or session["answered"] == picking or bool(selected) != picking
+    ):
+        await callback.answer("Эта кнопка больше не активна")
+        return
+    q = session["questions"][session["index"]]
+    if picking:
+        session["answered"] = True
+        correct = q["correct_option"] == int(selected[0])
+        session["correct"] += correct
+        await callback.answer()
+        choice = _TEST_LETTERS[int(selected[0]) - 1]
+        result = f"Твой ответ — {choice}. " + ("Верно." if correct else "Неверно.")
+        rows = [("Дальше", f"histology_test_next:{ident}:{index}")]
+        await tb.safe_edit_text(
+            callback.message, f"{_test_text(q)}\n\n{result}\n\n{_test_explanation(q)}",
+            parse_mode="HTML", reply_markup=_menu(rows, "histology_tests"),
+        )
+    elif session["index"] + 1 < len(session["questions"]):
+        session["index"] += 1
+        session["answered"] = False
+        await callback.answer()
+        await _render_test_question(callback.message, session)
+    else:
+        _TEST_SESSIONS.pop(user_id, None)
+        correct = session["correct"]
+        grade = histology_exam.exam_grade(correct)
+        await callback.answer()
+        await tb.safe_edit_text(
+            callback.message, f"Верных ответов: {correct} из {len(session['questions'])}\nОценка: {grade}",
+            reply_markup=_menu([("Пройти ещё раз", "histology_test_start")], "histology_tests"),
+        )
+
+
+@router.callback_query(F.data.regexp(r"^histology_test_topic:[a-z0-9-]+$"))
+async def cb_histology_test_topic(callback: CallbackQuery):
+    if not await histology_gate_ok(callback):
+        return
+    module_id = callback.data.partition(":")[2]
+    module = next((m for m in histology_exam.test_bank()["modules"] if m["id"] == module_id), None)
+    if module is None:
+        await callback.answer("Тема не найдена", show_alert=True)
+        return
+    await callback.answer()
+    rows = [
+        (f"{q['number']}. {q['question'][:65]}", f"histology_test_review:{q['number']}")
+        for q in histology_exam.test_questions().values() if q["module_id"] == module_id
+    ]
+    await tb.safe_edit_text(callback.message, escape(module["title"]), reply_markup=_menu(rows, "histology_test_topics"))
+
+
+@router.callback_query(F.data.regexp(r"^histology_test_review:\d{1,3}$"))
+async def cb_histology_test_review(callback: CallbackQuery):
+    if not await histology_gate_ok(callback):
+        return
+    number = int(callback.data.partition(":")[2])
+    q = histology_exam.test_questions().get(f"histology-2019-{number:03d}")
+    if q is None:
+        await callback.answer("Задание не найдено", show_alert=True)
+        return
+    await callback.answer()
+    await tb.safe_edit_text(
+        callback.message, f"{_test_text(q)}\n\n{_test_explanation(q)}", parse_mode="HTML",
+        reply_markup=_menu([], f"histology_test_topic:{q['module_id']}"),
     )

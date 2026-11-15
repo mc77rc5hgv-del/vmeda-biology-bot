@@ -114,23 +114,26 @@ export function SubjectPage() {
       )}
 
       {subject.id === "histology" && !locked && (
-        <PressableCard
-          className={[styles.sectionRow, styles.histologyExamRow].join(" ")}
-          aria-label="Открыть каталог и практический зачёт по гистологии"
-          onClick={() => {
-            hapticSelection();
-            navigate("/histology/exam");
-          }}
-        >
-          <span className={styles.histologyExamIcon} aria-hidden="true">
-            <Icon icon={Microscope} size={21} />
-          </span>
-          <div className={styles.anatomyExamContent}>
-            <div className={styles.anatomyExamTitle}>ЭКЗАМЕН</div>
-            <div className={styles.anatomyExamDescription}>71 препарат · атлас · зачёт · работа над ошибками</div>
-          </div>
-          <Icon icon={ChevronRight} size={18} color="currentColor" />
-        </PressableCard>
+        <div className={styles.sectionList}>
+          {[
+            { title: "Экзамен", path: "/histology/exam", icon: BookOpenCheck },
+            { title: "ДИАГНОСТИКИ", path: "/histology/diagnostics", icon: Microscope },
+          ].map(({ title, path, icon }) => (
+            <PressableCard
+              key={path}
+              className={[styles.sectionRow, styles.histologyExamRow].join(" ")}
+              onClick={() => { hapticSelection(); navigate(path); }}
+            >
+              <span className={styles.histologyExamIcon} aria-hidden="true">
+                <Icon icon={icon} size={21} />
+              </span>
+              <div className={styles.anatomyExamContent}>
+                <div className={styles.anatomyExamTitle}>{title}</div>
+              </div>
+              <Icon icon={ChevronRight} size={18} color="currentColor" />
+            </PressableCard>
+          ))}
+        </div>
       )}
 
       {!locked && (

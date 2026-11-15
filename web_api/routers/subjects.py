@@ -1,6 +1,7 @@
 import os
 import random
 
+from services import histology_exam
 from services.miniapp_policy import full_content_access, promo_active, public_launch, require_subject, subscription_required
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -88,6 +89,57 @@ def _histology_practical_pool(tb, scope: str, user_id: int) -> list[tuple[str, d
                 continue
             pool.append((group_id, group, specimen))
     return pool
+
+
+@router.get("/histology/exam/theory")
+def get_histology_theory(user_id: int = Depends(get_current_user_id), tb=Depends(get_fresh_bot_module)):
+    _check_histology_access(tb, user_id)
+    return histology_exam.theory_catalog()
+
+
+@router.get("/histology/exam/theory/{number}")
+def get_histology_theory_answer(number: int, user_id: int = Depends(get_current_user_id),
+                                tb=Depends(get_fresh_bot_module)):
+    _check_histology_access(tb, user_id)
+    question = histology_exam.theory_questions().get(number)
+    if question is None:
+        raise HTTPException(status_code=404, detail="Вопрос не найден")
+    return question
+
+
+@router.get("/histology/exam/tests")
+def get_histology_tests(user_id: int = Depends(get_current_user_id), tb=Depends(get_fresh_bot_module)):
+    _check_histology_access(tb, user_id)
+    bank = histology_exam.test_bank()
+    return {"modules": bank["modules"], "questions": histology_exam.test_catalog(), "rules": bank["exam_rules"]}
+
+
+@router.post("/histology/exam/tests/start")
+def start_histology_test(user_id: int = Depends(get_current_user_id), tb=Depends(get_fresh_bot_module)):
+    _check_histology_access(tb, user_id)
+    return [histology_exam.public_question(q) for q in histology_exam.start_test()]
+
+
+@router.get("/histology/exam/tests/{question_id}")
+def get_histology_test_question(question_id: str, user_id: int = Depends(get_current_user_id),
+                                tb=Depends(get_fresh_bot_module)):
+    _check_histology_access(tb, user_id)
+    question = histology_exam.test_questions().get(question_id)
+    if question is None:
+        raise HTTPException(status_code=404, detail="Задание не найдено")
+    return histology_exam.public_question(question)
+
+
+@router.post("/histology/exam/tests/{question_id}/answer")
+def answer_histology_test(question_id: str, body: schemas.HistologyTestAnswerRequest,
+                          user_id: int = Depends(get_current_user_id), tb=Depends(get_fresh_bot_module)):
+    _check_histology_access(tb, user_id)
+    question = histology_exam.test_questions().get(question_id)
+    if question is None:
+        raise HTTPException(status_code=404, detail="Задание не найдено")
+    answer = histology_exam.review_answer(question)
+    correct_option = answer["correct_option"]
+    return {**answer, "correct": None if correct_option is None else correct_option == body.option}
 
 
 @router.get("/histology/exam/catalog")

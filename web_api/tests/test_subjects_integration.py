@@ -1141,3 +1141,49 @@ def test_quiz_answer_requires_auth():
         json={"selected_index": 1},
     )
     assert resp.status_code == 401
+
+
+
+def test_histology_written_exam_exposes_theory_and_checks_test_answers():
+    user_id = 900_444_555_779
+    tb.stats["total_users"].add(user_id)
+    tb.stats["referral_monthly"][str(user_id)] = {"month": tb.local_today().strftime("%Y-%m"), "count": 2}
+    tb.save_stats()
+    tb._stats_executor.submit(lambda: None).result()
+    headers = _auth_headers(user_id)
+    exam = "/api/v1/histology/exam"
+
+    assert client.get(f"{exam}/theory").status_code == 401
+    theory = client.get(f"{exam}/theory", headers=headers)
+    assert theory.status_code == 200
+    rows = [q for section in theory.json() for q in section["questions"]]
+    assert [q["number"] for q in rows] == list(range(1, 101))
+    detail = client.get(f"{exam}/theory/48", headers=headers).json()
+    assert detail["title"] == rows[47]["title"]
+    assert any("прехордальной пластинки" in paragraph["text"] for paragraph in detail["paragraphs"])
+    assert client.get(f"{exam}/theory/101", headers=headers).status_code == 404
+
+    catalog_response = client.get(f"{exam}/tests", headers=headers)
+    assert catalog_response.status_code == 200
+    catalog = catalog_response.json()
+    assert len(catalog["questions"]) == 518
+    assert len(catalog["modules"]) == 18
+    assert catalog["rules"]["min_pass_correct"] == 21
+    assert all("correct_option" not in q for q in catalog["questions"])
+
+    run_response = client.post(f"{exam}/tests/start", headers=headers)
+    assert run_response.status_code == 200
+    run = run_response.json()
+    assert len({q["id"] for q in run}) == 30
+    assert all(set(q) == {"id", "number", "question", "options"} and len(q["options"]) == 4 for q in run)
+    assert all(q["number"] not in (455, 486) for q in run)
+
+    question = f"{exam}/tests/histology-2019-087"
+    assert client.get(question, headers=headers).json()["number"] == 87
+    answer = client.post(f"{question}/answer", json={"option": 2}, headers=headers)
+    assert answer.status_code == 200
+    assert answer.json()["correct"] is True and answer.json()["source_correct_option"] == 3
+    assert client.post(f"{question}/answer", json={"option": 0}, headers=headers).status_code == 422
+    disputed = client.post(f"{exam}/tests/histology-2019-455/answer", json={"option": 1}, headers=headers)
+    assert disputed.status_code == 200
+    assert disputed.json()["correct"] is None and disputed.json()["source_correct_option"] == 1
