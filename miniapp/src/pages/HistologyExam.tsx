@@ -15,7 +15,7 @@ import {
 } from "../lib/apiClient";
 import { filterHistologyGroups, type HistologyCatalogLocation } from "../lib/histologyCatalog";
 import { hapticSelection, useTelegramBackButton } from "../lib/telegram";
-import type { HistologyPracticalQuestion, HistologySpecimenSummary } from "../lib/types";
+import type { HistologyPracticalQuestion } from "../lib/types";
 import styles from "./HistologyExam.module.css";
 
 type Scope = "all" | "mistakes";
@@ -54,9 +54,10 @@ export function HistologyCatalogPage({ diagnostics = false }: { diagnostics?: bo
   const [params, setParams] = useSearchParams();
   const searchInput = useRef<HTMLInputElement>(null);
   const back = diagnostics ? "/subjects/histology" : "/histology/exam";
+  const scope = diagnostics ? "diagnostics" : "exam";
   const catalogPath = diagnostics ? "/histology/diagnostics" : "/histology/exam/specimens";
   useTelegramBackButton(() => navigate(back));
-  const catalogQuery = useQuery({ queryKey: ["histology-catalog"], queryFn: fetchHistologyCatalog });
+  const catalogQuery = useQuery({ queryKey: ["histology-catalog", scope], queryFn: () => fetchHistologyCatalog(scope) });
   const catalog = catalogQuery.data;
 
   const groups = catalog?.groups ?? [];
@@ -75,7 +76,7 @@ export function HistologyCatalogPage({ diagnostics = false }: { diagnostics?: bo
 
   function openSpecimen(id: string) {
     const state: HistologyCatalogLocation = { catalogPath, catalogSearch };
-    navigate(`/histology/specimens/${encodeURIComponent(id)}`, { state });
+    navigate(`/histology/specimens/${encodeURIComponent(id)}?scope=${scope}`, { state });
     window.scrollTo({ top: 0, behavior: "instant" });
   }
 
@@ -110,10 +111,10 @@ export function HistologyCatalogPage({ diagnostics = false }: { diagnostics?: bo
             </div>
             <div className={styles.catalogGroupFilter} role="group" aria-label="Выбор диагностики">
               <button type="button" aria-pressed={!selectedGroup} onClick={() => updateFilter("group", "")}>Все</button>
-              {groups.map((group, index) => (
+              {groups.map((group) => (
                 <button type="button" key={group.id} aria-label={group.title}
                   aria-pressed={selectedGroup?.id === group.id} onClick={() => updateFilter("group", group.id)}>
-                  №{index + 1}
+                  {group.title.match(/№\d+/)?.[0] ?? group.title}
                 </button>
               ))}
             </div>
@@ -165,7 +166,7 @@ export function HistologyGuessPage() {
   const queryClient = useQueryClient();
   const [session, setSession] = useState<{ scope: Scope; items: HistologyPracticalQuestion[] } | null>(null);
   const [index, setIndex] = useState(0);
-  const [answer, setAnswer] = useState<(HistologySpecimenSummary & { protocol: string }) | null>(null);
+  const [answer, setAnswer] = useState<Awaited<ReturnType<typeof revealHistologyAnswer>> | null>(null);
   const [sessionKnown, setSessionKnown] = useState(0);
   const [loadingAction, setLoadingAction] = useState(false);
   const busy = useRef(false);
@@ -174,7 +175,7 @@ export function HistologyGuessPage() {
 
   useTelegramBackButton(() => session ? setSession(null) : navigate("/histology/exam"));
 
-  const catalogQuery = useQuery({ queryKey: ["histology-catalog"], queryFn: fetchHistologyCatalog });
+  const catalogQuery = useQuery({ queryKey: ["histology-catalog", "exam"], queryFn: () => fetchHistologyCatalog("exam") });
   const statsQuery = useQuery({ queryKey: ["histology-stats"], queryFn: fetchHistologyStats });
 
   const startSession = async (scope: Scope) => {
@@ -289,6 +290,7 @@ export function HistologyGuessPage() {
                   {answer.magnification && <span>×{answer.magnification}</span>}
                 </div>
                 <p className={styles.protocolPreview}>{answer.protocol.split(/\n\s*\n/)[0]}</p>
+                {answer.guessImageNote && <p className={styles.protocolPreview}>{answer.guessImageNote}</p>}
                 <p className={styles.selfGrade}>Удалось определить до подсказки?</p>
                 <div className={styles.gradeGrid}>
                   <button type="button" disabled={loadingAction || pendingGrade === true} onClick={() => grade(false)}><Icon icon={X} size={18} /> Не узнал</button>
