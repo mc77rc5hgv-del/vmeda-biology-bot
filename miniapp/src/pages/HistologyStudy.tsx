@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, Info, X } from "lucide-react";
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Icon } from "../components/Icon";
@@ -89,37 +89,57 @@ function TestQuestionCard({ question, storedAnswer, onAnswer }: {
   });
   const result = storedAnswer?.result ?? answer.data;
   const selection = storedAnswer?.position ?? answer.variables;
+  const verdict = result?.correct === true ? "correct" : result?.correct === false ? "wrong" : "neutral";
+  const feedback = verdict === "correct" ? "Верно" : verdict === "wrong" ? "Неверно" : "Спорное задание · без балла";
 
   return (
-    <article className={styles.studyAnswer}>
+    <article className={styles.testCard}>
       <h2>{question.question}</h2>
       <div className={styles.testOptions}>
         {question.options.map((option, index) => {
           const position = index + 1;
+          const selected = selection === position;
           const correct = result?.correct_option === position;
-          const wrong = result?.correct === false && selection === position;
+          const wrong = verdict === "wrong" && selected;
+          const optionVerdict = correct ? "correct" : wrong ? "wrong" : undefined;
           return (
             <button
               type="button" key={position}
-              aria-pressed={selection === position}
-              data-verdict={correct ? "correct" : wrong ? "wrong" : undefined}
+              className={styles.testOption}
+              aria-pressed={selected}
+              data-verdict={optionVerdict}
               disabled={answer.isPending || Boolean(result)}
               onClick={() => answer.mutate(position)}
             >
-              <strong>{letters[index]}.</strong> {option}
+              <span className={styles.optionLetter}>{letters[index]}</span>
+              <span className={styles.optionText}>{option}</span>
+              {optionVerdict && (
+                <span className={styles.optionVerdict}>
+                  <Icon icon={correct ? Check : X} size={16} />
+                  <span>{correct ? "Правильный ответ" : "Твой ответ"}</span>
+                </span>
+              )}
             </button>
           );
         })}
       </div>
       {answer.isError && <StateMessage title="Не удалось проверить ответ. Попробуй ещё раз." />}
+      <span className="visually-hidden" role="status">
+        {result ? feedback : ""}
+        {verdict === "wrong" && result?.correct_option
+          ? `. Правильный ответ — ${question.options[result.correct_option - 1]}`
+          : ""}
+      </span>
       {result && (
-        <div className={styles.testFeedback} aria-live="polite">
-          <p><strong>{result.correct === null ? "Спорное задание · без балла" : result.correct ? "Верно" : "Неверно"}</strong></p>
-          {result.correct_option && <p>Учебный ответ — {letters[result.correct_option - 1]}.</p>}
-          {result.source_correct_option !== result.correct_option && (
-            <p>Ключ в сборнике — {letters[result.source_correct_option - 1]}.</p>
-          )}
+        <div className={styles.testFeedback} data-verdict={verdict}>
+          <h3>
+            <Icon icon={verdict === "correct" ? Check : verdict === "wrong" ? X : Info} size={19} />
+            {feedback}
+          </h3>
           <p>{result.explanation}</p>
+          {result.source_correct_option !== result.correct_option && (
+            <p className={styles.sourceKey}>Ключ в сборнике — {letters[result.source_correct_option - 1]}.</p>
+          )}
         </div>
       )}
     </article>
@@ -181,10 +201,12 @@ export function HistologyTestPage() {
       ) : run ? (
         current ? (
           <>
-            <h1 className={styles.testProgress}>Вопрос {run.index + 1} из {run.items.length}</h1>
-            <div className={styles.progressTrack} aria-hidden="true">
-              <i style={{ width: `${((run.index + 1) / run.items.length) * 100}%` }} />
-            </div>
+            <header className={styles.testHeader}>
+              <h1 className={styles.testProgress}>Вопрос {run.index + 1} <span>из {run.items.length}</span></h1>
+              <div className={styles.progressTrack} aria-hidden="true">
+                <i style={{ width: `${((run.index + 1) / run.items.length) * 100}%` }} />
+              </div>
+            </header>
             <TestQuestionCard
               key={current.id}
               question={current}
@@ -200,7 +222,8 @@ export function HistologyTestPage() {
               </button>
               <button type="button" className={styles.primaryButton} disabled={!run.answers[run.index]}
                 onClick={() => move(run, 1)}>
-                {run.index + 1 === run.items.length ? "Показать результат" : "Следующий вопрос →"}
+                {run.index + 1 === run.items.length ? "Показать результат" : "Следующий вопрос"}
+                <Icon icon={ArrowRight} size={18} />
               </button>
             </nav>
           </>
