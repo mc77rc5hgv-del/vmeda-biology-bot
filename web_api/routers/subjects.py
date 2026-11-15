@@ -111,13 +111,18 @@ def get_histology_theory_answer(number: int, user_id: int = Depends(get_current_
 def get_histology_tests(user_id: int = Depends(get_current_user_id), tb=Depends(get_fresh_bot_module)):
     _check_histology_access(tb, user_id)
     bank = histology_exam.test_bank()
-    return {"modules": bank["modules"], "questions": histology_exam.test_catalog(), "rules": bank["exam_rules"]}
+    return {"modules": histology_exam.test_topics(), "questions": histology_exam.test_catalog(), "rules": bank["exam_rules"]}
 
 
 @router.post("/histology/exam/tests/start")
-def start_histology_test(user_id: int = Depends(get_current_user_id), tb=Depends(get_fresh_bot_module)):
+def start_histology_test(module_id: str | None = None, user_id: int = Depends(get_current_user_id),
+                         tb=Depends(get_fresh_bot_module)):
     _check_histology_access(tb, user_id)
-    return [histology_exam.public_question(q) for q in histology_exam.start_test()]
+    try:
+        questions = histology_exam.start_test(module_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Тема не найдена") from exc
+    return [histology_exam.public_question(q) for q in questions]
 
 
 @router.get("/histology/exam/tests/{question_id}")

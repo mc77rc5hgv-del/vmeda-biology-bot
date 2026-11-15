@@ -2,6 +2,7 @@
 import json
 import random
 import re
+from collections import defaultdict
 from functools import lru_cache
 from pathlib import Path
 
@@ -19,7 +20,23 @@ def test_questions() -> dict:
     return {question["id"]: question for question in test_bank()["questions"]}
 
 
-def start_test() -> list[dict]:
+@lru_cache(maxsize=1)
+def _topic_questions() -> dict[str, list[dict]]:
+    groups = defaultdict(list)
+    for question in test_questions().values():
+        groups[question["module_id"]].append(question)
+    return dict(groups)
+
+
+def test_topics() -> list[dict]:
+    groups = _topic_questions()
+    return [{**topic, "question_count": len(groups[topic["id"]])} for topic in test_bank()["modules"]]
+
+
+def start_test(module_id: str | None = None) -> list[dict]:
+    if module_id is not None:
+        questions = _topic_questions()[module_id]
+        return random.sample(questions, len(questions))
     eligible = [q for q in test_questions().values() if q["qa"]["eligible_for_study_scoring"]]
     return random.sample(eligible, test_bank()["exam_rules"]["questions_per_attempt"])
 

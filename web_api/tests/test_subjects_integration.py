@@ -1178,6 +1178,18 @@ def test_histology_written_exam_exposes_theory_and_checks_test_answers():
     assert all(set(q) == {"id", "number", "question", "options"} and len(q["options"]) == 4 for q in run)
     assert all(q["number"] not in (455, 486) for q in run)
 
+    assert sum(module["question_count"] for module in catalog["modules"]) == 518
+    topic_id = "reproduction"
+    module = next(module for module in catalog["modules"] if module["id"] == topic_id)
+    topic_response = client.post(f"{exam}/tests/start", params={"module_id": topic_id}, headers=headers)
+    assert topic_response.status_code == 200
+    topic = topic_response.json()
+    assert len(topic) == module["question_count"] == 77
+    assert {q["id"] for q in topic} == {q["id"] for q in catalog["questions"] if q["module_id"] == topic_id}
+    assert {455, 486} <= {q["number"] for q in topic}
+    assert client.post(f"{exam}/tests/start", params={"module_id": "unknown"}, headers=headers).status_code == 404
+
+
     question = f"{exam}/tests/histology-2019-087"
     assert client.get(question, headers=headers).json()["number"] == 87
     answer = client.post(f"{question}/answer", json={"option": 2}, headers=headers)

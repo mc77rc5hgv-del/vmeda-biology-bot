@@ -664,7 +664,7 @@ _TEST_LETTERS = "АБВГ"
 
 
 def _test_text(question):
-    lines = [f"<b>№{question['number']}. {escape(question['question'])}</b>", ""]
+    lines = [f"<b>{escape(question['question'])}</b>", ""]
     lines.extend(f"{letter}. {escape(option)}" for letter, option in zip(_TEST_LETTERS, question["options"]))
     return "\n".join(lines)
 
@@ -688,83 +688,105 @@ async def _render_test_question(message, session):
     index = session["index"]
     questions = session["questions"]
     q = questions[index]
-    prefix = f"histology_test_pick:{session['id']}:{index}"
+    suffix = f"{session['id']}:{index}"
+    title = f"Вопрос {index + 1} из {len(questions)}"
+    text = f"{title}\n\n{_test_text(q)}"
     markup = InlineKeyboardBuilder()
-    for i, letter in enumerate(_TEST_LETTERS, 1):
-        markup.button(text=letter, callback_data=f"{prefix}:{i}")
-    markup.adjust(4)
-    markup.row(InlineKeyboardButton(text="Завершить", callback_data="histology_tests"))
-    await tb.safe_edit_text(
-        message, f"Вопрос {index + 1} из {len(questions)}\n\n{_test_text(q)}", parse_mode="HTML",
-        reply_markup=markup.as_markup(),
-    )
+    selected = session["answers"].get(index)
+    if selected is None:
+        markup.row(*[
+            InlineKeyboardButton(text=letter, callback_data=f"histology_test_pick:{suffix}:{i}")
+            for i, letter in enumerate(_TEST_LETTERS, 1)
+        ])
+    else:
+        choice = _TEST_LETTERS[selected - 1]
+        answer = q["correct_option"]
+        verdict = "" if answer is None else (" Верно." if selected == answer else " Неверно.")
+        text += f"\n\nТвой ответ — {choice}.{verdict}\n\n{_test_explanation(q)}"
+        label = "Показать результат" if index + 1 == len(questions) else "Следующий вопрос →"
+        markup.row(InlineKeyboardButton(text=label, callback_data=f"histology_test_next:{suffix}"))
+    if index > 0:
+        markup.row(InlineKeyboardButton(text="← Предыдущий вопрос", callback_data=f"histology_test_prev:{suffix}"))
+    markup.row(InlineKeyboardButton(text="К меню тестов", callback_data="histology_tests"))
+    await tb.safe_edit_text(message, text, parse_mode="HTML", reply_markup=markup.as_markup())
 
 
-@router.callback_query(F.data.in_({"histology_tests", "histology_test_start", "histology_test_topics"}))
+@router.callback_query(
+    F.data.in_({"histology_tests", "histology_test_topics"})
+    | F.data.regexp(r"^histology_test_start(?::[a-z0-9-]+)?$")
+)
 async def cb_histology_tests(callback: CallbackQuery):
     if not await histology_gate_ok(callback):
         return
     user_id = callback.from_user.id
-    await callback.answer()
-    if callback.data == "histology_test_start":
+    if callback.data.startswith("histology_test_start"):
+        module_id = callback.data.partition(":")[2] or None
+        try:
+            questions = histology_exam.start_test(module_id)
+        except KeyError:
+            await callback.answer("Тема не найдена", show_alert=True)
+            return
         session = {
-            "id": uuid.uuid4().hex[:12], "index": 0, "correct": 0,
-            "answered": False, "questions": histology_exam.start_test(),
+            "id": uuid.uuid4().hex[:12], "index": 0, "answers": {},
+            "questions": questions, "module_id": module_id,
         }
         _TEST_SESSIONS[user_id] = session
+        await callback.answer()
         await _render_test_question(callback.message, session)
-    elif callback.data == "histology_test_topics":
-        modules = histology_exam.test_bank()["modules"]
-        rows = [(m["title"], f"histology_test_topic:{m['id']}") for m in modules]
-        await tb.safe_edit_text(callback.message, "Банк заданий по темам", reply_markup=_menu(rows, "histology_tests"))
+        return
+
+    await callback.answer()
+    if callback.data == "histology_test_topics":
+        rows = [(m["title"], f"histology_test_topic:{m['id']}") for m in histology_exam.test_topics()]
+        await tb.safe_edit_text(callback.message, "Выбери тему теста", reply_markup=_menu(rows, "histology_tests"))
     else:
         _TEST_SESSIONS.pop(user_id, None)
         size = histology_exam.test_bank()["exam_rules"]["questions_per_attempt"]
-        rows = [(f"Начать тест · {size} вопросов", "histology_test_start"), ("Банк заданий", "histology_test_topics")]
+        rows = [(f"Случайный тест · {size} вопросов", "histology_test_start"), ("Тесты по темам", "histology_test_topics")]
         await tb.safe_edit_text(callback.message, "Тесты по гистологии", reply_markup=_menu(rows, "histology_exam"))
 
 
-@router.callback_query(F.data.regexp(r"^histology_test_(?:pick|next):[a-f0-9]{12}:\d{1,2}(?::[1-4])?$"))
+@router.callback_query(F.data.regexp(r"^histology_test_(?:pick|next|prev):[a-f0-9]{12}:\d{1,2}(?::[1-4])?$"))
 async def cb_histology_test_session(callback: CallbackQuery):
     if not await histology_gate_ok(callback):
         return
-    action, ident, index, *selected = callback.data.split(":")
+    action, ident, raw_index, *selected = callback.data.split(":")
+    index = int(raw_index)
     user_id = callback.from_user.id
     session = _TEST_SESSIONS.get(user_id)
-    picking = action == "histology_test_pick"
-    if (
-        session is None or session["id"] != ident or session["index"] != int(index)
-        or session["answered"] == picking or bool(selected) != picking
-    ):
+    if session is None or session["id"] != ident or session["index"] != index:
         await callback.answer("Эта кнопка больше не активна")
         return
-    q = session["questions"][session["index"]]
-    if picking:
-        session["answered"] = True
-        correct = q["correct_option"] == int(selected[0])
-        session["correct"] += correct
-        await callback.answer()
-        choice = _TEST_LETTERS[int(selected[0]) - 1]
-        result = f"Твой ответ — {choice}. " + ("Верно." if correct else "Неверно.")
-        rows = [("Дальше", f"histology_test_next:{ident}:{index}")]
-        await tb.safe_edit_text(
-            callback.message, f"{_test_text(q)}\n\n{result}\n\n{_test_explanation(q)}",
-            parse_mode="HTML", reply_markup=_menu(rows, "histology_tests"),
-        )
-    elif session["index"] + 1 < len(session["questions"]):
+    answers = session["answers"]
+    questions = session["questions"]
+    if action == "histology_test_pick" and selected and index not in answers:
+        answers[index] = int(selected[0])
+    elif action == "histology_test_prev" and index > 0 and not selected:
+        session["index"] -= 1
+    elif action == "histology_test_next" and index in answers and not selected:
+        if index + 1 == len(questions):
+            _TEST_SESSIONS.pop(user_id, None)
+            scored = sum(q["correct_option"] is not None for q in questions)
+            correct = sum(q["correct_option"] == answers[i] for i, q in enumerate(questions))
+            result = f"Верных ответов: {correct} из {scored}"
+            restart = "histology_test_start"
+            if session["module_id"] is None:
+                result += f"\nОценка: {histology_exam.exam_grade(correct)}"
+            else:
+                restart += f":{session['module_id']}"
+                if scored != len(questions):
+                    result += f"\nСпорных заданий без балла: {len(questions) - scored}"
+            await callback.answer()
+            await tb.safe_edit_text(
+                callback.message, result, reply_markup=_menu([("Пройти ещё раз", restart)], "histology_tests")
+            )
+            return
         session["index"] += 1
-        session["answered"] = False
-        await callback.answer()
-        await _render_test_question(callback.message, session)
     else:
-        _TEST_SESSIONS.pop(user_id, None)
-        correct = session["correct"]
-        grade = histology_exam.exam_grade(correct)
-        await callback.answer()
-        await tb.safe_edit_text(
-            callback.message, f"Верных ответов: {correct} из {len(session['questions'])}\nОценка: {grade}",
-            reply_markup=_menu([("Пройти ещё раз", "histology_test_start")], "histology_tests"),
-        )
+        await callback.answer("Эта кнопка больше не активна")
+        return
+    await callback.answer()
+    await _render_test_question(callback.message, session)
 
 
 @router.callback_query(F.data.regexp(r"^histology_test_topic:[a-z0-9-]+$"))
@@ -772,16 +794,13 @@ async def cb_histology_test_topic(callback: CallbackQuery):
     if not await histology_gate_ok(callback):
         return
     module_id = callback.data.partition(":")[2]
-    module = next((m for m in histology_exam.test_bank()["modules"] if m["id"] == module_id), None)
-    if module is None:
+    topic = next((m for m in histology_exam.test_topics() if m["id"] == module_id), None)
+    if topic is None:
         await callback.answer("Тема не найдена", show_alert=True)
         return
     await callback.answer()
-    rows = [
-        (f"{q['number']}. {q['question'][:65]}", f"histology_test_review:{q['number']}")
-        for q in histology_exam.test_questions().values() if q["module_id"] == module_id
-    ]
-    await tb.safe_edit_text(callback.message, escape(module["title"]), reply_markup=_menu(rows, "histology_test_topics"))
+    rows = [(f"Начать тест · вопросов: {topic['question_count']}", f"histology_test_start:{module_id}")]
+    await tb.safe_edit_text(callback.message, escape(topic["title"]), reply_markup=_menu(rows, "histology_test_topics"))
 
 
 @router.callback_query(F.data.regexp(r"^histology_test_review:\d{1,3}$"))

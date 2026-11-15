@@ -70,28 +70,41 @@ export function HistologyTheoryPage() {
   );
 }
 
-function TestQuestionCard({ question, onNext }: {
+type SelectedAnswer = { position: number; result: HistologyTestAnswer };
+type TestRun = {
+  items: HistologyTestQuestion[];
+  moduleId: string | null;
+  index: number;
+  answers: Record<number, SelectedAnswer>;
+};
+
+function TestQuestionCard({ question, storedAnswer, onAnswer }: {
   question: HistologyTestQuestion;
-  onNext?: (answer: HistologyTestAnswer) => void;
+  storedAnswer?: SelectedAnswer;
+  onAnswer?: (answer: SelectedAnswer) => void;
 }) {
-  const [selection, setSelection] = useState<number | null>(null);
   const answer = useMutation({
     mutationFn: (option: number) => answerHistologyTest(question.id, option),
+    onSuccess: (result, position) => onAnswer?.({ position, result }),
   });
-  const result = answer.data;
+  const result = storedAnswer?.result ?? answer.data;
+  const selection = storedAnswer?.position ?? answer.variables;
 
   return (
     <article className={styles.studyAnswer}>
-      <h2>№{question.number}. {question.question}</h2>
+      <h2>{question.question}</h2>
       <div className={styles.testOptions}>
         {question.options.map((option, index) => {
           const position = index + 1;
+          const correct = result?.correct_option === position;
+          const wrong = result?.correct === false && selection === position;
           return (
             <button
               type="button" key={position}
               aria-pressed={selection === position}
+              data-verdict={correct ? "correct" : wrong ? "wrong" : undefined}
               disabled={answer.isPending || Boolean(result)}
-              onClick={() => { setSelection(position); answer.mutate(position); }}
+              onClick={() => answer.mutate(position)}
             >
               <strong>{letters[index]}.</strong> {option}
             </button>
@@ -101,13 +114,12 @@ function TestQuestionCard({ question, onNext }: {
       {answer.isError && <StateMessage title="Не удалось проверить ответ. Попробуй ещё раз." />}
       {result && (
         <div className={styles.testFeedback} aria-live="polite">
-          <p><strong>{result.correct === null ? "Спорное задание" : result.correct ? "Верно" : "Неверно"}</strong></p>
+          <p><strong>{result.correct === null ? "Спорное задание · без балла" : result.correct ? "Верно" : "Неверно"}</strong></p>
           {result.correct_option && <p>Учебный ответ — {letters[result.correct_option - 1]}.</p>}
           {result.source_correct_option !== result.correct_option && (
             <p>Ключ в сборнике — {letters[result.source_correct_option - 1]}.</p>
           )}
           <p>{result.explanation}</p>
-          {onNext && <button type="button" className={styles.primaryButton} onClick={() => onNext(result)}>Дальше</button>}
         </div>
       )}
     </article>
@@ -117,7 +129,7 @@ function TestQuestionCard({ question, onNext }: {
 export function HistologyTestPage() {
   const navigate = useNavigate();
   const { questionId } = useParams();
-  const [run, setRun] = useState<{ items: HistologyTestQuestion[]; index: number; correct: number } | null>(null);
+  const [run, setRun] = useState<TestRun | null>(null);
   const [moduleId, setModuleId] = useState("");
   const catalog = useQuery({
     queryKey: ["histology-test-catalog"], queryFn: fetchHistologyTestCatalog, enabled: !questionId,
@@ -129,10 +141,28 @@ export function HistologyTestPage() {
   });
   const start = useMutation({
     mutationFn: startHistologyTest,
-    onSuccess: (items) => setRun({ items, index: 0, correct: 0 }),
+    onSuccess: (items, id) => {
+      setRun({ items, moduleId: id, index: 0, answers: {} });
+      window.scrollTo({ top: 0, behavior: "instant" });
+    },
   });
   const back = questionId ? testPath : examPath;
   useTelegramBackButton(() => run ? setRun(null) : navigate(back));
+
+  const current = run?.items[run.index];
+  const topic = catalog.data?.modules.find((module) => module.id === moduleId);
+
+  function move(session: TestRun, offset: number) {
+    setRun((previous) => previous === session ? { ...session, index: session.index + offset } : previous);
+    window.scrollTo({ top: 0, behavior: "instant" });
+  }
+
+  const answered = run ? Object.values(run.answers) : [];
+  const scored = answered.filter((answer) => answer.result.correct !== null).length;
+  const correct = answered.filter((answer) => answer.result.correct === true).length;
+  const grade = run?.moduleId === null && catalog.data?.rules.thresholds.find(
+    (band) => correct >= band.min_correct && correct <= band.max_correct,
+  );
 
   return (
     <div className={`screen ${styles.examScreen}`}>
@@ -141,58 +171,87 @@ export function HistologyTestPage() {
           <Icon icon={ArrowLeft} size={18} /> К тестам
         </button>
       ) : <BackLink to={back}>{questionId ? "К тестам" : "Экзамен"}</BackLink>}
-      <h1>Тесты</h1>
       {questionId ? (
-        question.isPending ? <Skeleton height={240} />
-          : question.isError ? <StateMessage title="Не удалось загрузить задание" onRetry={() => question.refetch()} />
-          : <TestQuestionCard key={question.data.id} question={question.data} />
+        <>
+          <h1>Тесты</h1>
+          {question.isPending ? <Skeleton height={240} />
+            : question.isError ? <StateMessage title="Не удалось загрузить задание" onRetry={() => question.refetch()} />
+            : <TestQuestionCard key={question.data.id} question={question.data} />}
+        </>
       ) : run ? (
-        run.index < run.items.length ? (
+        current ? (
           <>
-            <p>Вопрос {run.index + 1} из {run.items.length}</p>
+            <h1 className={styles.testProgress}>Вопрос {run.index + 1} из {run.items.length}</h1>
+            <div className={styles.progressTrack} aria-hidden="true">
+              <i style={{ width: `${((run.index + 1) / run.items.length) * 100}%` }} />
+            </div>
             <TestQuestionCard
-              key={run.items[run.index].id}
-              question={run.items[run.index]}
-              onNext={(answer) => setRun((current) => current === run
-                ? { ...current, index: current.index + 1, correct: current.correct + Number(answer.correct) }
-                : current)}
+              key={current.id}
+              question={current}
+              storedAnswer={run.answers[run.index]}
+              onAnswer={(answer) => setRun((previous) => previous?.items === run.items
+                ? { ...previous, answers: { ...previous.answers, [run.index]: answer } }
+                : previous)}
             />
+            <nav className={styles.testNavigation} aria-label="Переключение вопросов">
+              <button type="button" className={styles.testPrevious} disabled={run.index === 0}
+                onClick={() => move(run, -1)}>
+                <Icon icon={ArrowLeft} size={18} /> Назад
+              </button>
+              <button type="button" className={styles.primaryButton} disabled={!run.answers[run.index]}
+                onClick={() => move(run, 1)}>
+                {run.index + 1 === run.items.length ? "Показать результат" : "Следующий вопрос →"}
+              </button>
+            </nav>
           </>
         ) : (
           <section className={styles.studyAnswer}>
-            <h2>{run.correct} из {run.items.length}</h2>
-            <p>Оценка — {catalog.data?.rules.thresholds.find(
-              (grade) => run.correct >= grade.min_correct && run.correct <= grade.max_correct,
-            )?.grade}.</p>
+            <h1>Результат теста</h1>
+            <p>Верных ответов — <strong>{correct} из {scored}</strong>.</p>
+            {grade && <p>Оценка — {grade.grade}.</p>}
+            {scored < run.items.length && <p>Спорных заданий без балла — {run.items.length - scored}.</p>}
             <button type="button" className={styles.primaryButton} disabled={start.isPending}
-              onClick={() => start.mutate()}>Пройти ещё раз</button>
+              onClick={() => start.mutate(run.moduleId)}>Пройти ещё раз</button>
           </section>
         )
-      ) : catalog.isPending ? <Skeleton height={210} />
-        : catalog.isError ? <StateMessage title="Не удалось загрузить тесты" onRetry={() => catalog.refetch()} />
-        : (
-          <>
-            <button type="button" className={styles.primaryButton} disabled={start.isPending}
-              onClick={() => start.mutate()}>
-              {start.isPending ? "Загружаем…" : `Начать тест · ${catalog.data.rules.questions_per_attempt} вопросов`}
-            </button>
-            <label className={styles.studyFilter}>
-              Банк заданий
-              <select value={moduleId} onChange={(event) => setModuleId(event.target.value)}>
-                <option value="">Выбери тему</option>
-                {catalog.data.modules.map((module) => <option key={module.id} value={module.id}>{module.title}</option>)}
-              </select>
-            </label>
-            {moduleId && (
-              <div className={styles.studyGroup}>
-                {catalog.data.questions.filter((q) => q.module_id === moduleId).map((q) => (
-                  <Link key={q.id} to={`${testPath}/${q.id}`}>{q.number}. {q.question}</Link>
-                ))}
-              </div>
+      ) : (
+        <>
+          <h1>Тесты</h1>
+          {catalog.isPending ? <Skeleton height={210} />
+            : catalog.isError ? <StateMessage title="Не удалось загрузить тесты" onRetry={() => catalog.refetch()} />
+            : (
+              <>
+                <button type="button" className={styles.primaryButton} disabled={start.isPending}
+                  onClick={() => start.mutate(null)}>
+                  {start.isPending && start.variables === null
+                    ? "Загружаем…"
+                    : `Случайный тест · ${catalog.data.rules.questions_per_attempt} вопросов`}
+                </button>
+                <section className={styles.studyAnswer}>
+                  <label className={styles.studyFilter}>
+                    Тесты по темам
+                    <select value={moduleId} onChange={(event) => setModuleId(event.target.value)}>
+                      <option value="">Выбери тему</option>
+                      {catalog.data.modules.map((module) => (
+                        <option key={module.id} value={module.id}>{module.title}</option>
+                      ))}
+                    </select>
+                  </label>
+                  {topic && (
+                    <button type="button" className={styles.primaryButton} disabled={start.isPending}
+                      onClick={() => start.mutate(topic.id)}>
+                      {start.isPending && start.variables === topic.id
+                        ? "Загружаем…" : `Начать тест · вопросов: ${topic.question_count}`}
+                    </button>
+                  )}
+                </section>
+              </>
             )}
-          </>
-        )}
-      {start.isError && <StateMessage title="Не удалось начать тест" onRetry={() => start.mutate()} />}
+        </>
+      )}
+      {start.isError && (
+        <StateMessage title="Не удалось начать тест" onRetry={() => start.mutate(start.variables ?? null)} />
+      )}
     </div>
   );
 }

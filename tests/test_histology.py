@@ -165,7 +165,37 @@ async def main():
         await histology.cb_histology_test_session(advance)
     assert "30 из 30" in advance.message.edits[0][0]
     assert ADMIN_ID not in histology._TEST_SESSIONS
-    print("theory, test review and complete 30-question session: OK")
+    assert "№455." not in review.message.edits[0][0]
+
+    topic = FakeCB("histology_test_topic:reproduction")
+    await histology.cb_histology_test_topic(topic)
+    assert kb_texts(topic.message.edits[0][1])[0] == "Начать тест · вопросов: 77"
+    topic_start = FakeCB("histology_test_start:reproduction")
+    await histology.cb_histology_tests(topic_start)
+    assert "Вопрос 1 из 77" in topic_start.message.edits[0][0]
+    session = histology._TEST_SESSIONS[ADMIN_ID]
+    key = session["id"]
+    for index, item in enumerate(session["questions"]):
+        assert item["module_id"] == "reproduction"
+        option = item["correct_option"] or 1
+        pick = FakeCB(f"histology_test_pick:{key}:{index}:{option}")
+        await histology.cb_histology_test_session(pick)
+        assert f"№{item['number']}." not in pick.message.edits[0][0]
+        if index == 1:
+            previous = FakeCB(f"histology_test_prev:{key}:1")
+            await histology.cb_histology_test_session(previous)
+            assert "Вопрос 1 из 77" in previous.message.edits[0][0]
+            assert "Твой ответ" in previous.message.edits[0][0]
+            await histology.cb_histology_test_session(FakeCB(f"histology_test_next:{key}:0"))
+        advance = FakeCB(f"histology_test_next:{key}:{index}")
+        await histology.cb_histology_test_session(advance)
+    result = advance.message.edits[0][0]
+    disputed = sum(q["correct_option"] is None for q in session["questions"])
+    assert f"{77 - disputed} из {77 - disputed}" in result
+    assert f"Спорных заданий без балла: {disputed}" in result
+    assert "Оценка" not in result
+    assert ADMIN_ID not in histology._TEST_SESSIONS
+    print("theory, random exam and complete topic run with back navigation: OK")
 
     # 4. Access control: first-ever visit silently grants a free trial week (like the others'
     # grace period), so a brand-new non-admin sees the REAL menu, not a locked screen.

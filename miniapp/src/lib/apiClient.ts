@@ -905,8 +905,7 @@ export function fetchHistologyTheoryAnswer(number: string) {
 
 export function fetchHistologyTestCatalog() {
   return apiFetch<{
-    modules: { id: string; title: string }[];
-    questions: HistologyTestSummary[];
+    modules: { id: string; title: string; question_count: number }[];
     rules: {
       questions_per_attempt: number;
       thresholds: { grade: string; min_correct: number; max_correct: number }[];
@@ -914,8 +913,9 @@ export function fetchHistologyTestCatalog() {
   }>("/api/v1/histology/exam/tests");
 }
 
-export function startHistologyTest() {
-  return apiFetch<HistologyTestQuestion[]>("/api/v1/histology/exam/tests/start", { method: "POST" });
+export function startHistologyTest(moduleId: string | null) {
+  const query = moduleId ? `?module_id=${encodeURIComponent(moduleId)}` : "";
+  return apiFetch<HistologyTestQuestion[]>(`/api/v1/histology/exam/tests/start${query}`, { method: "POST" });
 }
 
 export function fetchHistologyTestQuestion(id: string) {
