@@ -131,6 +131,12 @@ async def main():
     assert len(diagnostics_groups) == len(tb.HISTOLOGY) + 1
     assert len(exam_groups) == 5
     assert all(
+        not button.callback_data.startswith("histology_guess_start:")
+        for key in tb.HISTOLOGY
+        for row in tb.get_histology_topic_keyboard(key).inline_keyboard
+        for button in row
+    )
+    assert all(
         exam[0].callback_data == diagnostics[0].callback_data + ":exam"
         for exam, diagnostics in zip(exam_groups[:-1], diagnostics_groups[1:-1])
     )

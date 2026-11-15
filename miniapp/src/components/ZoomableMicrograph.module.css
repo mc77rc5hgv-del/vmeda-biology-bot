@@ -23,18 +23,16 @@
 }
 .fullscreen::backdrop { background: #030611; }
 
-.viewport, .placeholder {
+.viewport {
   position: relative;
   width: 100%;
   aspect-ratio: 1 / 1;
-}
-.viewport {
   overflow: hidden;
   touch-action: pan-y;
   cursor: zoom-in;
   background: radial-gradient(circle, #171927, #06070d 72%);
 }
-.placeholder { margin-bottom: 76px; }
+.viewport:focus-visible { outline-offset: -3px; }
 .fullscreen .viewport, .viewport[data-zoomed="true"] { touch-action: none; }
 .viewport[data-zoomed="true"] { cursor: grab; }
 .viewport[data-zoomed="true"]:active { cursor: grabbing; }
@@ -54,8 +52,6 @@
   transform-origin: center;
   will-change: transform;
 }
-
-.canvas:not(:active) { transition: transform 90ms ease-out; }
 
 .canvas img {
   width: 100%;
@@ -105,6 +101,7 @@
 
 .controls button:disabled { opacity: .32; }
 .controls button.active { color: #f3a8ff; border-color: rgb(243 168 255 / 45%); }
+.controls button.closeButton { display: flex; justify-content: center; gap: 6px; width: auto; padding-inline: 10px; font-size: 12px; font-weight: 750; }
 .controls span { min-width: 36px; text-align: center; font-size: 12px; font-weight: 750; }
 
 .hint {
@@ -140,6 +137,6 @@
 }
 
 @media (min-width: 900px) {
-  .viewport, .placeholder { max-height: 560px; }
+  .viewport { max-height: 560px; }
   .fullscreen .viewport { max-height: none; }
 }

@@ -145,6 +145,36 @@
 .resultCard > button { margin-top: 8px; }
 .resultCard > button.secondaryButton { color: var(--ink); box-shadow: none; border: 1px solid var(--border); background: var(--surface); }
 
+.guessRound { display: grid; gap: 12px; }
+.guessRound > * { min-width: 0; }
+.guessAnswer { scroll-margin-block-start: calc(var(--safe-top) + 12px); }
+.guessAnswer h2 { overflow-wrap: anywhere; }
+.guessAnswer .metaLine span { font-size: 11px; }
+.guessAnswer .protocolPreview { font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; }
+.guessActions {
+  align-self: start;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 17px;
+  background: var(--surface-elevated);
+  box-shadow: var(--shadow-card);
+}
+.guessActions .selfGrade { margin: 2px 0 0; text-align: center; font-size: 12px; }
+.guessActions .gradeGrid button { font-size: 12px; }
+.guessActions .primaryButton { box-shadow: none; }
+.guessActions button:disabled { opacity: .6; }
+.guessError { margin: 4px 4px 8px; color: var(--ink); font-size: 13px; line-height: 1.4; }
+
+@media (max-width: 899px) and (min-height: 520px) {
+  .guessActions { position: sticky; bottom: calc(var(--safe-bottom) + var(--bottom-nav-height) + 5px); z-index: 2; }
+}
+@media (min-width: 900px) {
+  .guessRound { grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); grid-template-rows: auto 1fr; align-items: start; gap: 12px 16px; }
+  .guessImage { grid-column: 1; grid-row: 1 / span 2; }
+  .guessAnswer { grid-column: 2; grid-row: 1; }
+  .guessActions { grid-column: 2; }
+}
+
 @media (hover: hover) {
   .actions > button:hover { transform: translateY(-1px); }
   .group > button:hover, .searchBox button:hover { background: var(--surface); }

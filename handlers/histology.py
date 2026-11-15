@@ -205,8 +205,6 @@ def get_histology_topic_keyboard(diag_key: str, exam: bool = False):
     bank = histology_content.exam_groups(tb.HISTOLOGY) if exam else tb.HISTOLOGY
     diag = bank[diag_key]
     builder = InlineKeyboardBuilder()
-    if not exam and get_histology_guess_pool(diag_key):
-        builder.button(text="🎯 Угадай препарат", callback_data=f"histology_guess_start:{diag_key}")
     for spec in diag["specimens"]:
         builder.button(text=f"№{spec['number']}. {spec['title']}", callback_data=f"histology_specimen:{diag_key}:{spec['id']}{suffix}")
     builder.adjust(1)
@@ -462,10 +460,7 @@ def get_histology_guess_answer_keyboard(session=None):
 def get_histology_guess_summary_keyboard(scope: str):
     builder = InlineKeyboardBuilder()
     builder.button(text="🔁 Пройти ещё раз", callback_data=f"histology_guess_start:{scope}")
-    if scope in {"all", "mistakes"}:
-        builder.button(text="🔙 К тренажёру", callback_data="histology_guess_menu")
-    else:
-        builder.button(text="🔙 К разделу", callback_data=f"histology_topic:{scope}")
+    builder.button(text="🔙 К тренажёру", callback_data="histology_guess_menu")
     builder.adjust(1)
     return builder.as_markup()
 
