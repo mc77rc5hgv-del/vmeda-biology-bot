@@ -124,7 +124,7 @@ export function HistologyCatalogPage({ diagnostics = false }: { diagnostics?: bo
             <StateMessage icon={Search} title="Препараты не найдены" body="Попробуйте другое название, номер или диагностику."
               onRetry={() => setParams({}, { replace: true })} actionLabel="Сбросить фильтры" />
           ) : (
-            <div className={`${styles.catalog} ${filteredGroups.length === 1 ? styles.catalogSingle : ""}`}>
+            <div className={styles.catalog}>
               {filteredGroups.map((group) => {
                 const [title, topic] = group.title.split(": ");
                 return (

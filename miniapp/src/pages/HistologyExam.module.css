@@ -151,8 +151,14 @@
 }
 
 @media (min-width: 900px) {
-  .catalog { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
-  .catalogSingle { grid-template-columns: 1fr; }
+  .group {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    overflow: hidden;
+  }
+  .groupHead, .group > button:last-child:nth-of-type(odd) { grid-column: 1 / -1; }
+  .group > button:nth-of-type(even) { border-inline-start: 1px solid var(--border); }
+  .group > button:last-child { border-radius: 0; }
 }
 
 
