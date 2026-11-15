@@ -1,18 +1,18 @@
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, ArrowRight, BookOpen, Images, Lock, Microscope, ScanSearch } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState, type Ref } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { Icon } from "../components/Icon";
 import { Skeleton } from "../components/Skeleton";
 import { StateMessage } from "../components/StateMessage";
-import { ZoomableMicrograph } from "../components/ZoomableMicrograph";
+import { ZoomableMicrograph, type MicrographHandle } from "../components/ZoomableMicrograph";
 import { ApiError, fetchHistologyCatalog, fetchHistologySpecimen, type HistologyCatalogScope } from "../lib/apiClient";
 import { filterHistologyGroups, type HistologyCatalogLocation } from "../lib/histologyCatalog";
 import { useTelegramBackButton } from "../lib/telegram";
 import type { HistologySpecimen } from "../lib/types";
 import styles from "./HistologySpecimen.module.css";
 
-function SpecimenImages({ specimen }: { specimen: HistologySpecimen }) {
+function SpecimenImages({ specimen, viewer }: { specimen: HistologySpecimen; viewer: Ref<MicrographHandle> }) {
   const [imageIndex, setImageIndex] = useState(0);
   const guide = specimen.imageGuides[imageIndex];
   const src = specimen.images[imageIndex];
@@ -37,6 +37,7 @@ function SpecimenImages({ specimen }: { specimen: HistologySpecimen }) {
       {src ? (
         <ZoomableMicrograph
           key={src}
+          ref={viewer}
           src={src}
           alt={`${specimen.title} · ${guide?.kind === "diagram" ? "схема" : "микрофотография"} ${imageIndex + 1}`}
           markers={specimen.markers}
@@ -67,6 +68,7 @@ function SpecimenImages({ specimen }: { specimen: HistologySpecimen }) {
 export function HistologySpecimenPage() {
   const { specimenId = "" } = useParams();
   const navigate = useNavigate();
+  const viewer = useRef<MicrographHandle>(null);
   const location = useLocation();
   const state = location.state as HistologyCatalogLocation | null;
   const param = new URLSearchParams(location.search).get("scope");
@@ -89,6 +91,7 @@ export function HistologySpecimenPage() {
   const catalogPath = scope === "diagnostics" ? "/histology/diagnostics" : "/histology/exam/specimens";
   const catalogSearch = state?.catalogSearch ?? "";
   function backToCatalog() {
+    if (viewer.current?.closeFullscreen()) return;
     if (typeof state?.catalogSearch === "string") navigate(-1);
     else navigate(catalogPath);
   }
@@ -140,7 +143,7 @@ export function HistologySpecimenPage() {
       </header>
 
       <div className={styles.studyLayout}>
-        <SpecimenImages key={specimen.id} specimen={specimen} />
+        <SpecimenImages key={specimen.id} specimen={specimen} viewer={viewer} />
         <section className={styles.theory}>
           <h2><Icon icon={BookOpen} size={20} /> Как распознать препарат</h2>
           <div className={styles.protocol}>

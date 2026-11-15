@@ -1,11 +1,11 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, BookOpen, Check, ChevronRight, ClipboardList, GraduationCap, Images, Microscope, RotateCcw, ScanSearch, Search, X } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { Icon } from "../components/Icon";
 import { Skeleton } from "../components/Skeleton";
 import { StateMessage } from "../components/StateMessage";
-import { ZoomableMicrograph } from "../components/ZoomableMicrograph";
+import { ZoomableMicrograph, type MicrographHandle } from "../components/ZoomableMicrograph";
 import {
   fetchHistologyCatalog,
   fetchHistologyPractical,
@@ -170,10 +170,22 @@ export function HistologyGuessPage() {
   const [sessionKnown, setSessionKnown] = useState(0);
   const [loadingAction, setLoadingAction] = useState(false);
   const busy = useRef(false);
+  const viewer = useRef<MicrographHandle>(null);
+  const questionHeading = useRef<HTMLHeadingElement>(null);
+  const answerHeading = useRef<HTMLHeadingElement>(null);
   const [pendingGrade, setPendingGrade] = useState<boolean | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  useTelegramBackButton(() => session ? setSession(null) : navigate("/histology/exam"));
+  const backToTrainer = () => {
+    setSession(null);
+    setActionError(null);
+    window.scrollTo({ top: 0, behavior: "instant" });
+  };
+  useTelegramBackButton(() => {
+    if (viewer.current?.closeFullscreen()) return;
+    if (session) backToTrainer();
+    else navigate("/histology/exam");
+  });
 
   const catalogQuery = useQuery({ queryKey: ["histology-catalog", "exam"], queryFn: () => fetchHistologyCatalog("exam") });
   const statsQuery = useQuery({ queryKey: ["histology-stats"], queryFn: fetchHistologyStats });
@@ -197,6 +209,22 @@ export function HistologyGuessPage() {
 
   const current = session?.items[index];
   const finished = Boolean(session && index >= session.items.length);
+
+  useEffect(() => {
+    if (session) {
+      window.scrollTo({ top: 0, behavior: "instant" });
+      questionHeading.current?.focus({ preventScroll: true });
+    }
+  }, [session, index]);
+
+  useEffect(() => {
+    const heading = answerHeading.current;
+    if (!answer || !heading) return;
+    heading.focus({ preventScroll: true });
+    if (window.matchMedia("(max-width: 899px)").matches) {
+      heading.closest("article")?.scrollIntoView({ block: "start", behavior: "instant" });
+    }
+  }, [answer]);
 
   const reveal = async () => {
     if (!current) return;
@@ -231,18 +259,18 @@ export function HistologyGuessPage() {
     }
   };
 
-  if (catalogQuery.isLoading) {
+  if (!session && catalogQuery.isLoading) {
     return <div className="screen"><Skeleton height={190} radius="24px" /><Skeleton height={112} radius="20px" /></div>;
   }
-  if (catalogQuery.isError || !catalogQuery.data) {
+  if (!session && (catalogQuery.isError || !catalogQuery.data)) {
     return <div className="screen"><StateMessage title="Не удалось открыть тренажёр" onRetry={() => catalogQuery.refetch()} /></div>;
   }
 
   if (session) {
     return (
       <div className={["screen", styles.examScreen].join(" ")}>
-        {actionError && <p role="alert">{actionError}</p>}
-        <button type="button" className={styles.backButton} onClick={() => setSession(null)}>
+        {actionError && !current && <p role="alert">{actionError}</p>}
+        <button type="button" className={styles.backButton} onClick={backToTrainer}>
           <Icon icon={ArrowLeft} size={18} /> К тренажёру
         </button>
 
@@ -259,45 +287,56 @@ export function HistologyGuessPage() {
             <h1>{sessionKnown} из {session.items.length}</h1>
             <p>Результат сохранён. Нераспознанные препараты уже добавлены в работу над ошибками.</p>
             <button type="button" onClick={() => startSession(session.scope)}>Пройти ещё раз</button>
-            <button type="button" className={styles.secondaryButton} onClick={() => setSession(null)}>К тренажёру</button>
+            <button type="button" className={styles.secondaryButton} onClick={backToTrainer}>К тренажёру</button>
           </div>
         ) : current ? (
           <>
             <div className={styles.examHead}>
               <div>
                 <p className={styles.eyebrow}>{session.scope === "mistakes" ? "Работа над ошибками" : "Практический зачёт"}</p>
-                <h1>Определите препарат</h1>
+                <h1 ref={questionHeading} tabIndex={-1}>Определите препарат</h1>
               </div>
               <span>{index + 1}/{session.items.length}</span>
             </div>
             <div className={styles.progressTrack}><i style={{ width: `${((index + 1) / session.items.length) * 100}%` }} /></div>
-            <ZoomableMicrograph
-              key={current.id}
-              src={current.imageUrl}
-              alt="Микрофотография для определения препарата"
-            />
-
-            {!answer ? (
-              <button type="button" className={styles.primaryButton} disabled={loadingAction} onClick={reveal}>
-                {loadingAction ? "Открываем…" : "Показать ответ"}
-              </button>
-            ) : (
-              <div className={styles.answerCard}>
-                <p className={styles.eyebrow}>Правильный ответ</p>
-                <h2>{answer.title}</h2>
-                <div className={styles.metaLine}>
-                  {answer.stain && <span>{answer.stain}</span>}
-                  {answer.magnification && <span>×{answer.magnification}</span>}
-                </div>
-                <p className={styles.protocolPreview}>{answer.protocol.split(/\n\s*\n/)[0]}</p>
-                {answer.guessImageNote && <p className={styles.protocolPreview}>{answer.guessImageNote}</p>}
-                <p className={styles.selfGrade}>Удалось определить до подсказки?</p>
-                <div className={styles.gradeGrid}>
-                  <button type="button" disabled={loadingAction || pendingGrade === true} onClick={() => grade(false)}><Icon icon={X} size={18} /> Не узнал</button>
-                  <button type="button" disabled={loadingAction || pendingGrade === false} onClick={() => grade(true)}><Icon icon={Check} size={18} /> Узнал</button>
-                </div>
+            <div className={styles.guessRound}>
+              <div className={styles.guessImage}>
+                <ZoomableMicrograph
+                  key={current.attemptId}
+                  ref={viewer}
+                  src={current.imageUrl}
+                  alt="Микрофотография для определения препарата"
+                />
               </div>
-            )}
+              {answer && (
+                <article className={`${styles.answerCard} ${styles.guessAnswer}`}>
+                  <p className={styles.eyebrow}>Правильный ответ</p>
+                  <h2 ref={answerHeading} tabIndex={-1}>{answer.title}</h2>
+                  <div className={styles.metaLine}>
+                    {answer.stain && <span>{answer.stain}</span>}
+                    {answer.magnification && <span>×{answer.magnification}</span>}
+                  </div>
+                  <p className={styles.protocolPreview}>{answer.protocol.split(/\n\s*\n/)[0]}</p>
+                  {answer.guessImageNote && <p className={styles.protocolPreview}>{answer.guessImageNote}</p>}
+                </article>
+              )}
+              <div className={styles.guessActions}>
+                {actionError && <p className={styles.guessError} role="alert">{actionError}</p>}
+                {answer ? (
+                  <>
+                    <p className={styles.selfGrade}>Удалось определить до подсказки?</p>
+                    <div className={styles.gradeGrid}>
+                      <button type="button" disabled={loadingAction || pendingGrade === true} onClick={() => grade(false)}><Icon icon={X} size={18} /> Не узнал</button>
+                      <button type="button" disabled={loadingAction || pendingGrade === false} onClick={() => grade(true)}><Icon icon={Check} size={18} /> Узнал</button>
+                    </div>
+                  </>
+                ) : (
+                  <button type="button" className={styles.primaryButton} disabled={loadingAction} onClick={reveal}>
+                    {loadingAction ? "Открываем…" : "Показать ответ"}
+                  </button>
+                )}
+              </div>
+            </div>
           </>
         ) : null}
       </div>
