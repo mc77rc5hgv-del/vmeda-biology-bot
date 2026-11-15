@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, BookOpen, Check, ChevronRight, ClipboardList, GraduationCap, Microscope, RotateCcw, ScanSearch, Search, X } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { ArrowLeft, BookOpen, Check, ChevronRight, ClipboardList, GraduationCap, Images, Microscope, RotateCcw, ScanSearch, Search, X } from "lucide-react";
+import { useRef, useState } from "react";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { Icon } from "../components/Icon";
 import { Skeleton } from "../components/Skeleton";
 import { StateMessage } from "../components/StateMessage";
@@ -13,6 +13,7 @@ import {
   gradeHistologyAnswer,
   revealHistologyAnswer,
 } from "../lib/apiClient";
+import { filterHistologyGroups, type HistologyCatalogLocation } from "../lib/histologyCatalog";
 import { hapticSelection, useTelegramBackButton } from "../lib/telegram";
 import type { HistologyPracticalQuestion, HistologySpecimenSummary } from "../lib/types";
 import styles from "./HistologyExam.module.css";
@@ -49,31 +50,33 @@ export function HistologyExamPage() {
 
 export function HistologyCatalogPage({ diagnostics = false }: { diagnostics?: boolean }) {
   const navigate = useNavigate();
-  const [search, setSearch] = useState("");
+  const { search: catalogSearch } = useLocation();
+  const [params, setParams] = useSearchParams();
+  const searchInput = useRef<HTMLInputElement>(null);
   const back = diagnostics ? "/subjects/histology" : "/histology/exam";
   const catalogPath = diagnostics ? "/histology/diagnostics" : "/histology/exam/specimens";
   useTelegramBackButton(() => navigate(back));
   const catalogQuery = useQuery({ queryKey: ["histology-catalog"], queryFn: fetchHistologyCatalog });
+  const catalog = catalogQuery.data;
 
-  const filteredGroups = useMemo(() => {
-    const groups = catalogQuery.data?.groups ?? [];
-    const needle = search.trim().toLocaleLowerCase("ru");
-    if (!needle) return groups;
-    return groups
-      .map((group) => ({
-        ...group,
-        specimens: group.specimens.filter((item) =>
-          `${item.number} ${item.title} ${item.stain ?? ""}`.toLocaleLowerCase("ru").includes(needle),
-        ),
-      }))
-      .filter((group) => group.specimens.length > 0);
-  }, [catalogQuery.data, search]);
+  const groups = catalog?.groups ?? [];
+  const filteredGroups = filterHistologyGroups(groups, params);
+  const count = filteredGroups.reduce((sum, group) => sum + group.specimens.length, 0);
+  const search = params.get("q") ?? "";
+  const selectedGroup = groups.find((group) => group.id === params.get("group"));
+  const filtered = Boolean(search.trim() || selectedGroup);
 
-  if (catalogQuery.isLoading) {
-    return <div className="screen"><Skeleton height={190} radius="24px" /><Skeleton height={112} radius="20px" /></div>;
+  function updateFilter(key: "group" | "q", value: string) {
+    const next = new URLSearchParams(params);
+    if (value) next.set(key, value);
+    else next.delete(key);
+    setParams(next, { replace: true });
   }
-  if (catalogQuery.isError || !catalogQuery.data) {
-    return <div className="screen"><StateMessage title="Не удалось загрузить препараты" onRetry={() => catalogQuery.refetch()} /></div>;
+
+  function openSpecimen(id: string) {
+    const state: HistologyCatalogLocation = { catalogPath, catalogSearch };
+    navigate(`/histology/specimens/${encodeURIComponent(id)}`, { state });
+    window.scrollTo({ top: 0, behavior: "instant" });
   }
 
   return (
@@ -81,33 +84,78 @@ export function HistologyCatalogPage({ diagnostics = false }: { diagnostics?: bo
       <button type="button" className={styles.backButton} onClick={() => navigate(back)}>
         <Icon icon={ArrowLeft} size={18} /> {diagnostics ? "Гистология" : "Экзамен"}
       </button>
-      <div className={styles.catalogHead}>
-        <h1>{diagnostics ? "ДИАГНОСТИКИ" : "Препараты"}</h1>
-        <span>{catalogQuery.data.totalSpecimens}</span>
-      </div>
-      <label className={styles.searchBox}>
-        <Icon icon={Search} size={18} />
-        <input value={search} onChange={(event) => setSearch(event.target.value)} aria-label="Найти препарат или окраску" placeholder="Найти препарат или окраску" />
-      </label>
-
-      {filteredGroups.length === 0 && <StateMessage title="Препараты не найдены" />}
-      <div className={styles.catalog}>
-        {filteredGroups.map((group) => (
-          <section key={group.id} className={styles.group}>
-            <div className={styles.groupHead}><h3>{group.menuTitle}</h3><span>{group.specimens.length}</span></div>
-            {group.specimens.map((specimen) => (
-              <button key={specimen.id} type="button" onClick={() => navigate(`/histology/specimens/${specimen.id}`, { state: { catalogPath } })}>
-                <span className={styles.specimenNumber}>{specimen.number}</span>
-                <div>
-                  <strong>{specimen.title}</strong>
-                  <small>{[specimen.stain, specimen.magnification ? `×${specimen.magnification}` : null].filter(Boolean).join(" · ")}</small>
-                </div>
-                <Icon icon={ChevronRight} size={17} />
-              </button>
-            ))}
-          </section>
-        ))}
-      </div>
+      <header className={styles.catalogHead}>
+        <div>
+          <h1>{diagnostics ? "Диагностики" : "Препараты"}</h1>
+          {catalog && <p>Препаратов: {catalog.totalSpecimens} · диагностик: {groups.length}</p>}
+        </div>
+        <span className={styles.catalogIcon}><Icon icon={Microscope} size={27} /></span>
+      </header>
+      {catalogQuery.isLoading ? <Skeleton height={190} radius="22px" /> : catalogQuery.isError || !catalog ? (
+        <StateMessage title="Не удалось загрузить препараты" onRetry={() => catalogQuery.refetch()} />
+      ) : (
+        <>
+          <div className={styles.catalogFilters}>
+            <div className={styles.searchBox} role="search">
+              <Icon icon={Search} size={20} />
+              <input ref={searchInput} type="search" value={search} maxLength={160}
+                onChange={(event) => updateFilter("q", event.target.value)}
+                aria-label="Номер, название или окраска" placeholder="Номер, название или окраска" />
+              {search && (
+                <button type="button" aria-label="Очистить поиск" onClick={() => {
+                  updateFilter("q", "");
+                  searchInput.current?.focus();
+                }}><Icon icon={X} size={18} /></button>
+              )}
+            </div>
+            <div className={styles.catalogGroupFilter} role="group" aria-label="Выбор диагностики">
+              <button type="button" aria-pressed={!selectedGroup} onClick={() => updateFilter("group", "")}>Все</button>
+              {groups.map((group, index) => (
+                <button type="button" key={group.id} aria-label={group.title}
+                  aria-pressed={selectedGroup?.id === group.id} onClick={() => updateFilter("group", group.id)}>
+                  №{index + 1}
+                </button>
+              ))}
+            </div>
+            {filtered && <p role="status" className={styles.catalogCount}>Найдено: {count} из {catalog.totalSpecimens}</p>}
+          </div>
+          {count === 0 ? (
+            <StateMessage icon={Search} title="Препараты не найдены" body="Попробуйте другое название, номер или диагностику."
+              onRetry={() => setParams({}, { replace: true })} actionLabel="Сбросить фильтры" />
+          ) : (
+            <div className={`${styles.catalog} ${filteredGroups.length === 1 ? styles.catalogSingle : ""}`}>
+              {filteredGroups.map((group) => {
+                const [title, topic] = group.title.split(": ");
+                return (
+                  <section key={group.id} className={styles.group}>
+                    <header className={styles.groupHead}>
+                      <div><h2>{title}</h2>{topic && <p>{topic}</p>}</div>
+                      <span><span className="visually-hidden">Препаратов: </span>{group.specimens.length}</span>
+                    </header>
+                    {group.specimens.map((specimen) => (
+                      <button key={specimen.id} type="button" onClick={() => openSpecimen(specimen.id)}>
+                        <span className={styles.specimenNumber}><span className="visually-hidden">Препарат №</span>{specimen.number}</span>
+                        <span className={styles.specimenLabel}>
+                          <strong>{specimen.title}</strong>
+                          <span className={styles.specimenMeta}>
+                            {specimen.stain && <span>{specimen.stain}</span>}
+                            {specimen.magnification && <span>×{specimen.magnification}</span>}
+                            <span className={styles.imageCount}>
+                              <Icon icon={Images} size={14} />
+                              <span className="visually-hidden">Изображений: </span>{specimen.imageCount}
+                            </span>
+                          </span>
+                        </span>
+                        <Icon icon={ChevronRight} size={18} />
+                      </button>
+                    ))}
+                  </section>
+                );
+              })}
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
