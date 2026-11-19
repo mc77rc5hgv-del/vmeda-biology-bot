@@ -146,6 +146,12 @@ os.environ['BOT_SYNC_MODE']='legacy'
 # Preserve the existing journal and bot baseline; retries produce only one extra attempt.
 learning.record_histology_attempt(11,'d1',False)  # legacy Mini App history
 from services.histology_sync import summary
+import services.histology_content as histology_content_module
+# exam_progress() (reached through summary()) intersects mastered/mistake ids against the real
+# official-50 exam specimen bank (see "Use the official 50 histology exam specimens for 2026-2027")
+# -- the synthetic 'd1'/'d2' ids used throughout this file aren't in that real bank, so without
+# this stub every mastered/mistake id here would be silently filtered out to an empty list.
+histology_content_module.exam_specimens = lambda: {'d1': {}, 'd2': {}}
 baseline=copy.deepcopy(tb.stats)
 assert summary(tb,11)['attempts']==5
 learning.record_histology_attempt(11,'d2',True,event_id='new-shared-event')

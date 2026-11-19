@@ -81,7 +81,7 @@ async def test_media_navigation():
                         _cache_anatomy_file_id=lambda *_: False,
                         get_anatomy_exam_practice_section=lambda _: {'questions':[{'num':1,'question':'test','images':[image]}]},
                         get_anatomy_exam_practice_question_text=lambda *_:'test')
-                patched(stack, histology, get_histology_specimen=lambda *_:{'number':1,'title':'test','images':['test.jpg'],'guess_image':'test.jpg'},
+                patched(stack, histology, get_histology_specimen=lambda *_, **__:{'number':1,'title':'test','images':['test.jpg'],'guess_image':'test.jpg'},
                         HISTOLOGY_GUESS_SESSIONS={1:{'id':'synthetic','items':[('diag','spec')],'index':0,'scope':'all'}})
                 patched(stack, physiology, _phys_rk_image_media=lambda _: 'synthetic-file-id', _cache_phys_rk_file_id=lambda *_:False)
                 patched(stack, operative_surgery, _oh_instrument_image_media=lambda _: 'synthetic-file-id', _cache_oh_instrument_file_id=lambda *_:False)
@@ -120,7 +120,7 @@ async def test_saved_histology_answer_resumes_after_failed_delivery():
         return fn(*args)
     with ExitStack() as stack:
         patched(stack,histology,HISTOLOGY_GUESS_SESSIONS={1:session},_learning_call=direct,
-                record_histology_result=lambda *args:records.append(args),get_histology_specimen=lambda *_:{'guess_image':'test.jpg'})
+                record_histology_result=lambda *args:records.append(args),get_histology_specimen=lambda *_, **__:{'guess_image':'test.jpg'})
         callback=Callback('histology_guess_know:recovery:0',fail_send=True)
         try:
             await histology.cb_histology_guess_answer(callback)
