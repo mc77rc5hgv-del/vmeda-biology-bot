@@ -269,9 +269,40 @@ export async function enterSubject(subjectId: string): Promise<AccessStatus> {
   return toAccessStatus(result.access);
 }
 
-type AnatomyRunWire = Omit<AnatomyRun, "questions"> & {questions: AnatomyExamQuestionWire[]};
+interface AnatomyRunAnswerWire extends AnatomyExamAnswerWire {
+  position: number;
+  question_num: number;
+  chosen: string;
+  selected_index: number;
+}
+type AnatomyRunWire = Omit<AnatomyRun, "questions" | "answers"> & {
+  questions: AnatomyExamQuestionWire[];
+  answers: AnatomyRunAnswerWire[];
+};
+function toAnatomyAnswerResult(wire: AnatomyExamAnswerWire): AnatomyExamAnswerResult {
+  return {
+    correct: wire.correct,
+    correctIndex: wire.correct_index,
+    correctLetter: wire.correct_letter,
+    correctText: wire.correct_text,
+    explanation: wire.explanation,
+    wrongExplanation: wire.wrong_explanation ?? "",
+    correctExplanation: wire.correct_explanation ?? wire.explanation,
+    sourceWarning: wire.source_warning ?? "",
+  };
+}
 function toRun(run: AnatomyRunWire): AnatomyRun {
-  return {...run, questions: run.questions.map(toAnatomyExamQuestion)};
+  return {
+    ...run,
+    questions: run.questions.map(toAnatomyExamQuestion),
+    answers: run.answers.map((saved) => ({
+      ...toAnatomyAnswerResult(saved),
+      position: saved.position,
+      questionNum: saved.question_num,
+      chosen: saved.chosen,
+      selectedIndex: saved.selected_index,
+    })),
+  };
 }
 export async function startAnatomyRun(kind: AnatomyRun["kind"], partId?: number, rating = false): Promise<AnatomyRun> {
   return toRun(await apiFetch<AnatomyRunWire>("/api/v1/anatomy/exam/runs", {method: "POST", body: JSON.stringify({kind, part_id: partId, rating})}));
@@ -282,7 +313,7 @@ export async function activeAnatomyRun(): Promise<AnatomyRun | null> {
 }
 export async function answerAnatomyRun(runId: string, position: number, selectedIndex: number): Promise<AnatomyExamAnswerResult> {
   const wire = await apiFetch<AnatomyExamAnswerWire>(`/api/v1/anatomy/exam/runs/${encodeURIComponent(runId)}/answer`, {method: "POST", body: JSON.stringify({position, selected_index: selectedIndex})});
-  return {correct: wire.correct, correctIndex: wire.correct_index, correctLetter: wire.correct_letter, correctText: wire.correct_text, explanation: wire.explanation};
+  return toAnatomyAnswerResult(wire);
 }
 
 export function fetchAnatomyPreferences(): Promise<{rating: boolean}> {
@@ -496,6 +527,9 @@ interface AnatomyExamAnswerWire {
   correct_letter: string;
   correct_text: string;
   explanation: string;
+  wrong_explanation?: string;
+  correct_explanation?: string;
+  source_warning?: string;
 }
 
 function toAnatomyExamQuestion(wire: AnatomyExamQuestionWire): AnatomyExamQuestion {
@@ -542,6 +576,9 @@ export async function checkAnatomyExamAnswer(
     correctLetter: wire.correct_letter,
     correctText: wire.correct_text,
     explanation: wire.explanation,
+    wrongExplanation: wire.wrong_explanation ?? "",
+    correctExplanation: wire.correct_explanation ?? wire.explanation,
+    sourceWarning: wire.source_warning ?? "",
   };
 }
 

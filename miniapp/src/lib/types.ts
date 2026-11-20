@@ -151,7 +151,7 @@ export interface AnatomyRun {
   answered: number;
   correct: number;
   finished_at: string | null;
-  answers: { position: number; question_num: number; chosen: string; correct: number }[];
+  answers: AnatomyRunAnswer[];
 }
 
 export interface AnatomyExamAnswerResult {
@@ -159,7 +159,18 @@ export interface AnatomyExamAnswerResult {
   correctIndex: number;
   correctLetter: string;
   correctText: string;
+  /** Совместимое старое поле: объяснение правильного ответа. */
   explanation: string;
+  wrongExplanation: string;
+  correctExplanation: string;
+  sourceWarning: string;
+}
+
+export interface AnatomyRunAnswer extends AnatomyExamAnswerResult {
+  position: number;
+  questionNum: number;
+  chosen: string;
+  selectedIndex: number;
 }
 
 export interface HistologyMarker {

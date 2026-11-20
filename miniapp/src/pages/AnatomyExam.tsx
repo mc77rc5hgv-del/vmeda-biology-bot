@@ -4,8 +4,10 @@ import {
   ArrowRight,
   BookOpenCheck,
   Check,
+  ChevronLeft,
   ChevronRight,
   CircleAlert,
+  Eye,
   RefreshCw,
   Shuffle,
   Target,
@@ -40,6 +42,11 @@ interface Mistake {
   question: AnatomyExamQuestion;
 }
 
+interface AnsweredQuestion {
+  selectedIndex: number;
+  result: AnatomyExamAnswerResult;
+}
+
 function resultFeedback(percent: number): { emoji: string; title: string; text: string } {
   if (percent >= 90) return { emoji: "🏅", title: "Отличный результат", text: "Материал усвоен уверенно." };
   if (percent >= 75) return { emoji: "💪", title: "Хорошая работа", text: "Закрепи ошибки — и результат станет ещё выше." };
@@ -67,6 +74,8 @@ export function AnatomyExamPage() {
   const [index, setIndex] = useState(0);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [answer, setAnswer] = useState<AnatomyExamAnswerResult | null>(null);
+  const [answerHistory, setAnswerHistory] = useState<Record<number, AnsweredQuestion>>({});
+  const [answeredCount, setAnsweredCount] = useState(0);
   const [correctCount, setCorrectCount] = useState(0);
   const [mistakes, setMistakes] = useState<Mistake[]>([]);
   const [loadingRun, setLoadingRun] = useState(false);
@@ -92,13 +101,35 @@ export function AnatomyExamPage() {
   useTelegramBackButton(handleBack);
 
   const applyRun = useCallback((run: AnatomyRun) => {
+    const history = Object.fromEntries(run.answers.map((saved) => [
+      saved.position,
+      {
+        selectedIndex: saved.selectedIndex,
+        result: {
+          correct: saved.correct,
+          correctIndex: saved.correctIndex,
+          correctLetter: saved.correctLetter,
+          correctText: saved.correctText,
+          explanation: saved.explanation,
+          wrongExplanation: saved.wrongExplanation,
+          correctExplanation: saved.correctExplanation,
+          sourceWarning: saved.sourceWarning,
+        },
+      },
+    ])) as Record<number, AnsweredQuestion>;
+    const resumeIndex = run.finished_at
+      ? Math.max(0, run.questions.length - 1)
+      : Math.min(run.answered, Math.max(0, run.questions.length - 1));
+    const resumedAnswer = history[resumeIndex];
     setRetryOption(null);
     setRunId(run.id);
     setQuestions(run.questions);
     setMode(run.kind === "mistakes" ? "mistakes" : "standard");
-    setIndex(run.answered);
-    setSelectedIndex(null);
-    setAnswer(null);
+    setIndex(resumeIndex);
+    setAnswerHistory(history);
+    setAnsweredCount(run.answered);
+    setSelectedIndex(resumedAnswer?.selectedIndex ?? null);
+    setAnswer(resumedAnswer?.result ?? null);
     setCorrectCount(run.correct);
     setMistakes(run.answers.filter((item) => !item.correct).map((item) => ({question: run.questions[item.position]})));
     setRunError(null);
@@ -140,7 +171,9 @@ export function AnatomyExamPage() {
 
   async function selectAnswer(optionIndex: number) {
     const question = questions[index];
-    if (!question || !runId || selectedIndex !== null || requestBusy.current || (retryOption !== null && retryOption !== optionIndex)) return;
+    if (!question || !runId || index !== answeredCount || answerHistory[index]
+      || selectedIndex !== null || requestBusy.current
+      || (retryOption !== null && retryOption !== optionIndex)) return;
     requestBusy.current = true;
     setSelectedIndex(optionIndex);
     setChecking(true);
@@ -149,6 +182,8 @@ export function AnatomyExamPage() {
       const result = await answerAnatomyRun(runId!, index, optionIndex);
       setRetryOption(null);
       setAnswer(result);
+      setAnswerHistory((history) => ({...history, [index]: {selectedIndex: optionIndex, result}}));
+      setAnsweredCount((value) => Math.max(value, index + 1));
       for (const key of ['anatomy-active', 'anatomy-ratings', 'learning', 'dashboard']) void queryClient.invalidateQueries({queryKey: [key]});
       if (result.correct) {
         setCorrectCount((value) => value + 1);
@@ -169,16 +204,34 @@ export function AnatomyExamPage() {
     }
   }
 
+  function openQuestion(position: number) {
+    if (requestBusy.current || position < 0 || position >= questions.length || position > answeredCount) return;
+    const saved = answerHistory[position];
+    setIndex(position);
+    setSelectedIndex(saved?.selectedIndex ?? null);
+    setAnswer(saved?.result ?? null);
+    setRetryOption(null);
+    setRunError(null);
+    hapticSelection();
+  }
+
+  function previousQuestion() {
+    if (index > 0) openQuestion(index - 1);
+  }
+
   function nextQuestion() {
     if (!answer) return;
-    if (index + 1 >= questions.length) {
+    if (index + 1 >= questions.length && answeredCount >= questions.length) {
       setPhase("result");
       return;
     }
-    setIndex((value) => value + 1);
-    setSelectedIndex(null);
-    setAnswer(null);
-    setRunError(null);
+    openQuestion(index + 1);
+  }
+
+  function reviewCompletedRun() {
+    if (!answeredCount) return;
+    setPhase("quiz");
+    openQuestion(Math.min(answeredCount, questions.length) - 1);
   }
 
   if (!hasSession) {
@@ -270,6 +323,12 @@ export function AnatomyExamPage() {
           </div>
         </Card>
 
+        {answeredCount > 0 && (
+          <button type="button" className={styles.secondaryButton} onClick={reviewCompletedRun}>
+            <Icon icon={Eye} size={18} />
+            Посмотреть ответы
+          </button>
+        )}
         {mistakes.length > 0 && (
           <button type="button" className={styles.primaryButton} disabled={loadingRun} onClick={startMistakeWork}>
             <Icon icon={Target} size={18} />
@@ -292,8 +351,12 @@ export function AnatomyExamPage() {
   if (!question) {
     return <div className="screen"><StateMessage title="Вопросы не найдены" onRetry={leaveRun} actionLabel="К списку тестов" /></div>;
   }
-  const answered = index + (answer ? 1 : 0);
-  const wrongCount = answered - correctCount;
+  const wrongCount = answeredCount - correctCount;
+  const isReviewing = index < answeredCount;
+  const canMoveForward = index < Math.min(answeredCount, questions.length - 1);
+  const forwardLabel = index + 1 === answeredCount && answeredCount < questions.length
+    ? "К текущему"
+    : "Вперёд";
 
   return (
     <div className={["screen", styles.quizScreen].join(" ")}>
@@ -302,16 +365,29 @@ export function AnatomyExamPage() {
           <span>{mode === "mistakes" ? "Работа над ошибками" : source?.title}</span>
           <strong>{index + 1} / {questions.length}</strong>
         </div>
-        <ProgressBar percent={(answered / questions.length) * 100} color="var(--academic-blue)" label="Прогресс теста" />
+        <ProgressBar percent={(answeredCount / questions.length) * 100} color="var(--academic-blue)" label="Прогресс теста" />
         <div className={styles.liveStats}>
           <span><i className={styles.successDot} />Верно {correctCount}</span>
           <span><i className={styles.dangerDot} />Ошибок {wrongCount}</span>
           <span>№{question.num} в банке</span>
         </div>
+        <nav className={styles.questionNavigation} aria-label="Навигация по вопросам">
+          <button type="button" onClick={previousQuestion} disabled={index === 0 || checking} aria-label="Предыдущий вопрос">
+            <Icon icon={ChevronLeft} size={18} />
+            Назад
+          </button>
+          <span className={isReviewing ? styles.reviewBadge : undefined} aria-live="polite">
+            {isReviewing ? "Просмотр ответа" : "Текущий вопрос"}
+          </span>
+          <button type="button" onClick={nextQuestion} disabled={!canMoveForward || checking} aria-label={forwardLabel === "К текущему" ? "Вернуться к текущему вопросу" : "Следующий отвеченный вопрос"}>
+            {forwardLabel}
+            <Icon icon={ChevronRight} size={18} />
+          </button>
+        </nav>
       </div>
 
       <Card className={styles.questionCard}>
-        <span className={styles.questionEyebrow}>Выбери один правильный ответ</span>
+        <span className={styles.questionEyebrow}>{isReviewing ? "Ответ уже зафиксирован" : "Выбери один правильный ответ"}</span>
         <h1>{question.question}</h1>
       </Card>
 
@@ -350,17 +426,33 @@ export function AnatomyExamPage() {
       {answer && (
         <div className={[styles.answerPanel, answer.correct ? styles.answerCorrect : styles.answerWrong].join(" ")}>
           <strong>{answer.correct ? "Верно" : `Правильный ответ: ${answer.correctLetter.toUpperCase()}. ${answer.correctText}`}</strong>
-          {mode === "mistakes" && !answer.correct && (
+          {!answer.correct && (
             <div className={styles.explanation}>
-              <span><Icon icon={BookOpenCheck} size={16} /> Пояснение по Гайворонскому</span>
-              <p>{answer.explanation}</p>
+              <section className={styles.explanationBlock}>
+                <span className={styles.wrongReasonTitle}><Icon icon={CircleAlert} size={16} /> Почему выбранный ответ неверен</span>
+                <p>{answer.wrongExplanation}</p>
+              </section>
+              <section className={styles.explanationBlock}>
+                <span className={styles.correctReasonTitle}><Icon icon={BookOpenCheck} size={16} /> Почему правильный ответ верен</span>
+                <p>{answer.correctExplanation || answer.explanation}</p>
+              </section>
+              {answer.sourceWarning && (
+                <aside className={styles.sourceWarning}>
+                  <strong>Примечание к исходному вопросу</strong>
+                  <p>{answer.sourceWarning}</p>
+                </aside>
+              )}
             </div>
           )}
         </div>
       )}
       {answer && (
         <button type="button" className={styles.primaryButton} onClick={nextQuestion}>
-          {index + 1 >= questions.length ? "Показать результат" : "Следующий вопрос"}
+          {index + 1 >= questions.length && answeredCount >= questions.length
+            ? "Показать результат"
+            : index + 1 === answeredCount && answeredCount < questions.length
+              ? "Вернуться к текущему вопросу"
+              : "Следующий вопрос"}
           <Icon icon={ArrowRight} size={18} />
         </button>
       )}
@@ -388,7 +480,7 @@ function AnatomyExamMenu({
         <div className={styles.heroIcon}><Icon icon={BookOpenCheck} size={22} /></div>
         <span className={styles.heroOverline}>Экзаменационная подготовка</span>
         <h1>Тесты по анатомии</h1>
-        <p>Проверенные ответы, пояснения по Гайворонскому и отдельная работа над ошибками.</p>
+        <p>Проверенные ответы, пояснения по Гайворонскому, работа над ошибками и свободный просмотр уже отвеченных вопросов.</p>
         <div className={styles.metrics}>
           <div><strong>{total.toLocaleString("ru-RU")}</strong><span>вопросов</span></div>
           <div><strong>{parts.length}</strong><span>частей</span></div>
