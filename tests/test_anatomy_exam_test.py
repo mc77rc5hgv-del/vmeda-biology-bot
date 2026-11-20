@@ -173,6 +173,42 @@ async def main():
     assert cb_stale._answers and cb_stale._answers[0][1] is True
     print("answering without an active session -> alert: OK")
 
+    # 9b. A submitted answer can be reviewed with Back/Forward without being counted again.
+    nav_uid = 700100150
+    cb_nav_start = FakeCB("anatomy_exam_test_start:1", uid=nav_uid)
+    await tb.cb_anatomy_exam_test_start(cb_nav_start)
+    nav_session = tb.ANATOMY_EXAM_TEST_SESSIONS[nav_uid]
+    first = nav_session["queue"][0]
+    cb_nav_answer = FakeCB(f"anatomy_exam_test_answer:{first['correct']}", uid=nav_uid)
+    await tb.cb_anatomy_exam_test_answer(cb_nav_answer)
+    assert nav_session["index"] == 1 and nav_session["correct"] == 1
+    second_data = kb_data(cb_nav_answer.message.edits[-1][1])
+    back_data = f"anatomy_exam_test_nav:{nav_session['id']}:0"
+    assert back_data in second_data
+
+    cb_back = FakeCB(back_data, uid=nav_uid)
+    await tb.cb_anatomy_exam_test_nav(cb_back)
+    review_text, review_keyboard = cb_back.message.edits[-1]
+    assert "Ответ зафиксирован" in review_text
+    assert nav_session["view_index"] == 0 and nav_session["index"] == 1
+    assert not any((value or "").startswith("anatomy_exam_test_answer:") for value in kb_data(review_keyboard))
+    assert f"anatomy_exam_test_nav:{nav_session['id']}:1" in kb_data(review_keyboard)
+
+    stale_choice = next(letter for letter in first["options"] if letter != first["correct"])
+    cb_reanswer = FakeCB(
+        f"anatomy_exam_test_answer:{stale_choice}:{nav_session['id']}:0", uid=nav_uid
+    )
+    await tb.cb_anatomy_exam_test_answer(cb_reanswer)
+    assert nav_session["correct"] == 1 and nav_session["wrong"] == 0 and nav_session["index"] == 1
+
+    cb_forward = FakeCB(f"anatomy_exam_test_nav:{nav_session['id']}:1", uid=nav_uid)
+    await tb.cb_anatomy_exam_test_nav(cb_forward)
+    assert nav_session["view_index"] == 1
+    assert any((value or "").startswith("anatomy_exam_test_answer:") for value in kb_data(cb_forward.message.edits[-1][1]))
+    cb_nav_stop = FakeCB("anatomy_exam_test_stop", uid=nav_uid)
+    await tb.cb_anatomy_exam_test_stop(cb_nav_stop)
+    print("answered questions support safe Back/Forward review without duplicate statistics: OK")
+
     # 10. full sequential run-through of the smallest part (50 questions, part 1) —
     # deliberately answer the first 3 wrong (to populate mistakes) and the rest correctly
     uid = 700100200

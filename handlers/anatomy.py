@@ -1791,6 +1791,7 @@ async def render_anatomy_exam_test_menu(message, user_id: int):
         "",
         "После завершения доступны просмотр ответов и отдельная работа только над ошибками. "
         "После каждого неверного выбора бот сразу объясняет и ошибку, и правильный ответ.",
+        "⬅️ Во время попытки можно вернуться к уже отвеченным вопросам и затем продолжить с текущего.",
         "",
         (
             "⚠️ Ключ подготовлен экспертно для обучения, а не извлечён из закрытого ключа Moodle. "
@@ -1840,6 +1841,8 @@ def start_anatomy_exam_test_session(user_id: int, part_id: int) -> bool:
         "part_id": part_id,
         "queue": part["questions"],
         "index": 0,
+        "view_index": 0,
+        "answers": {},
         "correct": 0,
         "wrong": 0,
         "mistakes": [],
@@ -1859,6 +1862,8 @@ def start_anatomy_exam_flash_session(user_id: int) -> bool:
         "part_id": None,
         "queue": random.sample(ANATOMY_EXAM_TEST_ALL_QUESTIONS, size),
         "index": 0,
+        "view_index": 0,
+        "answers": {},
         "correct": 0,
         "wrong": 0,
         "mistakes": [],
@@ -1887,6 +1892,8 @@ def start_anatomy_exam_mistake_work_session(user_id: int) -> bool:
         "part_id": record.get("part_id"),
         "queue": queue,
         "index": 0,
+        "view_index": 0,
+        "answers": {},
         "correct": 0,
         "wrong": 0,
         "mistakes": [],
@@ -1900,16 +1907,52 @@ def start_anatomy_exam_mistake_work_session(user_id: int) -> bool:
 
 def get_anatomy_exam_test_keyboard(question: dict, session: dict | None = None):
     builder = InlineKeyboardBuilder()
-    for letter in ANATOMY_EXAM_TEST_OPTION_LETTERS:
-        if letter in question["options"]:
-            builder.button(text=letter, callback_data=f"anatomy_exam_test_answer:{letter}:{session['id']}:{session['index']}" if session else f"anatomy_exam_test_answer:{letter}")
-    builder.adjust(3, 2)
+    position = session.get("view_index", session["index"]) if session else 0
+    saved = session.get("answers", {}).get(position) if session else None
+    if not saved:
+        for letter in ANATOMY_EXAM_TEST_OPTION_LETTERS:
+            if letter in question["options"]:
+                builder.button(
+                    text=letter,
+                    callback_data=(
+                        f"anatomy_exam_test_answer:{letter}:{session['id']}:{position}"
+                        if session else f"anatomy_exam_test_answer:{letter}"
+                    ),
+                )
+        builder.adjust(3, 2)
+    if session:
+        nav = []
+        if position > 0:
+            nav.append(InlineKeyboardButton(
+                text="⬅️ Назад",
+                callback_data=f"anatomy_exam_test_nav:{session['id']}:{position - 1}",
+            ))
+        if position < session["index"]:
+            target = position + 1
+            if target >= len(session["queue"]):
+                label = "📊 Результат"
+            elif target == session["index"]:
+                label = "➡️ К текущему"
+            else:
+                label = "➡️ Вперёд"
+            nav.append(InlineKeyboardButton(
+                text=label,
+                callback_data=f"anatomy_exam_test_nav:{session['id']}:{target}",
+            ))
+        if nav:
+            builder.row(*nav)
     builder.row(InlineKeyboardButton(text="🛑 Завершить досрочно", callback_data="anatomy_exam_test_stop"))
     return builder.as_markup()
 
 async def render_anatomy_exam_test_question(message, user_id: int):
     session = ANATOMY_EXAM_TEST_SESSIONS[user_id]
-    question = session["queue"][session["index"]]
+    frontier = session["index"]
+    total = len(session["queue"])
+    position = session.get("view_index", frontier)
+    position = max(0, min(position, min(frontier, total - 1)))
+    session["view_index"] = position
+    question = session["queue"][position]
+    saved = session.setdefault("answers", {}).get(position)
     if session.get("is_mistake_work"):
         icon, label = "🧠", "РАБОТА НАД ОШИБКАМИ"
     elif session.get("is_flash"):
@@ -1918,20 +1961,31 @@ async def render_anatomy_exam_test_question(message, user_id: int):
         icon, label = "🏆", "ТЕСТ"
     else:
         icon, label = "🎯", "ТЕСТ"
-    answered = session["correct"] + session["wrong"]
-    total = len(session["queue"])
+    answered = frontier
     percent = round(100 * answered / total) if total else 0
     lines = [
         f"{icon} <b>{label}</b>",
         f"{get_anatomy_exam_progress_bar(answered, total)}  <b>{percent}%</b>",
-        f"Вопрос <b>{session['index'] + 1}</b> из {total}   ·   ✅ {session['correct']}   ❌ {session['wrong']}",
+        f"Вопрос <b>{position + 1}</b> из {total}   ·   ✅ {session['correct']}   ❌ {session['wrong']}",
         f"{tb.DIVIDER}\n",
         f"<b>№{question['num']}.</b> {escape(question['question'])}\n",
     ]
     for letter in ANATOMY_EXAM_TEST_OPTION_LETTERS:
         if letter in question["options"]:
-            lines.append(f"<b>{letter.upper()})</b> {escape(question['options'][letter])}")
-    lines.append("\nНажми букву правильного ответа:")
+            marker = ""
+            if saved and letter == question["correct"]:
+                marker = "  ✅"
+            elif saved and letter == saved["chosen"]:
+                marker = "  ❌ твой ответ"
+            lines.append(f"<b>{letter.upper()})</b> {escape(question['options'][letter])}{marker}")
+    if saved:
+        status = "✅ верно" if saved["correct"] else "❌ неверно"
+        lines.append(
+            f"\n📌 <b>Ответ зафиксирован: {escape(saved['chosen'].upper())}) · {status}</b>\n"
+            "Можно просматривать отвеченные вопросы, но менять ответ нельзя — так статистика остаётся честной."
+        )
+    else:
+        lines.append("\nНажми букву правильного ответа:")
     await tb.safe_edit_text(
         message, "\n".join(lines), parse_mode="HTML",
         reply_markup=get_anatomy_exam_test_keyboard(question, session)
@@ -1967,10 +2021,15 @@ def get_anatomy_exam_mistake_explanation_text(question: dict, chosen: str) -> st
         )
     return text
 
-def get_anatomy_exam_mistake_explanation_keyboard(is_last: bool):
+def get_anatomy_exam_mistake_explanation_keyboard(session: dict, position: int):
     builder = InlineKeyboardBuilder()
+    if position > 0:
+        builder.button(
+            text="⬅️ Назад",
+            callback_data=f"anatomy_exam_test_nav:{session['id']}:{position - 1}",
+        )
     builder.button(
-        text="📊 Завершить" if is_last else "➡️ Следующий вопрос",
+        text="📊 Завершить" if session["index"] >= len(session["queue"]) else "➡️ Следующий вопрос",
         callback_data="anatomy_exam_feedback_next",
     )
     builder.button(text="🛑 Закончить", callback_data="anatomy_exam_test_stop")
@@ -2134,11 +2193,14 @@ async def cb_anatomy_exam_test_answer(callback: CallbackQuery):
         await callback.answer("Сначала нажми «Следующий вопрос»", show_alert=True)
         return
     fields = callback.data.split(':')
-    if len(fields) != 4 or fields[2] != session.get('id') or fields[3] != str(session['index']) or session.get('saving'):
+    position = session.get('view_index', session['index'])
+    if (len(fields) != 4 or fields[2] != session.get('id') or fields[3] != str(position)
+            or position != session['index'] or position in session.setdefault('answers', {})
+            or session.get('saving')):
         await callback.answer('Ответ уже обработан или вопрос устарел')
         return
     chosen = fields[1]
-    question = session['queue'][session['index']]
+    question = session['queue'][position]
     if chosen not in question['options']:
         await callback.answer('Некорректный вариант ответа', show_alert=True)
         return
@@ -2159,16 +2221,21 @@ async def cb_anatomy_exam_test_answer(callback: CallbackQuery):
                 run_id,
                 tb.ANATOMY_EXAM_BANK_VERSION,
             )
-            await asyncio.to_thread(learning.answer_anatomy_run, user_id, run_id, session['index'], question['num'], chosen, chosen == correct)
+            await asyncio.to_thread(learning.answer_anatomy_run, user_id, run_id, position, question['num'], chosen, chosen == correct)
         except Exception:
             tb.logger.exception('Не удалось сохранить ответ по анатомии')
             await callback.answer('Ответ пока не сохранён. Повтори нажатие.', show_alert=True)
             return
         finally:
             session['saving'] = False
+    session['answers'][position] = {
+        'chosen': chosen,
+        'correct': chosen == correct,
+    }
     session['index'] += 1
     if chosen == correct:
         session["correct"] += 1
+        session["view_index"] = session["index"]
         await callback.answer("✅ Верно!")
     else:
         session["wrong"] += 1
@@ -2182,19 +2249,49 @@ async def cb_anatomy_exam_test_answer(callback: CallbackQuery):
         # Подробный разбор показывается сразу после ЛЮБОЙ ошибки, а не только в отдельном
         # режиме повторения. Следующий вопрос не заменяет экран до осознанного нажатия студента.
         session["awaiting_explanation_next"] = True
+        session["view_index"] = position
         await callback.answer()
         await tb.safe_edit_text(
             callback.message,
             get_anatomy_exam_mistake_explanation_text(question, chosen),
             parse_mode="HTML",
-            reply_markup=get_anatomy_exam_mistake_explanation_keyboard(
-                session["index"] >= len(session["queue"])
-            ),
+            reply_markup=get_anatomy_exam_mistake_explanation_keyboard(session, position),
         )
         return
     if ANATOMY_EXAM_TEST_SESSIONS.get(user_id) is not session:
         return
     if session["index"] >= len(session["queue"]):
+        await render_anatomy_exam_test_summary(callback.message, user_id)
+    else:
+        await render_anatomy_exam_test_question(callback.message, user_id)
+
+@router.callback_query(F.data.startswith("anatomy_exam_test_nav:"))
+async def cb_anatomy_exam_test_nav(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    session = ANATOMY_EXAM_TEST_SESSIONS.get(user_id)
+    fields = callback.data.split(":")
+    if not session or len(fields) != 3 or fields[1] != session.get("id"):
+        await callback.answer("Сессия истекла, начни заново", show_alert=True)
+        return
+    if session.get("saving"):
+        await callback.answer("Подожди, ответ сохраняется")
+        return
+    try:
+        target = int(fields[2])
+    except ValueError:
+        await callback.answer("Вопрос не найден", show_alert=True)
+        return
+    frontier = session["index"]
+    if target < 0 or target > frontier or target > len(session["queue"]):
+        await callback.answer("Вопрос ещё не отвечен", show_alert=True)
+        return
+    if target < frontier and target not in session.setdefault("answers", {}):
+        await callback.answer("История этого вопроса недоступна", show_alert=True)
+        return
+    session["awaiting_explanation_next"] = False
+    session["view_index"] = target
+    await callback.answer()
+    if target >= len(session["queue"]):
         await render_anatomy_exam_test_summary(callback.message, user_id)
     else:
         await render_anatomy_exam_test_question(callback.message, user_id)
@@ -2261,6 +2358,7 @@ async def cb_anatomy_exam_mistake_work_next(callback: CallbackQuery):
         await callback.answer("Сессия истекла, начни заново", show_alert=True)
         return
     session["awaiting_explanation_next"] = False
+    session["view_index"] = session["index"]
     await callback.answer()
     if session["index"] >= len(session["queue"]):
         await render_anatomy_exam_test_summary(callback.message, user_id)

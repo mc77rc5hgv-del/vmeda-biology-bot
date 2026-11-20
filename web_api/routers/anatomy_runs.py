@@ -46,7 +46,43 @@ def _public(tb, run):
             status_code=409,
             detail='Эта незавершённая попытка относится к предыдущей версии банка. Начни новую попытку.',
         )
-    return {**run, 'questions': [_anatomy_exam_public_question(_anatomy_exam_question_by_num(tb, n)) for n in run['queue']]}
+    questions = {
+        number: _anatomy_exam_question_by_num(tb, number)
+        for number in run['queue']
+    }
+    public_answers = []
+    for saved in run['answers']:
+        question = questions[saved['question_num']]
+        letters = [letter for letter in ANATOMY_EXAM_OPTION_LETTERS if letter in question['options']]
+        chosen = saved['chosen']
+        feedback = get_anatomy_answer_feedback(
+            question,
+            chosen,
+            feedback_items=tb.ANATOMY_EXAM_TEST_FEEDBACK_ITEMS,
+            feedback_by_signature=tb.ANATOMY_EXAM_TEST_FEEDBACK_BY_SIGNATURE,
+            legacy_explanations=tb.ANATOMY_EXAM_TEST_EXPLANATIONS,
+            legacy_explanations_by_signature=tb.ANATOMY_EXAM_LEGACY_EXPLANATIONS_BY_SIGNATURE,
+        )
+        public_answers.append({
+            **saved,
+            'correct': bool(saved['correct']),
+            'selected_index': letters.index(chosen),
+            'correct_index': letters.index(question['correct']),
+            'correct_letter': question['correct'],
+            'correct_text': question['options'][question['correct']],
+            'explanation': feedback['correct_explanation'],
+            'wrong_explanation': feedback['wrong_explanation'],
+            'correct_explanation': feedback['correct_explanation'],
+            'source_warning': feedback['source_warning'],
+        })
+    return {
+        **run,
+        'questions': [_anatomy_exam_public_question(questions[n]) for n in run['queue']],
+        # Only already submitted positions are enriched with their key and feedback.  The
+        # unanswered tail still contains public question data only, so navigation cannot
+        # reveal future answers.
+        'answers': public_answers,
+    }
 
 
 @router.post('/runs')

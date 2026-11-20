@@ -443,6 +443,49 @@ def test_anatomy_exam_answer_returns_verified_key_and_explanation_only_after_cho
     assert invalid.status_code == 400
 
 
+def test_anatomy_run_exposes_feedback_only_for_saved_answers_and_keeps_them_immutable():
+    headers = _auth_headers(user_id=900_777_888_741)
+    started = client.post(
+        "/api/v1/anatomy/exam/runs",
+        headers=headers,
+        json={"kind": "part", "part_id": 1, "rating": False},
+    )
+    assert started.status_code == 200, started.text
+    run = started.json()
+    assert run["answered"] == 0 and run["answers"] == []
+    assert "correct_index" not in run["questions"][0]
+
+    with open("anatomy_exam_test_2026.json", encoding="utf-8") as stream:
+        source_question = json.load(stream)["parts"][0]["questions"][0]
+    selected_index = run["questions"][0]["option_letters"].index(source_question["correct"])
+    saved = client.post(
+        f"/api/v1/anatomy/exam/runs/{run['id']}/answer",
+        headers=headers,
+        json={"position": 0, "selected_index": selected_index},
+    )
+    assert saved.status_code == 200, saved.text
+
+    resumed = client.get("/api/v1/anatomy/exam/runs/active", headers=headers)
+    assert resumed.status_code == 200, resumed.text
+    body = resumed.json()
+    assert body["answered"] == 1 and len(body["answers"]) == 1
+    answer = body["answers"][0]
+    assert answer["position"] == 0
+    assert answer["selected_index"] == selected_index
+    assert answer["correct_index"] == selected_index
+    assert answer["correct"] is True
+    assert answer["correct_explanation"]
+    assert "correct_index" not in body["questions"][1]
+
+    changed_index = next(i for i in range(len(run["questions"][0]["options"])) if i != selected_index)
+    changed = client.post(
+        f"/api/v1/anatomy/exam/runs/{run['id']}/answer",
+        headers=headers,
+        json={"position": 0, "selected_index": changed_index},
+    )
+    assert changed.status_code == 409
+
+
 def test_anatomy_exam_flash_returns_fifty_unique_questions():
     response = client.get("/api/v1/anatomy/exam/flash", headers=_auth_headers())
     assert response.status_code == 200, response.text
