@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-"""Anatomy -> «Экзамен» -> «ТЕСТ»: 1040-question official test bank (Гайворонский и др.,
-2021), split into 10 parts, full sequential run-through per part, early-stop + mistake
-review. Also covers the anatomy_root top-level split (ВЕСЬ КУРС АНАТОМИИ / ЭКЗАМЕН)."""
+"""Anatomy -> «Экзамен» -> «ТЕСТ»: current 1073-question training bank from the VMedA
+learning environment, split into 12 subject parts, with an expert-derived answer key and
+option-aware feedback. Also covers the anatomy_root split (ВЕСЬ КУРС / ЭКЗАМЕН)."""
 import asyncio
 from _bootstrap import tb
 from html.parser import HTMLParser
@@ -62,27 +62,27 @@ async def main():
     # dedicated coverage in test_anatomy_maintenance.py.
     tb.anatomy_handlers.ANATOMY_MAINTENANCE_MODE = False
 
-    # 0. data integrity: 10 parts, 1040 questions total, every question well-formed
+    # 0. data integrity: 12 parts, 1073 questions total, every question well-formed
     parts = tb.ANATOMY_EXAM_TEST_PARTS
-    assert len(parts) == 10
+    assert tb.ANATOMY_EXAM_BANK_VERSION == "vmeda_anatomy_2026_1073"
+    assert len(parts) == 12
     total = sum(len(p["questions"]) for p in parts)
-    assert total == 1040, total
+    assert total == 1073, total
     seen_nums = set()
     for part in parts:
         assert part["questions"], part["id"]
         for q in part["questions"]:
             assert q["question"].strip()
-            assert 4 <= len(q["options"]) <= 5, (part["id"], q["num"], q["options"])
+            # One source question (№315) legitimately contains three variants; all others have five.
+            assert 3 <= len(q["options"]) <= 5, (part["id"], q["num"], q["options"])
             assert q["correct"] in q["options"], (part["id"], q["num"])
             assert q["num"] not in seen_nums, q["num"]
             seen_nums.add(q["num"])
-    assert seen_nums == set(range(1, 1041))
-    assert set(tb.ANATOMY_EXAM_TEST_EXPLANATIONS) == {str(i) for i in range(1, 1041)}
-    assert all(text.strip() for text in tb.ANATOMY_EXAM_TEST_EXPLANATIONS.values())
+    assert seen_nums == set(range(1, 1074))
     for question in tb.ANATOMY_EXAM_TEST_ALL_QUESTIONS:
         wrong = next(letter for letter in question["options"] if letter != question["correct"])
         check_html(tb.get_anatomy_exam_mistake_explanation_text(question, wrong))
-    print(f"data integrity: 10 parts, {total} questions, all numbered 1..1040 with a valid answer key: OK")
+    print(f"data integrity: 12 parts, {total} questions, all numbered 1..1073 with a valid answer key: OK")
 
     # 1. anatomy_root is the new top-level split (ВЕСЬ КУРС АНАТОМИИ / ЭКЗАМЕН)
     cb = FakeCB("anatomy_root")
@@ -130,7 +130,7 @@ async def main():
     assert cb4.message.edits
     print("Вопросы практики renders (not a stub anymore): OK")
 
-    # 6. ТЕСТ part list shows all 10 parts, free for a non-admin user
+    # 6. ТЕСТ part list shows all 12 thematic parts, free for a non-admin user
     cb5 = FakeCB("anatomy_exam_test_menu", uid=NON_ADMIN)
     await tb.cb_anatomy_exam_test_menu(cb5)
     text5, kb5 = cb5.message.edits[-1]
@@ -141,7 +141,7 @@ async def main():
         assert part["topics"].strip(), part["id"]
         assert part["topics"] in text5, f"part {part['id']} topics missing from menu text"
     assert "anatomy_exam_menu" in test_menu_data
-    print("ТЕСТ part-list menu lists all 10 parts with topic labels, reachable by a non-admin: OK")
+    print("ТЕСТ part-list menu lists all 12 parts with topic labels, reachable by a non-admin: OK")
 
     # 7. starting a part renders the first question with lettered option buttons + stop
     cb6 = FakeCB("anatomy_exam_test_start:1", uid=NON_ADMIN)
@@ -173,7 +173,7 @@ async def main():
     assert cb_stale._answers and cb_stale._answers[0][1] is True
     print("answering without an active session -> alert: OK")
 
-    # 10. full sequential run-through of the smallest part (102 questions, part 1) —
+    # 10. full sequential run-through of the smallest part (50 questions, part 1) —
     # deliberately answer the first 3 wrong (to populate mistakes) and the rest correctly
     uid = 700100200
     cb7 = FakeCB("anatomy_exam_test_start:1", uid=uid)
@@ -193,14 +193,23 @@ async def main():
         await tb.cb_anatomy_exam_test_answer(cb_ans)
         if chosen == correct:
             assert cb_ans._answers[0][1] is False, "correct answer should not use show_alert"
+            rendered_cb = cb_ans
         else:
-            assert cb_ans._answers[0][1] is True
-            assert f"{correct})" in (cb_ans._answers[0][0] or "")
+            # Every wrong answer now pauses on an educational two-part explanation. It is an
+            # ordinary edited message, not a short Telegram alert that disappears immediately.
+            assert cb_ans._answers[0][1] is False
+            explanation_text, explanation_kb = cb_ans.message.edits[-1]
+            assert "Почему выбранный ответ неверен" in explanation_text
+            assert "Почему правильный ответ верен" in explanation_text
+            assert "anatomy_exam_feedback_next" in kb_data(explanation_kb)
+            cb_next = FakeCB("anatomy_exam_feedback_next", uid=uid)
+            await tb.cb_anatomy_exam_mistake_work_next(cb_next)
+            rendered_cb = cb_next
         if i < n_questions - 1:
-            assert cb_ans.message.edits, f"question {i+2} should render"
-            check_html(cb_ans.message.edits[-1][0])
+            assert rendered_cb.message.edits, f"question {i+2} should render"
+            check_html(rendered_cb.message.edits[-1][0])
         else:
-            last_cb = cb_ans
+            last_cb = rendered_cb
     assert uid not in tb.ANATOMY_EXAM_TEST_SESSIONS, "session must be cleared after the last question"
     summary_text, summary_kb = last_cb.message.edits[-1]
     check_html(summary_text)
@@ -263,13 +272,14 @@ async def main():
     await tb.cb_anatomy_exam_test_answer(cb_work_wrong)
     explanation_text, explanation_kb = cb_work_wrong.message.edits[-1]
     check_html(explanation_text)
-    assert "Ответ снова неверный" in explanation_text
-    assert "Пояснение по Гайворонскому" in explanation_text
-    assert tb.ANATOMY_EXAM_TEST_EXPLANATIONS[str(repeated_question["num"])] in explanation_text
-    assert "anatomy_exam_mistake_work_next" in kb_data(explanation_kb)
+    assert "Ответ неверный" in explanation_text
+    assert "Почему выбранный ответ неверен" in explanation_text
+    assert "Почему правильный ответ верен" in explanation_text
+    assert repeated_question["options"][repeated_question["correct"]] in explanation_text
+    assert "anatomy_exam_feedback_next" in kb_data(explanation_kb)
     assert work_session["awaiting_explanation_next"] is True
 
-    cb_work_next = FakeCB("anatomy_exam_mistake_work_next", uid=uid)
+    cb_work_next = FakeCB("anatomy_exam_feedback_next", uid=uid)
     await tb.cb_anatomy_exam_mistake_work_next(cb_work_next)
     assert work_session["index"] == 1
     for question in work_session["queue"][1:]:
@@ -324,7 +334,7 @@ async def main():
 
     # 13. early stop mid-test renders an aborted summary and clears the session
     uid2 = 700100201
-    cb8 = FakeCB("anatomy_exam_test_start:6", uid=uid2)  # Лечебное дело, часть 1/5
+    cb8 = FakeCB("anatomy_exam_test_start:6", uid=uid2)  # Дыхательная система
     await tb.cb_anatomy_exam_test_start(cb8)
     session2 = tb.ANATOMY_EXAM_TEST_SESSIONS[uid2]
     q = session2["queue"][0]
@@ -336,7 +346,7 @@ async def main():
     stop_text, stop_kb = cb_stop.message.edits[-1]
     check_html(stop_text)
     assert "прерван" in stop_text
-    assert "Отвечено: <b>1</b> из 106" in stop_text
+    assert f"Отвечено: <b>1</b> из {len(session2['queue'])}" in stop_text
     print("early stop shows an aborted summary and clears the session: OK")
 
     # 14. stopping with no active session is a silent no-op (not an error)
@@ -451,10 +461,10 @@ async def main():
     assert "anatomy_exam_flash_leaderboard" in kb_data(menu_flash_kb)
     print("ТЕСТ menu exposes flash-test start + its own leaderboard: OK")
 
-    # 21. flash-test session pulls exactly 50 random questions from the whole 1040-question
+    # 21. flash-test session pulls exactly 50 random questions from the whole 1073-question
     # pool (mixed across parts, unlike a sequential single-part run)
     all_q = tb.ANATOMY_EXAM_TEST_ALL_QUESTIONS
-    assert len(all_q) == 1040
+    assert len(all_q) == 1073
     cb_flash_start = FakeCB("anatomy_exam_test_flash_start", uid=uid4)
     await tb.cb_anatomy_exam_test_flash_start(cb_flash_start)
     session_flash = tb.ANATOMY_EXAM_TEST_SESSIONS[uid4]
@@ -506,6 +516,8 @@ async def main():
     wrong_letter = next(letter for letter in q_first["options"] if letter != q_first["correct"])
     cb_wrong = FakeCB(f"anatomy_exam_test_answer:{wrong_letter}", uid=uid4)
     await tb.cb_anatomy_exam_test_answer(cb_wrong)
+    cb_wrong_next = FakeCB("anatomy_exam_feedback_next", uid=uid4)
+    await tb.cb_anatomy_exam_mistake_work_next(cb_wrong_next)
     for q in session_flash2["queue"][1:]:
         cb_fa2 = FakeCB(f"anatomy_exam_test_answer:{q['correct']}", uid=uid4)
         await tb.cb_anatomy_exam_test_answer(cb_fa2)

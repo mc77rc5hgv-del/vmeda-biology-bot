@@ -282,7 +282,16 @@ export async function activeAnatomyRun(): Promise<AnatomyRun | null> {
 }
 export async function answerAnatomyRun(runId: string, position: number, selectedIndex: number): Promise<AnatomyExamAnswerResult> {
   const wire = await apiFetch<AnatomyExamAnswerWire>(`/api/v1/anatomy/exam/runs/${encodeURIComponent(runId)}/answer`, {method: "POST", body: JSON.stringify({position, selected_index: selectedIndex})});
-  return {correct: wire.correct, correctIndex: wire.correct_index, correctLetter: wire.correct_letter, correctText: wire.correct_text, explanation: wire.explanation};
+  return {
+    correct: wire.correct,
+    correctIndex: wire.correct_index,
+    correctLetter: wire.correct_letter,
+    correctText: wire.correct_text,
+    explanation: wire.explanation,
+    wrongExplanation: wire.wrong_explanation ?? "",
+    correctExplanation: wire.correct_explanation ?? wire.explanation,
+    sourceWarning: wire.source_warning ?? "",
+  };
 }
 
 export function fetchAnatomyPreferences(): Promise<{rating: boolean}> {
@@ -496,6 +505,9 @@ interface AnatomyExamAnswerWire {
   correct_letter: string;
   correct_text: string;
   explanation: string;
+  wrong_explanation?: string;
+  correct_explanation?: string;
+  source_warning?: string;
 }
 
 function toAnatomyExamQuestion(wire: AnatomyExamQuestionWire): AnatomyExamQuestion {
@@ -542,6 +554,9 @@ export async function checkAnatomyExamAnswer(
     correctLetter: wire.correct_letter,
     correctText: wire.correct_text,
     explanation: wire.explanation,
+    wrongExplanation: wire.wrong_explanation ?? "",
+    correctExplanation: wire.correct_explanation ?? wire.explanation,
+    sourceWarning: wire.source_warning ?? "",
   };
 }
 

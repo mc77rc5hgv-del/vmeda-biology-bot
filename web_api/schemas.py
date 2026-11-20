@@ -44,7 +44,12 @@ class AnatomyExamAnswerResponse(BaseModel):
     correct_index: int
     correct_letter: str
     correct_text: str
+    # `explanation` сохранён как совместимый псевдоним объяснения правильного ответа для
+    # старых клиентов. Новые клиенты показывают два независимых, предметных разбора.
     explanation: str
+    wrong_explanation: str = ""
+    correct_explanation: str = ""
+    source_warning: str = ""
 
 
 class HistologyPracticalGradeRequest(BaseModel):

@@ -159,7 +159,11 @@ export interface AnatomyExamAnswerResult {
   correctIndex: number;
   correctLetter: string;
   correctText: string;
+  /** Совместимое старое поле: объяснение правильного ответа. */
   explanation: string;
+  wrongExplanation: string;
+  correctExplanation: string;
+  sourceWarning: string;
 }
 
 export interface HistologyMarker {

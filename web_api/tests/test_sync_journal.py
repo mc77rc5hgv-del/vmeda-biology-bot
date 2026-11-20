@@ -43,6 +43,48 @@ def test_concurrent_answers_and_retry_count_once():
         learning.get_anatomy_run(456, run['id'])
 
 
+def test_anatomy_bank_versions_isolate_mistakes_and_preserve_legacy_runs():
+    legacy = learning.create_anatomy_run(123, 'miniapp', 'part', False, [1])
+    learning.answer_anatomy_run(123, legacy['id'], 0, 1, 'а', False)
+    current = learning.create_anatomy_run(
+        123, 'miniapp', 'part', False, [1], bank_version='vmeda_anatomy_2026_1073'
+    )
+    learning.answer_anatomy_run(123, current['id'], 0, 1, 'в', True)
+
+    assert learning.get_anatomy_run(123, legacy['id'])['bank_version'] == 'legacy_1040'
+    assert learning.get_anatomy_run(123, current['id'])['bank_version'] == 'vmeda_anatomy_2026_1073'
+    assert learning.get_anatomy_mistakes(123, 'legacy_1040') == [1]
+    assert learning.get_anatomy_mistakes(123, 'vmeda_anatomy_2026_1073') == []
+    assert learning.active_anatomy_run(123, bank_version='legacy_1040') is None
+    assert learning.active_anatomy_run(123, bank_version='vmeda_anatomy_2026_1073') is None
+
+
+def test_anatomy_bank_version_migration_keeps_old_rows_byte_for_byte():
+    path = learning._db_path()
+    with sqlite3.connect(path) as connection:
+        connection.executescript('''
+            CREATE TABLE anatomy_runs (
+              id TEXT PRIMARY KEY, user_id INTEGER NOT NULL, source TEXT NOT NULL,
+              kind TEXT NOT NULL, rating INTEGER NOT NULL, queue TEXT NOT NULL,
+              created_at TEXT NOT NULL, finished_at TEXT);
+            CREATE TABLE anatomy_answers (
+              run_id TEXT NOT NULL REFERENCES anatomy_runs(id), position INTEGER NOT NULL,
+              question_num INTEGER NOT NULL, chosen TEXT NOT NULL, correct INTEGER NOT NULL,
+              answered_at TEXT NOT NULL, PRIMARY KEY(run_id, position));
+            INSERT INTO anatomy_runs VALUES
+              ('old-run', 321, 'miniapp', 'part', 0, '[7]', '2026-01-01T00:00:00Z', NULL);
+            INSERT INTO anatomy_answers VALUES
+              ('old-run', 0, 7, 'б', 0, '2026-01-01T00:01:00Z');
+        ''')
+
+    migrated = learning.get_anatomy_run(321, 'old-run')
+    assert migrated['queue'] == [7]
+    assert migrated['answers'][0]['question_num'] == 7
+    assert migrated['answers'][0]['chosen'] == 'б'
+    assert migrated['bank_version'] == 'legacy_1040'
+    assert learning.get_anatomy_mistakes(321, 'legacy_1040') == [7]
+
+
 def test_common_bot_and_miniapp_rating_preserves_baseline():
     tb.stats['usernames']['123'] = 'preserved_username'
     tb.stats['anatomy_exam_test_scores']['123'] = {'correct': 5, 'total': 10, 'attempts': 1}

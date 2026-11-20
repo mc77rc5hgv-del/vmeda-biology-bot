@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse
 
 from .. import content, schemas, static_content, attempt_tokens
 from services.content_access import can_visit
+from services.anatomy_feedback import get_anatomy_answer_feedback
 from ..deps import get_current_user_id, get_fresh_bot_module
 
 router = APIRouter(prefix="/api/v1", tags=["subjects"])
@@ -382,14 +383,24 @@ def answer_anatomy_exam_question(
         raise HTTPException(status_code=400, detail="некорректный вариант ответа")
     correct_letter = question["correct"]
     correct_index = letters.index(correct_letter)
+    chosen_letter = letters[body.selected_index]
+    feedback = get_anatomy_answer_feedback(
+        question,
+        chosen_letter,
+        feedback_items=tb.ANATOMY_EXAM_TEST_FEEDBACK_ITEMS,
+        feedback_by_signature=tb.ANATOMY_EXAM_TEST_FEEDBACK_BY_SIGNATURE,
+        legacy_explanations=tb.ANATOMY_EXAM_TEST_EXPLANATIONS,
+        legacy_explanations_by_signature=tb.ANATOMY_EXAM_LEGACY_EXPLANATIONS_BY_SIGNATURE,
+    )
     return schemas.AnatomyExamAnswerResponse(
         correct=body.selected_index == correct_index,
         correct_index=correct_index,
         correct_letter=correct_letter,
         correct_text=question["options"][correct_letter],
-        explanation=tb.ANATOMY_EXAM_TEST_EXPLANATIONS.get(
-            str(question_num), "Правильный вариант соответствует ключу тестового банка."
-        ),
+        explanation=feedback["correct_explanation"],
+        wrong_explanation=feedback["wrong_explanation"],
+        correct_explanation=feedback["correct_explanation"],
+        source_warning=feedback["source_warning"],
     )
 
 

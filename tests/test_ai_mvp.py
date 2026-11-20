@@ -2112,14 +2112,19 @@ async def main():
     # ==================== ЧАСТЬ J: ai.reference_bank + ai.mcq_verifier ====================
 
     # ---- 59. reference_bank.configure()/find_reference_match(): matches a real question from
-    # the actual production bank (already configured at telegram_bot import time — the same 1040
+    # the actual production bank (already configured at telegram_bot import time — the same 1073
     # verified questions that power "🎓 Экзамен → ✅ ТЕСТ"), no match for unrelated text ----
-    assert len(tb.ai_reference_bank._index) == 1040, "the real anatomy exam bank must be loaded at startup"
-    known_question = "Кто является «отцом» научной медицины?"
+    assert len(tb.ai_reference_bank._index) == 1073, "the real anatomy exam bank must be loaded at startup"
+    known_record = tb.ANATOMY_EXAM_TEST_PARTS[0]["questions"][16]
+    known_question = known_record["question"]
+    known_correct = known_record["correct"]
+    known_correct_text = known_record["options"][known_correct]
+    known_wrong = next(letter for letter in known_record["options"] if letter != known_correct)
+    known_wrong_text = known_record["options"][known_wrong]
     match59 = tb.ai_reference_bank.find_reference_match(known_question)
     assert match59 is not None
-    assert match59["correct"] == "б"
-    assert match59["options"]["б"] == "Гиппократ"
+    assert match59["correct"] == known_correct
+    assert match59["options"][known_correct] == known_correct_text
 
     no_match59 = tb.ai_reference_bank.find_reference_match("Совершенно не связанный вопрос про игру в шахматы")
     assert no_match59 is None
@@ -2137,7 +2142,7 @@ async def main():
     match59b = tb.ai_reference_bank.find_reference_match("Тестовый вопрос номер один")
     assert match59b is not None and match59b["correct"] == "а"
     tb.ai_reference_bank.configure(tb.ANATOMY_EXAM_TEST_PARTS)
-    assert len(tb.ai_reference_bank._index) == 1040, "re-configuring with the real bank must restore it fully"
+    assert len(tb.ai_reference_bank._index) == 1073, "re-configuring with the real bank must restore it fully"
     assert tb.ai_reference_bank._index == orig_ref_index
     print("59b. reference_bank degrades cleanly on an empty/tiny index, configure() is idempotent: OK")
 
@@ -2145,17 +2150,21 @@ async def main():
     # limits — no reference match, non-mcq task, mcq task with no options all -> checked=False ----
     mcq_task60 = TaskRepresentation(
         type="mcq", question=known_question,
-        options=["Аристотель", "Гиппократ", "Авиценна", "А. Везалий", "Н.И. Пирогов"],
+        options=list(known_record["options"].values()),
     )
-    r60_correct = tb.ai_mcq_verifier.verify_mcq(mcq_task60, "Правильный ответ: б) Гиппократ")
+    r60_correct = tb.ai_mcq_verifier.verify_mcq(
+        mcq_task60, f"Правильный ответ: {known_correct}) {known_correct_text}"
+    )
     assert r60_correct.checked and r60_correct.matched
-    assert r60_correct.correct_option == "б" and r60_correct.found_option == "б"
+    assert r60_correct.correct_option == known_correct and r60_correct.found_option == known_correct
 
-    r60_wrong = tb.ai_mcq_verifier.verify_mcq(mcq_task60, "Правильный ответ: а) Аристотель")
+    r60_wrong = tb.ai_mcq_verifier.verify_mcq(
+        mcq_task60, f"Правильный ответ: {known_wrong}) {known_wrong_text}"
+    )
     assert r60_wrong.checked and not r60_wrong.matched
-    assert r60_wrong.correct_option == "б" and r60_wrong.found_option == "а"
+    assert r60_wrong.correct_option == known_correct and r60_wrong.found_option == known_wrong
 
-    r60_by_text = tb.ai_mcq_verifier.verify_mcq(mcq_task60, "Это был Гиппократ, знаменитый древнегреческий врач.")
+    r60_by_text = tb.ai_mcq_verifier.verify_mcq(mcq_task60, f"Ответ: {known_correct_text}")
     assert r60_by_text.checked and r60_by_text.matched, "must also recognize the option by its TEXT, not only its letter"
 
     r60_unparseable = tb.ai_mcq_verifier.verify_mcq(mcq_task60, "Затрудняюсь ответить однозначно.")
@@ -2165,18 +2174,24 @@ async def main():
     r60_nomatch = tb.ai_mcq_verifier.verify_mcq(unrelated_task60, "x")
     assert not r60_nomatch.checked
 
-    r60_noncalc = tb.ai_mcq_verifier.verify_mcq(TaskRepresentation(type="theory", question=known_question), "Гиппократ")
+    r60_noncalc = tb.ai_mcq_verifier.verify_mcq(
+        TaskRepresentation(type="theory", question=known_question), known_correct_text
+    )
     assert not r60_noncalc.checked, "verifier only applies to mcq-typed tasks"
 
-    r60_nooptions = tb.ai_mcq_verifier.verify_mcq(TaskRepresentation(type="mcq", question=known_question, options=[]), "Гиппократ")
+    r60_nooptions = tb.ai_mcq_verifier.verify_mcq(
+        TaskRepresentation(type="mcq", question=known_question, options=[]), known_correct_text
+    )
     assert not r60_nooptions.checked, "an mcq task the parser couldn't extract options for has no options to verify against"
     print("60. verify_mcq: correct/wrong/by-text/unparseable against the real bank, honest scope limits: OK")
 
     # ---- 60b. extract_chosen_letter: the letter must be recognized even at the ABSOLUTE END of
     # the answer string, with no trailing delimiter character at all — the old pattern required a
     # separator AFTER the letter, so a bare "Ответ: Б" (letter as the very last character) failed ----
-    end_of_string_letter = tb.ai_mcq_verifier.extract_chosen_letter("Ответ: б", match59["options"])
-    assert end_of_string_letter == "б", "a letter with no trailing delimiter (end of string) must still be recognized"
+    end_of_string_letter = tb.ai_mcq_verifier.extract_chosen_letter(
+        f"Ответ: {known_correct}", match59["options"]
+    )
+    assert end_of_string_letter == known_correct, "a letter with no trailing delimiter (end of string) must still be recognized"
     print("60b. extract_chosen_letter recognizes a letter at the absolute end of the answer string: OK")
 
     # ---- 60c. reference_bank polarity guard: a negated question ("НЕ относится") must never
@@ -2218,12 +2233,16 @@ async def main():
 
     # ---- 61. ai.confidence.decide: mcq_verification wiring mirrors math_verification exactly —
     # match is a bonus, mismatch forces ESCALATE, checked=False is a complete no-op ----
-    clean_validation61 = tb.ai_validator.validate_answer(mcq_task60, "Правильный ответ: б) Гиппократ")
+    clean_validation61 = tb.ai_validator.validate_answer(
+        mcq_task60, f"Правильный ответ: {known_correct}) {known_correct_text}"
+    )
     decision61_match = tb.ai_confidence.decide(mcq_task60, clean_validation61, mcq_verification=r60_correct)
     assert decision61_match.action == tb.ai_confidence.SERVE
     assert any("подтверждена" in r for r in decision61_match.reasons)
 
-    clean_validation61_wrong = tb.ai_validator.validate_answer(mcq_task60, "Правильный ответ: а) Аристотель")
+    clean_validation61_wrong = tb.ai_validator.validate_answer(
+        mcq_task60, f"Правильный ответ: {known_wrong}) {known_wrong_text}"
+    )
     decision61_mismatch = tb.ai_confidence.decide(mcq_task60, clean_validation61_wrong, mcq_verification=r60_wrong)
     assert decision61_mismatch.action == tb.ai_confidence.ESCALATE
 
@@ -2240,7 +2259,7 @@ async def main():
     tb.stats["ai_usage"].pop(str(uid), None)
     async def fake_solve_62(*, task=None, text=None, history=None, quick=False, bucket=None, rag_context=None, subject=None):
         return (
-            "Правильный ответ: а) Аристотель",  # wrong — the real answer key says «б» (Гиппократ)
+            f"Правильный ответ: {known_wrong}) {known_wrong_text}",
             {"role": "user", "content": task.to_prompt_text() + tb.ai_prompts.QUICK_SUFFIX},
             dict(FAKE_USAGE, provider="openai"),
             [{"provider": "openai", "status": "success", "usage": dict(FAKE_USAGE)}],
@@ -2248,7 +2267,7 @@ async def main():
     tb.solve_ai_request = fake_solve_62
     mcq_task_62 = TaskRepresentation(
         type="mcq", question=known_question,
-        options=["Аристотель", "Гиппократ", "Авиценна", "А. Везалий", "Н.И. Пирогов"],
+        options=list(known_record["options"].values()),
         raw_text=known_question,
     )
     session62 = {"messages": [], "bucket": "theory_simple", "rag_context": None, "quick_answer": None}

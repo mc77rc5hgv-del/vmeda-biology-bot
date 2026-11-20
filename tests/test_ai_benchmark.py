@@ -28,18 +28,18 @@ def main():
     assert text == "Тестовый вопрос?\nа) Вариант А\nб) Вариант Б"
     print("1. format_question_text: OK")
 
-    # ---- 2. sample_questions: against the REAL bank (1040 questions, 10 parts) — part filter and
+    # ---- 2. sample_questions: against the REAL bank (1073 questions, 12 parts) — part filter and
     # reproducible seeded sampling (needed for --compare-with to mean anything across runs) ----
     all_q = ai_benchmark.sample_questions(ai_benchmark.knowledge.ANATOMY_EXAM_TEST_PARTS)
-    assert len(all_q) == 1040
+    assert len(all_q) == 1073
     part1 = ai_benchmark.sample_questions(ai_benchmark.knowledge.ANATOMY_EXAM_TEST_PARTS, part_filter=1)
-    assert len(part1) == 102 and all(p[0] == 1 for p in part1)
+    assert len(part1) == 50 and all(p[0] == 1 for p in part1)
     sampled = ai_benchmark.sample_questions(ai_benchmark.knowledge.ANATOMY_EXAM_TEST_PARTS, sample_size=25, seed=42)
     assert len(sampled) == 25
     sampled_again = ai_benchmark.sample_questions(ai_benchmark.knowledge.ANATOMY_EXAM_TEST_PARTS, sample_size=25, seed=42)
     assert sampled == sampled_again, "same seed must give the same sample, or --compare-with runs aren't comparable"
     sample_size_over_pool = ai_benchmark.sample_questions(ai_benchmark.knowledge.ANATOMY_EXAM_TEST_PARTS, part_filter=1, sample_size=9999)
-    assert len(sample_size_over_pool) == 102, "sample_size larger than the pool must return the whole pool, not crash"
+    assert len(sample_size_over_pool) == 50, "sample_size larger than the pool must return the whole pool, not crash"
     print("2. sample_questions: real bank size, part filter, reproducible seeded sampling: OK")
 
     # ---- 3. summarize: accuracy / by-part / by-confidence-action aggregation, errored entries
@@ -94,7 +94,7 @@ def main():
 
     # ---- 6. main(): --all without --confirm-cost must abort via sys.exit(1) BEFORE touching any
     # provider — this is the actual safety property (a copy-pasted --all command can't silently
-    # burn through the whole 1040-question bank), not just an argparse detail ----
+    # burn through the whole 1073-question bank), not just an argparse detail ----
     import asyncio
     import contextlib
     import io

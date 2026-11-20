@@ -350,10 +350,22 @@ export function AnatomyExamPage() {
       {answer && (
         <div className={[styles.answerPanel, answer.correct ? styles.answerCorrect : styles.answerWrong].join(" ")}>
           <strong>{answer.correct ? "Верно" : `Правильный ответ: ${answer.correctLetter.toUpperCase()}. ${answer.correctText}`}</strong>
-          {mode === "mistakes" && !answer.correct && (
+          {!answer.correct && (
             <div className={styles.explanation}>
-              <span><Icon icon={BookOpenCheck} size={16} /> Пояснение по Гайворонскому</span>
-              <p>{answer.explanation}</p>
+              <section className={styles.explanationBlock}>
+                <span className={styles.wrongReasonTitle}><Icon icon={CircleAlert} size={16} /> Почему выбранный ответ неверен</span>
+                <p>{answer.wrongExplanation}</p>
+              </section>
+              <section className={styles.explanationBlock}>
+                <span className={styles.correctReasonTitle}><Icon icon={BookOpenCheck} size={16} /> Почему правильный ответ верен</span>
+                <p>{answer.correctExplanation || answer.explanation}</p>
+              </section>
+              {answer.sourceWarning && (
+                <aside className={styles.sourceWarning}>
+                  <strong>Примечание к исходному вопросу</strong>
+                  <p>{answer.sourceWarning}</p>
+                </aside>
+              )}
             </div>
           )}
         </div>

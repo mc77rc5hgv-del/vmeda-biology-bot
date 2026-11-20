@@ -23,6 +23,7 @@ from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton, Inpu
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 import telegram_bot as tb
+from services.anatomy_feedback import get_anatomy_answer_feedback
 from services.telegram_ui import safe_delete_message
 
 router = Router()
@@ -1568,9 +1569,10 @@ async def cb_anatomy_exam_theory_question(callback: CallbackQuery):
         reply_markup=get_anatomy_exam_theory_question_keyboard(section_id, num, len(section["questions"]))
     )
 
-# ---- ТЕСТ: 1040 вопросов официального сборника кафедры нормальной анатомии ВМедА
-# (Гайворонский и др., 2021), разбитые на 10 частей — 5 по «Базовой части», 5 по
-# «Лечебному делу». Прохождение — полный последовательный прогон всех вопросов части
+# ---- ТЕСТ: 1073 вопроса из актуального тренировочного банка ЭИОС ВМедА, сгруппированные
+# в 12 тематических частей. Ключ экспертно выведен по Гайворонскому и другим проверенным
+# анатомическим источникам (это не выгрузка официального Moodle-ключа). Прохождение — полный
+# последовательный прогон всех вопросов части
 # (не случайная выборка, в отличие от ANATOMY_LATIN_SESSIONS), с возможностью закончить
 # досрочно, посмотреть разбор ошибок и повторно пройти только ошибочные вопросы.
 ANATOMY_EXAM_TEST_SESSIONS: dict[int, dict] = {}
@@ -1677,7 +1679,7 @@ async def cb_anatomy_exam_test_leaderboard(callback: CallbackQuery):
         reply_markup=get_anatomy_exam_test_leaderboard_keyboard()
     )
 
-# ---- Флэш-тест: 50 случайных вопросов из всего банка (все 10 частей вперемешку),
+# ---- Флэш-тест: 50 случайных вопросов из всего банка (все части вперемешку),
 # всегда засчитывается в личный рекорд при полном прохождении (в отличие от обычных
 # частей, тут нет отдельного переключателя режима — засчитывается любое завершённое
 # прохождение). Рейтинг — по личному лучшему результату, как у теста по латыни
@@ -1784,10 +1786,17 @@ async def render_anatomy_exam_test_menu(message, user_id: int):
     )
     lines = [
         f"✅ <b>ТЕСТ по анатомии</b>\n{tb.DIVIDER}\n",
-        f"📚 <b>{total} вопросов</b> · 10 частей · пояснения по Гайворонскому",
+        f"📚 <b>{total} вопросов</b> · {len(tb.ANATOMY_EXAM_TEST_PARTS)} тематических частей",
+        "📖 Пояснения по Гайворонскому и утверждённым анатомическим источникам",
         "",
         "После завершения доступны просмотр ответов и отдельная работа только над ошибками. "
-        "При повторной ошибке бот покажет подробное пояснение.",
+        "После каждого неверного выбора бот сразу объясняет и ошибку, и правильный ответ.",
+        "",
+        (
+            "⚠️ Ключ подготовлен экспертно для обучения, а не извлечён из закрытого ключа Moodle. "
+            f"В {tb.ANATOMY_EXAM_REVIEW_REQUIRED_COUNT} неоднозначных исходных формулировках "
+            "показывается отдельное примечание."
+        ),
         "",
         mode_line,
         "",
@@ -1932,24 +1941,37 @@ def get_anatomy_exam_mistake_explanation_text(question: dict, chosen: str) -> st
     correct = question["correct"]
     correct_text = question["options"].get(correct, "")
     chosen_text = question["options"].get(chosen, "")
-    explanation = tb.ANATOMY_EXAM_TEST_EXPLANATIONS.get(
-        str(question["num"]),
-        "Правильный вариант соответствует ключу тестового банка.",
+    feedback = get_anatomy_answer_feedback(
+        question,
+        chosen,
+        feedback_items=tb.ANATOMY_EXAM_TEST_FEEDBACK_ITEMS,
+        feedback_by_signature=tb.ANATOMY_EXAM_TEST_FEEDBACK_BY_SIGNATURE,
+        legacy_explanations=tb.ANATOMY_EXAM_TEST_EXPLANATIONS,
+        legacy_explanations_by_signature=tb.ANATOMY_EXAM_LEGACY_EXPLANATIONS_BY_SIGNATURE,
     )
-    return (
-        "❌ <b>Ответ снова неверный</b>\n"
+    text = (
+        "❌ <b>Ответ неверный</b>\n"
         f"{tb.DIVIDER}\n\n"
         f"<b>Вопрос №{question['num']}:</b> {escape(question['question'])}\n\n"
         f"Твой ответ: <b>{escape(chosen)}) {escape(chosen_text)}</b>\n"
         f"Правильный ответ: <b>{escape(correct)}) {escape(correct_text)}</b>\n\n"
-        f"📖 <b>Пояснение по Гайворонскому:</b>\n{escape(explanation)}"
+        "❌ <b>Почему выбранный ответ неверен</b>\n"
+        f"{escape(feedback['wrong_explanation'])}\n\n"
+        "✅ <b>Почему правильный ответ верен</b>\n"
+        f"{escape(feedback['correct_explanation'])}"
     )
+    if feedback["source_warning"]:
+        text += (
+            "\n\n⚠️ <b>Примечание к исходному вопросу</b>\n"
+            f"{escape(feedback['source_warning'])}"
+        )
+    return text
 
 def get_anatomy_exam_mistake_explanation_keyboard(is_last: bool):
     builder = InlineKeyboardBuilder()
     builder.button(
         text="📊 Завершить" if is_last else "➡️ Следующий вопрос",
-        callback_data="anatomy_exam_mistake_work_next",
+        callback_data="anatomy_exam_feedback_next",
     )
     builder.button(text="🛑 Закончить", callback_data="anatomy_exam_test_stop")
     builder.adjust(1)
@@ -2127,7 +2149,16 @@ async def cb_anatomy_exam_test_answer(callback: CallbackQuery):
         try:
             kind = 'mistakes' if session.get('is_mistake_work') else 'flash' if session.get('is_flash') else 'part'
             run_id = 'bot:' + session['id']
-            await asyncio.to_thread(learning.create_anatomy_run, user_id, 'bot', kind, session.get('is_rating', False), [q['num'] for q in session['queue']], run_id)
+            await asyncio.to_thread(
+                learning.create_anatomy_run,
+                user_id,
+                'bot',
+                kind,
+                session.get('is_rating', False),
+                [q['num'] for q in session['queue']],
+                run_id,
+                tb.ANATOMY_EXAM_BANK_VERSION,
+            )
             await asyncio.to_thread(learning.answer_anatomy_run, user_id, run_id, session['index'], question['num'], chosen, chosen == correct)
         except Exception:
             tb.logger.exception('Не удалось сохранить ответ по анатомии')
@@ -2148,20 +2179,19 @@ async def cb_anatomy_exam_test_answer(callback: CallbackQuery):
             "correct": correct,
             "chosen": chosen,
         })
-        if session.get("is_mistake_work"):
-            session["awaiting_explanation_next"] = True
-            await callback.answer()
-            await tb.safe_edit_text(
-                callback.message,
-                get_anatomy_exam_mistake_explanation_text(question, chosen),
-                parse_mode="HTML",
-                reply_markup=get_anatomy_exam_mistake_explanation_keyboard(
-                    session["index"] >= len(session["queue"])
-                ),
-            )
-            return
-        correct_text = question["options"].get(correct, "")
-        await callback.answer(f"❌ Неверно. Правильно: {correct}) {correct_text}", show_alert=True)
+        # Подробный разбор показывается сразу после ЛЮБОЙ ошибки, а не только в отдельном
+        # режиме повторения. Следующий вопрос не заменяет экран до осознанного нажатия студента.
+        session["awaiting_explanation_next"] = True
+        await callback.answer()
+        await tb.safe_edit_text(
+            callback.message,
+            get_anatomy_exam_mistake_explanation_text(question, chosen),
+            parse_mode="HTML",
+            reply_markup=get_anatomy_exam_mistake_explanation_keyboard(
+                session["index"] >= len(session["queue"])
+            ),
+        )
+        return
     if ANATOMY_EXAM_TEST_SESSIONS.get(user_id) is not session:
         return
     if session["index"] >= len(session["queue"]):
@@ -2205,7 +2235,11 @@ async def cb_anatomy_exam_mistake_work_start(callback: CallbackQuery):
     if os.environ.get('BOT_SYNC_MODE') == 'owner':
         from web_api import learning
         try:
-            nums = await asyncio.to_thread(learning.get_anatomy_mistakes, callback.from_user.id)
+            nums = await asyncio.to_thread(
+                learning.get_anatomy_mistakes,
+                callback.from_user.id,
+                tb.ANATOMY_EXAM_BANK_VERSION,
+            )
             by_num = {q['num']: q for q in ANATOMY_EXAM_TEST_ALL_QUESTIONS}
             ANATOMY_EXAM_TEST_MISTAKES[callback.from_user.id] = {'part_id': None, 'is_flash': False,
                 'mistakes': [{**by_num[num], 'chosen': None} for num in nums if num in by_num]}
@@ -2218,11 +2252,12 @@ async def cb_anatomy_exam_mistake_work_start(callback: CallbackQuery):
     await callback.answer()
     await render_anatomy_exam_test_question(callback.message, callback.from_user.id)
 
-@router.callback_query(F.data == "anatomy_exam_mistake_work_next")
+@router.callback_query(F.data == "anatomy_exam_feedback_next")
+@router.callback_query(F.data == "anatomy_exam_mistake_work_next")  # старые сообщения до редеплоя
 async def cb_anatomy_exam_mistake_work_next(callback: CallbackQuery):
     user_id = callback.from_user.id
     session = ANATOMY_EXAM_TEST_SESSIONS.get(user_id)
-    if not session or not session.get("is_mistake_work") or not session.get("awaiting_explanation_next"):
+    if not session or not session.get("awaiting_explanation_next"):
         await callback.answer("Сессия истекла, начни заново", show_alert=True)
         return
     session["awaiting_explanation_next"] = False

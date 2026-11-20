@@ -382,8 +382,8 @@ def test_anatomy_exam_exposes_all_parts_without_leaking_answer_keys():
     headers = _auth_headers()
     parts = client.get("/api/v1/anatomy/exam/parts", headers=headers)
     assert parts.status_code == 200, parts.text
-    assert len(parts.json()) == 10
-    assert sum(part["question_count"] for part in parts.json()) == 1040
+    assert len(parts.json()) == 12
+    assert sum(part["question_count"] for part in parts.json()) == 1073
 
     first_part = parts.json()[0]
     questions = client.get(
@@ -401,7 +401,7 @@ def test_anatomy_exam_answer_returns_verified_key_and_explanation_only_after_cho
     headers = _auth_headers()
     questions = client.get("/api/v1/anatomy/exam/parts/1/questions", headers=headers).json()
     first_question = questions[0]
-    with open("anatomy_exam_test.json", encoding="utf-8") as stream:
+    with open("anatomy_exam_test_2026.json", encoding="utf-8") as stream:
         source = json.load(stream)
     source_question = source["parts"][0]["questions"][0]
     letters = first_question["option_letters"]
@@ -418,7 +418,22 @@ def test_anatomy_exam_answer_returns_verified_key_and_explanation_only_after_cho
     assert body["correct_index"] == correct_index
     assert body["correct_letter"] == source_question["correct"]
     assert body["correct_text"] == source_question["options"][source_question["correct"]]
-    assert body["explanation"] == tb.ANATOMY_EXAM_TEST_EXPLANATIONS[str(first_question["num"])]
+    assert len(body["explanation"]) >= 80
+    assert body["correct_explanation"] == body["explanation"]
+    assert body["wrong_explanation"] == ""
+    assert "source_warning" in body
+
+    wrong_index = next(index for index in range(len(letters)) if index != correct_index)
+    wrong = client.post(
+        f"/api/v1/anatomy/exam/questions/{first_question['num']}/answer",
+        headers=headers,
+        json={"selected_index": wrong_index},
+    )
+    assert wrong.status_code == 200, wrong.text
+    wrong_body = wrong.json()
+    assert wrong_body["correct"] is False
+    assert source_question["options"][letters[wrong_index]] in wrong_body["wrong_explanation"]
+    assert wrong_body["correct_explanation"] == body["correct_explanation"]
 
     invalid = client.post(
         f"/api/v1/anatomy/exam/questions/{first_question['num']}/answer",

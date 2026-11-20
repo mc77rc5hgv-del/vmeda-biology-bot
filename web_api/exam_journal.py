@@ -1,5 +1,6 @@
 """Append-only answers and durable, resumable anatomy runs on the existing learning DB."""
 import json
+import sqlite3
 import uuid
 from contextlib import closing
 
@@ -19,6 +20,7 @@ def _connection():
         CREATE TABLE IF NOT EXISTS anatomy_runs (
           id TEXT PRIMARY KEY, user_id INTEGER NOT NULL, source TEXT NOT NULL,
           kind TEXT NOT NULL, rating INTEGER NOT NULL, queue TEXT NOT NULL,
+          bank_version TEXT NOT NULL DEFAULT 'legacy_1040',
           created_at TEXT NOT NULL, finished_at TEXT);
         CREATE INDEX IF NOT EXISTS anatomy_runs_user ON anatomy_runs(user_id, created_at);
         CREATE TABLE IF NOT EXISTS anatomy_answers (
@@ -26,18 +28,51 @@ def _connection():
           question_num INTEGER NOT NULL, chosen TEXT NOT NULL, correct INTEGER NOT NULL,
           answered_at TEXT NOT NULL, PRIMARY KEY(run_id, position));
     ''')
+    columns = {row['name'] for row in conn.execute('PRAGMA table_info(anatomy_runs)').fetchall()}
+    if 'bank_version' not in columns:
+        try:
+            # Additive migration only: every historical run remains present and is explicitly
+            # namespaced as the 1040-question legacy bank. No answer rows are rewritten.
+            conn.execute(
+                "ALTER TABLE anatomy_runs ADD COLUMN bank_version TEXT NOT NULL DEFAULT 'legacy_1040'"
+            )
+        except sqlite3.OperationalError as exc:
+            # Two cold-start requests may observe the pre-migration schema simultaneously.
+            if 'duplicate column' not in str(exc).casefold():
+                raise
+    conn.execute(
+        'CREATE INDEX IF NOT EXISTS anatomy_runs_user_bank ON anatomy_runs(user_id, source, bank_version, created_at)'
+    )
+    # Read-only callers (get/active/mistakes) close the connection without a transaction context;
+    # commit the one-time additive schema migration here so it cannot be rolled back on close.
+    conn.commit()
     return conn
 
 
-def create_anatomy_run(user_id: int, source: str, kind: str, rating: bool, queue: list[int], run_id: str | None = None):
-    if source not in {'bot', 'miniapp'} or kind not in {'part', 'flash', 'mistakes'} or not queue or len(queue) > 2000:
+def create_anatomy_run(
+    user_id: int,
+    source: str,
+    kind: str,
+    rating: bool,
+    queue: list[int],
+    run_id: str | None = None,
+    bank_version: str = 'legacy_1040',
+):
+    if (source not in {'bot', 'miniapp'} or kind not in {'part', 'flash', 'mistakes'}
+            or not queue or len(queue) > 2000 or not bank_version or len(bank_version) > 80):
         raise HTTPException(status_code=422, detail='Некорректная попытка')
     run_id = run_id or uuid.uuid4().hex
     with closing(_connection()) as conn, conn:
-        conn.execute('INSERT INTO anatomy_runs VALUES (?, ?, ?, ?, ?, ?, ?, NULL) ON CONFLICT(id) DO NOTHING',
-                     (run_id, user_id, source, kind, int(rating), json.dumps(queue), _now()))
+        conn.execute(
+            '''INSERT INTO anatomy_runs
+               (id, user_id, source, kind, rating, queue, bank_version, created_at, finished_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL) ON CONFLICT(id) DO NOTHING''',
+            (run_id, user_id, source, kind, int(rating), json.dumps(queue), bank_version, _now()),
+        )
     run = get_anatomy_run(user_id, run_id)
-    if (run['source'], run['kind'], bool(run['rating']), run['queue']) != (source, kind, bool(rating), queue):
+    if (run['source'], run['kind'], bool(run['rating']), run['queue'], run['bank_version']) != (
+        source, kind, bool(rating), queue, bank_version
+    ):
         raise HTTPException(status_code=409, detail='Попытка уже существует с другими параметрами')
     return run
 
@@ -56,9 +91,14 @@ def get_anatomy_run(user_id: int, run_id: str):
     return result
 
 
-def active_anatomy_run(user_id: int, source: str = 'miniapp'):
+def active_anatomy_run(user_id: int, source: str = 'miniapp', bank_version: str = 'legacy_1040'):
     with closing(_connection()) as conn:
-        row = conn.execute('SELECT id FROM anatomy_runs WHERE user_id=? AND source=? AND finished_at IS NULL ORDER BY rowid DESC LIMIT 1', (user_id, source)).fetchone()
+        row = conn.execute(
+            '''SELECT id FROM anatomy_runs
+               WHERE user_id=? AND source=? AND bank_version=? AND finished_at IS NULL
+               ORDER BY rowid DESC LIMIT 1''',
+            (user_id, source, bank_version),
+        ).fetchone()
     return get_anatomy_run(user_id, row['id']) if row else None
 
 
@@ -85,10 +125,12 @@ def answer_anatomy_run(user_id: int, run_id: str, position: int, question_num: i
     return {'correct': bool(correct), 'duplicate': False}
 
 
-def get_anatomy_mistakes(user_id: int):
+def get_anatomy_mistakes(user_id: int, bank_version: str = 'legacy_1040'):
     with closing(_connection()) as conn:
         rows = conn.execute('''SELECT question_num, correct FROM anatomy_answers a
-          JOIN anatomy_runs r ON r.id=a.run_id WHERE r.user_id=? ORDER BY a.rowid''', (user_id,)).fetchall()
+          JOIN anatomy_runs r ON r.id=a.run_id
+          WHERE r.user_id=? AND r.bank_version=? ORDER BY a.rowid''',
+          (user_id, bank_version)).fetchall()
     latest = {row['question_num']: row['correct'] for row in rows}
     return [num for num, correct in latest.items() if not correct]
 

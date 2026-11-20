@@ -193,9 +193,15 @@
 
 .answerCorrect { color: var(--success); border-color: var(--success); background: var(--success-tint); }
 .answerWrong { color: var(--danger); border-color: var(--danger); background: var(--academy-red-tint); }
-.explanation { padding-top: var(--space-3); color: var(--ink); border-top: 1px solid color-mix(in srgb, var(--danger) 25%, transparent); }
-.explanation > span { display: flex; align-items: center; gap: var(--space-2); color: var(--subject-ink, var(--academic-blue)); font-size: 12px; font-weight: 750; }
-.explanation p { margin: var(--space-2) 0 0; }
+.explanation { display: flex; flex-direction: column; gap: var(--space-3); padding-top: var(--space-3); color: var(--ink); border-top: 1px solid color-mix(in srgb, var(--danger) 25%, transparent); }
+.explanationBlock { padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--surface) 88%, transparent); }
+.explanationBlock > span { display: flex; align-items: center; gap: var(--space-2); font-size: 12px; font-weight: 800; }
+.wrongReasonTitle { color: var(--danger); }
+.correctReasonTitle { color: var(--success); }
+.explanation p { margin: var(--space-2) 0 0; color: var(--ink); line-height: 1.55; }
+.sourceWarning { padding: var(--space-3); border-radius: var(--radius-sm); color: var(--ink); background: color-mix(in srgb, var(--warning, #d99000) 12%, var(--surface)); }
+.sourceWarning strong { color: var(--warning, #9b6200); font-size: 12px; }
+.sourceWarning p { font-size: 12px; }
 
 .primaryButton,
 .secondaryButton,
