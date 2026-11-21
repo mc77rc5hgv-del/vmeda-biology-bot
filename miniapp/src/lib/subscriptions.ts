@@ -28,12 +28,10 @@ export function normalizePaymentLink(value: string): string {
   let target: URL;
   try { target = new URL(value); }
   catch { throw new Error("Некорректная ссылка оплаты"); }
-  const legacy = target.hostname === "payment.codeepay.xyz";
-  const allowed = target.hostname === "codeepay.xyz" || target.hostname === "codeepay.ru" || legacy;
+  const allowed = target.hostname === "payment.codeepay.xyz" || target.hostname === "codeepay.xyz" || target.hostname === "codeepay.ru";
   if (target.protocol !== "https:" || !allowed || target.username || target.password
       || (!target.pathname.startsWith("/payment/") && !target.pathname.startsWith("/transfer/"))) {
     throw new Error("Некорректная ссылка оплаты");
   }
-  if (legacy) target.hostname = "codeepay.xyz";
   return target.toString();
 }
