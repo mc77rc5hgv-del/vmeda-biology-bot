@@ -116,9 +116,20 @@ class BillingLedger:
             return [dict(row) for row in db.execute('SELECT * FROM orders WHERE provider_id IS NOT NULL AND state NOT IN ("applied","review","resolved_keep") AND checked < ? - CASE WHEN created > ? - 3600 THEN 15 WHEN created > ? - 86400 THEN 300 ELSE 3600 END ORDER BY checked LIMIT ?',
                                                     (time.time(), time.time(), time.time(), limit))]
 
-    def uncertain_creation(self, user_id):
+    def uncertain_creation(self, user_id, *, newer_than=None):
         with self.connect() as db:
-            return db.execute('SELECT 1 FROM orders WHERE user_id=? AND state IN ("creating","creation_unknown") LIMIT 1', (user_id,)).fetchone() is not None
+            if newer_than is None:
+                query = 'SELECT 1 FROM orders WHERE user_id=? AND state IN ("creating","creation_unknown") LIMIT 1'
+                params = (user_id,)
+            else:
+                # A live creation always blocks. An old attempt that never stored a
+                # provider id or checkout URL must not disable every future tariff
+                # for this user forever; the original row and its events remain.
+                query = '''SELECT 1 FROM orders WHERE user_id=? AND
+                           (state="creating" OR (state="creation_unknown" AND
+                            (updated>=? OR provider_id IS NOT NULL OR url IS NOT NULL))) LIMIT 1'''
+                params = (user_id, newer_than)
+            return db.execute(query, params).fetchone() is not None
 
     def record_event(self, order_id, state, details):
         with self.connect() as db:

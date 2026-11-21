@@ -1,5 +1,6 @@
 import asyncio
 import copy
+import time
 from dataclasses import replace
 from unittest.mock import AsyncMock
 
@@ -38,6 +39,43 @@ async def test_definitive_rejection_can_retry_same_key_without_changing_quote(se
     result = await service.checkout(777123, 21, None, 'retry-safe-key', 'miniapp')
     assert result['id'] == row['id'] and result['state'] == 'pending'
     assert result['proof'] == row['proof'] and service.tb.stats == before
+
+
+@pytest.mark.asyncio
+async def test_stale_url_less_unknown_retries_without_losing_audit_or_user_data(service):
+    service.provider.create_checkout.side_effect = ProviderNotReady('response lost')
+    before = copy.deepcopy(service.tb.stats)
+    with pytest.raises(ProviderNotReady):
+        await service.checkout(777123, 21, None, 'stale-unknown-key', 'miniapp')
+    row = service.ledger.existing(777123, 'stale-unknown-key')
+    original_proof = row['proof']
+    with service.ledger.connect() as db:
+        db.execute('UPDATE orders SET updated=? WHERE id=?', (time.time() - 3600, row['id']))
+    service.provider.create_checkout.side_effect = None
+    service.provider.create_checkout.return_value = CheckoutSession(
+        row['id'], 'provider-retry', 'https://payment.codeepay.xyz/transfer/retry')
+    result = await service.checkout(777123, 21, None, 'stale-unknown-key', 'miniapp')
+    assert result['id'] == row['id'] and result['proof'] == original_proof
+    assert result['state'] == 'pending'
+    assert [event['state'] for event in service.ledger.events(row['id'])] == [
+        'creating', 'creation_unknown', 'creation_rejected', 'creating', 'pending']
+    assert service.tb.stats == before
+
+
+@pytest.mark.asyncio
+async def test_stale_url_less_unknown_does_not_block_another_tariff_request(service):
+    service.provider.create_checkout.side_effect = ProviderNotReady('response lost')
+    with pytest.raises(ProviderNotReady):
+        await service.checkout(777123, 21, None, 'old-unknown-key', 'bot')
+    old = service.ledger.existing(777123, 'old-unknown-key')
+    with service.ledger.connect() as db:
+        db.execute('UPDATE orders SET updated=? WHERE id=?', (time.time() - 3600, old['id']))
+    async def create(order):
+        return CheckoutSession(order.order_id, 'provider-fresh', 'https://payment.codeepay.xyz/transfer/fresh')
+    service.provider.create_checkout.side_effect = create
+    fresh = await service.checkout(777123, 21, None, 'fresh-checkout-key', 'bot')
+    assert fresh['state'] == 'pending' and fresh['id'] != old['id']
+    assert service.ledger.get(old['id'])['state'] == 'creation_unknown'
 
 
 @pytest.mark.asyncio

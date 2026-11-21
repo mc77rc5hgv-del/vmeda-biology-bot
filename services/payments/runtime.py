@@ -12,6 +12,13 @@ from .ledger import BillingLedger
 from .providers.codeepay import CodeePayProvider, normalize_checkout_url
 
 
+# Keep an ambiguous provider request protected from an immediate duplicate, but
+# never leave the account payment-locked forever. No checkout URL is returned to
+# the caller when creation becomes unknown, so a stale url-less attempt cannot be
+# completed by the customer. Its immutable row and event history are retained.
+UNKNOWN_CREATION_RETRY_SECONDS = 10 * 60
+
+
 def runtime(tb):
     return getattr(tb, '_billing_runtime', None)
 
@@ -94,6 +101,12 @@ class BillingRuntime:
                     return {**existing, 'url': self.checkout_url(existing)}
                 if existing['state'] == 'pending':
                     raise ProviderNotReady('Счёт найден у провайдера. Проверь статус или обратись в поддержку за ссылкой.')
+                if (existing['state'] == 'creation_unknown'
+                        and not existing.get('provider_id') and not existing.get('url')
+                        and existing['updated'] < time.time() - UNKNOWN_CREATION_RETRY_SECONDS):
+                    self.ledger.update(existing['id'], 'creation_rejected',
+                                       reason='Предыдущая попытка не вернула ссылку; разрешён безопасный повтор.')
+                    existing = self.ledger.get(existing['id'])
                 if existing['state'] in ('creating', 'creation_unknown'):
                     raise ProviderNotReady('Счёт требует сверки. Проверь историю или напиши @vmeda_helper. Повторно не оплачивай.')
                 if existing['state'] != 'creation_rejected':
@@ -112,7 +125,8 @@ class BillingRuntime:
                 previous_url = self.checkout_url(previous)
                 if previous.get('kind', 'subscription') == kind and previous['state'] == 'pending' and previous['tier_id'] == tier_id and previous['subject'] == subject and previous['created'] > time.time() - 900 and previous_url:
                     return {**previous, 'url': previous_url}
-            if self.ledger.uncertain_creation(user_id):
+            if self.ledger.uncertain_creation(
+                    user_id, newer_than=time.time() - UNKNOWN_CREATION_RETRY_SECONDS):
                 raise ProviderNotReady('Предыдущий счёт требует сверки с codeePay. Напиши @vmeda_helper перед повторной оплатой.')
             price = cfg.get('price_rub')
             if type(price) is not int or price <= 0:
@@ -141,10 +155,11 @@ class BillingRuntime:
             self.provider_healthy = False
             self.ledger.update(row['id'], 'creation_rejected', reason='Провайдер отклонил создание без выпуска счёта. Можно повторить.')
             raise
-        except BaseException:
+        except BaseException as exc:
             self.provider_healthy = False
             # Cancellation may also happen after the provider has issued an invoice.
             self.ledger.update(row['id'], 'creation_unknown', reason='Создание не подтверждено. Требуется сверка с codeePay, повторно не оплачивай.')
+            self.tb.logger.warning('SBP checkout creation uncertain error_type=%s', type(exc).__name__)
             raise
         result = self.ledger.get(row['id'])
         return {**result, 'url': self.checkout_url(result)}

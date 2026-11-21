@@ -4097,7 +4097,8 @@ async def cb_buy_sub_sbp(callback: CallbackQuery):
         parts = callback.data.split(":")
         row = await service.checkout(callback.from_user.id, int(parts[1]), parts[2] if len(parts) == 3 else None,
                                      "bot_" + callback.id, "bot")
-    except Exception:
+    except Exception as exc:
+        logger.warning("SBP checkout unavailable source=bot error_type=%s", type(exc).__name__)
         await callback.message.answer("Не удалось подтвердить создание счёта СБП. Проверь историю или напиши @vmeda_helper. Доступ не изменён.")
         return
     if row['state'] in ('applied', 'review', 'resolved_keep'):
