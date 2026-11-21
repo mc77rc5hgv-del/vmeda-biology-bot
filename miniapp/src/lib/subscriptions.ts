@@ -33,5 +33,6 @@ export function normalizePaymentLink(value: string): string {
       || (!target.pathname.startsWith("/payment/") && !target.pathname.startsWith("/transfer/"))) {
     throw new Error("Некорректная ссылка оплаты");
   }
+  if (target.hostname === "codeepay.xyz") target.hostname = "payment.codeepay.xyz";
   return target.toString();
 }

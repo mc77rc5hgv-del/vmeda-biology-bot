@@ -11,15 +11,16 @@ from ..contracts import CheckoutRejected, CheckoutSession, PaymentMismatch, Paym
 
 
 CHECKOUT_HOST = 'payment.codeepay.xyz'
-ACCEPTED_CHECKOUT_HOSTS = {CHECKOUT_HOST, 'codeepay.xyz', 'codeepay.ru'}
+API_HOST = 'codeepay.xyz'
+ACCEPTED_CHECKOUT_HOSTS = {CHECKOUT_HOST, API_HOST, 'codeepay.ru'}
 
 
 def normalize_checkout_url(value: str) -> str:
     """Validate a provider checkout URL without changing its host or token.
 
     ``codeepay.xyz`` is the API host. CodeePay currently returns customer
-    checkouts on ``payment.codeepay.xyz``; moving ``/transfer/<token>`` to the
-    API host produces a 404 page.
+    checkouts on ``payment.codeepay.xyz``. Links stored with the API host by a
+    previous release are repaired without changing their path, token or query.
     """
     if not isinstance(value, str):
         raise PaymentMismatch('Invalid checkout response')
@@ -32,6 +33,8 @@ def normalize_checkout_url(value: str) -> str:
         raise PaymentMismatch('Invalid checkout response') from exc
     if not valid:
         raise PaymentMismatch('Invalid checkout response')
+    if url.hostname == API_HOST:
+        return url._replace(netloc=CHECKOUT_HOST).geturl()
     return value
 
 
