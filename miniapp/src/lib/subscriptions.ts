@@ -23,3 +23,17 @@ export function planSubject(options: ReadonlyArray<{id: string}>, choice: string
   if (!options.length) return undefined; // Bundles must omit subject, never send an empty string.
   return choice ?? options.find(option => option.id === requested)?.id;
 }
+
+export function normalizePaymentLink(value: string): string {
+  let target: URL;
+  try { target = new URL(value); }
+  catch { throw new Error("Некорректная ссылка оплаты"); }
+  const legacy = target.hostname === "payment.codeepay.xyz";
+  const allowed = target.hostname === "codeepay.xyz" || target.hostname === "codeepay.ru" || legacy;
+  if (target.protocol !== "https:" || !allowed || target.username || target.password
+      || (!target.pathname.startsWith("/payment/") && !target.pathname.startsWith("/transfer/"))) {
+    throw new Error("Некорректная ссылка оплаты");
+  }
+  if (legacy) target.hostname = "codeepay.xyz";
+  return target.toString();
+}

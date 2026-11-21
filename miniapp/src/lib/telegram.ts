@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { applyPreferredTheme } from "./theme";
+import { normalizePaymentLink } from "./subscriptions";
 
 // Тонкая типизированная обёртка над window.Telegram.WebApp (официальный скрипт, см. index.html).
 // Никакой сторонней SDK-библиотеки — см. комментарий в index.html о причине.
@@ -208,9 +209,8 @@ export function openInvoice(url: string, callback: (status: "paid" | "cancelled"
 
 /** External SBP checkout uses openLink, never openTelegramLink or a client-side grant. */
 export function openPaymentLink(url: string): void {
-  const target = new URL(url);
-  if (target.protocol !== "https:" || !["codeepay.ru", "payment.codeepay.xyz"].includes(target.hostname)) throw new Error("Некорректная ссылка оплаты");
-  if (webApp?.openLink) { webApp.openLink(url); return; }
-  const popup = window.open(url, "_blank", "noopener,noreferrer");
-  if (!popup) window.location.assign(url);
+  const target = normalizePaymentLink(url);
+  if (webApp?.openLink) { webApp.openLink(target); return; }
+  const popup = window.open(target, "_blank", "noopener,noreferrer");
+  if (!popup) window.location.assign(target);
 }

@@ -9,7 +9,7 @@ import time
 from .config import CodeePayConfig
 from .contracts import CheckoutRejected, PaymentMismatch, PaymentOrder, PaymentStatus, ProviderNotReady, validate_confirmation
 from .ledger import BillingLedger
-from .providers.codeepay import CodeePayProvider
+from .providers.codeepay import CodeePayProvider, normalize_checkout_url
 
 
 def runtime(tb):
@@ -37,6 +37,21 @@ class BillingRuntime:
         self._create_waiting = 0
         self._checkout_deadline = min(60, getattr(provider.config, 'timeout_seconds', 15) + 2)
         self._max_create_waiting = max(4, min(8, 4 * int(60 / self._checkout_deadline)))
+
+    @staticmethod
+    def checkout_url(row):
+        """Return only a validated, current CodeePay URL for a client button."""
+        if not row or not row.get('url'):
+            return None
+        try:
+            return normalize_checkout_url(row['url'])
+        except PaymentMismatch:
+            return None
+
+    def public(self, row):
+        value = self.ledger.public(row)
+        value['url'] = self.checkout_url(row)
+        return value
 
     async def fetch_provider(self, provider_id):
         try:
@@ -75,8 +90,8 @@ class BillingRuntime:
                 if (existing['tier_id'] != tier_id or existing['subject'] != subject
                         or existing.get('kind', 'subscription') != kind):
                     raise ValueError('Ключ запроса уже связан с другим тарифом')
-                if existing['state'] == 'pending' and existing['url']:
-                    return existing
+                if existing['state'] == 'pending' and self.checkout_url(existing):
+                    return {**existing, 'url': self.checkout_url(existing)}
                 if existing['state'] == 'pending':
                     raise ProviderNotReady('Счёт найден у провайдера. Проверь статус или обратись в поддержку за ссылкой.')
                 if existing['state'] in ('creating', 'creation_unknown'):
@@ -94,8 +109,9 @@ class BillingRuntime:
             if not self.provider.public_status()['available']:
                 raise ProviderNotReady('СБП временно недоступна')
             for previous in self.ledger.history(user_id, limit=50):
-                if previous.get('kind', 'subscription') == kind and previous['state'] == 'pending' and previous['tier_id'] == tier_id and previous['subject'] == subject and previous['created'] > time.time() - 900 and previous['url']:
-                    return previous
+                previous_url = self.checkout_url(previous)
+                if previous.get('kind', 'subscription') == kind and previous['state'] == 'pending' and previous['tier_id'] == tier_id and previous['subject'] == subject and previous['created'] > time.time() - 900 and previous_url:
+                    return {**previous, 'url': previous_url}
             if self.ledger.uncertain_creation(user_id):
                 raise ProviderNotReady('Предыдущий счёт требует сверки с codeePay. Напиши @vmeda_helper перед повторной оплатой.')
             price = cfg.get('price_rub')
@@ -119,7 +135,8 @@ class BillingRuntime:
                 if current['provider_id'] and current['provider_id'] != session.provider_payment_id:
                     raise PaymentMismatch('Different invoice recovered during creation')
                 state = current['state'] if current['state'] in ('applied', 'review', 'resolved_keep', 'confirmed') else 'pending'
-                self.ledger.update(row['id'], state, provider_id=session.provider_payment_id, url=session.checkout_url)
+                self.ledger.update(row['id'], state, provider_id=session.provider_payment_id,
+                                   url=normalize_checkout_url(session.checkout_url))
         except CheckoutRejected:
             self.provider_healthy = False
             self.ledger.update(row['id'], 'creation_rejected', reason='Провайдер отклонил создание без выпуска счёта. Можно повторить.')
@@ -129,7 +146,8 @@ class BillingRuntime:
             # Cancellation may also happen after the provider has issued an invoice.
             self.ledger.update(row['id'], 'creation_unknown', reason='Создание не подтверждено. Требуется сверка с codeePay, повторно не оплачивай.')
             raise
-        return self.ledger.get(row['id'])
+        result = self.ledger.get(row['id'])
+        return {**result, 'url': self.checkout_url(result)}
 
     def validate_binding(self, row, payment):
         if (payment.provider != 'codeepay' or payment.order_id != row['id']

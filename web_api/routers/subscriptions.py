@@ -133,7 +133,7 @@ async def sbp(body: SbpRequest, user_id: int = Depends(get_current_user_id), tb=
 async def history(user_id: int = Depends(get_current_user_id), tb=Depends(get_fresh_bot_module)):
     from services.payments.runtime import runtime
     service = runtime(tb)
-    return {'payments': [service.ledger.public(row) for row in service.ledger.history(user_id) if row.get('kind', 'subscription') == 'subscription'] if service else []}
+    return {'payments': [service.public(row) for row in service.ledger.history(user_id) if row.get('kind', 'subscription') == 'subscription'] if service else []}
 
 
 @router.get('/admin/sbp')
@@ -144,7 +144,7 @@ async def sbp_statistics(offset: int = 0, user_id: int = Depends(get_current_use
     service = runtime(tb)
     if not service:
         return {'summary': [], 'payments': []}
-    return {'summary': service.ledger.summary(), 'payments': [{**service.ledger.public(row),
+    return {'summary': service.ledger.summary(), 'payments': [{**service.public(row),
             'user_id': row['user_id'], 'username': row['username'], 'provider_id': row['provider_id'], 'charge_id': row['charge_id']}
             for row in service.ledger.history(limit=50, offset=max(0, offset))]}
 
@@ -174,7 +174,7 @@ async def reconcile_payment(order_id: str, body: ReconcileRequest,
         raise HTTPException(409, detail='Платёж не соответствует исходному счёту') from exc
     except ValueError as exc:
         raise HTTPException(409, detail=str(exc)) from exc
-    return {'payment': service.ledger.public(row), 'events': service.ledger.events(order_id)}
+    return {'payment': service.public(row), 'events': service.ledger.events(order_id)}
 
 
 @router.post('/codeepay/webhook')

@@ -5,7 +5,7 @@ import ts from 'typescript';
 
 const events = [];
 const context = {
-  exports: {}, URLSearchParams,
+  exports: {}, URL, URLSearchParams,
   window: { dispatchEvent: event => events.push(event) },
   CustomEvent: class { constructor(type, config) { this.type = type; this.detail = config.detail; } },
 };
@@ -34,4 +34,9 @@ assert.equal(api.planSubject([], 'chemistry', 'biology'), undefined);
 const bundleSubject = api.planSubject([], undefined, 'histology');
 assert.equal(JSON.stringify({tier_id: 24, subject: bundleSubject}), '{"tier_id":24}');
 assert.equal(`sbp-request:24:${bundleSubject ?? 'all'}`, 'sbp-request:24:all');
+assert.equal(api.normalizePaymentLink('https://codeepay.xyz/transfer/new-token'), 'https://codeepay.xyz/transfer/new-token');
+assert.equal(api.normalizePaymentLink('https://payment.codeepay.xyz/transfer/legacy-token'), 'https://codeepay.xyz/transfer/legacy-token');
+for (const value of ['http://codeepay.xyz/transfer/x', 'https://evil.example/transfer/x', 'https://codeepay.xyz/not-payment/x']) {
+  assert.throws(() => api.normalizePaymentLink(value), /Некорректная ссылка оплаты/);
+}
 console.log('Subscription navigation and checkout: contextual subject, safe return path, paid-only redirects, bundle payload and stable nonce OK');

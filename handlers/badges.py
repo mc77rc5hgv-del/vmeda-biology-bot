@@ -423,8 +423,9 @@ async def payment_action(callback, token, *, check=False):
                                       "Не оплачивай старую ссылку; напиши @vmeda_helper для безопасного продолжения.")
         return
     builder = InlineKeyboardBuilder()
-    if row["state"] == "pending" and row["url"]:
-        builder.row(InlineKeyboardButton(text=f"🏦 Оплатить {row['amount_minor'] // 100} ₽", url=row["url"]))
+    checkout_url = service.checkout_url(row)
+    if row["state"] == "pending" and checkout_url:
+        builder.row(InlineKeyboardButton(text=f"🏦 Оплатить {row['amount_minor'] // 100} ₽", url=checkout_url))
     builder.row(InlineKeyboardButton(text="🔄 Проверить оплату", callback_data=f"badges:check:{token}"))
     builder.row(InlineKeyboardButton(text="🪪 Мои заявки", callback_data="badges:mine"))
     await callback.message.answer("🪪 Заказ бейджиков\n" + pricing_text(order["pricing"]) +

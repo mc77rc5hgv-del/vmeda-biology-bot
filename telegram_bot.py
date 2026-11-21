@@ -4104,7 +4104,7 @@ async def cb_buy_sub_sbp(callback: CallbackQuery):
         await callback.message.answer('Оплата уже подтверждена. Подписка активирована.' if row['state'] == 'applied' else 'Оплата подтверждена. Решение по доступу доступно через @vmeda_helper. Повторно платить не нужно.')
         return
     builder = InlineKeyboardBuilder()
-    builder.button(text=f"🏦 Оплатить СБП {row['amount_minor'] // 100}₽", url=row['url'])
+    builder.button(text=f"🏦 Оплатить СБП {row['amount_minor'] // 100}₽", url=service.checkout_url(row))
     builder.button(text="🔄 Проверить оплату", callback_data="check_sbp:" + row['id'])
     builder.button(text="🔙 Подписки", callback_data="subscription_menu")
     builder.adjust(1)
@@ -4128,8 +4128,9 @@ async def cb_sbp_history(callback: CallbackQuery):
         if row.get('kind') == 'badge' and row['state'] == 'applied':
             label = 'оплачено, заказ подтверждён'
         lines.append(f"\n{row['amount_minor']/100:g}₽ · {product} · {label}\n{row['id']}")
-        if row['state'] == 'pending' and row['url']:
-            builder.button(text=f"СБП {row['amount_minor']/100:g}₽ · продолжить", url=row['url'])
+        checkout_url = service.checkout_url(row)
+        if row['state'] == 'pending' and checkout_url:
+            builder.button(text=f"СБП {row['amount_minor']/100:g}₽ · продолжить", url=checkout_url)
             builder.button(text="Проверить " + row['id'][-6:], callback_data='check_sbp:' + row['id'])
     builder.button(text="🔙 Подписки", callback_data="subscription_menu")
     builder.adjust(1)

@@ -10,6 +10,33 @@ from ..config import CodeePayConfig
 from ..contracts import CheckoutRejected, CheckoutSession, PaymentMismatch, PaymentOrder, PaymentStatus, ProviderNotReady, VerifiedPayment
 
 
+CURRENT_CHECKOUT_HOST = 'codeepay.xyz'
+LEGACY_CHECKOUT_HOSTS = {'payment.codeepay.xyz'}
+ACCEPTED_CHECKOUT_HOSTS = {CURRENT_CHECKOUT_HOST, 'codeepay.ru', *LEGACY_CHECKOUT_HOSTS}
+
+
+def normalize_checkout_url(value: str) -> str:
+    """Validate a provider checkout URL and move the retired host to the live one.
+
+    Existing invoices keep the same path/token; only the CodeePay hostname changes.
+    This also lets callers repair links already stored in the durable billing ledger.
+    """
+    if not isinstance(value, str):
+        raise PaymentMismatch('Invalid checkout response')
+    try:
+        url = urlsplit(value)
+        valid = (url.scheme == 'https' and url.hostname in ACCEPTED_CHECKOUT_HOSTS
+                 and not url.username and not url.password and url.port in (None, 443)
+                 and url.path.startswith(('/payment/', '/transfer/')))
+    except ValueError as exc:
+        raise PaymentMismatch('Invalid checkout response') from exc
+    if not valid:
+        raise PaymentMismatch('Invalid checkout response')
+    if url.hostname in LEGACY_CHECKOUT_HOSTS:
+        return url._replace(netloc=CURRENT_CHECKOUT_HOST).geturl()
+    return value
+
+
 def minor(value) -> int:
     if isinstance(value, bool):
         raise PaymentMismatch('Invalid amount')
@@ -67,12 +94,11 @@ class CodeePayProvider:
         data = await self._post('/initiate_payment', {'method_slug': 'sbp', 'amount': order.amount_minor / 100,
                  'description': ('VMEDA: медицинские бейджики' if order.kind == 'badge' else f'VMEDA: подписка {order.tier_id}'), 'shop_name': 'VMEDA',
                  'metadata': metadata})
-        url = urlsplit(data.get('url', ''))
-        if (url.scheme != 'https' or url.hostname not in {'codeepay.xyz', 'payment.codeepay.xyz'} or url.username or url.password
-                or not url.path.startswith(('/payment/', '/transfer/')) or minor(data.get('amount')) != order.amount_minor
+        checkout_url = normalize_checkout_url(data.get('url', ''))
+        if (minor(data.get('amount')) != order.amount_minor
                 or not isinstance(data.get('order_id'), str) or not data['order_id']):
             raise PaymentMismatch('Invalid checkout response')
-        return CheckoutSession(order.order_id, data['order_id'], data['url'])
+        return CheckoutSession(order.order_id, data['order_id'], checkout_url)
 
     async def fetch_payment(self, provider_payment_id: str) -> VerifiedPayment:
         data = await self._post('/get_payment', {'order_id': provider_payment_id})

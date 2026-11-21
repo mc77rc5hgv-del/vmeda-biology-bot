@@ -3,7 +3,8 @@
 API: `https://codeepay.xyz`. Ключ передаётся только
 сервером через `X-Api-Key` на `https://codeepay.xyz`. `POST /initiate_payment` создаёт счёт
 с `method_slug=sbp` и суммой в рублях. `POST /get_payment` возвращает финансовое подтверждение.
-Реальный API также возвращает checkout на `https://payment.codeepay.xyz/transfer/...`.
+Checkout открывается на `https://codeepay.xyz/...`; сохранённые ссылки прежнего
+`https://payment.codeepay.xyz/...` проверяются и переводятся на актуальный хост без изменения токена счёта.
 Ключ никогда не передаётся платёжной странице, клиенту или журналу приложения.
 
 ## Хранение и подтверждение
