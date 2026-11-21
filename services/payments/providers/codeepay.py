@@ -10,16 +10,16 @@ from ..config import CodeePayConfig
 from ..contracts import CheckoutRejected, CheckoutSession, PaymentMismatch, PaymentOrder, PaymentStatus, ProviderNotReady, VerifiedPayment
 
 
-CURRENT_CHECKOUT_HOST = 'codeepay.xyz'
-LEGACY_CHECKOUT_HOSTS = {'payment.codeepay.xyz'}
-ACCEPTED_CHECKOUT_HOSTS = {CURRENT_CHECKOUT_HOST, 'codeepay.ru', *LEGACY_CHECKOUT_HOSTS}
+CHECKOUT_HOST = 'payment.codeepay.xyz'
+ACCEPTED_CHECKOUT_HOSTS = {CHECKOUT_HOST, 'codeepay.xyz', 'codeepay.ru'}
 
 
 def normalize_checkout_url(value: str) -> str:
-    """Validate a provider checkout URL and move the retired host to the live one.
+    """Validate a provider checkout URL without changing its host or token.
 
-    Existing invoices keep the same path/token; only the CodeePay hostname changes.
-    This also lets callers repair links already stored in the durable billing ledger.
+    ``codeepay.xyz`` is the API host. CodeePay currently returns customer
+    checkouts on ``payment.codeepay.xyz``; moving ``/transfer/<token>`` to the
+    API host produces a 404 page.
     """
     if not isinstance(value, str):
         raise PaymentMismatch('Invalid checkout response')
@@ -32,8 +32,6 @@ def normalize_checkout_url(value: str) -> str:
         raise PaymentMismatch('Invalid checkout response') from exc
     if not valid:
         raise PaymentMismatch('Invalid checkout response')
-    if url.hostname in LEGACY_CHECKOUT_HOSTS:
-        return url._replace(netloc=CURRENT_CHECKOUT_HOST).geturl()
     return value
 
 

@@ -122,7 +122,7 @@ async def test_documented_api_units_headers_and_provider_confirmed_settlement():
 
 
 @pytest.mark.asyncio
-async def test_retired_checkout_host_is_rewritten_without_changing_invoice_token():
+async def test_provider_checkout_host_and_invoice_token_are_preserved():
     import httpx
     def respond(request):
         return httpx.Response(200, json={'url': 'https://payment.codeepay.xyz/transfer/preserved-token?bank=1',
@@ -130,7 +130,7 @@ async def test_retired_checkout_host_is_rewritten_without_changing_invoice_token
     provider = CodeePayProvider(CodeePayConfig.from_env({'CODEEPAY_ENABLED': 'true', 'CODEEPAY_API_KEY': 'test-api-key'}),
                                 transport=httpx.MockTransport(respond))
     session = await provider.create_checkout(order())
-    assert session.checkout_url == 'https://codeepay.xyz/transfer/preserved-token?bank=1'
+    assert session.checkout_url == 'https://payment.codeepay.xyz/transfer/preserved-token?bank=1'
 
 
 @pytest.mark.asyncio
