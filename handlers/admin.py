@@ -21,7 +21,6 @@ ADMIN_PENDING/ADMIN_CHANNEL_POST_PREVIEW/ASSISTANT_PENDING/ASSISTANT_DM_REQUESTS
 import asyncio
 import os
 import re
-import secrets
 import time
 from html import escape
 
@@ -172,13 +171,7 @@ def get_admin_battle_text() -> str:
     )
 
 def get_admin_announcements_keyboard(back_callback: str = "admin_panel"):
-    """Подраздел «Анонсы» — все admin_announce_* рассылки собраны сюда с главного экрана
-    админ-панели одной кнопкой, чтобы не захламлять его; каждая кнопка ведёт напрямую в свой
-    already-existing _confirm-хендлер (см. cb_admin_announce_*_confirm ниже и в telegram_bot.py
-    для переклички), сама рассылочная логика не меняется. Доступен и полным админам, и отдельной
-    роли «админ платежей» (is_payment_admin) — back_callback параметризован именно поэтому:
-    полный админ возвращается в admin_panel, а админ платежей — в свою отдельную panel, см.
-    cb_admin_announcements_menu, который выбирает нужное значение."""
+    """Шаблоны анонсов и создание рассылки. Кнопка «Назад» учитывает роль админа."""
     builder = InlineKeyboardBuilder()
     builder.button(text="📝 Создать рассылку (текст, фото, видео)", callback_data="admin_broadcast_prompt")
     builder.button(text="Новое в гистологии и анатомии", callback_data="admin_announce_exam_updates")
@@ -637,15 +630,7 @@ async def cb_admin_announcements_menu(callback: CallbackQuery):
 
 @router.callback_query(F.data == "admin_announce_exam_updates")
 async def cb_admin_announce_exam_updates(callback: CallbackQuery):
-    from services.admin_broadcast import Draft, preview_preset
-
-    user_id = callback.from_user.id
-    if not (tb.is_admin(user_id) or tb.is_payment_admin(user_id)):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
-    if callback.message.chat.type != "private":
-        await callback.answer("Открой админ-панель в личном чате с ботом.", show_alert=True)
-        return
+    from services.admin_broadcast import preview_text_preset
 
     text = (
         "<b>Гистология и анатомия к зимней сессии</b>\n\n"
@@ -663,9 +648,7 @@ async def cb_admin_announce_exam_updates(callback: CallbackQuery):
     builder.button(text="Анатомия · тесты", callback_data="anatomy_exam_test_menu")
     builder.button(text="Зимняя сессия подписка", callback_data="sub_tier:24")
     builder.adjust(1)
-    draft = Draft(secrets.token_hex(8), text, [], reply_markup=builder.as_markup(), allow_payment_admin=True)
-    await callback.answer()
-    await preview_preset(tb, callback.message, draft, user_id)
+    await preview_text_preset(tb, callback, lambda: text, builder.as_markup)
 
 
 @router.callback_query(F.data == "admin_battle_last_results")
@@ -1636,222 +1619,48 @@ async def cb_admin_bulk_subscription_prompt(callback: CallbackQuery):
 
 @router.callback_query(F.data == "admin_announce_support_confirm")
 async def cb_admin_announce_support_confirm(callback: CallbackQuery):
-    if not (tb.is_admin(callback.from_user.id) or tb.is_payment_admin(callback.from_user.id)):
-        await callback.answer()
-        return
-    await callback.answer()
-    builder = InlineKeyboardBuilder()
-    builder.button(text="✅ Отправить всем", callback_data="admin_announce_support_go")
-    builder.button(text="❌ Отмена", callback_data="admin_announcements_menu")
-    builder.adjust(1)
-    preview = (
-        f"👀 <b>Предпросмотр анонса</b>\n{tb.DIVIDER}\n\n"
-        f"{tb.get_support_announcement_text()}\n\n{tb.DIVIDER}\n"
-        f"Отправить это всем {len(tb.stats['total_users'])} пользователям?"
-    )
-    await tb.safe_edit_text(callback.message, preview, parse_mode="HTML", reply_markup=builder.as_markup())
+    from services.admin_broadcast import preview_text_preset
 
-@router.callback_query(F.data == "admin_announce_support_go")
-async def cb_admin_announce_support_go(callback: CallbackQuery):
-    if not (tb.is_admin(callback.from_user.id) or tb.is_payment_admin(callback.from_user.id)):
-        await callback.answer()
-        return
-    await callback.answer("📣 Рассылка запущена!", show_alert=True)
-    recipients = len(tb.stats["total_users"])
-    tb.stats["broadcast_count"] = tb.stats.get("broadcast_count", 0) + 1
-    tb.save_stats()
-    await tb._broadcast(tb.get_support_announcement_text(), tb.get_support_announcement_keyboard())
-    await tb.safe_edit_text(
-        callback.message,
-        f"✅ Анонс раздела поддержки отправлен (попытка охватить {recipients} пользователей).",
-        parse_mode="HTML",
-        reply_markup=get_admin_announcements_keyboard(
-            "admin_panel" if tb.is_admin(callback.from_user.id) else "payment_admin_panel"
-        )
-    )
+    await preview_text_preset(tb, callback, tb.get_support_announcement_text, tb.get_support_announcement_keyboard)
+
 
 @router.callback_query(F.data == "admin_announce_subscription_confirm")
 async def cb_admin_announce_subscription_confirm(callback: CallbackQuery):
-    if not (tb.is_admin(callback.from_user.id) or tb.is_payment_admin(callback.from_user.id)):
-        await callback.answer()
-        return
-    await callback.answer()
-    builder = InlineKeyboardBuilder()
-    builder.button(text="✅ Отправить всем", callback_data="admin_announce_subscription_go")
-    builder.button(text="❌ Отмена", callback_data="admin_announcements_menu")
-    builder.adjust(1)
-    preview = (
-        f"👀 <b>Предпросмотр анонса</b>\n{tb.DIVIDER}\n\n"
-        f"{tb.get_subscription_announcement_text()}\n\n{tb.DIVIDER}\n"
-        f"Отправить это всем {len(tb.stats['total_users'])} пользователям?"
-    )
-    await tb.safe_edit_text(callback.message, preview, parse_mode="HTML", reply_markup=builder.as_markup())
+    from services.admin_broadcast import preview_text_preset
 
-@router.callback_query(F.data == "admin_announce_subscription_go")
-async def cb_admin_announce_subscription_go(callback: CallbackQuery):
-    if not (tb.is_admin(callback.from_user.id) or tb.is_payment_admin(callback.from_user.id)):
-        await callback.answer()
-        return
-    await callback.answer("📣 Рассылка запущена!", show_alert=True)
-    recipients = len(tb.stats["total_users"])
-    tb.stats["broadcast_count"] = tb.stats.get("broadcast_count", 0) + 1
-    tb.save_stats()
-    await tb._broadcast(tb.get_subscription_announcement_text(), tb.get_subscription_announcement_keyboard())
-    await tb.safe_edit_text(
-        callback.message,
-        f"✅ Оповещение о подписке отправлено (попытка охватить {recipients} пользователей).",
-        parse_mode="HTML",
-        reply_markup=get_admin_announcements_keyboard(
-            "admin_panel" if tb.is_admin(callback.from_user.id) else "payment_admin_panel"
-        )
-    )
+    await preview_text_preset(tb, callback, tb.get_subscription_announcement_text, tb.get_subscription_announcement_keyboard)
+
 
 @router.callback_query(F.data == "admin_announce_anatomy_confirm")
 async def cb_admin_announce_anatomy_confirm(callback: CallbackQuery):
-    if not (tb.is_admin(callback.from_user.id) or tb.is_payment_admin(callback.from_user.id)):
-        await callback.answer()
-        return
-    await callback.answer()
-    builder = InlineKeyboardBuilder()
-    builder.button(text="✅ Отправить всем", callback_data="admin_announce_anatomy_go")
-    builder.button(text="❌ Отмена", callback_data="admin_announcements_menu")
-    builder.adjust(1)
-    preview = (
-        f"👀 <b>Предпросмотр анонса</b>\n{tb.DIVIDER}\n\n"
-        f"{tb.get_anatomy_announcement_text()}\n\n{tb.DIVIDER}\n"
-        f"Отправить это всем {len(tb.stats['total_users'])} пользователям?"
-    )
-    await tb.safe_edit_text(callback.message, preview, parse_mode="HTML", reply_markup=builder.as_markup())
+    from services.admin_broadcast import preview_text_preset
 
-@router.callback_query(F.data == "admin_announce_anatomy_go")
-async def cb_admin_announce_anatomy_go(callback: CallbackQuery):
-    if not (tb.is_admin(callback.from_user.id) or tb.is_payment_admin(callback.from_user.id)):
-        await callback.answer()
-        return
-    await callback.answer("📣 Рассылка запущена!", show_alert=True)
-    recipients = len(tb.stats["total_users"])
-    tb.stats["broadcast_count"] = tb.stats.get("broadcast_count", 0) + 1
-    tb.save_stats()
-    await tb._broadcast(tb.get_anatomy_announcement_text(), tb.get_anatomy_announcement_keyboard())
-    await tb.safe_edit_text(
-        callback.message,
-        f"✅ Анонс раздела Анатомия отправлен (попытка охватить {recipients} пользователей).",
-        parse_mode="HTML",
-        reply_markup=get_admin_announcements_keyboard(
-            "admin_panel" if tb.is_admin(callback.from_user.id) else "payment_admin_panel"
-        )
-    )
+    await preview_text_preset(tb, callback, tb.get_anatomy_announcement_text, tb.get_anatomy_announcement_keyboard)
+
 
 @router.callback_query(F.data == "admin_announce_ai_confirm")
 async def cb_admin_announce_ai_confirm(callback: CallbackQuery):
-    if not (tb.is_admin(callback.from_user.id) or tb.is_payment_admin(callback.from_user.id)):
-        await callback.answer()
-        return
-    if not tb.ai_provider_available():
-        await callback.answer("AI сейчас не настроен (нет ни одного провайдера) — рассылать нечего.", show_alert=True)
-        return
-    await callback.answer()
-    builder = InlineKeyboardBuilder()
-    builder.button(text="✅ Отправить всем", callback_data="admin_announce_ai_go")
-    builder.button(text="❌ Отмена", callback_data="admin_announcements_menu")
-    builder.adjust(1)
-    preview = (
-        f"👀 <b>Предпросмотр анонса</b>\n{tb.DIVIDER}\n\n"
-        f"{tb.get_ai_announcement_text()}\n\n{tb.DIVIDER}\n"
-        f"Отправить это всем {len(tb.stats['total_users'])} пользователям?"
-    )
-    await tb.safe_edit_text(callback.message, preview, parse_mode="HTML", reply_markup=builder.as_markup())
+    from services.admin_broadcast import preview_text_preset
 
-@router.callback_query(F.data == "admin_announce_ai_go")
-async def cb_admin_announce_ai_go(callback: CallbackQuery):
-    if not (tb.is_admin(callback.from_user.id) or tb.is_payment_admin(callback.from_user.id)):
-        await callback.answer()
+    if (tb.is_admin(callback.from_user.id) or tb.is_payment_admin(callback.from_user.id)) and not tb.ai_provider_available():
+        await callback.answer("AI сейчас не настроен.", show_alert=True)
         return
-    await callback.answer("📣 Рассылка запущена!", show_alert=True)
-    recipients = len(tb.stats["total_users"])
-    tb.stats["broadcast_count"] = tb.stats.get("broadcast_count", 0) + 1
-    tb.save_stats()
-    await tb._broadcast(tb.get_ai_announcement_text(), tb.get_ai_announcement_keyboard())
-    await tb.safe_edit_text(
-        callback.message,
-        f"✅ Анонс VMedA AI отправлен (попытка охватить {recipients} пользователей).",
-        parse_mode="HTML",
-        reply_markup=get_admin_announcements_keyboard(
-            "admin_panel" if tb.is_admin(callback.from_user.id) else "payment_admin_panel"
-        )
-    )
+
+    await preview_text_preset(tb, callback, tb.get_ai_announcement_text, tb.get_ai_announcement_keyboard)
+
 
 @router.callback_query(F.data == "admin_announce_anatomy_exam_confirm")
 async def cb_admin_announce_anatomy_exam_confirm(callback: CallbackQuery):
-    if not (tb.is_admin(callback.from_user.id) or tb.is_payment_admin(callback.from_user.id)):
-        await callback.answer()
-        return
-    await callback.answer()
-    builder = InlineKeyboardBuilder()
-    builder.button(text="✅ Отправить всем", callback_data="admin_announce_anatomy_exam_go")
-    builder.button(text="❌ Отмена", callback_data="admin_announcements_menu")
-    builder.adjust(1)
-    preview = (
-        f"👀 <b>Предпросмотр анонса</b>\n{tb.DIVIDER}\n\n"
-        f"{tb.get_anatomy_exam_announcement_text()}\n\n{tb.DIVIDER}\n"
-        f"Отправить это всем {len(tb.stats['total_users'])} пользователям?"
-    )
-    await tb.safe_edit_text(callback.message, preview, parse_mode="HTML", reply_markup=builder.as_markup())
+    from services.admin_broadcast import preview_text_preset
 
-@router.callback_query(F.data == "admin_announce_anatomy_exam_go")
-async def cb_admin_announce_anatomy_exam_go(callback: CallbackQuery):
-    if not (tb.is_admin(callback.from_user.id) or tb.is_payment_admin(callback.from_user.id)):
-        await callback.answer()
-        return
-    await callback.answer("📣 Рассылка запущена!", show_alert=True)
-    recipients = len(tb.stats["total_users"])
-    tb.stats["broadcast_count"] = tb.stats.get("broadcast_count", 0) + 1
-    tb.save_stats()
-    await tb._broadcast(tb.get_anatomy_exam_announcement_text(), tb.get_anatomy_exam_announcement_keyboard())
-    await tb.safe_edit_text(
-        callback.message,
-        f"✅ Анонс раздела Экзамен отправлен (попытка охватить {recipients} пользователей).",
-        parse_mode="HTML",
-        reply_markup=get_admin_announcements_keyboard(
-            "admin_panel" if tb.is_admin(callback.from_user.id) else "payment_admin_panel"
-        )
-    )
+    await preview_text_preset(tb, callback, tb.get_anatomy_exam_announcement_text, tb.get_anatomy_exam_announcement_keyboard)
+
 
 @router.callback_query(F.data == "admin_announce_anatomy_latin_confirm")
 async def cb_admin_announce_anatomy_latin_confirm(callback: CallbackQuery):
-    if not (tb.is_admin(callback.from_user.id) or tb.is_payment_admin(callback.from_user.id)):
-        await callback.answer()
-        return
-    await callback.answer()
-    builder = InlineKeyboardBuilder()
-    builder.button(text="✅ Отправить всем", callback_data="admin_announce_anatomy_latin_go")
-    builder.button(text="❌ Отмена", callback_data="admin_announcements_menu")
-    builder.adjust(1)
-    preview = (
-        f"👀 <b>Предпросмотр анонса</b>\n{tb.DIVIDER}\n\n"
-        f"{tb.get_anatomy_latin_announcement_text()}\n\n{tb.DIVIDER}\n"
-        f"Отправить это всем {len(tb.stats['total_users'])} пользователям?"
-    )
-    await tb.safe_edit_text(callback.message, preview, parse_mode="HTML", reply_markup=builder.as_markup())
+    from services.admin_broadcast import preview_text_preset
 
-@router.callback_query(F.data == "admin_announce_anatomy_latin_go")
-async def cb_admin_announce_anatomy_latin_go(callback: CallbackQuery):
-    if not (tb.is_admin(callback.from_user.id) or tb.is_payment_admin(callback.from_user.id)):
-        await callback.answer()
-        return
-    await callback.answer("📣 Рассылка запущена!", show_alert=True)
-    recipients = len(tb.stats["total_users"])
-    tb.stats["broadcast_count"] = tb.stats.get("broadcast_count", 0) + 1
-    tb.save_stats()
-    await tb._broadcast(tb.get_anatomy_latin_announcement_text(), tb.get_anatomy_latin_announcement_keyboard())
-    await tb.safe_edit_text(
-        callback.message,
-        f"✅ Анонс теста по латыни отправлен (попытка охватить {recipients} пользователей).",
-        parse_mode="HTML",
-        reply_markup=get_admin_announcements_keyboard(
-            "admin_panel" if tb.is_admin(callback.from_user.id) else "payment_admin_panel"
-        )
-    )
+    await preview_text_preset(tb, callback, tb.get_anatomy_latin_announcement_text, tb.get_anatomy_latin_announcement_keyboard)
 
 @router.callback_query(F.data == "admin_channel_post_prompt")
 async def cb_admin_channel_post_prompt(callback: CallbackQuery):
@@ -2282,6 +2091,21 @@ async def cb_admin_broadcast_cancel(callback: CallbackQuery):
     await admin_broadcast.cancel(tb, callback)
 
 
+@router.callback_query(F.data.startswith("admin_broadcast_edit:"))
+async def cb_admin_broadcast_edit(callback: CallbackQuery):
+    from services import admin_broadcast
+    await admin_broadcast.edit(tb, callback)
+
+
+@router.callback_query(F.data.in_({
+    "admin_announce_support_go", "admin_announce_subscription_go", "admin_announce_anatomy_go",
+    "admin_announce_anatomy_exam_go", "admin_announce_anatomy_latin_go", "admin_announce_ai_go",
+    "admin_announce_rollcall_go",
+}))
+async def cb_admin_expired_announcement(callback: CallbackQuery):
+    await callback.answer("Этот предпросмотр устарел. Открой анонс заново.", show_alert=True)
+
+
 _miniapp_promo_lock = asyncio.Lock()
 
 
@@ -2335,6 +2159,9 @@ async def cb_admin_announce_badges_confirm(callback: CallbackQuery):
     uid = callback.from_user.id
     if not (tb.is_admin(uid) or tb.is_payment_admin(uid)):
         await callback.answer("Нет доступа", show_alert=True)
+        return
+    if getattr(getattr(callback.message, 'chat', None), 'type', None) != "private":
+        await callback.answer("Открой анонс в личном чате с ботом.", show_alert=True)
         return
     await callback.answer()
     from services.admin_broadcast import preview_preset

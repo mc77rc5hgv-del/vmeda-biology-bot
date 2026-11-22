@@ -189,11 +189,6 @@ async def main():
     print("rollcall callbacks exempt from the referral gate: OK")
 
     # 14. Admin announcement broadcast: preview -> confirm -> broadcast, non-admin blocked
-    orig_broadcast = tb._broadcast
-    broadcast_calls = []
-    async def fake_broadcast(text, keyboard=None):
-        broadcast_calls.append((text, keyboard))
-    tb._broadcast = fake_broadcast
 
     ann_text = tb.get_rollcall_announcement_text()
     check_html(ann_text)
@@ -203,24 +198,6 @@ async def main():
     ann_kb = tb.get_rollcall_announcement_keyboard()
     assert ann_kb.inline_keyboard[0][0].callback_data == "rollcall_menu"
 
-    cb_ann1 = FakeCB("admin_announce_rollcall_confirm")
-    await tb.cb_admin_announce_rollcall_confirm(cb_ann1)
-    assert cb_ann1.message.edits and "Отправить" in cb_ann1.message.edits[0][0]
-    assert not broadcast_calls, "must not broadcast before confirmation"
-
-    broadcasts_before = tb.stats.get("broadcast_count", 0)
-    cb_ann2 = FakeCB("admin_announce_rollcall_go")
-    await tb.cb_admin_announce_rollcall_go(cb_ann2)
-    assert broadcast_calls and broadcast_calls[0][0] == ann_text
-    assert tb.stats["broadcast_count"] == broadcasts_before + 1
-    assert cb_ann2.message.edits and "отправлен" in cb_ann2.message.edits[0][0]
-
-    cb_ann3 = FakeCB("admin_announce_rollcall_confirm", uid=non_admin)
-    await tb.cb_admin_announce_rollcall_confirm(cb_ann3)
-    assert not cb_ann3.message.edits, "non-admin must be blocked"
-
-    tb._broadcast = orig_broadcast
-    print("admin rollcall-announcement broadcast (preview/confirm/go, non-admin blocked): OK")
 
     # 15. admin panel's Announcements submenu exposes the rollcall announce button (not the
     # top-level admin_panel menu directly — all admin_announce_* buttons live in the submenu)

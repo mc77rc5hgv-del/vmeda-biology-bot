@@ -123,27 +123,19 @@ async def main():
     assert back_data == "payment_admin_panel", "payment admin's back button must not point at admin_panel"
     print("6. payment admin reaches Announcements submenu, back goes to its own panel: OK")
 
-    # ---- 7. payment admin can actually send one of the announcements end to end ----
-    orig_broadcast = tb._broadcast
-    broadcast_calls = []
-    async def fake_broadcast(text, keyboard=None):
-        broadcast_calls.append((text, keyboard))
-    tb._broadcast = fake_broadcast
+    # ---- 7. payment admin can preview a preset with the original public buttons ----
+    from types import SimpleNamespace
+    from services import admin_broadcast
 
-    cb_supp_confirm = FakeCB("admin_announce_support_confirm", uid=payer_id)
-    await tb.cb_admin_announce_support_confirm(cb_supp_confirm)
-    assert cb_supp_confirm.message.edits and "Отправить" in cb_supp_confirm.message.edits[0][0]
-    assert not broadcast_calls, "must not broadcast before confirmation"
-
-    broadcasts_before = tb.stats.get("broadcast_count", 0)
-    cb_supp_go = FakeCB("admin_announce_support_go", uid=payer_id)
-    await tb.cb_admin_announce_support_go(cb_supp_go)
-    assert broadcast_calls, "payment admin must be able to actually send the announcement"
-    assert tb.stats["broadcast_count"] == broadcasts_before + 1
-    result_kb = cb_supp_go.message.edits[-1][1]
-    assert kb_data(result_kb)[-1] == "payment_admin_panel", "success screen back-button must match role"
-    tb._broadcast = orig_broadcast
-    print("7. payment admin can send an announcement end to end, result screen routes back correctly: OK")
+    cb_supp = FakeCB("admin_announce_support_confirm", uid=payer_id)
+    cb_supp.message.chat = SimpleNamespace(id=payer_id, type="private")
+    sent_msgs.clear()
+    await tb.cb_admin_announce_support_confirm(cb_supp)
+    assert sent_msgs == [(payer_id, tb.get_support_announcement_text(), tb.get_support_announcement_keyboard())]
+    draft = admin_broadcast.drafts.pop(payer_id)
+    assert draft.allow_payment_admin
+    assert f"admin_broadcast_go:{draft.token}" in kb_data(cb_supp.message.edits[-1][1])
+    print("7. payment admin can preview an announcement with its public buttons: OK")
 
     # ---- 8. notify_admins_of_payment_request pings payment admins too, not just ADMIN_IDS ----
     tb.stats["subscriptions"].pop(str(buyer_id), None)

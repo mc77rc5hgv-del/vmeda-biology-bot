@@ -1298,39 +1298,10 @@ async def cb_rollcall_confirm(callback: CallbackQuery):
 
 @dp.callback_query(F.data == "admin_announce_rollcall_confirm")
 async def cb_admin_announce_rollcall_confirm(callback: CallbackQuery):
-    if not (is_admin(callback.from_user.id) or is_payment_admin(callback.from_user.id)):
-        await callback.answer()
-        return
-    await callback.answer()
-    builder = InlineKeyboardBuilder()
-    builder.button(text="✅ Отправить всем", callback_data="admin_announce_rollcall_go")
-    builder.button(text="❌ Отмена", callback_data="admin_announcements_menu")
-    builder.adjust(1)
-    preview = (
-        f"👀 <b>Предпросмотр анонса</b>\n{DIVIDER}\n\n"
-        f"{get_rollcall_announcement_text()}\n\n{DIVIDER}\n"
-        f"Отправить это всем {len(stats['total_users'])} пользователям?"
-    )
-    await safe_edit_text(callback.message, preview, parse_mode="HTML", reply_markup=builder.as_markup())
+    from services.admin_broadcast import preview_text_preset
 
-@dp.callback_query(F.data == "admin_announce_rollcall_go")
-async def cb_admin_announce_rollcall_go(callback: CallbackQuery):
-    if not (is_admin(callback.from_user.id) or is_payment_admin(callback.from_user.id)):
-        await callback.answer()
-        return
-    await callback.answer("📣 Рассылка запущена!", show_alert=True)
-    recipients = len(stats["total_users"])
-    stats["broadcast_count"] = stats.get("broadcast_count", 0) + 1
-    save_stats()
-    await _broadcast(get_rollcall_announcement_text(), get_rollcall_announcement_keyboard())
-    await safe_edit_text(
-        callback.message,
-        f"✅ Анонс переклички отправлен (попытка охватить {recipients} пользователей).",
-        parse_mode="HTML",
-        reply_markup=get_admin_announcements_keyboard(
-            "admin_panel" if is_admin(callback.from_user.id) else "payment_admin_panel"
-        )
-    )
+    await preview_text_preset(sys.modules[__name__], callback, get_rollcall_announcement_text,
+                              get_rollcall_announcement_keyboard)
 
 # ==================== ПОДДЕРЖКА АВТОРА ====================
 DONATION_PENDING: dict[int, dict] = {}
@@ -2807,17 +2778,11 @@ cb_admin_subscription_prompt = admin_handlers.cb_admin_subscription_prompt
 cb_admin_bulk_subscription_prompt = admin_handlers.cb_admin_bulk_subscription_prompt
 BULK_SUBSCRIPTION_MAX_TARGETS = admin_handlers.BULK_SUBSCRIPTION_MAX_TARGETS
 cb_admin_announce_support_confirm = admin_handlers.cb_admin_announce_support_confirm
-cb_admin_announce_support_go = admin_handlers.cb_admin_announce_support_go
 cb_admin_announce_subscription_confirm = admin_handlers.cb_admin_announce_subscription_confirm
-cb_admin_announce_subscription_go = admin_handlers.cb_admin_announce_subscription_go
 cb_admin_announce_anatomy_confirm = admin_handlers.cb_admin_announce_anatomy_confirm
-cb_admin_announce_anatomy_go = admin_handlers.cb_admin_announce_anatomy_go
 cb_admin_announce_anatomy_exam_confirm = admin_handlers.cb_admin_announce_anatomy_exam_confirm
-cb_admin_announce_anatomy_exam_go = admin_handlers.cb_admin_announce_anatomy_exam_go
 cb_admin_announce_anatomy_latin_confirm = admin_handlers.cb_admin_announce_anatomy_latin_confirm
-cb_admin_announce_anatomy_latin_go = admin_handlers.cb_admin_announce_anatomy_latin_go
 cb_admin_announce_ai_confirm = admin_handlers.cb_admin_announce_ai_confirm
-cb_admin_announce_ai_go = admin_handlers.cb_admin_announce_ai_go
 cb_admin_channel_post_prompt = admin_handlers.cb_admin_channel_post_prompt
 cb_admin_channel_post_go = admin_handlers.cb_admin_channel_post_go
 cb_admin_channel_post_cancel = admin_handlers.cb_admin_channel_post_cancel
@@ -2855,6 +2820,9 @@ async def cmd_admin(message: Message):
         )
         return
     if is_payment_admin(user_id):
+        from services import admin_broadcast
+        admin_broadcast.drafts.pop(user_id, None)
+        ADMIN_PENDING.pop(user_id, None)
         await message.answer(
             get_payment_admin_menu_text(),
             parse_mode="HTML",
@@ -2870,19 +2838,22 @@ async def cmd_admin(message: Message):
 @dp.message(F.text)
 async def handle_admin_pending_action(message: Message):
     admin_id = message.from_user.id
-    if not is_admin(admin_id) or admin_id not in ADMIN_PENDING:
-        raise SkipHandler
     if message.text.startswith("/"):
         raise SkipHandler
 
-    pending = ADMIN_PENDING[admin_id]
+    pending = ADMIN_PENDING.get(admin_id)
+    if pending is None:
+        raise SkipHandler
     action = pending["action"]
 
-    if action == 'broadcast_content':
+    if action in ('broadcast_content', 'broadcast_edit'):
         from services import admin_broadcast
         import telegram_bot as tb
-        await admin_broadcast.receive(tb, message)
+        if not await admin_broadcast.receive(tb, message):
+            raise SkipHandler
         return
+    if not is_admin(admin_id) or action == 'broadcast_preview':
+        raise SkipHandler
 
     if action == 'sbp_resolution':
         text = message.text.strip()

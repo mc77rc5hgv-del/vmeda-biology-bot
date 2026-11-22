@@ -2,7 +2,7 @@
 import asyncio
 import re
 import secrets
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from html import unescape
 
 from aiogram.exceptions import TelegramRetryAfter
@@ -72,7 +72,13 @@ async def _preset_request(method, *args, **kwargs):
 
 async def deliver(bot, chat_id, draft):
     if draft.reply_markup is not None:
-        messages = await _preset_request(bot.send_media_group, chat_id, media=draft.media) if draft.media else None
+        messages = []
+        if len(draft.media) > 1:
+            messages = await _preset_request(bot.send_media_group, chat_id, media=draft.media)
+        elif draft.media:
+            item = draft.media[0]
+            method = bot.send_photo if isinstance(item, InputMediaPhoto) else bot.send_video
+            messages = [await _preset_request(method, chat_id, item.media, caption=item.caption, parse_mode='HTML')]
         await _preset_request(bot.send_message, chat_id, draft.text, parse_mode='HTML',
                               reply_markup=draft.reply_markup, disable_web_page_preview=True)
         return messages
@@ -117,33 +123,127 @@ def can_confirm(tb, admin_id, draft=None):
     return tb.is_admin(admin_id) or bool(draft and draft.allow_payment_admin and tb.is_payment_admin(admin_id))
 
 
+async def preview_text_preset(tb, callback, text, keyboard):
+    user_id = callback.from_user.id
+    if not (tb.is_admin(user_id) or tb.is_payment_admin(user_id)):
+        await callback.answer('Нет доступа', show_alert=True)
+        return
+    if getattr(getattr(callback.message, 'chat', None), 'type', None) != 'private':
+        await callback.answer('Открой анонс в личном чате с ботом.', show_alert=True)
+        return
+    await callback.answer()
+    draft = Draft(secrets.token_hex(8), text(), [], reply_markup=keyboard(), allow_payment_admin=True)
+    await preview_preset(tb, callback.message, draft, user_id)
+
+
 async def preview_preset(tb, message, draft, admin_id):
     if not can_confirm(tb, admin_id, draft):
         return False
-    drafts.pop(admin_id, None)
+    previous = tb.ADMIN_PENDING.get(admin_id)
+    pending = {'action': 'broadcast_preview'}
+    tb.ADMIN_PENDING[admin_id] = pending
     try:
         sent = await deliver(tb.bot, message.chat.id, draft)
+        # Reuse Telegram's file IDs for preset uploads. Attachments from chat already have IDs.
+        cached = []
+        for item, delivered in zip(draft.media, sent, strict=True):
+            if not isinstance(item.media, str):
+                file_id = delivered.photo[-1].file_id if isinstance(item, InputMediaPhoto) else delivered.video.file_id
+                item = item.model_copy(update={'media': file_id})
+            cached.append(item)
+        draft.media = cached
+        if tb.ADMIN_PENDING.get(admin_id) is not pending:
+            return False
+        builder = InlineKeyboardBuilder()
+        builder.button(text='✅ Отправить всем', callback_data='admin_broadcast_go:' + draft.token)
+        builder.button(text='Редактировать текст', callback_data=f'admin_broadcast_edit:text:{draft.token}')
+        builder.button(text='Добавить фото или видео', callback_data=f'admin_broadcast_edit:media:{draft.token}')
         if draft.media:
-            if len(sent) != len(draft.media) or any(not item.photo for item in sent):
-                raise ValueError('Telegram did not return the preset photo album')
-            # Only Telegram file IDs enter the broadcast queue: no repeated local uploads.
-            draft.media = [InputMediaPhoto(media=item.photo[-1].file_id) for item in sent]
+            builder.button(text='Удалить вложения', callback_data=f'admin_broadcast_edit:clear:{draft.token}')
+        builder.button(text='❌ Отмена', callback_data='admin_broadcast_cancel:' + draft.token)
+        builder.adjust(1)
+        await message.answer(
+            f'Предпросмотр анонса · получателей: {len(tb.stats["total_users"])}\n'
+            f'Вложений: {len(draft.media)} из 10. Кнопки анонса сохраняются при редактировании.',
+            reply_markup=builder.as_markup(),
+        )
     except Exception:
         tb.logger.exception('Preset broadcast preview failed')
-        await message.answer('Не удалось показать весь анонс. Рассылка не запускалась; открой предпросмотр ещё раз.')
+        if tb.ADMIN_PENDING.get(admin_id) is pending:
+            if previous is None:
+                tb.ADMIN_PENDING.pop(admin_id, None)
+            else:
+                tb.ADMIN_PENDING[admin_id] = previous
+            await message.answer('Не удалось показать предпросмотр. Попробуй ещё раз.')
+        return False
+    if tb.ADMIN_PENDING.get(admin_id) is not pending:
         return False
     drafts[admin_id] = draft
     tb.ADMIN_PENDING.pop(admin_id, None)
-    builder = InlineKeyboardBuilder()
-    builder.button(text='✅ Отправить всем', callback_data='admin_broadcast_go:' + draft.token)
-    builder.button(text='❌ Отмена', callback_data='admin_broadcast_cancel:' + draft.token)
-    builder.adjust(1)
-    delivery = ('Отправятся оба фото альбомом и текст с кнопками заказа.' if draft.media
-                else 'Отправится сообщение выше вместе с кнопками.')
-    await message.answer(f'👆 Предпросмотр анонса. Получателей: {len(tb.stats["total_users"])}.\n'
-                         f'{delivery}\n'
-                         'Нажми «Отправить всем» для запуска рассылки.', reply_markup=builder.as_markup())
     return True
+
+
+async def edit(tb, callback):
+    admin_id = callback.from_user.id
+    action, _, token = callback.data.removeprefix('admin_broadcast_edit:').partition(':')
+    draft = drafts.get(admin_id)
+    if not can_confirm(tb, admin_id, draft):
+        await callback.answer('Нет доступа', show_alert=True)
+        return
+    if (not draft or draft.reply_markup is None or draft.token != token
+            or getattr(getattr(callback.message, 'chat', None), 'type', None) != 'private'):
+        await callback.answer('Открой актуальный предпросмотр в личном чате с ботом.', show_alert=True)
+        return
+    if tb.ADMIN_PENDING.get(admin_id, {}).get('action') == 'broadcast_preview':
+        await callback.answer('Дождись предпросмотра.', show_alert=True)
+        return
+    if action in ('back', 'clear'):
+        previous = tb.ADMIN_PENDING.get(admin_id)
+        updated = replace(draft, token=secrets.token_hex(8), media=[] if action == 'clear' else draft.media)
+        await callback.answer()
+        if drafts.get(admin_id) is draft and tb.ADMIN_PENDING.get(admin_id) is previous:
+            await preview_preset(tb, callback.message, updated, admin_id)
+        return
+    if action not in ('text', 'media'):
+        await callback.answer()
+        return
+    pending = {'action': 'broadcast_edit', 'mode': action, 'draft': draft}
+    tb.ADMIN_PENDING[admin_id] = pending
+    builder = InlineKeyboardBuilder()
+    builder.button(text='Назад к предпросмотру', callback_data=f'admin_broadcast_edit:back:{token}')
+    await callback.answer()
+    if tb.ADMIN_PENDING.get(admin_id) is pending:
+        prompt = ('Пришли новый текст одним сообщением. Telegram-форматирование сохранится.'
+                  if action == 'text' else 'Пришли фото, видео или альбом. Всего можно прикрепить до 10 файлов.')
+        await callback.message.answer(prompt, reply_markup=builder.as_markup())
+
+
+async def apply_edit(tb, message, messages, pending):
+    admin_id = message.from_user.id
+    draft = pending['draft']
+    if (tb.ADMIN_PENDING.get(admin_id) is not pending or drafts.get(admin_id) is not draft
+            or not can_confirm(tb, admin_id, draft)):
+        return
+    if pending['mode'] == 'text':
+        updated_text = (message.html_text or '').strip() if message.text else ''
+        if not updated_text or visible_length(updated_text) > 4096:
+            await message.answer('Пришли текст одним сообщением, до 4096 символов.')
+            return
+        updated = replace(draft, token=secrets.token_hex(8), text=updated_text)
+    else:
+        if not all(item.photo or item.video for item in messages):
+            await message.answer('Пришли фото, видео или альбом.')
+            return
+        if len(draft.media) + len(messages) > 10:
+            await message.answer(f'В анонсе уже {len(draft.media)} вложений. Лимит — 10. Лишние файлы не добавлены.')
+            return
+        try:
+            attached = build_draft(messages).media
+        except ValueError as exc:
+            await message.answer(str(exc))
+            return
+        updated = replace(draft, token=secrets.token_hex(8), media=[*draft.media, *attached])
+    await preview_preset(tb, message, updated, admin_id)
 
 
 async def collect(tb, message, *, selected=False):
@@ -155,6 +255,7 @@ async def collect(tb, message, *, selected=False):
     if selected:
         bucket['admin'] = message.from_user.id
         bucket['message'] = message
+        bucket['pending'] = tb.ADMIN_PENDING.get(message.from_user.id)
     if bucket['task']:
         bucket['task'].cancel()
 
@@ -162,8 +263,12 @@ async def collect(tb, message, *, selected=False):
         try:
             await asyncio.sleep(ALBUM_DELAY)
             albums.pop(key, None)
-            if bucket['selected'] and tb.ADMIN_PENDING.get(bucket['admin'], {}).get('action') == 'broadcast_content':
-                await preview(tb, bucket['message'], list(bucket['messages'].values()))
+            if bucket['selected'] and tb.ADMIN_PENDING.get(bucket['admin']) is bucket['pending']:
+                messages = list(bucket['messages'].values())
+                if bucket['pending']['action'] == 'broadcast_edit':
+                    await apply_edit(tb, bucket['message'], messages, bucket['pending'])
+                else:
+                    await preview(tb, bucket['message'], messages)
         except asyncio.CancelledError:
             pass
         except Exception:
@@ -174,10 +279,19 @@ async def collect(tb, message, *, selected=False):
 
 async def receive(tb, message, *, command=False):
     admin_id = message.from_user.id
+    pending = tb.ADMIN_PENDING.get(admin_id, {})
+    if not command and pending.get('action') == 'broadcast_edit':
+        if message.chat.type != 'private' or not can_confirm(tb, admin_id, pending['draft']):
+            return False
+        if message.media_group_id and pending['mode'] == 'media':
+            await collect(tb, message, selected=True)
+        else:
+            await apply_edit(tb, message, [message], pending)
+        return True
     if not tb.is_admin(admin_id):
         return False
     selected = command or tb.ADMIN_PENDING.get(admin_id, {}).get('action') == 'broadcast_content'
-    if selected:
+    if command:
         drafts.pop(admin_id, None)
         tb.ADMIN_PENDING[admin_id] = {'action': 'broadcast_content'}
     if message.media_group_id:
@@ -237,16 +351,20 @@ async def confirm(tb, callback):
     if not draft or draft.token != token:
         await callback.answer('Этот предпросмотр уже неактуален.', show_alert=True)
         return
+    if tb.ADMIN_PENDING.get(admin_id, {}).get('action') in ('broadcast_edit', 'broadcast_preview'):
+        await callback.answer('Заверши редактирование и открой новый предпросмотр.', show_alert=True)
+        return
     if busy:
         await callback.answer('Дождись завершения текущей рассылки.', show_alert=True)
         return
     busy = True
+    drafts.pop(admin_id, None)
     try:
         status = await callback.message.answer('⏳ Рассылка запущена…')
     except Exception:
+        drafts.setdefault(admin_id, draft)
         busy = False
         raise
-    drafts.pop(admin_id, None)
     task = asyncio.create_task(send_all(tb, status, draft, tuple(tb.stats['total_users'])))
     jobs.add(task)
     task.add_done_callback(jobs.discard)
@@ -261,6 +379,8 @@ async def cancel(tb, callback):
     draft = drafts.get(callback.from_user.id)
     if draft and draft.token == callback.data.split(':', 1)[1]:
         drafts.pop(callback.from_user.id, None)
+        if tb.ADMIN_PENDING.get(callback.from_user.id, {}).get('action') in ('broadcast_edit', 'broadcast_preview'):
+            tb.ADMIN_PENDING.pop(callback.from_user.id, None)
         await callback.answer('Рассылка отменена')
     else:
         await callback.answer('Этот предпросмотр уже неактуален.')

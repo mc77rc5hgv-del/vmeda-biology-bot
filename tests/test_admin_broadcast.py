@@ -131,6 +131,85 @@ async def main():
     confirm_button = exam_preview.answer.await_args.kwargs['reply_markup'].inline_keyboard[0][0]
     assert confirm_button.callback_data == 'admin_broadcast_go:' + exam.token
     assert tb.stats == before_preview and not b.jobs and not b.busy
+
+    # Each text template enters the same editor with its own public navigation.
+    for key in ('support', 'subscription', 'anatomy', 'anatomy_exam', 'anatomy_latin', 'ai', 'rollcall'):
+        exam_cb.data = f'admin_announce_{key}_confirm'
+        with patch.object(tb, 'ai_provider_available', return_value=True):
+            await getattr(tb, f'cb_admin_announce_{key}_confirm')(exam_cb)
+        template = b.drafts[ADMIN]
+        assert template.text == getattr(tb, f'get_{key}_announcement_text')()
+        assert template.reply_markup == getattr(tb, f'get_{key}_announcement_keyboard')()
+        controls = exam_preview.answer.await_args.kwargs['reply_markup'].inline_keyboard
+        assert f'admin_broadcast_edit:media:{template.token}' in [button.callback_data for row in controls for button in row]
+    exam_cb.data = exam_action
+    await tb.admin_handlers.cb_admin_announce_exam_updates(exam_cb)
+    exam = b.drafts[ADMIN]
+
+    def incoming(mid, *, text=None, kind=None, group=None):
+        source = message(mid, text=text, kind=kind, group=group)
+        return SimpleNamespace(
+            message_id=mid, chat=source.chat, from_user=source.from_user, text=source.text, html_text=source.html_text,
+            media_group_id=source.media_group_id, photo=source.photo, video=source.video, answer=AsyncMock(),
+        )
+
+    exam_cb.data = f'admin_broadcast_edit:text:{exam.token}'
+    await tb.admin_handlers.cb_admin_broadcast_edit(exam_cb)
+    exam_cb.data = f'admin_broadcast_go:{exam.token}'
+    await b.confirm(tb, exam_cb)
+    assert not b.jobs and b.drafts[ADMIN] is exam
+    await tb.handle_admin_pending_action(incoming(24, text='Обновлённый текст & детали'))
+    edited = b.drafts[ADMIN]
+    assert edited.text == 'Обновлённый текст &amp; детали'
+    assert edited.reply_markup == exam.reply_markup and edited.token != exam.token
+    await b.confirm(tb, exam_cb)
+    assert not b.jobs
+    exam_cb.data = f'admin_broadcast_edit:media:{edited.token}'
+    await b.edit(tb, exam_cb)
+    await tb.handle_admin_broadcast_media(incoming(25, kind='video'))
+    with_video = b.drafts[ADMIN]
+    assert [item.media for item in with_video.media] == ['video-25']
+    assert mocked.send_video.await_args.args == (ADMIN, 'video-25')
+    assert mocked.send_message.await_args.kwargs['reply_markup'] == exam.reply_markup
+
+    exam_cb.data = f'admin_broadcast_edit:media:{with_video.token}'
+    await b.edit(tb, exam_cb)
+    mocked.send_media_group.return_value = [message(25, kind='video'), message(26, kind='photo'), message(27, kind='video')]
+    await tb.handle_admin_broadcast_media(incoming(27, kind='video', group='edited'))
+    await tb.handle_admin_broadcast_media(incoming(26, kind='photo', group='edited'))
+    await asyncio.sleep(0.04)
+    complete = b.drafts[ADMIN]
+    assert [item.media for item in complete.media] == ['video-25', 'photo-26', 'video-27']
+    assert complete.reply_markup == exam.reply_markup and complete.text == edited.text
+    exam_cb.data = f'admin_broadcast_edit:media:{complete.token}'
+    await b.edit(tb, exam_cb)
+    oversized = incoming(28, kind='photo')
+    await b.apply_edit(tb, oversized, [oversized] * 8, tb.ADMIN_PENDING[ADMIN])
+    assert b.drafts[ADMIN] is complete and oversized.answer.await_count == 1
+    exam_cb.data = f'admin_broadcast_edit:back:{complete.token}'
+    await b.edit(tb, exam_cb)
+    complete = b.drafts[ADMIN]
+    assert len(complete.media) == 3
+    await b.deliver(mocked, 111, complete)
+    assert mocked.send_media_group.await_args.args == (111,)
+    assert mocked.send_message.await_args.args == (111, complete.text)
+    assert mocked.send_message.await_args.kwargs['reply_markup'] == exam.reply_markup
+    exam_cb.data = f'admin_broadcast_edit:clear:{complete.token}'
+    await b.edit(tb, exam_cb)
+    cleared = b.drafts[ADMIN]
+    assert not cleared.media and cleared.reply_markup == complete.reply_markup and cleared.text == complete.text
+    exam_cb.data = f'admin_broadcast_go:{complete.token}'
+    await b.confirm(tb, exam_cb)
+    assert not b.jobs
+    exam_cb.data = f'admin_broadcast_go:{cleared.token}'
+    with patch.object(b, 'send_all', AsyncMock()) as sent:
+        await b.confirm(tb, exam_cb)
+        await b.confirm(tb, exam_cb)
+        await asyncio.gather(*b.jobs)
+        assert sent.await_count == 1 and sent.await_args.args[2] is cleared
+    b.busy = False
+    assert tb.stats == before_preview
+
     # Text-stage rate limiting must not resend the two photos.
     mocked.send_media_group.reset_mock(); mocked.send_message.reset_mock()
     mocked.send_message.side_effect = [TelegramRetryAfter(method=SendPhoto(chat_id=111,photo='photo'),message='Retry',retry_after=0),None]

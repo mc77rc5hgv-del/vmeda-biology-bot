@@ -1348,11 +1348,6 @@ async def main():
     print("subscription callbacks (incl. the new course screens) exempt from referral gate: OK")
 
     # 26. Admin subscription-announcement broadcast: preview -> confirm -> broadcast
-    orig_broadcast = tb._broadcast
-    broadcast_calls = []
-    async def fake_broadcast(text, keyboard=None):
-        broadcast_calls.append((text, keyboard))
-    tb._broadcast = fake_broadcast
 
     ann_text = tb.get_subscription_announcement_text()
     check_html(ann_text)
@@ -1364,32 +1359,9 @@ async def main():
     assert kb_texts(ann_kb)[0] == "💎 Подписка без рефералов"
     assert ann_kb.inline_keyboard[0][0].callback_data == "subscription_menu"
 
-    cb_ann1 = FakeCB("admin_announce_subscription_confirm")
-    await tb.cb_admin_announce_subscription_confirm(cb_ann1)
-    assert cb_ann1.message.edits and "Отправить" in cb_ann1.message.edits[0][0]
-    assert not broadcast_calls, "must not broadcast before confirmation"
-
-    broadcasts_before = tb.stats.get("broadcast_count", 0)
-    cb_ann2 = FakeCB("admin_announce_subscription_go")
-    await tb.cb_admin_announce_subscription_go(cb_ann2)
-    assert broadcast_calls, "expected broadcast to be sent"
-    assert broadcast_calls[0][0] == ann_text
-    assert tb.stats["broadcast_count"] == broadcasts_before + 1
-    assert cb_ann2.message.edits and "отправлено" in cb_ann2.message.edits[0][0]
-
-    cb_ann3 = FakeCB("admin_announce_subscription_confirm", uid=non_admin)
-    await tb.cb_admin_announce_subscription_confirm(cb_ann3)
-    assert not cb_ann3.message.edits, "non-admin must be blocked"
-
-    tb._broadcast = orig_broadcast
-    print("admin subscription-announcement broadcast lists only active tiers, excludes retired ones: OK")
+    print("subscription announcement lists only active tiers: OK")
 
     # 26b. Admin Anatomy-section announcement broadcast: preview -> confirm -> broadcast
-    orig_broadcast2 = tb._broadcast
-    anatomy_broadcast_calls = []
-    async def fake_broadcast2(text, keyboard=None):
-        anatomy_broadcast_calls.append((text, keyboard))
-    tb._broadcast = fake_broadcast2
 
     anat_ann_text = tb.get_anatomy_announcement_text()
     check_html(anat_ann_text)
@@ -1406,25 +1378,7 @@ async def main():
     assert "subscription_menu" in anat_ann_data
     assert "anatomy_root" in anat_ann_data
 
-    cb_anat1 = FakeCB("admin_announce_anatomy_confirm")
-    await tb.cb_admin_announce_anatomy_confirm(cb_anat1)
-    assert cb_anat1.message.edits and "Отправить" in cb_anat1.message.edits[0][0]
-    assert not anatomy_broadcast_calls, "must not broadcast before confirmation"
-
-    broadcasts_before2 = tb.stats.get("broadcast_count", 0)
-    cb_anat2 = FakeCB("admin_announce_anatomy_go")
-    await tb.cb_admin_announce_anatomy_go(cb_anat2)
-    assert anatomy_broadcast_calls, "expected broadcast to be sent"
-    assert anatomy_broadcast_calls[0][0] == anat_ann_text
-    assert tb.stats["broadcast_count"] == broadcasts_before2 + 1
-    assert cb_anat2.message.edits and "отправлен" in cb_anat2.message.edits[0][0]
-
-    cb_anat3 = FakeCB("admin_announce_anatomy_confirm", uid=non_admin)
-    await tb.cb_admin_announce_anatomy_confirm(cb_anat3)
-    assert not cb_anat3.message.edits, "non-admin must be blocked"
-
-    tb._broadcast = orig_broadcast2
-    print("admin Anatomy-announcement broadcast lists only anatomy-granting active tiers: OK")
+    print("Anatomy announcement lists only anatomy-granting active tiers: OK")
 
     # 26c. Admin panel groups all announcement broadcasts under one "Анонсы" submenu button
     admin_menu_texts = kb_texts(tb.get_admin_menu())
@@ -1446,11 +1400,6 @@ async def main():
     print("cb_admin_announcements_menu renders the submenu, non-admin blocked: OK")
 
     # 26c2. Admin Anatomy-exam announcement broadcast (ТЕСТ/теория/практика): preview -> confirm -> broadcast
-    orig_broadcast_exam = tb._broadcast
-    exam_broadcast_calls = []
-    async def fake_broadcast_exam(text, keyboard=None):
-        exam_broadcast_calls.append((text, keyboard))
-    tb._broadcast = fake_broadcast_exam
 
     exam_ann_text = tb.get_anatomy_exam_announcement_text()
     check_html(exam_ann_text)
@@ -1461,33 +1410,9 @@ async def main():
     assert "anatomy_exam_practice" in exam_ann_data
     assert "anatomy_exam_test_leaderboard" in exam_ann_data
 
-    cb_exam1 = FakeCB("admin_announce_anatomy_exam_confirm")
-    await tb.cb_admin_announce_anatomy_exam_confirm(cb_exam1)
-    assert cb_exam1.message.edits and "Отправить" in cb_exam1.message.edits[0][0]
-    assert not exam_broadcast_calls, "must not broadcast before confirmation"
-
-    broadcasts_before_exam = tb.stats.get("broadcast_count", 0)
-    cb_exam2 = FakeCB("admin_announce_anatomy_exam_go")
-    await tb.cb_admin_announce_anatomy_exam_go(cb_exam2)
-    assert exam_broadcast_calls, "expected broadcast to be sent"
-    assert exam_broadcast_calls[0][0] == exam_ann_text
-    assert tb.stats["broadcast_count"] == broadcasts_before_exam + 1
-    assert cb_exam2.message.edits and "отправлен" in cb_exam2.message.edits[0][0]
-
-    cb_exam3 = FakeCB("admin_announce_anatomy_exam_confirm", uid=non_admin)
-    await tb.cb_admin_announce_anatomy_exam_confirm(cb_exam3)
-    assert not cb_exam3.message.edits, "non-admin must be blocked"
-
-    tb._broadcast = orig_broadcast_exam
     assert "📣 Анонс Экзамена (ТЕСТ/теория/практика)" in kb_texts(tb.get_admin_announcements_keyboard())
-    print("admin Anatomy-exam-announcement broadcast + Announcements submenu button: OK")
 
     # 26d. Admin announcement for the global Latin-terminology quiz: preview -> confirm -> broadcast
-    orig_broadcast3 = tb._broadcast
-    latin_broadcast_calls = []
-    async def fake_broadcast3(text, keyboard=None):
-        latin_broadcast_calls.append((text, keyboard))
-    tb._broadcast = fake_broadcast3
 
     latin_ann_text = tb.get_anatomy_latin_announcement_text()
     check_html(latin_ann_text)
@@ -1496,26 +1421,7 @@ async def main():
     assert "anatomy_latin_all_start" in latin_ann_data
     assert "anatomy_latin_leaderboard" in latin_ann_data
 
-    cb_latin1 = FakeCB("admin_announce_anatomy_latin_confirm")
-    await tb.cb_admin_announce_anatomy_latin_confirm(cb_latin1)
-    assert cb_latin1.message.edits and "Отправить" in cb_latin1.message.edits[0][0]
-    assert not latin_broadcast_calls, "must not broadcast before confirmation"
-
-    broadcasts_before3 = tb.stats.get("broadcast_count", 0)
-    cb_latin2 = FakeCB("admin_announce_anatomy_latin_go")
-    await tb.cb_admin_announce_anatomy_latin_go(cb_latin2)
-    assert latin_broadcast_calls, "expected broadcast to be sent"
-    assert latin_broadcast_calls[0][0] == latin_ann_text
-    assert tb.stats["broadcast_count"] == broadcasts_before3 + 1
-    assert cb_latin2.message.edits and "отправлен" in cb_latin2.message.edits[0][0]
-
-    cb_latin3 = FakeCB("admin_announce_anatomy_latin_confirm", uid=non_admin)
-    await tb.cb_admin_announce_anatomy_latin_confirm(cb_latin3)
-    assert not cb_latin3.message.edits, "non-admin must be blocked"
-
-    tb._broadcast = orig_broadcast3
     assert "📣 Анонс теста по латыни" in kb_texts(tb.get_admin_announcements_keyboard())
-    print("admin Latin-quiz announcement broadcast + Announcements submenu button: OK")
 
     # 26e. Admin VMedA AI announcement broadcast: maintenance-mode block, then preview -> confirm -> broadcast
     orig_openai_key = tb.OPENAI_API_KEY
@@ -1527,11 +1433,6 @@ async def main():
     assert cb_ai_maint._answers and cb_ai_maint._answers[0][1] is True  # show_alert
 
     tb.OPENAI_API_KEY = "fake-key-for-tests"
-    orig_broadcast4 = tb._broadcast
-    ai_broadcast_calls = []
-    async def fake_broadcast4(text, keyboard=None):
-        ai_broadcast_calls.append((text, keyboard))
-    tb._broadcast = fake_broadcast4
 
     ai_ann_text = tb.get_ai_announcement_text()
     check_html(ai_ann_text)
@@ -1540,27 +1441,8 @@ async def main():
     assert "ai_menu" in ai_ann_data
     assert "subscription_menu" in ai_ann_data
 
-    cb_ai1 = FakeCB("admin_announce_ai_confirm")
-    await tb.cb_admin_announce_ai_confirm(cb_ai1)
-    assert cb_ai1.message.edits and "Отправить" in cb_ai1.message.edits[0][0]
-    assert not ai_broadcast_calls, "must not broadcast before confirmation"
-
-    broadcasts_before4 = tb.stats.get("broadcast_count", 0)
-    cb_ai2 = FakeCB("admin_announce_ai_go")
-    await tb.cb_admin_announce_ai_go(cb_ai2)
-    assert ai_broadcast_calls, "expected broadcast to be sent"
-    assert ai_broadcast_calls[0][0] == ai_ann_text
-    assert tb.stats["broadcast_count"] == broadcasts_before4 + 1
-    assert cb_ai2.message.edits and "отправлен" in cb_ai2.message.edits[0][0]
-
-    cb_ai3 = FakeCB("admin_announce_ai_confirm", uid=non_admin)
-    await tb.cb_admin_announce_ai_confirm(cb_ai3)
-    assert not cb_ai3.message.edits, "non-admin must be blocked"
-
-    tb._broadcast = orig_broadcast4
     tb.OPENAI_API_KEY, tb.ai_gemini.GEMINI_API_KEY = orig_openai_key, orig_gemini_key
     assert "📣 Анонс VMedA AI" in kb_texts(tb.get_admin_announcements_keyboard())
-    print("admin VMedA AI announcement broadcast + Announcements submenu button: OK")
 
     # 27. Menu order: active tiers appear in ascending price order (menu_number), 20 first, 28
     # (the most expensive, "Вся академия") last — tier 29 ("5 лет", cheaper than 28) sits just
