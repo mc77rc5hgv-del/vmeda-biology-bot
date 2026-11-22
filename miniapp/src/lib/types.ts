@@ -75,7 +75,6 @@ export interface MaterialRef {
   subjectId: string;
   sectionId: string;
   title: string;
-  status: ProgressStatus;
   /** Порядковый номер темы и общее число тем раздела — "Тема 12 из 18" на карточке продолжения. */
   order: number;
   totalInSection: number;

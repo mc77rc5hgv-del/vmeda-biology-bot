@@ -1,4 +1,5 @@
 import { notifySubscriptionRequired } from "./subscriptions";
+import { subjectMeta } from "./subjectRegistry";
 // Тонкий слой поверх настоящего web_api (см. web_api/README.md в репозитории бота) — единственное
 // место, которое знает про формат данных на проводе (snake_case, ровно как в web_api/schemas.py)
 // и переводит его в app-типы из lib/types.ts. lib/api.ts (диспетчер, решающий mock vs реальный
@@ -353,9 +354,9 @@ export function mergeProfile(authProfile: AuthProfile, me: RealMe): UserProfile 
 }
 
 // ==================== контент (только реально подключённые предметы) ====================
-// См. web_api/content.py на бэкенде -- сегодня это ровно Биохимия/Фармакология/Латынь/
-// Правоведение (generated_courses/*.json). Любой другой subject_id вернёт 404 -- lib/api.ts сам
-// решает, для кого вообще пробовать эти вызовы, здесь только чистая передача.
+// См. web_api/routers/subjects.py на бэкенде. Для неподключённого subject_id вернётся 404 --
+// lib/api.ts сам решает (флаг realBacked в subjectRegistry.ts), для кого вообще пробовать эти
+// вызовы, здесь только чистая передача.
 
 interface SubjectSummaryWire {
   id: string;
@@ -372,25 +373,11 @@ interface SubjectDetailWire extends SubjectSummaryWire {
   sections: Array<{ id: string; title: string; item_count: number; kind: "flat" | "grouped" }>;
 }
 
-const ACCENT_BY_SUBJECT_ID: Record<string, string> = {
-  biochemistry: "biochemistry",
-  pharmacology: "pharmacology",
-  latin: "latin",
-  law: "law",
-  physiology: "physiology",
-  operative_surgery: "operative-surgery",
-  anatomy: "anatomy",
-  histology: "histology",
-  biology: "biology",
-  chemistry: "chemistry",
-  physics: "physics",
-};
-
 function toSubjectSummary(wire: SubjectSummaryWire): SubjectSummary {
   return {
     id: wire.id,
     title: wire.title,
-    accent: ACCENT_BY_SUBJECT_ID[wire.id] ?? "biochemistry",
+    accent: subjectMeta(wire.id)?.accent ?? "biochemistry",
     tag: wire.maintenance ? "Техобслуживание" : (wire.has_ai ? "VMEDA AI" : "Курс"),
     course: wire.course,
     readiness: null, // прогресс/готовность для реальных предметов ещё не подключены (см. README web_api)
@@ -768,7 +755,6 @@ export async function fetchRealMaterial(
     subjectId,
     sectionId,
     title: wire.title,
-    status: "in_progress", // прогресс для реальных предметов ещё не подключён, см. README web_api
     order: wire.order,
     totalInSection: wire.total,
     groupId: wire.group_id,

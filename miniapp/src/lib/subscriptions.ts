@@ -1,6 +1,8 @@
-export const paidSubjectTitles: Record<string, string> = {
-  biology: "Биология", physics: "Физика", chemistry: "Химия", anatomy: "Анатомия", histology: "Гистология",
-};
+import { SUBJECTS } from "./subjectRegistry";
+
+export const paidSubjectTitles: Record<string, string> = Object.fromEntries(
+  Object.entries(SUBJECTS).filter(([, meta]) => meta.paid).map(([id, meta]) => [id, meta.title]),
+);
 
 export function subscriptionPath(subjectId: string, returnTo: string): string {
   const params = new URLSearchParams({ subject: subjectId, returnTo: subscriptionReturnPath(returnTo) });

@@ -1,12 +1,13 @@
 // Диспетчер: каждая функция здесь пробует НАСТОЯЩИЙ web_api, если он реально что-то знает про
 // запрошенное (см. REAL_BACKED_SUBJECT_IDS ниже), и использует mockData.ts, если
 // нет — либо потому что backend не подключён вообще (нет сессии), либо потому что конкретный
-// предмет ещё не имеет контент-адаптера на бэкенде (6 из 11 предметов, см. web_api/README.md).
+// предмет ещё не имеет контент-адаптера на бэкенде (флаг realBacked в lib/subjectRegistry.ts).
 // Компоненты про это ветвление не знают — они видят только эти функции.
 import * as apiClient from "./apiClient";
 import type { AiSolveInput, AiSolveResult } from "./apiClient";
 import * as mock from "./mockData";
 import { useAuthStore } from "./store";
+import { subjectIdsWhere } from "./subjectRegistry";
 import type {
   AccessStatus,
   AnatomyExamAnswerResult,
@@ -35,13 +36,9 @@ function resolveAfterDelay<T>(value: T): Promise<T> {
   return new Promise((resolve) => setTimeout(() => resolve(value), MOCK_DELAY_MS));
 }
 
-// См. web_api/content.py -- список предметов, у которых есть настоящий контент-адаптер. Держать
-// синхронно с REPO_ROOT/web_api/routers/subjects.py вручную -- backend не отдаёт "список
-// подключённых предметов" отдельным полем, а этот список статичен и меняется редко.
-const REAL_BACKED_SUBJECT_IDS = new Set([
-  "biochemistry", "pharmacology", "latin", "law", "physiology", "operative_surgery", "anatomy",
-  "histology", "biology", "chemistry", "physics",
-]);
+// Предметы с настоящим контент-адаптером (web_api/routers/subjects.py). Backend не отдаёт этот
+// список отдельным полем, поэтому флаг realBacked в реестре держится синхронно с ним вручную.
+const REAL_BACKED_SUBJECT_IDS = new Set(subjectIdsWhere((meta) => meta.realBacked));
 
 export function isRealBackedSubject(subjectId: string): boolean {
   return REAL_BACKED_SUBJECT_IDS.has(subjectId);

@@ -4,15 +4,26 @@ import assert from 'node:assert/strict';
 import ts from 'typescript';
 
 const events = [];
-const context = {
-  exports: {}, URL, URLSearchParams,
+const globals = {
+  URL, URLSearchParams,
   window: { dispatchEvent: event => events.push(event) },
   CustomEvent: class { constructor(type, config) { this.type = type; this.detail = config.detail; } },
 };
-vm.runInNewContext(ts.transpileModule(readFileSync(new URL('../src/lib/subscriptions.ts', import.meta.url), 'utf8'), {
-  compilerOptions: { module: ts.ModuleKind.CommonJS },
-}).outputText, context);
-const api = context.exports;
+const loaded = new Map();
+function load(name) {
+  if (!loaded.has(name)) {
+    const context = { ...globals, exports: {}, require: path => load(path.replace(/^\.\//, '')) };
+    loaded.set(name, context.exports);
+    vm.runInNewContext(ts.transpileModule(readFileSync(new URL(`../src/lib/${name}.ts`, import.meta.url), 'utf8'), {
+      compilerOptions: { module: ts.ModuleKind.CommonJS },
+    }).outputText, context);
+    loaded.set(name, context.exports);
+  }
+  return loaded.get(name);
+}
+const api = load('subscriptions');
+assert.deepEqual(Object.keys(api.paidSubjectTitles).sort(), ['anatomy', 'biology', 'chemistry', 'histology', 'physics']);
+assert.equal(api.paidSubjectTitles.histology, 'Гистология');
 for (const value of ['https://bad.example', '//bad.example', '/profile/subscriptions', '/subjects/../profile']) {
   assert.equal(api.subscriptionReturnPath(value), '/profile');
 }

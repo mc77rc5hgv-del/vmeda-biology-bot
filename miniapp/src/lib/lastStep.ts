@@ -1,18 +1,13 @@
 import { create } from "zustand";
 import type { ContinueItem } from "./types";
-
-const titles: Record<string, string> = {
-  anatomy: "Анатомия", histology: "Гистология", chemistry: "Химия",
-  biology: "Биология", latin: "Латинский язык", law: "Правоведение", physics: "Физика",
-  physiology: "Нормальная физиология", operative_surgery: "Оперативная хирургия",
-  biochemistry: "Биохимия", pharmacology: "Фармакология",
-};
+import { subjectMeta } from "./subjectRegistry";
 
 export function stepFromPath(path: string): ContinueItem | null {
   const match = path.match(/^\/(subjects|materials|tests)\/([\w-]+)(?:\/[^?#]*)?$/);
   const histology = path.match(/^\/histology\/(diagnostics|specimens\/[^/?#]+|exam(?:\/(?:specimens|guess|tests(?:\/[^/?#]+)?|theory(?:\/\d+)?))?)$/);
   const subjectId = match?.[2] ?? (histology ? "histology" : "");
-  if (!titles[subjectId]) return null;
+  const subjectTitle = subjectMeta(subjectId)?.title;
+  if (!subjectTitle) return null;
   const sectionTitle = path === "/histology/exam" ? "Экзамен"
     : path === "/histology/diagnostics" ? "Диагностики"
     : path === "/histology/exam/specimens" ? "Препараты"
@@ -23,7 +18,7 @@ export function stepFromPath(path: string): ContinueItem | null {
     : match?.[1] === "tests" ? "Тестирование"
     : match?.[1] === "materials" ? "Учебный материал"
     : path.includes("/sections/") ? "Учебный раздел" : "Подготовка по предмету";
-  return { path, subjectId, subjectTitle: titles[subjectId], sectionTitle,
+  return { path, subjectId, subjectTitle, sectionTitle,
     materialTitle: sectionTitle, order: 0, totalInSection: 0 };
 }
 
