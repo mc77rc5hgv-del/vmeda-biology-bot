@@ -545,6 +545,7 @@ async def main():
     # 12. Subscription menu ("📦 Все тарифы") only lists the active tiers, never the 11 retired ones
     menu_text = tb.get_subscription_menu_text(non_admin)
     check_html(menu_text)
+    assert "с декабря 2026 года" in menu_text and "с сентября" not in menu_text
     for cfg in tb.ACTIVE_SUBSCRIPTION_TIERS.values():
         assert cfg["title"] in menu_text
         assert str(cfg["price_rub"]) in menu_text
@@ -564,6 +565,7 @@ async def main():
     for tier_id in ACTIVE_TIERS:
         tier_text = tb.get_sub_tier_text(tier_id)
         check_html(tier_text)
+        assert "с декабря 2026 года" in tier_text and "с сентября" not in tier_text
     print("every active tier's detail screen renders: OK")
 
     # 13. Per-tier screens: subject-choice tier (new tier 20) shows subject buttons, not payment buttons directly
@@ -585,20 +587,21 @@ async def main():
         assert any("Оплатить" in t and "₽" in t for t in tt)
     print("non-subject-choice active tiers offer direct payment buttons: OK")
 
-    # 13b. Upsell: every active tier except the most expensive one offers the next tier up
+    # 13b. The winter plan offers a longer second-year plan. Other tiers keep their price order.
     price_sorted = sorted(ACTIVE_TIERS, key=lambda t: tb.SUBSCRIPTION_TIERS[t]["price_rub"])
     top_tier = price_sorted[-1]
     assert top_tier == 28
     for i, tier_id in enumerate(price_sorted[:-1]):
-        nxt_id = price_sorted[i + 1]
+        nxt_id = 26 if tier_id == 24 else price_sorted[i + 1]
         upsell_text = tb.get_tier_upsell_text(tier_id)
         assert "Выгоднее" in upsell_text
         assert str(tb.SUBSCRIPTION_TIERS[nxt_id]["price_rub"]) in upsell_text
         upsell_kb = tb.get_tier_upsell_keyboard(tier_id)
         assert upsell_kb is not None
+        assert kb_data(upsell_kb) == [f"sub_tier:{nxt_id}"]
     assert tb.get_tier_upsell_text(top_tier) == ""
     assert tb.get_tier_upsell_keyboard(top_tier) is None
-    print("tier upsell dynamically points at the next-more-expensive active tier: OK")
+    print("winter tier points to the second-year plan; other upsells follow price order: OK")
 
     # 14. Rubles flow: deep-link keyboard and message text for all active tiers
     for tier_id in ACTIVE_TIERS:
@@ -695,6 +698,7 @@ async def main():
     cb_subj = FakeCB("sub_subject:20:biology", uid=non_admin)
     await tb.cb_sub_subject(cb_subj)
     assert cb_subj.message.edits and "Биологии" in cb_subj.message.edits[0][0]
+    assert "с декабря 2026 года" in cb_subj.message.edits[0][0]
     subj_kb_data = kb_data(cb_subj.message.edits[0][1])
     assert "buy_sub_stars_subj:20:biology" in subj_kb_data
     assert "buy_sub_rubles_subj:20:biology" in subj_kb_data
@@ -1700,6 +1704,7 @@ async def main():
     await tb.cb_subscription_course(cb_y2)
     y2_text, y2_kb = cb_y2.message.edits[0]
     check_html(y2_text)
+    assert "с декабря 2026 года" in y2_text
     y2_tier_ids = [d.split(":")[1] for d in kb_data(y2_kb) if d.startswith("sub_tier:")]
     is_autumn = time.time() < tb.NOV_1_2026_CUTOFF
     expected_ids = tb.SECOND_YEAR_AUTUMN_TIER_IDS if is_autumn else tb.SECOND_YEAR_WINTER_TIER_IDS

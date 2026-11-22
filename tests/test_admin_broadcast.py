@@ -122,6 +122,7 @@ async def main():
     exam = b.drafts[ADMIN]
     shortcuts = [[button.callback_data for button in row] for row in exam.reply_markup.inline_keyboard]
     assert shortcuts == [['histology_exam'], ['anatomy_exam_test_menu'], ['sub_tier:24']]
+    assert exam.reply_markup.inline_keyboard[2][0].text == 'Зимняя сессия подписка'
     assert 24 in tb.ACTIVE_SUBSCRIPTION_TIERS
     assert sum(len(part['questions']) for part in tb.ANATOMY_EXAM_TEST_PARTS) == 1073
     assert mocked.send_message.await_args.args == (ADMIN, exam.text)

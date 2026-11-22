@@ -496,6 +496,7 @@ SUBSCRIPTION_TIERS = {
         "emoji": "🧠",
         "price_rub": 599,
         "price_stars": 599,
+        "upsell_tier_id": 26,
         "duration_days": None,
         "expires_at": MAR_1_2027_CUTOFF,
         "subject_choice_required": False,
@@ -690,7 +691,8 @@ ACTIVE_SUBSCRIPTION_TIERS = {
 # выше про "никогда не переиспользовать id снятого с продажи тарифа".
 ADMIN_GRANTABLE_TIERS = {t: cfg for t, cfg in SUBSCRIPTION_TIERS.items() if not cfg.get("retired")}
 
-SEPTEMBER_PRICE_INCREASE = 1.4  # с сентября цены на все тарифы вырастут на 40%
+SUBSCRIPTION_PRICE_NOTE = "Зачёркнутая цена — планируемая цена с декабря 2026 года."
+SEPTEMBER_PRICE_INCREASE = 1.4  # Историческое имя коэффициента зачёркнутой цены.
 
 def september_price(price: int) -> int:
     return round(price * SEPTEMBER_PRICE_INCREASE)
@@ -701,7 +703,7 @@ def discount_price(price: int) -> int:
     return round(price * (1 - DISCOUNT_RATE))
 
 def get_tier_price_line(cfg: dict) -> str:
-    """Текущая цена + зачёркнутая цена на 40% выше — с сентября будет дороже."""
+    """Текущая и зачёркнутая планируемая цена для витрины подписок."""
     return (
         f"<b>{cfg['price_rub']}₽</b> <s>{september_price(cfg['price_rub'])}₽</s> / "
         f"<b>{cfg['price_stars']}⭐</b> <s>{september_price(cfg['price_stars'])}⭐</s>"
