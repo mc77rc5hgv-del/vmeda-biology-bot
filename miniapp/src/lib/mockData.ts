@@ -144,7 +144,6 @@ export function getMaterial(subjectId: string, sectionId: string, materialId: st
     subjectId,
     sectionId,
     title: `Тема ${materialId}`,
-    status: "in_progress",
     order: Number(materialId) || 1,
     totalInSection: section.itemCount || 1,
     blocks: [

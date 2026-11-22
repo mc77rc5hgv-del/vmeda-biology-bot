@@ -21,6 +21,7 @@ import { fetchSubjects, fetchSubscriptionSummary, solveAiTask } from "../lib/api
 import { ApiError } from "../lib/apiClient";
 import { hapticImpact, useTelegramBackButton } from "../lib/telegram";
 import { Icon } from "../components/Icon";
+import { Skeleton } from "../components/Skeleton";
 import styles from "./Ai.module.css";
 
 type Mode = "photo" | "text";
@@ -254,8 +255,16 @@ export function AiPage() {
           </div>
         </div>
 
+        {subjectsQuery.isError && (
+          <button type="button" className={styles.subjectChip} onClick={() => subjectsQuery.refetch()}>
+            <Icon icon={RefreshCw} size={14} /> Не удалось загрузить предметы — повторить
+          </button>
+        )}
         <div className={styles.subjectRail}>
           <div className={styles.subjectRow} role="tablist" aria-label="Предмет">
+            {subjectsQuery.isLoading && Array.from({ length: 3 }).map((_, index) => (
+              <Skeleton key={index} height={42} width="120px" radius="999px" />
+            ))}
             {availableSubjects.map((subject) => (
               <button
                 key={subject.id}
