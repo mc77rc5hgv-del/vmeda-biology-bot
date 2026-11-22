@@ -108,6 +108,28 @@ async def main():
     await tb.admin_handlers.cb_admin_announce_badges_confirm(outsider_cb)
     assert mocked.send_media_group.await_count == count
     assert outsider_cb.answer.await_args.kwargs['show_alert'] is True
+    # The exam announcement previews the exact text and buttons in the admin's private chat.
+    exam_action = 'admin_announce_exam_updates'
+    assert any(button.callback_data == exam_action for row in menu.inline_keyboard for button in row)
+    exam_preview = SimpleNamespace(chat=SimpleNamespace(id=ADMIN, type='private'), answer=AsyncMock())
+    exam_cb = SimpleNamespace(from_user=SimpleNamespace(id=outsider), data=exam_action,
+                              message=exam_preview, answer=AsyncMock())
+    mocked.send_message.reset_mock()
+    await tb.admin_handlers.cb_admin_announce_exam_updates(exam_cb)
+    assert not mocked.send_message.called and outsider not in b.drafts
+    exam_cb.from_user.id = ADMIN
+    await tb.admin_handlers.cb_admin_announce_exam_updates(exam_cb)
+    exam = b.drafts[ADMIN]
+    shortcuts = [[button.callback_data for button in row] for row in exam.reply_markup.inline_keyboard]
+    assert shortcuts == [['histology_exam'], ['anatomy_exam_test_menu'], ['sub_tier:24']]
+    assert 24 in tb.ACTIVE_SUBSCRIPTION_TIERS
+    assert sum(len(part['questions']) for part in tb.ANATOMY_EXAM_TEST_PARTS) == 1073
+    assert mocked.send_message.await_args.args == (ADMIN, exam.text)
+    assert mocked.send_message.await_args.kwargs['reply_markup'] == exam.reply_markup
+    assert mocked.send_media_group.await_count == count
+    confirm_button = exam_preview.answer.await_args.kwargs['reply_markup'].inline_keyboard[0][0]
+    assert confirm_button.callback_data == 'admin_broadcast_go:' + exam.token
+    assert tb.stats == before_preview and not b.jobs and not b.busy
     # Text-stage rate limiting must not resend the two photos.
     mocked.send_media_group.reset_mock(); mocked.send_message.reset_mock()
     mocked.send_message.side_effect = [TelegramRetryAfter(method=SendPhoto(chat_id=111,photo='photo'),message='Retry',retry_after=0),None]

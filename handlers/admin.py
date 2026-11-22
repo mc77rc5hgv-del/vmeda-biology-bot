@@ -21,6 +21,7 @@ ADMIN_PENDING/ADMIN_CHANNEL_POST_PREVIEW/ASSISTANT_PENDING/ASSISTANT_DM_REQUESTS
 import asyncio
 import os
 import re
+import secrets
 import time
 from html import escape
 
@@ -180,6 +181,7 @@ def get_admin_announcements_keyboard(back_callback: str = "admin_panel"):
     cb_admin_announcements_menu, который выбирает нужное значение."""
     builder = InlineKeyboardBuilder()
     builder.button(text="📝 Создать рассылку (текст, фото, видео)", callback_data="admin_broadcast_prompt")
+    builder.button(text="Новое в гистологии и анатомии", callback_data="admin_announce_exam_updates")
     builder.button(text="🪪 Анонс медицинских бейджиков", callback_data="admin_announce_badges_confirm")
     builder.button(text="📣 Оповещение о подписке", callback_data="admin_announce_subscription_confirm")
     builder.button(text="📣 Анонс раздела поддержки", callback_data="admin_announce_support_confirm")
@@ -632,6 +634,36 @@ async def cb_admin_announcements_menu(callback: CallbackQuery):
         parse_mode="HTML",
         reply_markup=get_admin_announcements_keyboard(back_callback)
     )
+
+@router.callback_query(F.data == "admin_announce_exam_updates")
+async def cb_admin_announce_exam_updates(callback: CallbackQuery):
+    from services.admin_broadcast import Draft, preview_preset
+
+    user_id = callback.from_user.id
+    if not (tb.is_admin(user_id) or tb.is_payment_admin(user_id)):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    if callback.message.chat.type != "private":
+        await callback.answer("Открой админ-панель в личном чате с ботом.", show_alert=True)
+        return
+
+    text = (
+        "<b>Гистология и анатомия: что нового к экзамену</b>\n\n"
+        "<b>Гистология.</b> Научись узнавать препараты по снимку. В разделе 50 препаратов с протоколами, "
+        "тренажёр «Угадай препарат», 518 тестовых вопросов и ответы на 100 вопросов по теории.\n\n"
+        "<b>Анатомия.</b> Решай 1 073 вопроса по темам. Можно вернуться к предыдущему вопросу, "
+        "разобрать ошибку и понять, почему правильный вариант подходит.\n\n"
+        "<b>На 2-м курсе?</b> Анатомия и гистология входят в подписку «Зимняя сессия»."
+    )
+    builder = InlineKeyboardBuilder()
+    builder.button(text="Гистология · экзамен", callback_data="histology_exam")
+    builder.button(text="Анатомия · тесты", callback_data="anatomy_exam_test_menu")
+    builder.button(text="Зимняя сессия · Купить", callback_data="sub_tier:24")
+    builder.adjust(1)
+    draft = Draft(secrets.token_hex(8), text, [], reply_markup=builder.as_markup(), allow_payment_admin=True)
+    await callback.answer()
+    await preview_preset(tb, callback.message, draft, user_id)
+
 
 @router.callback_query(F.data == "admin_battle_last_results")
 async def cb_admin_battle_last_results(callback: CallbackQuery):

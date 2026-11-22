@@ -72,7 +72,7 @@ async def _preset_request(method, *args, **kwargs):
 
 async def deliver(bot, chat_id, draft):
     if draft.reply_markup is not None:
-        messages = await _preset_request(bot.send_media_group, chat_id, media=draft.media)
+        messages = await _preset_request(bot.send_media_group, chat_id, media=draft.media) if draft.media else None
         await _preset_request(bot.send_message, chat_id, draft.text, parse_mode='HTML',
                               reply_markup=draft.reply_markup, disable_web_page_preview=True)
         return messages
@@ -123,10 +123,11 @@ async def preview_preset(tb, message, draft, admin_id):
     drafts.pop(admin_id, None)
     try:
         sent = await deliver(tb.bot, message.chat.id, draft)
-        if len(sent) != len(draft.media) or any(not item.photo for item in sent):
-            raise ValueError('Telegram did not return the preset photo album')
-        # Only Telegram file IDs enter the broadcast queue: no repeated local uploads.
-        draft.media = [InputMediaPhoto(media=item.photo[-1].file_id) for item in sent]
+        if draft.media:
+            if len(sent) != len(draft.media) or any(not item.photo for item in sent):
+                raise ValueError('Telegram did not return the preset photo album')
+            # Only Telegram file IDs enter the broadcast queue: no repeated local uploads.
+            draft.media = [InputMediaPhoto(media=item.photo[-1].file_id) for item in sent]
     except Exception:
         tb.logger.exception('Preset broadcast preview failed')
         await message.answer('Не удалось показать весь анонс. Рассылка не запускалась; открой предпросмотр ещё раз.')
@@ -137,8 +138,10 @@ async def preview_preset(tb, message, draft, admin_id):
     builder.button(text='✅ Отправить всем', callback_data='admin_broadcast_go:' + draft.token)
     builder.button(text='❌ Отмена', callback_data='admin_broadcast_cancel:' + draft.token)
     builder.adjust(1)
+    delivery = ('Отправятся оба фото альбомом и текст с кнопками заказа.' if draft.media
+                else 'Отправится сообщение выше вместе с кнопками.')
     await message.answer(f'👆 Предпросмотр анонса. Получателей: {len(tb.stats["total_users"])}.\n'
-                         'Отправятся оба фото альбомом и текст с кнопками заказа.\n'
+                         f'{delivery}\n'
                          'Нажми «Отправить всем» для запуска рассылки.', reply_markup=builder.as_markup())
     return True
 
