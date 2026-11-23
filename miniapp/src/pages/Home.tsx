@@ -3,7 +3,11 @@ import { useQuery } from "@tanstack/react-query";
 import { fetchLearningState, fetchMe, fetchSubjects } from "../lib/api";
 import { useUiStore, useAuthStore } from "../lib/store";
 import { stepFromPath, useLastStepStore } from "../lib/lastStep";
-import { useTelegramBackButton } from "../lib/telegram";
+import { hapticSelection, useTelegramBackButton } from "../lib/telegram";
+import { Search } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { Icon } from "../components/Icon";
+import { HomeReminders } from "../components/HomeReminders";
 import { TopBar } from "../components/TopBar";
 import { StatsBar } from "../components/StatsBar";
 import { ContinueCard } from "../components/ContinueCard";
@@ -16,6 +20,7 @@ import styles from "./Home.module.css";
 
 export function HomePage() {
   useTelegramBackButton(null); // главный экран — кнопка "Назад" Telegram скрыта
+  const navigate = useNavigate();
 
   const meQuery = useQuery({ queryKey: ["me"], queryFn: fetchMe });
   const learningQuery = useQuery({ queryKey: ["learning"], queryFn: fetchLearningState });
@@ -23,6 +28,7 @@ export function HomePage() {
 
   const selectedCourse = useUiStore((s) => s.selectedCourse);
   const owner = useAuthStore((state) => String(state.profile?.userId ?? "preview"));
+  const authenticated = useAuthStore((state) => state.status === "authenticated");
   const lastStep = useLastStepStore((state) => state.steps[owner]);
   const setSelectedCourse = useUiStore((s) => s.setSelectedCourse);
 
@@ -49,7 +55,8 @@ export function HomePage() {
   const learning = learningQuery.data;
   const accuracy = learning?.quizAttempts ? Math.round((learning.quizCorrect / learning.quizAttempts) * 100) : 0;
   const last = learning?.lastMaterial;
-  const serverStep = learning?.lastStep ? {...stepFromPath(learning.lastStep.path)!, updatedAt: learning.lastStep.updatedAt} : null;
+  const parsedServerStep = learning?.lastStep ? stepFromPath(learning.lastStep.path) : null;
+  const serverStep = parsedServerStep ? {...parsedServerStep, updatedAt: learning?.lastStep?.updatedAt} : null;
   const datedSteps = [serverStep, lastStep].filter(item => item?.path);
   const chosenStep = datedSteps.sort((a, b) => Date.parse(b?.updatedAt ?? "1970-01-01") - Date.parse(a?.updatedAt ?? "1970-01-01"))[0];
   const stepNewer = chosenStep?.updatedAt && (!last || Date.parse(chosenStep.updatedAt) >= Date.parse(last.lastOpenedAt));
@@ -80,9 +87,12 @@ export function HomePage() {
 
       {learning && meQuery.data && (
         <div className="page-intro">
-          <h1 style={{ fontSize: 20, fontWeight: 700 }}>{meQuery.data.firstName}, продолжаем?</h1>
+          <h1 style={{ fontSize: 20, fontWeight: 700 }}>
+            {authenticated ? `${meQuery.data.firstName}, продолжаем?` : "Добро пожаловать в VMEDA"}
+          </h1>
           <p style={{ fontSize: 13, color: "var(--ink-secondary)", marginTop: 4 }}>
-            {learning.completedTotal ? "продолжай в своём темпе" : "начни с одного материала или теста"}
+            {!authenticated ? "Это превью: материалы и прогресс доступны при входе через Telegram"
+              : learning.completedTotal ? "продолжай в своём темпе" : "начни с одного материала или теста"}
           </p>
         </div>
       )}
@@ -92,6 +102,13 @@ export function HomePage() {
       ) : (
         continueItem && <ContinueCard item={continueItem} />
       )}
+
+      {authenticated && <HomeReminders />}
+
+      <button type="button" className={styles.searchEntry} onClick={() => { hapticSelection(); navigate("/search"); }}>
+        <Icon icon={Search} size={18} />
+        <span>Найти тему, билет или вопрос</span>
+      </button>
 
       <section className={styles.sectionBlock} aria-labelledby="quick-actions-title">
         <div className={styles.sectionHeading}>

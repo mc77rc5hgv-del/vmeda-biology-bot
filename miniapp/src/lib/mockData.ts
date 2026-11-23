@@ -9,7 +9,6 @@
 
 import type {
   AccessStatus,
-  ContinueItem,
   DashboardStats,
   MaterialDetail,
   SubjectDetail,
@@ -20,47 +19,40 @@ import type {
 } from "./types";
 import type { AiSolveResult } from "./apiClient";
 
+// Гость браузерного превью: без чужого имени, прогресса и подписки, чтобы публичная ссылка
+// не выглядела как настоящий аккаунт.
 export const mockUser: UserProfile = {
-  id: 123456789,
-  firstName: "Алексей",
+  id: 0,
+  firstName: "Гость",
   lastName: null,
-  username: "alex_vmeda",
+  username: null,
   photoUrl: null,
-  referralCount: 4,
-  referralCountThisMonth: 1,
+  referralCount: 0,
+  referralCountThisMonth: 0,
 };
 
 export const mockDashboard: DashboardStats = {
-  streakDays: 7,
-  xp: 420,
-  readinessPercent: 68,
+  streakDays: 0,
+  xp: 0,
+  readinessPercent: 0,
   dailyGoalMinutes: 30,
-  minutesLeftToday: 20,
-};
-
-export const mockContinue: ContinueItem = {
-  subjectId: "biochemistry",
-  subjectTitle: "Биохимия",
-  sectionTitle: "Занятия 1–6 · основы",
-  materialTitle: "Занятие 1. Биохимия белков",
-  order: 1,
-  totalInSection: 11,
+  minutesLeftToday: 30,
 };
 
 export const mockSubjects: SubjectSummary[] = [
   // ---- 1 курс ----
-  { id: "physics", title: "Физика", accent: "physics", tag: "Билеты", course: 1, readiness: 42, locked: false, hasAi: true },
-  { id: "chemistry", title: "Химия", accent: "chemistry", tag: "Лабораторные", course: 1, readiness: 35, locked: false, hasAi: true },
-  { id: "biology", title: "Биология", accent: "biology", tag: "Билеты", course: 1, readiness: 71, locked: false, hasAi: true },
-  { id: "anatomy", title: "Анатомия", accent: "anatomy", tag: "10 модулей", course: 1, readiness: 24, locked: false, hasAi: true },
-  { id: "histology", title: "Гистология", accent: "histology", tag: "71 препарат", course: 1, readiness: null, locked: true, lockedReason: "Нужно 2 реферала в этом месяце", hasAi: true },
-  { id: "latin", title: "Латинский язык", accent: "latin", tag: "Зачёт", course: 1, readiness: 10, locked: false, hasAi: true },
+  { id: "physics", title: "Физика", accent: "physics", tag: "Билеты", course: 1, readiness: 0, locked: false, hasAi: true },
+  { id: "chemistry", title: "Химия", accent: "chemistry", tag: "Лабораторные", course: 1, readiness: 0, locked: false, hasAi: true },
+  { id: "biology", title: "Биология", accent: "biology", tag: "Билеты", course: 1, readiness: 0, locked: false, hasAi: true },
+  { id: "anatomy", title: "Анатомия", accent: "anatomy", tag: "10 модулей", course: 1, readiness: 0, locked: false, hasAi: true },
+  { id: "histology", title: "Гистология", accent: "histology", tag: "71 препарат", course: 1, readiness: 0, locked: true, lockedReason: "Нужно 2 реферала в этом месяце", hasAi: true },
+  { id: "latin", title: "Латинский язык", accent: "latin", tag: "Зачёт", course: 1, readiness: 0, locked: false, hasAi: true },
   { id: "law", title: "Правоведение", accent: "law", tag: "81 вопрос", course: 1, readiness: 0, locked: false },
   // ---- 2 курс ----
-  { id: "physiology", title: "Нормальная физиология", accent: "physiology", tag: "Рубежные", course: 2, readiness: 55, locked: false, hasAi: true },
-  { id: "operative_surgery", title: "Оперативная хирургия", accent: "operative-surgery", tag: "4 тома", course: 2, readiness: 18, locked: false, hasAi: true },
-  { id: "biochemistry", title: "Биохимия", accent: "biochemistry", tag: "68%", course: 2, readiness: 68, locked: false, hasAi: true },
-  { id: "pharmacology", title: "Фармакология", accent: "pharmacology", tag: "Техобслуживание", course: 2, readiness: 8, locked: true, lockedReason: "Раздел перерабатывается", hasAi: true },
+  { id: "physiology", title: "Нормальная физиология", accent: "physiology", tag: "Рубежные", course: 2, readiness: 0, locked: false, hasAi: true },
+  { id: "operative_surgery", title: "Оперативная хирургия", accent: "operative-surgery", tag: "4 тома", course: 2, readiness: 0, locked: false, hasAi: true },
+  { id: "biochemistry", title: "Биохимия", accent: "biochemistry", tag: "Практикум", course: 2, readiness: 0, locked: false, hasAi: true },
+  { id: "pharmacology", title: "Фармакология", accent: "pharmacology", tag: "Техобслуживание", course: 2, readiness: 0, locked: true, lockedReason: "Раздел перерабатывается", hasAi: true },
 ];
 
 const subjectSections: Record<string, SubjectDetail["sections"]> = {
@@ -202,11 +194,11 @@ export function getTestQuestions(subjectId: string): TestQuestion[] {
 export const mockSubscriptionSummary: AccessStatus = {
   canOpenSubject: true,
   canDownload: false,
-  canUseAi: true,
-  aiRequestsLeft: 12,
-  subscriptionExpiresAt: "2027-01-01T00:00:00Z",
-  subscriptionTitle: "Весь первый курс",
-  lockedReason: null,
+  canUseAi: false,
+  aiRequestsLeft: 0,
+  subscriptionExpiresAt: null,
+  subscriptionTitle: null,
+  lockedReason: "Открой мини-приложение из Telegram",
 };
 
 export function getAccessStatus(subjectId: string): AccessStatus {

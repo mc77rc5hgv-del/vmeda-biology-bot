@@ -1281,3 +1281,62 @@ def test_histology_written_exam_exposes_theory_and_checks_test_answers():
     disputed = client.post(f"{exam}/tests/histology-2019-455/answer", json={"option": 1}, headers=headers)
     assert disputed.status_code == 200
     assert disputed.json()["correct"] is None and disputed.json()["source_correct_option"] == 1
+
+
+def test_subject_summaries_carry_total_items_matching_detail():
+    headers = _auth_headers()
+    for summary in client.get("/api/v1/subjects", headers=headers).json():
+        detail = client.get(f"/api/v1/subjects/{summary['id']}", headers=headers).json()
+        assert summary["total_items"] == sum(section["item_count"] for section in detail["sections"]), summary["id"]
+
+
+def test_search_requires_auth_and_validates_query():
+    assert client.get("/api/v1/search", params={"q": "клетка"}).status_code == 401
+    headers = _auth_headers()
+    assert client.get("/api/v1/search", params={"q": "а"}, headers=headers).json()["results"] == []
+    assert client.get("/api/v1/search", params={"q": "я" * 81}, headers=headers).status_code == 422
+
+
+def test_search_matches_titles_case_and_yo_insensitively():
+    from web_api import search
+    assert search.normalize("  Ёмкость   КЛЕТКИ ") == "емкость клетки"
+    headers = _auth_headers()
+    body = client.get("/api/v1/search", params={"q": "ОСНОВЫ КЛЕТОЧНОЙ"}, headers=headers).json()
+    hit = next(r for r in body["results"] if r["subject_id"] == "physiology")
+    assert hit["title"] == "Основы клеточной физиологии"
+    assert hit["section_id"] and hit["item_id"] and hit["subject_title"]
+
+
+def test_search_never_reveals_titles_the_listing_would_hide(monkeypatch):
+    locked_id, unlocked_id = 900_123_000_001, 900_123_000_002
+    tb.stats["referral_warnings"][str(locked_id)] = {"count": tb.REFERRAL_WARNING_THRESHOLD, "last_warn_at": time.time()}
+    tb.stats["total_users"].add(unlocked_id)
+    tb.stats["referral_monthly"][str(unlocked_id)] = {"month": tb.local_today().strftime("%Y-%m"), "count": 2}
+    tb.save_stats()
+    tb._stats_executor.submit(lambda: None).result()
+    unlocked = _auth_headers(unlocked_id)
+    question = client.get("/api/v1/subjects/biology/sections/questions", headers=unlocked).json()["items"][0]
+
+    def biology_hits(headers):
+        body = client.get("/api/v1/search", params={"q": question["title"][:60]}, headers=headers).json()
+        return [r for r in body["results"] if r["subject_id"] == "biology" and r["item_id"] == question["id"]]
+
+    assert biology_hits(unlocked), "user with access finds the question"
+    assert biology_hits(_auth_headers(locked_id)) == [], "locked user must not learn the title via search"
+
+    monkeypatch.setattr(tb, "DYNAMIC_COURSE_MAINTENANCE_IDS", frozenset({"pharmacology"}))
+    body = client.get("/api/v1/search", params={"q": "рецепт"}, headers=unlocked).json()
+    assert not any(r["subject_id"] == "pharmacology" for r in body["results"])
+
+
+def test_dashboard_reports_whether_the_user_studied_today():
+    body = client.get("/api/v1/learning/dashboard", headers=_auth_headers(900_123_000_003)).json()
+    assert body["studied_today"] is False
+
+
+def test_search_ranks_word_start_matches_above_mid_word_ones():
+    from web_api import search
+    entries = search.find(tb, "кость")
+    first_mid_word = next(i for i, e in enumerate(entries) if e.norm_title.split()[0].endswith("кость") and not e.norm_title.startswith("кость"))
+    word_start = [i for i, e in enumerate(entries) if any(w.startswith("кость") for w in e.norm_title.split())]
+    assert word_start and max(word_start) < first_mid_word

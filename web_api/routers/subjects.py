@@ -5,10 +5,10 @@ from typing import Literal
 from services import histology_content, histology_exam
 from services.miniapp_policy import full_content_access, promo_active, public_launch, require_subject, subscription_required
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 
-from .. import content, schemas, static_content, attempt_tokens
+from .. import content, schemas, search, static_content, attempt_tokens
 from services.content_access import can_visit
 from services.anatomy_feedback import get_anatomy_answer_feedback
 from ..deps import get_current_user_id, get_fresh_bot_module
@@ -667,10 +667,12 @@ def list_subjects(
     _user_id: int = Depends(get_current_user_id),
     tb=Depends(get_fresh_bot_module),
 ) -> list[dict]:
-    return [
+    summaries = [
         *[_with_maintenance(tb, content.to_subject_summary(course)) for course in tb.DYNAMIC_COURSES],
         *static_content.list_subject_summaries(tb),
     ]
+    # Итог по предмету здесь же, чтобы экран прогресса не запрашивал каждый предмет отдельно.
+    return [{**summary, "total_items": search.total_items(tb, summary["id"])} for summary in summaries]
 
 
 @router.get("/subjects/{subject_id}")
@@ -868,3 +870,51 @@ def get_material_media(
     if not os.path.isfile(absolute_path):
         raise HTTPException(status_code=404, detail="файл отсутствует на диске")
     return FileResponse(absolute_path)
+
+
+SEARCH_RESULT_LIMIT = 30
+
+
+@router.get("/search")
+def search_materials(
+    q: str = Query(..., max_length=search.QUERY_MAX_LENGTH),
+    user_id: int = Depends(get_current_user_id),
+    tb=Depends(get_fresh_bot_module),
+) -> dict:
+    """Ищет по заголовкам материалов. Каждый результат проходит те же проверки, что и список
+    его раздела/группы (get_section/get_group): закрытое, на техобслуживании или недоступное
+    по подписке в выдачу не попадает."""
+    visible: dict[tuple[str, str, str | None], bool] = {}
+
+    def listing_open(subject_id: str, section_id: str, group_id: str | None) -> bool:
+        key = (subject_id, section_id, group_id)
+        if key not in visible:
+            try:
+                if group_id is None:
+                    get_section(subject_id, section_id, user_id=user_id, tb=tb)
+                else:
+                    get_group(subject_id, section_id, group_id, user_id=user_id, tb=tb)
+                visible[key] = True
+            except HTTPException:
+                visible[key] = False
+        return visible[key]
+
+    results: list[dict] = []
+    has_more = False
+    for entry in search.find(tb, q):
+        if not listing_open(entry.subject_id, entry.section_id, None):
+            continue
+        if not all(listing_open(entry.subject_id, entry.section_id, group) for group in entry.group_chain):
+            continue
+        if len(results) == SEARCH_RESULT_LIMIT:
+            has_more = True
+            break
+        results.append({
+            "subject_id": entry.subject_id,
+            "subject_title": entry.subject_title,
+            "section_id": entry.section_id,
+            "section_title": entry.section_title,
+            "item_id": entry.item_id,
+            "title": entry.title,
+        })
+    return {"query": q, "results": results, "has_more": has_more}

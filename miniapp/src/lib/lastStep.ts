@@ -6,8 +6,11 @@ export function stepFromPath(path: string): ContinueItem | null {
   const match = path.match(/^\/(subjects|materials|tests)\/([\w-]+)(?:\/[^?#]*)?$/);
   const histology = path.match(/^\/histology\/(diagnostics|specimens\/[^/?#]+|exam(?:\/(?:specimens|guess|tests(?:\/[^/?#]+)?|theory(?:\/\d+)?))?)$/);
   const subjectId = match?.[2] ?? (histology ? "histology" : "");
-  const subjectTitle = subjectMeta(subjectId)?.title;
-  if (!subjectTitle) return null;
+  const meta = subjectMeta(subjectId);
+  if (!meta) return null;
+  // /tests/<предмет> — экран-прототип; у подключённых предметов он перенаправляет на предмет.
+  if (match?.[1] === "tests" && meta.realBacked && subjectId !== "anatomy") return null;
+  const subjectTitle = meta.title;
   const sectionTitle = path === "/histology/exam" ? "Экзамен"
     : path === "/histology/diagnostics" ? "Диагностики"
     : path === "/histology/exam/specimens" ? "Препараты"
@@ -35,7 +38,8 @@ export const useLastStepStore = create<{
     if (previous === undefined) {
       try {
         const saved = JSON.parse(localStorage.getItem(storageKey(owner)) ?? "null");
-        previous = typeof saved?.path === "string" ? {...stepFromPath(saved.path)!, updatedAt: saved.updatedAt} : null;
+        const step = typeof saved?.path === "string" ? stepFromPath(saved.path) : null;
+        previous = step ? {...step, updatedAt: saved.updatedAt} : null;
       } catch { previous = null; }
     }
     let next = stepFromPath(path);

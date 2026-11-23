@@ -82,7 +82,13 @@ JSON контентного контракта ТЗ §14. **Статичные �
 `GET /api/v1/subjects/{id}`, `GET /api/v1/subjects/{id}/sections/{id}`,
 `GET /api/v1/subjects/{id}/sections/{id}/groups/{id}`,
 `GET /api/v1/materials/{subject}/{section}/{item}` (+ `/media/{index}`),
-`GET /api/v1/learning/state`, `GET /api/v1/learning/dashboard` и команды изученного/избранного. `web_api/tests/test_content.py`
+`GET /api/v1/learning/state`, `GET /api/v1/learning/dashboard` и команды изученного/избранного,
+`GET /api/v1/search?q=`. `GET /api/v1/subjects` отдаёт у каждого предмета `total_items` (сумма
+разделов), чтобы экран прогресса не запрашивал предметы по одному; дашборд отдаёт `studied_today`
+для напоминания о серии. Поиск (`web_api/search.py`) идёт только по заголовкам: индекс строится
+один раз из контент-слоя, а каждый результат роутер пропускает через те же `get_section`/`get_group`,
+что и обычный просмотр, — закрытое подпиской, на техобслуживании или по рефералам в выдачу не
+попадает. `web_api/tests/test_content.py`
 проверяет `content.py` на маленькой ручной фикстуре (без импорта бота);
 `web_api/tests/test_subjects_integration.py` гоняет тот же путь через настоящий HTTP-запрос на
 РЕАЛЬНЫХ файлах `generated_courses/biochemistry.json`/`pharmacology.json` — включая вложенные

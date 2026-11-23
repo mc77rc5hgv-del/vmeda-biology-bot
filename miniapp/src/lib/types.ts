@@ -26,6 +26,8 @@ export interface SubjectSummary {
   hasAi?: boolean;
   /** Короткая причина блокировки для локализованного текста на карточке, если locked. */
   lockedReason?: string;
+  /** Всего материалов в предмете (сумма разделов); нет у старого бэкенда и у демо-данных. */
+  totalItems?: number | null;
 }
 
 export interface ContentSection {
@@ -259,6 +261,22 @@ export interface DashboardStats {
   readinessPercent: number;
   dailyGoalMinutes: number;
   minutesLeftToday: number;
+  /** Была ли учебная активность сегодня (серия засчитывается и со вчерашнего дня). */
+  studiedToday?: boolean;
+}
+
+export interface SearchResult {
+  subjectId: string;
+  subjectTitle: string;
+  sectionId: string;
+  sectionTitle: string;
+  itemId: string;
+  title: string;
+}
+
+export interface SearchResponse {
+  results: SearchResult[];
+  hasMore: boolean;
 }
 
 export interface ContinueItem {

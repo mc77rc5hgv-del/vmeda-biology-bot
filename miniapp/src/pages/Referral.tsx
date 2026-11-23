@@ -8,6 +8,7 @@ import { Card } from "../components/Card";
 import { Icon } from "../components/Icon";
 import { Skeleton } from "../components/Skeleton";
 import { StateMessage } from "../components/StateMessage";
+import { useAuthStore } from "../lib/store";
 import styles from "./ProfileDetails.module.css";
 
 const MONTHLY_TARGET = 2;
@@ -32,9 +33,12 @@ export function ReferralPage() {
   useTelegramBackButton(() => navigate("/profile"));
   const meQuery = useQuery({ queryKey: ["me"], queryFn: fetchMe });
   const [copied, setCopied] = useState(false);
+  const authenticated = useAuthStore((state) => state.status === "authenticated");
 
   if (meQuery.isLoading) return <div className="screen"><Skeleton height={62} width="72%" /><Skeleton height={120} radius="18px" /><Skeleton height={78} radius="18px" /></div>;
   if (meQuery.isError || !meQuery.data) return <div className="screen"><StateMessage title="Не удалось загрузить реферальную программу" onRetry={() => meQuery.refetch()} /></div>;
+
+  if (!authenticated) return <div className="screen"><StateMessage icon={Users} title="Открой мини-приложение из Telegram" body="Личная реферальная ссылка появится после входа через бота." onRetry={() => openTelegramLink("https://t.me/VMEDA_examen_bot")} actionLabel="Открыть бота" /></div>;
 
   const user = meQuery.data;
   const inviteLink = "https://t.me/VMEDA_examen_bot?start=ref_" + user.id;

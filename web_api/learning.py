@@ -409,6 +409,7 @@ def get_dashboard(user_id: int) -> dict:
         "daily_goal_actions": 6,
         "actions_left_today": max(0, 6 - today_actions),
         "streak_days": streak,
+        "studied_today": today in activity_dates,
         "xp": xp,
         "readiness_percent": max(0, min(100, readiness)),
         "daily_goal_minutes": daily_goal,

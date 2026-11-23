@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useNavigate, useParams } from "react-router-dom";
-import { fetchTestQuestions } from "../lib/api";
+import { Navigate, useNavigate, useParams } from "react-router-dom";
+import { fetchTestQuestions, isRealBackedSubject } from "../lib/api";
 import { hapticImpact, useTelegramBackButton } from "../lib/telegram";
 import { Card } from "../components/Card";
 import { ProgressBar } from "../components/ProgressBar";
@@ -13,6 +13,9 @@ import { AnatomyExamPage } from "./AnatomyExam";
 export function TestPage() {
   const { subjectId = "" } = useParams();
   if (subjectId === "anatomy") return <AnatomyExamPage />;
+  // Прототипный тест есть только у предметов на демо-данных. Старые ссылки и сохранённый
+  // «последний шаг» на /tests/<предмет> не должны приводить к вопросам-заглушкам.
+  if (isRealBackedSubject(subjectId)) return <Navigate to={`/subjects/${subjectId}`} replace />;
   return <GenericTestPage key={subjectId} subjectId={subjectId} />;
 }
 

@@ -1,0 +1,83 @@
+.field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 0 6px 0 14px;
+  margin-bottom: 14px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+  color: var(--ink-secondary);
+}
+
+.field:focus-within {
+  outline: 2px solid var(--academic-blue);
+  outline-offset: 2px;
+}
+
+.field input {
+  width: 100%;
+  min-width: 0;
+  padding: 12px 0;
+  border: 0;
+  outline: 0;
+  font: inherit;
+  font-size: 16px; /* меньше 16px — iOS увеличивает страницу при фокусе */
+  color: var(--ink);
+  background: transparent;
+}
+
+.field input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.field button {
+  display: grid;
+  place-items: center;
+  flex: 0 0 44px;
+  height: 44px;
+  border-radius: 12px;
+  color: var(--ink-secondary);
+  background: transparent;
+}
+
+.hint {
+  color: var(--ink-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin-bottom: 12px;
+}
+
+.result {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.resultCopy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.resultCopy strong {
+  font-size: 14px;
+  font-weight: 720;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.resultCopy span {
+  color: var(--subject-ink, var(--ink-secondary));
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}

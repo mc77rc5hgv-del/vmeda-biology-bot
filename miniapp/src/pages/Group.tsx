@@ -1,5 +1,5 @@
 import { subscriptionPath } from "../lib/subscriptions";
-import { Fragment, useState } from "react";
+import { Fragment, useCallback, useState } from "react";
 import { CheckCircle2, ChevronRight, Lock } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
@@ -11,9 +11,10 @@ import { Icon } from "../components/Icon";
 import { Skeleton } from "../components/Skeleton";
 import { StateMessage } from "../components/StateMessage";
 import { TelegramContentGate } from "../components/TelegramContentGate";
+import { LoadMore } from "../components/LoadMore";
 import styles from "./Section.module.css";
 
-const PAGE_SIZE = 50; // см. Section.tsx за тем, почему это временная мера, а не виртуализация
+const PAGE_SIZE = 50; // порционная отрисовка с автодогрузкой, см. Section.tsx
 
 export function GroupPage() {
   const { subjectId = "", sectionId = "", groupId = "" } = useParams();
@@ -22,6 +23,7 @@ export function GroupPage() {
     ? `/subjects/${subjectId}/sections/${sectionId}/groups/${groupQuery.data.parentId}`
     : `/subjects/${subjectId}/sections/${sectionId}`));
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const showMore = useCallback(() => setVisibleCount((count) => count + PAGE_SIZE), []);
   const hasSession = hasContentSession();
 
   const groupQuery = useQuery({
@@ -111,9 +113,12 @@ export function GroupPage() {
         })}
       </div>
       {visibleCount < group.items.length && (
-        <PressableCard className={styles.row} onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}>
-          <span className={styles.rowTitle}>Показать ещё ({group.items.length - visibleCount})</span>
-        </PressableCard>
+        <LoadMore
+          remaining={group.items.length - visibleCount}
+          onMore={showMore}
+          className={styles.row}
+          titleClassName={styles.rowTitle}
+        />
       )}
     </div>
   );

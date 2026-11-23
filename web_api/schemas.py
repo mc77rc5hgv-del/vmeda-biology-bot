@@ -100,6 +100,8 @@ class MeResponse(BaseModel):
 
 class DashboardStatsResponse(BaseModel):
     streak_days: int
+    # Серия считается и со вчерашнего дня; флаг нужен, чтобы напомнить продлить её сегодня.
+    studied_today: bool = False
     xp: int
     readiness_percent: int
     daily_goal_minutes: int
