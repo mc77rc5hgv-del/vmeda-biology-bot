@@ -7,7 +7,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 
-from services.anatomy_feedback import (
+from services.anatomy_feedback import (  # noqa: E402 -- sys.path must point at the repo root first
     build_feedback_signature_index,
     build_legacy_explanation_signature_index,
     get_anatomy_answer_feedback,

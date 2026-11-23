@@ -188,6 +188,7 @@ async def check_miniapp_payments():
     print('miniapp Stars: signature, ownership, currency, concurrent checkout, renewal, idempotency and data preservation: OK')
 
 async def check_sbp_bot_routes():
+    from services.payments.runtime import BillingRuntime
     from types import SimpleNamespace
     from unittest.mock import AsyncMock
     import copy
@@ -195,7 +196,8 @@ async def check_sbp_bot_routes():
     row = {'id': 'sbp_' + 'b' * 32, 'user_id': uid, 'amount_minor': 12900, 'url': 'https://payment.codeepay.xyz/transfer/test', 'state': 'pending', 'tier_id': 21}
     fake = SimpleNamespace(provider=SimpleNamespace(public_status=lambda: {'available': True}),
                            checkout=AsyncMock(return_value=row), check=AsyncMock(return_value={**row, 'state': 'applied'}),
-                           ledger=SimpleNamespace(get=lambda order_id: row))
+                           ledger=SimpleNamespace(get=lambda order_id: row),
+                           checkout_url=BillingRuntime.checkout_url)
     before = copy.deepcopy(tb.stats)
     with patch.object(tb, '_billing_runtime', fake, create=True):
         data = kb_data(tb.get_sub_tier_keyboard(21))

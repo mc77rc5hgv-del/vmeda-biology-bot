@@ -407,8 +407,8 @@ def get_phys_menu_keyboard(user_id: int):
     builder.button(text="🔎 Поиск", callback_data="phys:search_prompt")
     builder.button(text="⭐ Избранное", callback_data="phys:favorites")
     builder.button(text="📊 Мой прогресс", callback_data="phys:progress")
-    builder.adjust(1)
-    builder.row(InlineKeyboardButton(text="🏠 Главное меню", callback_data="back_to_main"))
+    builder.adjust(1, 1, 2, 1, 2, 1)
+    builder.row(*tb.subject_back_buttons(2))
     return builder.as_markup()
 
 

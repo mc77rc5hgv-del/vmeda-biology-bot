@@ -147,8 +147,10 @@ async def main():
             ledger.update(row['id'], 'pending', provider_id='provider', url='https://payment.codeepay.xyz/transfer/test')
         return ledger.get(row['id'])
     original_runtime = getattr(tb, '_billing_runtime', None)
+    from services.payments.runtime import BillingRuntime
     tb._billing_runtime = SimpleNamespace(ledger=ledger, checkout_badge=AsyncMock(side_effect=checkout_badge),
-                                         check=AsyncMock(side_effect=lambda row: row))
+                                         check=AsyncMock(side_effect=lambda row: row),
+                                         checkout_url=BillingRuntime.checkout_url)
     checkout = Callback("pay:" + token)
     await b.callback_badges(checkout)
     assert "1060 ₽" in str(checkout.message.sent)

@@ -150,8 +150,8 @@ def get_biology_menu():
     builder.button(text="📝 Вопросы", callback_data="menu_questions")
     builder.button(text="🎯 Опрос (10 вопросов)", callback_data="quiz_start")
     builder.button(text="📄 Все билеты (текстовый файл)", callback_data="download_biology_tickets")
-    builder.adjust(1)
-    builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
+    builder.adjust(2, 1)
+    builder.row(*tb.subject_back_buttons(1))
     return builder.as_markup()
 
 # ==================== БИОЛОГИЯ — РЕЖИМ ОПРОСА (ФЛЭШ-КАРТОЧКИ) ====================

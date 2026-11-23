@@ -197,8 +197,8 @@ def get_oh_menu_keyboard():
     builder.button(text="🛠 Хирургические инструменты", callback_data="oh:instruments")
     builder.button(text="🎓 Практические станции", callback_data="oh:stations")
     builder.button(text="🔎 Поиск по ОХ", callback_data="oh:search_prompt")
-    builder.adjust(1)
-    builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
+    builder.adjust(2, 1)
+    builder.row(*tb.subject_back_buttons(2))
     return builder.as_markup()
 
 

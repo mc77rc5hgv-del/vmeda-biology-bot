@@ -98,6 +98,14 @@ course screens render the identical label for the same user without duplicating 
 one menu should follow this same shared-label-function pattern rather than recomputing its label inline at each
 call site.
 
+The main menu is laid out in explicit rows (`builder.row(...)`, not `adjust(1)`): course buttons paired,
+AI and subscription full-width, community buttons paired. Its screen text comes from `get_main_menu_text(user_id,
+greeting)` (shared by `/start` and `back_to_main`) and shows one access line: active subscription, otherwise
+"open" when `has_free_access()` holds, otherwise this month's referral count. Single-course subject menus
+(Biology/Physics/Chemistry on course 1, Physiology/Operative Surgery on course 2) end with
+`subject_back_buttons(course)` — back to that course screen plus "🏠 Главное меню" — instead of jumping straight
+to the main menu. Anatomy/Histology belong to both courses, so they keep their plain main-menu back button.
+
 ### Biochemistry: approved single-source practicum
 
 `course_sources/biochemistry/Biokhimia_VMedA_praktikum_zanyatia.docx` is the only source of

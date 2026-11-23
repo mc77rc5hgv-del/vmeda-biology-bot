@@ -1347,7 +1347,7 @@ def get_support_announcement_text() -> str:
         '<a href="https://t.me/vmeda_helper">@vmeda_helper</a>\n\n'
         "А ещё есть рейтинг «🏆 Лучшие донатеры» — топ по звёздам и топ по рублям! "
         "Можно засветить свой ник или остаться анонимом — выбираешь сам.\n\n"
-        "Заходи в «😇 Поддержать автора 💰» в главном меню, жертвуй любую сумму — "
+        "Заходи в «😇 Поддержать» в главном меню, жертвуй любую сумму — "
         "и попади в топ! 🙏"
     )
 
@@ -1985,6 +1985,8 @@ async def sync_miniapp_menu_button(user_id: int) -> bool:
 
 
 def get_main_menu(user_id: int = None):
+    # Явные ряды вместо adjust(1): учёба сверху, доступ отдельной строкой, сообщество парами.
+    # Подписи и callback_data не меняются — на них завязаны хендлеры и тесты.
     builder = InlineKeyboardBuilder()
     # Public launcher is independent of paid subject access.
     # Server-side initData and entitlement checks remain authoritative.
@@ -1994,27 +1996,54 @@ def get_main_menu(user_id: int = None):
             text="🎓 Открыть MINI-App",
             web_app=WebAppInfo(url=MINIAPP_URL),
         ))
-    builder.button(text="🤖 VMedA AI (бета)", callback_data="ai_menu")
-    builder.button(text="1️⃣ Первый курс", callback_data="course_menu:1")
-    builder.button(text="2️⃣ Второй курс", callback_data="course_menu:2")
-    builder.button(text="👥 Пригласить друзей", callback_data="referral_info")
-    builder.button(text="🏆 Рейтинг", callback_data="referral_leaderboard")
-    rollcall_confirmed_count = get_rollcall_confirmed_count()
-    builder.button(
-        text=f"📋 Перекличка ({rollcall_confirmed_count}/{ROLLCALL_GROUP_COUNT})",
-        callback_data="rollcall_menu"
+    builder.row(
+        InlineKeyboardButton(text="1️⃣ Первый курс", callback_data="course_menu:1"),
+        InlineKeyboardButton(text="2️⃣ Второй курс", callback_data="course_menu:2"),
     )
-    builder.button(text="🪪 Медицинские бейджики", callback_data="badges:menu")
-    battle_label = "⚔️ Битва рефералов 🔥" if is_battle_active() else "⚔️ Битва рефералов"
-    builder.button(text=battle_label, callback_data="referral_battle")
+    builder.row(InlineKeyboardButton(text="🤖 VMedA AI (бета)", callback_data="ai_menu"))
     if user_id is not None and has_active_subscription(user_id):
         sub_label = "💎 Моя подписка"
     else:
         sub_label = "💎 Подписка без рефералов"
-    builder.button(text=sub_label, callback_data="subscription_menu")
-    builder.button(text="😇 Поддержать автора 💰", callback_data="support_menu")
-    builder.adjust(1)
+    builder.row(InlineKeyboardButton(text=sub_label, callback_data="subscription_menu"))
+    builder.row(
+        InlineKeyboardButton(text="👥 Пригласить друзей", callback_data="referral_info"),
+        InlineKeyboardButton(text="🏆 Рейтинг", callback_data="referral_leaderboard"),
+    )
+    battle_label = "⚔️ Битва рефералов 🔥" if is_battle_active() else "⚔️ Битва рефералов"
+    rollcall_confirmed_count = get_rollcall_confirmed_count()
+    builder.row(
+        InlineKeyboardButton(text=battle_label, callback_data="referral_battle"),
+        InlineKeyboardButton(
+            text=f"📋 Перекличка ({rollcall_confirmed_count}/{ROLLCALL_GROUP_COUNT})",
+            callback_data="rollcall_menu",
+        ),
+    )
+    builder.row(
+        InlineKeyboardButton(text="🪪 Бейджики", callback_data="badges:menu"),
+        InlineKeyboardButton(text="😇 Поддержать", callback_data="support_menu"),
+    )
     return builder.as_markup()
+
+
+def get_main_menu_text(user_id: int = None, greeting: str = "🏠 <b>Главное меню</b>") -> str:
+    if user_id is not None and has_active_subscription(user_id):
+        sub = get_subscription(user_id) or {}
+        tier = SUBSCRIPTION_TIERS.get(sub.get("tier"), {})
+        title = tier.get("short") or tier.get("title") or "подписка"
+        access = f"💎 Доступ: <b>{html.escape(title)}</b> {format_subscription_expiry(sub.get('expires'))}"
+    elif user_id is not None and has_free_access(user_id):
+        access = "✅ Биология, физика и химия открыты"
+    else:
+        count = get_referral_count_this_month(user_id) if user_id is not None else 0
+        access = f"👥 Рефералы в этом месяце: <b>{count}/{REFERRAL_FULL_ACCESS_THRESHOLD}</b> — до бесплатного доступа"
+    return (
+        f"{greeting}\n{DIVIDER}\n\n"
+        "📚 <b>Учёба</b> — предметы 1 и 2 курса\n"
+        "🤖 <b>VMedA AI</b> — разбор заданий по тексту и фото\n"
+        f"{access}\n\n"
+        "Выбери предмет для подготовки 👇"
+    )
 
 
 def get_miniapp_keyboard():
@@ -2056,8 +2085,17 @@ COURSE_SUBJECTS = {
 
 
 def get_course_menu_text(course: int) -> str:
-    title = "1️⃣ ПЕРВЫЙ КУРС" if course == 1 else "2️⃣ ВТОРОЙ КУРС"
-    return f"{title}\n{DIVIDER}\n\nВыбери предмет:"
+    title = "1️⃣ <b>ПЕРВЫЙ КУРС</b>" if course == 1 else "2️⃣ <b>ВТОРОЙ КУРС</b>"
+    hint = "🦴 Анатомия и 🔬 Гистология есть на обоих курсах — доступ и прогресс общие."
+    return f"{title}\n{DIVIDER}\n\n{hint}\n\nВыбери предмет 👇"
+
+
+def subject_back_buttons(course: int) -> list:
+    """Нижний ряд меню предмета: назад к экрану курса, откуда пришли, и в главное меню."""
+    return [
+        InlineKeyboardButton(text=f"🔙 {course} курс", callback_data=f"course_menu:{course}"),
+        InlineKeyboardButton(text="🏠 Главное меню", callback_data="back_to_main"),
+    ]
 
 
 def get_course_menu_keyboard(course: int, user_id: int = None):
@@ -2166,8 +2204,8 @@ def get_physics_menu():
     builder.button(text="📄 (60 вопросов) на 4/5 (файл)", callback_data="download_physics_grade45")
     builder.button(text="📄 Ответы на задачи билетов (файл)", callback_data="download_physics_ticket_tasks")
     builder.button(text="📄 Шпаргалка по формулам к задачам (файл)", callback_data="download_physics_tasks_cheatsheet")
-    builder.adjust(1)
-    builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
+    builder.adjust(1, 2, 1)
+    builder.row(*subject_back_buttons(1))
     return builder.as_markup()
 
 def get_physics_tickets_menu():
@@ -2420,8 +2458,8 @@ def get_chemistry_menu():
     builder.button(text="🎫 Билеты", callback_data="chemistry_tickets")
     builder.button(text="📄 Все лабораторные работы (файл)", callback_data="download_chemistry_labs")
     builder.button(text="📄 Все задачи (файл)", callback_data="download_chemistry_tasks")
-    builder.adjust(1)
-    builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
+    builder.adjust(2, 2, 1)
+    builder.row(*subject_back_buttons(1))
     return builder.as_markup()
 
 # chemistry_tickets_access_ok перенесена в services/access.py — см. импорт и реэкспорт
@@ -2642,7 +2680,7 @@ async def cmd_start(message: Message):
 
     greeting = "🎉 <b>С возвращением!</b>" if not is_new_user else "👋 <b>Привет!</b>"
     await message.answer(
-        f"{greeting}\n\nВыбери предмет для подготовки:",
+        get_main_menu_text(user_id, greeting),
         parse_mode="HTML",
         reply_markup=get_main_menu(user_id)
     )
@@ -3393,7 +3431,7 @@ async def cb_back_to_main(callback: CallbackQuery):
     await callback.answer()
     await safe_edit_text(
         callback.message,
-        "🏠 <b>Главное меню</b>\n\nВыбери предмет для подготовки:",
+        get_main_menu_text(callback.from_user.id),
         parse_mode="HTML",
         reply_markup=get_main_menu(callback.from_user.id)
     )
