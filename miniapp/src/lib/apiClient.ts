@@ -382,7 +382,8 @@ function toSubjectSummary(wire: SubjectSummaryWire): SubjectSummary {
     id: wire.id,
     title: wire.title,
     accent: subjectMeta(wire.id)?.accent ?? "biochemistry",
-    tag: wire.maintenance ? "Техобслуживание" : (wire.has_ai ? "VMEDA AI" : "Курс"),
+    // Метка только когда она что-то сообщает: «VMEDA AI»/«Курс» стояли почти на каждой карточке.
+    tag: wire.maintenance ? "Техобслуживание" : "",
     course: wire.course,
     readiness: null, // прогресс/готовность для реальных предметов ещё не подключены (см. README web_api)
     locked: wire.maintenance ?? false,

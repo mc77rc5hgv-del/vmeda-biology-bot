@@ -86,11 +86,11 @@ export function HomePage() {
       )}
 
       {learning && meQuery.data && (
-        <div className="page-intro">
-          <h1 style={{ fontSize: 20, fontWeight: 700 }}>
+        <div className={styles.greeting}>
+          <h1>
             {authenticated ? `${meQuery.data.firstName}, продолжаем?` : "Добро пожаловать в VMEDA"}
           </h1>
-          <p style={{ fontSize: 13, color: "var(--ink-secondary)", marginTop: 4 }}>
+          <p>
             {!authenticated ? "Это превью: материалы и прогресс доступны при входе через Telegram"
               : learning.completedTotal ? "продолжай в своём темпе" : "начни с одного материала или теста"}
           </p>
@@ -136,7 +136,7 @@ export function HomePage() {
         ) : (
           <div className={styles.subjectGrid} role="list" aria-label="Предметы">
             {subjectsForCourse.map((subject) => (
-              <SubjectCard key={subject.id} subject={subject} />
+              <SubjectCard key={subject.id} subject={subject} completed={learning?.completedBySubject[subject.id] ?? 0} />
             ))}
           </div>
         )}

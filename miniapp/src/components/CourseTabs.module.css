@@ -12,8 +12,8 @@
   flex: 1;
   min-height: 40px;
   border-radius: var(--radius-pill);
-  font-size: 13px;
-  font-weight: 680;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
   color: var(--ink-secondary);
   background: transparent;
   transition: background 150ms ease, color 150ms ease;

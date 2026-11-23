@@ -24,7 +24,7 @@
 }
 
 .subtitle {
-  font-size: 10px;
+  font-size: var(--text-xs);
   color: var(--ink-secondary);
   line-height: 1.3;
 }
