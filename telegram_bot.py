@@ -925,7 +925,7 @@ def get_referral_reminder_broadcast_text() -> str:
 def get_referral_reminder_broadcast_keyboard():
     builder = InlineKeyboardBuilder()
     builder.button(text="👥 Пригласить друзей", callback_data="referral_info")
-    builder.button(text="💎 Подписка", callback_data="subscription_menu")
+    builder.button(style="success", text="💎 Подписка", callback_data="subscription_menu")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -1190,7 +1190,7 @@ async def notify_admins_of_rollcall_request(n: int, user) -> None:
         "Проверь в чате с @vmeda_helper, что это правда представитель этой группы, и подтверди:"
     )
     builder = InlineKeyboardBuilder()
-    builder.button(text="✅ Подтвердить — выдать бонус", callback_data=f"rollcall_confirm:{n}:{user.id}")
+    builder.button(style="success", text="✅ Подтвердить — выдать бонус", callback_data=f"rollcall_confirm:{n}:{user.id}")
     keyboard = builder.as_markup()
     for admin_id in ADMIN_IDS:
         try:
@@ -1374,7 +1374,7 @@ def get_subscription_announcement_text() -> str:
 
 def get_subscription_announcement_keyboard():
     builder = InlineKeyboardBuilder()
-    builder.button(text="💎 Подписка без рефералов", callback_data="subscription_menu")
+    builder.button(style="success", text="💎 Подписка без рефералов", callback_data="subscription_menu")
     return builder.as_markup()
 
 def get_ai_announcement_text() -> str:
@@ -1396,7 +1396,7 @@ def get_ai_announcement_text() -> str:
 def get_ai_announcement_keyboard():
     builder = InlineKeyboardBuilder()
     builder.button(text="🤖 Попробовать VMedA AI", callback_data="ai_menu")
-    builder.button(text="💎 Подписка", callback_data="subscription_menu")
+    builder.button(style="success", text="💎 Подписка", callback_data="subscription_menu")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -1427,7 +1427,7 @@ def get_anatomy_announcement_text() -> str:
 
 def get_anatomy_announcement_keyboard():
     builder = InlineKeyboardBuilder()
-    builder.button(text="💎 Подписка", callback_data="subscription_menu")
+    builder.button(style="success", text="💎 Подписка", callback_data="subscription_menu")
     builder.button(text="🦴 Анатомия", callback_data="anatomy_root")
     builder.adjust(1)
     return builder.as_markup()
@@ -1995,25 +1995,31 @@ def get_main_menu(user_id: int = None):
         builder.row(InlineKeyboardButton(
             text="🎓 Открыть MINI-App",
             web_app=WebAppInfo(url=MINIAPP_URL),
+            style="primary",
         ))
     builder.row(
-        InlineKeyboardButton(text="1️⃣ Первый курс", callback_data="course_menu:1"),
-        InlineKeyboardButton(text="2️⃣ Второй курс", callback_data="course_menu:2"),
+        InlineKeyboardButton(text="1️⃣ Первый курс", callback_data="course_menu:1", style="primary"),
+        InlineKeyboardButton(text="2️⃣ Второй курс", callback_data="course_menu:2", style="primary"),
     )
-    builder.row(InlineKeyboardButton(text="🤖 VMedA AI (бета)", callback_data="ai_menu"))
+    # Единственная зелёная кнопка меню — платный доступ должен быть заметен, но не навязчив:
+    # у подписчиков та же кнопка без цвета, им продавать уже нечего.
     if user_id is not None and has_active_subscription(user_id):
-        sub_label = "💎 Моя подписка"
+        builder.row(InlineKeyboardButton(text="💎 Моя подписка", callback_data="subscription_menu"))
     else:
-        sub_label = "💎 Подписка без рефералов"
-    builder.row(InlineKeyboardButton(text=sub_label, callback_data="subscription_menu"))
+        builder.row(InlineKeyboardButton(
+            text=get_main_menu_subscription_label(), callback_data="subscription_menu", style="success",
+        ))
+    builder.row(InlineKeyboardButton(text="🤖 VMedA AI (бета)", callback_data="ai_menu", style="primary"))
     builder.row(
         InlineKeyboardButton(text="👥 Пригласить друзей", callback_data="referral_info"),
         InlineKeyboardButton(text="🏆 Рейтинг", callback_data="referral_leaderboard"),
     )
-    battle_label = "⚔️ Битва рефералов 🔥" if is_battle_active() else "⚔️ Битва рефералов"
+    battle_active = is_battle_active()
+    battle_label = "⚔️ Битва рефералов 🔥" if battle_active else "⚔️ Битва рефералов"
     rollcall_confirmed_count = get_rollcall_confirmed_count()
     builder.row(
-        InlineKeyboardButton(text=battle_label, callback_data="referral_battle"),
+        InlineKeyboardButton(text=battle_label, callback_data="referral_battle",
+                             style="danger" if battle_active else None),
         InlineKeyboardButton(
             text=f"📋 Перекличка ({rollcall_confirmed_count}/{ROLLCALL_GROUP_COUNT})",
             callback_data="rollcall_menu",
@@ -2024,6 +2030,11 @@ def get_main_menu(user_id: int = None):
         InlineKeyboardButton(text="😇 Поддержать", callback_data="support_menu"),
     )
     return builder.as_markup()
+
+
+def get_main_menu_subscription_label() -> str:
+    price = cheapest_active_tier()["price_rub"]
+    return f"💎 Подписка от {price}₽ — без рефералов"
 
 
 def get_main_menu_text(user_id: int = None, greeting: str = "🏠 <b>Главное меню</b>") -> str:
@@ -2090,6 +2101,18 @@ def get_course_menu_text(course: int) -> str:
     return f"{title}\n{DIVIDER}\n\n{hint}\n\nВыбери предмет 👇"
 
 
+def _course_subject_style(callback_data: str, user_id: int = None) -> str | None:
+    """Синий — предмет можно открыть; без цвета — техобслуживание или закрытый доступ."""
+    if callback_data == "anatomy_root":
+        # Тот же порядок проверок, что и в _anatomy_menu_label(): цвет не спорит с подписью.
+        if user_id is not None and is_admin(user_id):
+            return "primary"
+        return None if anatomy_handlers.anatomy_maintenance_mode_enabled() else "primary"
+    if callback_data == "histology_menu":
+        return "primary" if user_id is not None and histology_access_ok(user_id) else None
+    return "primary"
+
+
 def subject_back_buttons(course: int) -> list:
     """Нижний ряд меню предмета: назад к экрану курса, откуда пришли, и в главное меню."""
     return [
@@ -2103,7 +2126,7 @@ def get_course_menu_keyboard(course: int, user_id: int = None):
     for label, callback_data in COURSE_SUBJECTS[course]:
         if label is None:
             label = _anatomy_menu_label(user_id) if callback_data == "anatomy_root" else _histology_menu_label(user_id)
-        builder.button(text=label, callback_data=callback_data)
+        builder.button(text=label, callback_data=callback_data, style=_course_subject_style(callback_data, user_id))
     for course_index, dynamic_course in enumerate(DYNAMIC_COURSES):
         if dynamic_course.get("course", 2) == course:
             if dynamic_course_under_maintenance(dynamic_course):
@@ -2113,6 +2136,7 @@ def get_course_menu_keyboard(course: int, user_id: int = None):
             builder.button(
                 text=f"{dynamic_course.get('emoji', '📚')} {dynamic_course['title']}{maintenance_suffix}",
                 callback_data=f"dyn_c:{course_index}",
+                style=None if maintenance_suffix else "primary",
             )
     builder.adjust(1)
     builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
@@ -2120,7 +2144,7 @@ def get_course_menu_keyboard(course: int, user_id: int = None):
 
 def get_referral_back_keyboard():
     builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="💎 Открыть доступ без рефералов", callback_data="subscription_menu"))
+    builder.row(InlineKeyboardButton(style="success", text="💎 Открыть доступ без рефералов", callback_data="subscription_menu"))
     builder.row(InlineKeyboardButton(text="🚀 Запустить Medical_vpn_bot", url=MEDICAL_VPN_URL))
     builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
     return builder.as_markup()
@@ -2195,11 +2219,11 @@ def get_ticket_questions_keyboard(ticket_num: str):
 # ==================== ФИЗИКА (клавиатуры) ====================
 def get_physics_menu():
     builder = InlineKeyboardBuilder()
-    builder.button(text="📝 Тестовая часть (186 вопросов)", callback_data="physics_test")
-    builder.button(text="📘 Билеты", callback_data="physics_tickets")
-    builder.button(text="🧮 Задачи", callback_data="physics_tasks")
-    builder.button(text="❓ (60 вопросов) на 4/5", callback_data="physics_grade45")
-    builder.button(text="⭐ Доп. вопросы от преподавателей", callback_data="physics_extra")
+    builder.button(text="📝 Тестовая часть (186 вопросов)", callback_data="physics_test", style="primary")
+    builder.button(text="📘 Билеты", callback_data="physics_tickets", style="primary")
+    builder.button(text="🧮 Задачи", callback_data="physics_tasks", style="primary")
+    builder.button(text="❓ (60 вопросов) на 4/5", callback_data="physics_grade45", style="primary")
+    builder.button(text="⭐ Доп. вопросы от преподавателей", callback_data="physics_extra", style="primary")
     builder.button(text="📄 186 вопросов + шаблоны задач (файл)", callback_data="download_physics_full")
     builder.button(text="📄 (60 вопросов) на 4/5 (файл)", callback_data="download_physics_grade45")
     builder.button(text="📄 Ответы на задачи билетов (файл)", callback_data="download_physics_ticket_tasks")
@@ -2452,10 +2476,10 @@ def get_physics_extra_answer_keyboard(q_num: str):
 # ==================== ХИМИЯ (клавиатуры) ====================
 def get_chemistry_menu():
     builder = InlineKeyboardBuilder()
-    builder.button(text="📚 Теория", callback_data="chemistry_theory")
-    builder.button(text="📝 Задачи", callback_data="chemistry_tasks")
-    builder.button(text="🧪 Лабораторные работы", callback_data="chemistry_labs")
-    builder.button(text="🎫 Билеты", callback_data="chemistry_tickets")
+    builder.button(text="📚 Теория", callback_data="chemistry_theory", style="primary")
+    builder.button(text="📝 Задачи", callback_data="chemistry_tasks", style="primary")
+    builder.button(text="🧪 Лабораторные работы", callback_data="chemistry_labs", style="primary")
+    builder.button(text="🎫 Билеты", callback_data="chemistry_tickets", style="primary")
     builder.button(text="📄 Все лабораторные работы (файл)", callback_data="download_chemistry_labs")
     builder.button(text="📄 Все задачи (файл)", callback_data="download_chemistry_tasks")
     builder.adjust(2, 2, 1)
@@ -2479,7 +2503,7 @@ def get_chemistry_tickets_locked_text() -> str:
 def get_chemistry_tickets_locked_keyboard():
     builder = InlineKeyboardBuilder()
     builder.button(text="👥 Пригласить друзей", callback_data="referral_info")
-    builder.button(text="💎 Оформить подписку", callback_data="subscription_menu")
+    builder.button(style="success", text="💎 Оформить подписку", callback_data="subscription_menu")
     builder.button(text="🔙 Назад", callback_data="menu_chemistry")
     builder.adjust(1)
     return builder.as_markup()
@@ -3362,7 +3386,7 @@ async def notify_admins_of_assistant_dm_request(req_id: str) -> None:
     )
     builder = InlineKeyboardBuilder()
     builder.button(text="✅ Отправить", callback_data=f"assistant_dm_approve:{req_id}")
-    builder.button(text="❌ Отклонить", callback_data=f"assistant_dm_reject:{req_id}")
+    builder.button(style="danger", text="❌ Отклонить", callback_data=f"assistant_dm_reject:{req_id}")
     builder.adjust(1)
     for admin_id in ADMIN_IDS:
         try:
@@ -3637,11 +3661,11 @@ def get_admin_payment_confirm_keyboard(tier_id: int, target_id: int, subject: st
     price = price if price is not None else cfg["price_rub"]
     builder = InlineKeyboardBuilder()
     builder.button(
-        text="✅ Подтвердить оплату",
+        style="success", text="✅ Подтвердить оплату",
         callback_data=f"admin_confirm_sub:{tier_id}:{target_id}:{subject or '-'}:{price}"
     )
     builder.button(
-        text="❌ Отклонить",
+        style="danger", text="❌ Отклонить",
         callback_data=f"admin_reject_sub:{tier_id}:{target_id}:{subject or '-'}"
     )
     builder.adjust(1)
@@ -3761,7 +3785,8 @@ def get_subscription_menu_keyboard():
         badge = f"{cfg['badge']} — " if cfg.get("badge") else ""
         builder.button(
             text=f"{badge}{cfg['emoji']} {cfg['short']} — {cfg['price_rub']}₽/{cfg['price_stars']}⭐",
-            callback_data=f"sub_tier:{tier_id}"
+            callback_data=f"sub_tier:{tier_id}",
+            style=_tier_button_style(cfg),
         )
     builder.adjust(1)
     builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
@@ -3800,10 +3825,15 @@ def get_subscription_course_picker_text(user_id: int) -> str:
     lines.append("🎓 Выбери свой курс — покажем подходящие тарифы:")
     return "\n".join(lines)
 
+def _tier_button_style(cfg: dict) -> str:
+    """Тарифы с бейджем (HOT и т.п.) — зелёные, остальные — синие."""
+    return "success" if cfg.get("badge") else "primary"
+
+
 def get_subscription_course_picker_keyboard():
     builder = InlineKeyboardBuilder()
-    builder.button(text="1️⃣ Первый курс", callback_data="subscription_course:year1")
-    builder.button(text="2️⃣ Второй курс", callback_data="subscription_course:year2")
+    builder.button(text="1️⃣ Первый курс", callback_data="subscription_course:year1", style="primary")
+    builder.button(text="2️⃣ Второй курс", callback_data="subscription_course:year2", style="primary")
     builder.button(text="📦 Все тарифы", callback_data="subscription_all_tiers")
     builder.button(text="🏦 Мои платежи СБП", callback_data="sbp_history")
     builder.adjust(1)
@@ -3834,7 +3864,8 @@ def get_subscription_course_tiers_keyboard(course: str):
         badge = f"{cfg['badge']} — " if cfg.get("badge") else ""
         builder.button(
             text=f"{badge}{cfg['emoji']} {cfg['short']} — {cfg['price_rub']}₽/{cfg['price_stars']}⭐",
-            callback_data=f"sub_tier:{tier_id}"
+            callback_data=f"sub_tier:{tier_id}",
+            style=_tier_button_style(cfg),
         )
     builder.button(text="📦 Все тарифы", callback_data="subscription_all_tiers")
     builder.adjust(1)
@@ -3870,10 +3901,10 @@ def get_sub_tier_keyboard(tier_id: int):
         builder.button(text="🧪 Химия", callback_data=f"sub_subject:{tier_id}:chemistry")
         builder.adjust(1)
     else:
-        builder.button(text=f"⭐ Оплатить {cfg['price_stars']} звёзд", callback_data=f"buy_sub_stars:{tier_id}")
+        builder.button(style="primary", text=f"⭐ Оплатить {cfg['price_stars']} звёзд", callback_data=f"buy_sub_stars:{tier_id}")
         from services.payments.runtime import available as sbp_available
         if sbp_available(sys.modules[__name__]):
-            builder.button(text=f"🏦 СБП {cfg['price_rub']}₽ — автоматически", callback_data=f"buy_sub_sbp:{tier_id}")
+            builder.button(style="success", text=f"🏦 СБП {cfg['price_rub']}₽ — автоматически", callback_data=f"buy_sub_sbp:{tier_id}")
         builder.button(text=f"💵 Оплатить {cfg['price_rub']}₽", callback_data=f"buy_sub_rubles:{tier_id}")
         builder.adjust(1)
     nxt_kb = get_tier_upsell_keyboard(tier_id)
@@ -3886,12 +3917,12 @@ def get_sub_subject_keyboard(tier_id: int, subject: str):
     cfg = SUBSCRIPTION_TIERS[tier_id]
     builder = InlineKeyboardBuilder()
     builder.button(
-        text=f"⭐ Оплатить {cfg['price_stars']} звёзд",
+        style="primary", text=f"⭐ Оплатить {cfg['price_stars']} звёзд",
         callback_data=f"buy_sub_stars_subj:{tier_id}:{subject}"
     )
     from services.payments.runtime import available as sbp_available
     if sbp_available(sys.modules[__name__]):
-        builder.button(text=f"🏦 СБП {cfg['price_rub']}₽ — автоматически", callback_data=f"buy_sub_sbp:{tier_id}:{subject}")
+        builder.button(style="success", text=f"🏦 СБП {cfg['price_rub']}₽ — автоматически", callback_data=f"buy_sub_sbp:{tier_id}:{subject}")
     builder.button(
         text=f"💵 Оплатить {cfg['price_rub']}₽",
         callback_data=f"buy_sub_rubles_subj:{tier_id}:{subject}"
@@ -3960,7 +3991,7 @@ def get_discount_offer_keyboard(tier_id: int):
     cfg = SUBSCRIPTION_TIERS[tier_id]
     builder = InlineKeyboardBuilder()
     builder.button(
-        text=f"⭐ Оплатить {discount_price(cfg['price_stars'])} звёзд",
+        style="primary", text=f"⭐ Оплатить {discount_price(cfg['price_stars'])} звёзд",
         callback_data=f"buy_sub_stars_discount:{tier_id}"
     )
     builder.button(
@@ -3973,7 +4004,7 @@ def get_discount_offer_keyboard(tier_id: int):
 
 def get_subscription_teaser_keyboard():
     builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="💎 Открыть доступ без рефералов", callback_data="subscription_menu"))
+    builder.row(InlineKeyboardButton(style="success", text="💎 Открыть доступ без рефералов", callback_data="subscription_menu"))
     builder.row(InlineKeyboardButton(text="🚀 Запустить Medical_vpn_bot", url=MEDICAL_VPN_URL))
     return builder.as_markup()
 
@@ -4024,7 +4055,7 @@ def get_tier_retired_text(tier_id: int) -> str:
 
 def get_tier_retired_keyboard():
     builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="💎 Посмотреть актуальные тарифы", callback_data="subscription_menu"))
+    builder.row(InlineKeyboardButton(style="success", text="💎 Посмотреть актуальные тарифы", callback_data="subscription_menu"))
     return builder.as_markup()
 
 @dp.callback_query(F.data.startswith("sub_tier:"))
@@ -4119,7 +4150,7 @@ async def cb_buy_sub_sbp(callback: CallbackQuery):
         await callback.message.answer('Оплата уже подтверждена. Подписка активирована.' if row['state'] == 'applied' else 'Оплата подтверждена. Решение по доступу доступно через @vmeda_helper. Повторно платить не нужно.')
         return
     builder = InlineKeyboardBuilder()
-    builder.button(text=f"🏦 Оплатить СБП {row['amount_minor'] // 100}₽", url=service.checkout_url(row))
+    builder.button(style="success", text=f"🏦 Оплатить СБП {row['amount_minor'] // 100}₽", url=service.checkout_url(row))
     builder.button(text="🔄 Проверить оплату", callback_data="check_sbp:" + row['id'])
     builder.button(text="🔙 Подписки", callback_data="subscription_menu")
     builder.adjust(1)

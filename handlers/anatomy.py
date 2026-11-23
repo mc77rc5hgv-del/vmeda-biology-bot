@@ -126,7 +126,7 @@ def get_anatomy_locked_text(section_key: str | None = None) -> str:
 
 def get_anatomy_locked_keyboard():
     builder = InlineKeyboardBuilder()
-    builder.button(text="💎 Оформить подписку", callback_data="subscription_menu")
+    builder.button(style="success", text="💎 Оформить подписку", callback_data="subscription_menu")
     builder.button(text="🔙 В меню Анатомии", callback_data="anatomy_menu")
     builder.adjust(1)
     return builder.as_markup()
@@ -405,7 +405,7 @@ def get_anatomy_latin_keyboard(options: list):
     for i in range(len(options)):
         builder.button(text=str(i + 1), callback_data=f"anatomy_latin_answer:{i}")
     builder.adjust(len(options))
-    builder.row(InlineKeyboardButton(text="🛑 Закончить", callback_data="anatomy_latin_stop"))
+    builder.row(InlineKeyboardButton(style="danger", text="🛑 Закончить", callback_data="anatomy_latin_stop"))
     return builder.as_markup()
 
 def pick_anatomy_latin_distractors(term: dict, pool: list, count: int = 3) -> list:
@@ -604,16 +604,16 @@ def start_anatomy_flash_session(user_id: int, topic_key: str, bone_id: str = Non
 def get_anatomy_flash_question_keyboard():
     builder = InlineKeyboardBuilder()
     builder.button(text="🙈 Показать ответ", callback_data="anatomy_flash_show_answer")
-    builder.button(text="🛑 Закончить", callback_data="anatomy_flash_stop")
+    builder.button(style="danger", text="🛑 Закончить", callback_data="anatomy_flash_stop")
     builder.adjust(1)
     return builder.as_markup()
 
 def get_anatomy_flash_answer_keyboard():
     builder = InlineKeyboardBuilder()
-    builder.button(text="✅ Знаю", callback_data="anatomy_flash_know")
-    builder.button(text="❌ Не знаю", callback_data="anatomy_flash_dont_know")
+    builder.button(style="success", text="✅ Знаю", callback_data="anatomy_flash_know")
+    builder.button(style="danger", text="❌ Не знаю", callback_data="anatomy_flash_dont_know")
     builder.adjust(2)
-    builder.row(InlineKeyboardButton(text="🛑 Закончить", callback_data="anatomy_flash_stop"))
+    builder.row(InlineKeyboardButton(style="danger", text="🛑 Закончить", callback_data="anatomy_flash_stop"))
     return builder.as_markup()
 
 def get_anatomy_flash_summary_keyboard(topic_key: str, bone_id: str = None):
@@ -691,7 +691,7 @@ def get_anatomy_match_keyboard(options: list):
     for i in range(len(options)):
         builder.button(text=str(i + 1), callback_data=f"anatomy_match_answer:{i}")
     builder.adjust(len(options))
-    builder.row(InlineKeyboardButton(text="🛑 Закончить", callback_data="anatomy_match_stop"))
+    builder.row(InlineKeyboardButton(style="danger", text="🛑 Закончить", callback_data="anatomy_match_stop"))
     return builder.as_markup()
 
 async def render_anatomy_match_question(message, user_id: int):
@@ -778,8 +778,8 @@ def get_bone_mnemonic_text(topic_key: str, bone_id: str, idx: int) -> str:
 # ---- Хендлеры ----
 def get_anatomy_root_keyboard():
     builder = InlineKeyboardBuilder()
-    builder.button(text="📚 Весь курс анатомии", callback_data="anatomy_menu")
-    builder.button(text="🎓 Экзамен", callback_data="anatomy_exam_menu")
+    builder.button(text="📚 Весь курс анатомии", callback_data="anatomy_menu", style="primary")
+    builder.button(text="🎓 Экзамен", callback_data="anatomy_exam_menu", style="primary")
     builder.adjust(1)
     builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
     return builder.as_markup()
@@ -2032,7 +2032,7 @@ def get_anatomy_exam_mistake_explanation_keyboard(session: dict, position: int):
         text="📊 Завершить" if session["index"] >= len(session["queue"]) else "➡️ Следующий вопрос",
         callback_data="anatomy_exam_feedback_next",
     )
-    builder.button(text="🛑 Закончить", callback_data="anatomy_exam_test_stop")
+    builder.button(style="danger", text="🛑 Закончить", callback_data="anatomy_exam_test_stop")
     builder.adjust(1)
     return builder.as_markup()
 

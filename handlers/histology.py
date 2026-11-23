@@ -138,7 +138,7 @@ def get_histology_locked_text() -> str:
 def get_histology_locked_keyboard():
     builder = InlineKeyboardBuilder()
     builder.button(text="👥 Пригласить друзей", callback_data="referral_info")
-    builder.button(text="💎 Оформить подписку", callback_data="subscription_menu")
+    builder.button(style="success", text="💎 Оформить подписку", callback_data="subscription_menu")
     builder.button(text="🔙 Назад в меню", callback_data="back_to_main")
     builder.adjust(1)
     return builder.as_markup()
@@ -159,7 +159,7 @@ async def announce_histology_promo_start() -> None:
 def _menu(rows, back):
     builder = InlineKeyboardBuilder()
     for label, data in rows:
-        builder.button(text=label, callback_data=data)
+        builder.button(text=label, callback_data=data, style="primary")
     builder.adjust(1)
     builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data=back))
     return builder.as_markup()
@@ -444,17 +444,17 @@ def get_histology_guess_question_keyboard(session=None):
     builder = InlineKeyboardBuilder()
     suffix = f":{session['id']}:{session['index']}" if session else ''
     builder.button(text="🙈 Показать ответ", callback_data="histology_guess_show_answer" + suffix)
-    builder.button(text="🛑 Закончить", callback_data="histology_guess_stop")
+    builder.button(style="danger", text="🛑 Закончить", callback_data="histology_guess_stop")
     builder.adjust(1)
     return builder.as_markup()
 
 def get_histology_guess_answer_keyboard(session=None):
     builder = InlineKeyboardBuilder()
     suffix = f":{session['id']}:{session['index']}" if session else ''
-    builder.button(text="✅ Угадал(а)", callback_data="histology_guess_know" + suffix)
-    builder.button(text="❌ Не угадал(а)", callback_data="histology_guess_dont_know" + suffix)
+    builder.button(style="success", text="✅ Угадал(а)", callback_data="histology_guess_know" + suffix)
+    builder.button(style="danger", text="❌ Не угадал(а)", callback_data="histology_guess_dont_know" + suffix)
     builder.adjust(2)
-    builder.row(InlineKeyboardButton(text="🛑 Закончить", callback_data="histology_guess_stop"))
+    builder.row(InlineKeyboardButton(style="danger", text="🛑 Закончить", callback_data="histology_guess_stop"))
     return builder.as_markup()
 
 def get_histology_guess_summary_keyboard(scope: str):

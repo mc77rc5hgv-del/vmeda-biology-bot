@@ -4,13 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A single-file Telegram bot (`telegram_bot.py`, aiogram 3.7.0, Python 3.12) that helps students at ВМедА (Military
+A single-file Telegram bot (`telegram_bot.py`, aiogram 3.31.0 / Bot API 10.3, Python 3.12) that helps students at ВМедА (Military
 Medical Academy) prepare for entrance/subject exams: Biology, Physics, Chemistry, Anatomy, Histology. Content lives
 in top-level JSON files loaded into memory at import time. Hosted on Railway, auto-deploying from `main`.
 
 ## Commands
 
-Install deps: `pip install -r requirements.txt` (`aiogram==3.7.0` for the bot itself, `python-docx==1.2.0` for the
+Install deps: `pip install -r requirements.txt` (`aiogram==3.31.0` for the bot itself, `python-docx==1.2.0` for the
 per-subject Word-file export buttons).
 
 Syntax-check after any edit (fast, no token/network needed):
@@ -105,6 +105,17 @@ greeting)` (shared by `/start` and `back_to_main`) and shows one access line: ac
 (Biology/Physics/Chemistry on course 1, Physiology/Operative Surgery on course 2) end with
 `subject_back_buttons(course)` — back to that course screen plus "🏠 Главное меню" — instead of jumping straight
 to the main menu. Anatomy/Histology belong to both courses, so they keep their plain main-menu back button.
+
+**Button colors** use the Bot API 9.4 `style` field (`"primary"` blue, `"success"` green, `"danger"` red; clients
+older than Feb 2026 just render a plain button). There are only three colors, so they encode meaning, not
+subject identity: blue = open a study section; green = the main CTA on a screen (the subscription button,
+badged/HOT tiers, SBP payment, "✅ Знаю"/"Угадал", "✅ Подтвердить"); red = negative/ending actions ("❌ Не знаю",
+"🛑 Закончить", "❌ Отклонить", the referral battle only while it is live). Navigation (back/main menu), file
+downloads, and card-transfer payment stay unstyled. Keep one green button per screen where possible, and give a
+section that the user cannot open right now (maintenance, locked Histology) no color so it doesn't look active —
+`_course_subject_style()` mirrors `_anatomy_menu_label()`'s order of checks for exactly that reason. The main-menu
+subscription label is `get_main_menu_subscription_label()` ("💎 Подписка от N₽ — без рефералов", N from
+`cheapest_active_tier()`); subscribers instead see a plain uncolored "💎 Моя подписка".
 
 ### Biochemistry: approved single-source practicum
 

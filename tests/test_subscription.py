@@ -1236,7 +1236,10 @@ async def main():
     tb.anatomy_handlers.ANATOMY_MAINTENANCE_MODE = False
     try:
         menu_no_sub = tb.get_main_menu(user_id=non_admin)
-        assert "💎 Подписка без рефералов" in kb_texts(menu_no_sub)
+        cheapest_price = tb.cheapest_active_tier()["price_rub"]
+        sub_buttons = [b for row in menu_no_sub.inline_keyboard for b in row if b.callback_data == "subscription_menu"]
+        assert [b.text for b in sub_buttons] == [f"💎 Подписка от {cheapest_price}₽ — без рефералов"]
+        assert sub_buttons[0].style == "success", "subscription CTA is the menu's green button"
         assert tb._anatomy_menu_label(non_admin) == "🔥🦴 Анатомия"
         assert tb._histology_menu_label(non_admin) == "🔬 Гистология (рефералы/подписка)"
 
@@ -1244,6 +1247,7 @@ async def main():
         menu_tier21 = tb.get_main_menu(user_id=non_admin)
         tier21_texts = kb_texts(menu_tier21)
         assert "💎 Моя подписка" in tier21_texts
+        assert [b.style for row in menu_tier21.inline_keyboard for b in row if b.callback_data == "subscription_menu"] == [None]
         assert tb._histology_menu_label(non_admin) == "🔬 Гистология (рефералы/подписка)", "tier 21 has no histology"
         assert tb._anatomy_menu_label(non_admin) == "🔥🦴 Анатомия", "tier 21 has no anatomy — button stays plain (not the 💎 variant)"
         tb.stats["subscriptions"].pop(str(non_admin), None)
@@ -1265,7 +1269,7 @@ async def main():
     assert tb.get_referral_count_this_month(non_admin) >= tb.REFERRAL_FULL_ACCESS_THRESHOLD
     assert tb.has_free_access(non_admin) and not tb.has_active_subscription(non_admin)
     menu_referral_access = tb.get_main_menu(user_id=non_admin)
-    assert "💎 Подписка без рефералов" in kb_texts(menu_referral_access)
+    assert tb.get_main_menu_subscription_label() in kb_texts(menu_referral_access)
     tb.stats["referrals"].pop(str(non_admin), None)
     tb.stats["referral_monthly"].pop(str(non_admin), None)
     print("subscription button stays visible for users with free referral access (not subscribed): OK")

@@ -72,6 +72,10 @@ async def main():
     assert any("техобслуживание" in t for t in kb_texts(course1_non_admin))
     course2_admin = tb.get_course_menu_keyboard(2, user_id=ADMIN_ID)
     assert any("(админ)" in t for t in kb_texts(course2_admin))
+    def anatomy_style(kb):
+        return next(b.style for row in kb.inline_keyboard for b in row if b.callback_data == "anatomy_root")
+    assert anatomy_style(course1_non_admin) is None, "a closed section must not look like an active (blue) button"
+    assert anatomy_style(course2_admin) == "primary"
     print("3. course menu label: non-admin sees maintenance, admin sees normal (админ) label: OK")
 
     # ---- 4. maintenance OFF: behaves exactly as before for non-admin too ----

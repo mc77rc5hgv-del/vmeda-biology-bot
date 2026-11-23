@@ -1273,7 +1273,7 @@ def get_ai_cache_queue_keyboard(fingerprint: str, page: int = 0, page_count: int
     if nav:
         builder.row(*nav)
     builder.row(InlineKeyboardButton(text="✅ Одобрить", callback_data=f"admin_ai_cache_approve:{fingerprint}"),
-                InlineKeyboardButton(text="❌ Отклонить", callback_data=f"admin_ai_cache_reject:{fingerprint}"))
+                InlineKeyboardButton(style="danger", text="❌ Отклонить", callback_data=f"admin_ai_cache_reject:{fingerprint}"))
     builder.row(InlineKeyboardButton(text="🔙 В админ-панель", callback_data="admin_panel"))
     return builder.as_markup()
 

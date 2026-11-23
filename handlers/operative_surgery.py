@@ -192,10 +192,10 @@ def get_oh_menu_text() -> str:
 
 def get_oh_menu_keyboard():
     builder = InlineKeyboardBuilder()
-    builder.button(text="📚 Темы по томам", callback_data="oh:volumes")
-    builder.button(text="📍 Проекции", callback_data="oh:projections")
-    builder.button(text="🛠 Хирургические инструменты", callback_data="oh:instruments")
-    builder.button(text="🎓 Практические станции", callback_data="oh:stations")
+    builder.button(text="📚 Темы по томам", callback_data="oh:volumes", style="primary")
+    builder.button(text="📍 Проекции", callback_data="oh:projections", style="primary")
+    builder.button(text="🛠 Хирургические инструменты", callback_data="oh:instruments", style="primary")
+    builder.button(text="🎓 Практические станции", callback_data="oh:stations", style="primary")
     builder.button(text="🔎 Поиск по ОХ", callback_data="oh:search_prompt")
     builder.adjust(2, 1)
     builder.row(*tb.subject_back_buttons(2))

@@ -146,9 +146,9 @@ async def cb_question_search(callback: CallbackQuery):
 # ==================== БИОЛОГИЯ — ГЛАВНОЕ МЕНЮ ====================
 def get_biology_menu():
     builder = InlineKeyboardBuilder()
-    builder.button(text="📘 Билеты", callback_data="menu_tickets")
-    builder.button(text="📝 Вопросы", callback_data="menu_questions")
-    builder.button(text="🎯 Опрос (10 вопросов)", callback_data="quiz_start")
+    builder.button(text="📘 Билеты", callback_data="menu_tickets", style="primary")
+    builder.button(text="📝 Вопросы", callback_data="menu_questions", style="primary")
+    builder.button(text="🎯 Опрос (10 вопросов)", callback_data="quiz_start", style="success")
     builder.button(text="📄 Все билеты (текстовый файл)", callback_data="download_biology_tickets")
     builder.adjust(2, 1)
     builder.row(*tb.subject_back_buttons(1))
@@ -161,16 +161,16 @@ QUIZ_SESSIONS: dict[int, dict] = {}
 def get_quiz_question_keyboard():
     builder = InlineKeyboardBuilder()
     builder.button(text="🙈 Показать ответ", callback_data="quiz_show_answer")
-    builder.button(text="🛑 Закончить опрос", callback_data="quiz_stop")
+    builder.button(style="danger", text="🛑 Закончить опрос", callback_data="quiz_stop")
     builder.adjust(1)
     return builder.as_markup()
 
 def get_quiz_answer_keyboard():
     builder = InlineKeyboardBuilder()
-    builder.button(text="✅ Знаю", callback_data="quiz_know")
-    builder.button(text="❌ Не знаю", callback_data="quiz_dont_know")
+    builder.button(style="success", text="✅ Знаю", callback_data="quiz_know")
+    builder.button(style="danger", text="❌ Не знаю", callback_data="quiz_dont_know")
     builder.adjust(2)
-    builder.row(InlineKeyboardButton(text="🛑 Закончить опрос", callback_data="quiz_stop"))
+    builder.row(InlineKeyboardButton(style="danger", text="🛑 Закончить опрос", callback_data="quiz_stop"))
     return builder.as_markup()
 
 def get_quiz_summary_keyboard():
@@ -279,7 +279,7 @@ def get_biology_tickets_locked_text() -> str:
 
 def get_biology_tickets_locked_keyboard():
     builder = InlineKeyboardBuilder()
-    builder.button(text="💎 Оформить подписку", callback_data="subscription_menu")
+    builder.button(style="success", text="💎 Оформить подписку", callback_data="subscription_menu")
     builder.button(text="🔙 Назад к Биологии", callback_data="menu_biology")
     builder.adjust(1)
     return builder.as_markup()

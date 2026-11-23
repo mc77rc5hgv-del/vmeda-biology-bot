@@ -398,12 +398,12 @@ def get_phys_menu_keyboard(user_id: int):
         phys_topic_status(user_id, t["topic_id"]) != "not_started" for t in tb.PHYSIOLOGY["topics"]
     )
     builder = InlineKeyboardBuilder()
-    builder.button(text="📚 Все темы", callback_data="phys:topics:0")
+    builder.button(text="📚 Все темы", callback_data="phys:topics:0", style="primary")
     continue_label = "🧠 Продолжить обучение" if any_started else "🧠 Начать обучение"
-    builder.button(text=continue_label, callback_data="phys:continue")
-    builder.button(text="⚡ Быстрый повтор", callback_data="phys:qpick:0")
-    builder.button(text="🎯 Проверить себя", callback_data="phys:zpick:0")
-    builder.button(text="📋 Рубежные контроли", callback_data="phys:rk_menu")
+    builder.button(text=continue_label, callback_data="phys:continue", style="success")
+    builder.button(text="⚡ Быстрый повтор", callback_data="phys:qpick:0", style="primary")
+    builder.button(text="🎯 Проверить себя", callback_data="phys:zpick:0", style="primary")
+    builder.button(text="📋 Рубежные контроли", callback_data="phys:rk_menu", style="primary")
     builder.button(text="🔎 Поиск", callback_data="phys:search_prompt")
     builder.button(text="⭐ Избранное", callback_data="phys:favorites")
     builder.button(text="📊 Мой прогресс", callback_data="phys:progress")
@@ -645,7 +645,7 @@ def get_phys_quiz_question_keyboard(topic_id: str, options: list):
     for i in range(len(options)):
         builder.button(text=str(i + 1), callback_data=f"phys:quiz_answer:{i}")
     builder.adjust(4)
-    builder.row(InlineKeyboardButton(text="🛑 Закончить", callback_data="phys:quiz_stop"))
+    builder.row(InlineKeyboardButton(style="danger", text="🛑 Закончить", callback_data="phys:quiz_stop"))
     return builder.as_markup()
 
 
@@ -665,7 +665,7 @@ def get_phys_quiz_answer_keyboard(is_last: bool):
         builder.button(text="🏁 Итоги", callback_data="phys:quiz_next")
     else:
         builder.button(text="➡️ Следующий вопрос", callback_data="phys:quiz_next")
-    builder.row(InlineKeyboardButton(text="🛑 Закончить", callback_data="phys:quiz_stop"))
+    builder.row(InlineKeyboardButton(style="danger", text="🛑 Закончить", callback_data="phys:quiz_stop"))
     return builder.as_markup()
 
 

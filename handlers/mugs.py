@@ -228,7 +228,7 @@ def get_mug_model_keyboard(
     else:
         builder.row(
             InlineKeyboardButton(
-                text="✅ Подтвердить оплату и заказать",
+                style="success", text="✅ Подтвердить оплату и заказать",
                 callback_data=f"mugs_order:{model_id}:{quantity}",
             )
         )
@@ -261,8 +261,8 @@ def get_admin_mug_request_text(request: dict) -> str:
 
 def get_admin_mug_request_keyboard(model_id: str, user_id: int):
     builder = InlineKeyboardBuilder()
-    builder.button(text="✅ Подтвердить оплату", callback_data=f"admin_mug_confirm:{model_id}:{user_id}")
-    builder.button(text="❌ Отклонить", callback_data=f"admin_mug_reject:{model_id}:{user_id}")
+    builder.button(style="success", text="✅ Подтвердить оплату", callback_data=f"admin_mug_confirm:{model_id}:{user_id}")
+    builder.button(style="danger", text="❌ Отклонить", callback_data=f"admin_mug_reject:{model_id}:{user_id}")
     builder.adjust(1)
     return builder.as_markup()
 

@@ -147,6 +147,8 @@ async def main():
     course1 = tb.get_course_menu_keyboard(1, user_id=non_admin)
     c1_data = [d for d in kb_data(course1) if d != "back_to_main"]
     assert c1_data[:5] == ["menu_physics", "menu_chemistry", "menu_biology", "anatomy_root", "histology_menu"]
+    c1_styles = {b.callback_data: b.style for row in course1.inline_keyboard for b in row}
+    assert c1_styles["menu_physics"] == "primary" and c1_styles["back_to_main"] is None
     assert all(value.startswith("dyn_c:") for value in c1_data[5:])
     print("2. 1st course keeps core subjects in order and appends generated subjects: OK")
 

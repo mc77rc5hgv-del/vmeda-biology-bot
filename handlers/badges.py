@@ -166,7 +166,7 @@ async def navigation_middleware(handler, event, data):
 def result_keyboard(order):
     builder = InlineKeyboardBuilder()
     if order.get("pricing") and order.get("payment", {}).get("status") != "paid":
-        builder.row(InlineKeyboardButton(text=f"🏦 Оплатить СБП · {order['pricing']['total_rub']} ₽",
+        builder.row(InlineKeyboardButton(style="success", text=f"🏦 Оплатить СБП · {order['pricing']['total_rub']} ₽",
                                          callback_data=f"badges:pay:{order['id']}"))
     if order.get("payment", {}).get("id"):
         builder.row(InlineKeyboardButton(text="🔄 Проверить оплату", callback_data=f"badges:check:{order['id']}"))
@@ -425,7 +425,7 @@ async def payment_action(callback, token, *, check=False):
     builder = InlineKeyboardBuilder()
     checkout_url = service.checkout_url(row)
     if row["state"] == "pending" and checkout_url:
-        builder.row(InlineKeyboardButton(text=f"🏦 Оплатить {row['amount_minor'] // 100} ₽", url=checkout_url))
+        builder.row(InlineKeyboardButton(style="success", text=f"🏦 Оплатить {row['amount_minor'] // 100} ₽", url=checkout_url))
     builder.row(InlineKeyboardButton(text="🔄 Проверить оплату", callback_data=f"badges:check:{token}"))
     builder.row(InlineKeyboardButton(text="🪪 Мои заявки", callback_data="badges:mine"))
     await callback.message.answer("🪪 Заказ бейджиков\n" + pricing_text(order["pricing"]) +
