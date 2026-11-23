@@ -11,3 +11,11 @@ export function formatMaterialCount(count: number): string {
         : "материалов";
   return `${count} ${word}`;
 }
+
+/** 1 день, 2 дня, 5 дней, 11 дней. */
+export function formatDayCount(count: number): string {
+  const mod100 = Math.abs(count) % 100;
+  const mod10 = mod100 % 10;
+  const word = mod100 >= 11 && mod100 <= 14 ? "дней" : mod10 === 1 ? "день" : mod10 >= 2 && mod10 <= 4 ? "дня" : "дней";
+  return `${count} ${word}`;
+}

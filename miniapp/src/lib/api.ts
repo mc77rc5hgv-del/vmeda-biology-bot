@@ -13,7 +13,7 @@ import type {
   AnatomyExamAnswerResult,
   AnatomyExamPart,
   AnatomyExamQuestion,
-  ContinueItem,
+  SearchResponse,
   DashboardStats,
   MaterialDetail,
   LearningState,
@@ -69,14 +69,10 @@ export function fetchDashboard(): Promise<DashboardStats> {
   return hasSession() ? apiClient.fetchRealDashboard() : resolveAfterDelay(mock.mockDashboard);
 }
 
-export function fetchContinueItem(): Promise<ContinueItem | null> {
-  if (!hasSession()) return resolveAfterDelay(mock.mockContinue);
-  return apiClient.fetchLearningState().then((state) => {
-    const item = state.lastMaterial;
-    return item ? {subjectId: item.subjectId, sectionId: item.sectionId, materialId: item.materialId,
-      subjectTitle: item.subjectTitle, sectionTitle: item.sectionTitle, materialTitle: item.materialTitle,
-      order: item.materialOrder, totalInSection: item.totalInSection} : null;
-  });
+/** Поиск идёт только по настоящему бэкенду: в превью без Telegram-сессии возвращает null. */
+export function searchMaterials(query: string, signal?: AbortSignal): Promise<SearchResponse | null> {
+  if (!hasSession()) return Promise.resolve(null);
+  return apiClient.searchRealMaterials(query, signal);
 }
 
 export async function fetchSubjects(): Promise<SubjectSummary[]> {

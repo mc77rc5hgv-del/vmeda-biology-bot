@@ -1,5 +1,5 @@
 import { subscriptionPath } from "../lib/subscriptions";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { CheckCircle2, ChevronRight, Layers, Lock } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
@@ -12,13 +12,12 @@ import { Icon } from "../components/Icon";
 import { Skeleton } from "../components/Skeleton";
 import { StateMessage } from "../components/StateMessage";
 import { TelegramContentGate } from "../components/TelegramContentGate";
+import { LoadMore } from "../components/LoadMore";
 import styles from "./Section.module.css";
 
-// Backend отдаёт раздел целиком одним ответом (см. web_api/content.py) — у самых больших
-// разделов (напр. "Все тесты по биохимии", 1500 уроков) рендерить их все в DOM сразу плохо для
-// мобильного скролла (§17 ТЗ: "виртуализация длинных списков"). Пока нет backend-пагинации,
-// компенсируем на фронте простым "показать ещё" — честная временная мера, не замена настоящей
-// виртуализации/серверной пагинации, которая нужна отдельным шагом.
+// Раздел приходит целиком одним ответом: это только заголовки (самый большой раздел — 540,
+// десятки килобайт), так что серверная пагинация не нужна. В DOM же рисуем порциями и
+// догружаем их сами при прокрутке (LoadMore), чтобы длинный список не тормозил на слабых телефонах.
 const PAGE_SIZE = 50;
 
 export function SectionPage() {
@@ -26,6 +25,7 @@ export function SectionPage() {
   const navigate = useNavigate();
   useTelegramBackButton(() => navigate(`/subjects/${subjectId}`));
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const showMore = useCallback(() => setVisibleCount((count) => count + PAGE_SIZE), []);
   const hasSession = hasContentSession();
 
   const sectionQuery = useQuery({
@@ -134,11 +134,12 @@ export function SectionPage() {
         })}
       </div>
       {visibleCount < section.items.length && (
-        <PressableCard className={styles.row} onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}>
-          <span className={styles.rowTitle}>
-            Показать ещё ({section.items.length - visibleCount})
-          </span>
-        </PressableCard>
+        <LoadMore
+          remaining={section.items.length - visibleCount}
+          onMore={showMore}
+          className={styles.row}
+          titleClassName={styles.rowTitle}
+        />
       )}
     </div>
   );

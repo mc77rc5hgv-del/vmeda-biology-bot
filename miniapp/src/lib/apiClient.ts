@@ -20,6 +20,7 @@ import type {
   MaterialDetail,
   LearningState,
   SectionContents,
+  SearchResponse,
   SectionItemRef,
   SubjectDetail,
   SubjectSummary,
@@ -216,6 +217,7 @@ interface DashboardStatsWire {
   readiness_percent: number;
   daily_goal_minutes: number;
   minutes_left_today: number;
+  studied_today?: boolean;
 }
 
 export async function fetchRealDashboard(): Promise<DashboardStats> {
@@ -226,6 +228,7 @@ export async function fetchRealDashboard(): Promise<DashboardStats> {
     readinessPercent: body.readiness_percent,
     dailyGoalMinutes: body.daily_goal_minutes,
     minutesLeftToday: body.minutes_left_today,
+    studiedToday: body.studied_today,
   };
 }
 
@@ -367,6 +370,7 @@ interface SubjectSummaryWire {
   has_ai: boolean;
   maintenance?: boolean;
   maintenance_reason?: string | null;
+  total_items?: number | null;
 }
 
 interface SubjectDetailWire extends SubjectSummaryWire {
@@ -384,6 +388,27 @@ function toSubjectSummary(wire: SubjectSummaryWire): SubjectSummary {
     locked: wire.maintenance ?? false,
     hasAi: wire.has_ai,
     lockedReason: wire.maintenance_reason ?? undefined,
+    totalItems: wire.total_items ?? null,
+  };
+}
+
+interface SearchResponseWire {
+  results: Array<{ subject_id: string; subject_title: string; section_id: string; section_title: string; item_id: string; title: string }>;
+  has_more: boolean;
+}
+
+export async function searchRealMaterials(query: string, signal?: AbortSignal): Promise<SearchResponse> {
+  const body: SearchResponseWire = await apiFetch(`/api/v1/search?q=${encodeURIComponent(query)}`, { signal });
+  return {
+    results: body.results.map((item) => ({
+      subjectId: item.subject_id,
+      subjectTitle: item.subject_title,
+      sectionId: item.section_id,
+      sectionTitle: item.section_title,
+      itemId: item.item_id,
+      title: item.title,
+    })),
+    hasMore: body.has_more,
   };
 }
 

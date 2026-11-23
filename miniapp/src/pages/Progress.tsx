@@ -21,29 +21,35 @@ export function ProgressPage() {
   const [course, setCourse] = useState<0 | 1 | 2>(0);
   const subjectsQuery = useQuery({ queryKey: ["subjects"], queryFn: fetchSubjects });
   const learningQuery = useQuery({ queryKey: ["learning"], queryFn: fetchLearningState });
+  // Итоги приходят прямо в списке предметов; отдельный запрос — только для тех, у кого их нет
+  // (демо-данные или ответ старого бэкенда во время выкладки).
+  const missingTotals = (subjectsQuery.data ?? []).filter((item) => typeof item.totalItems !== "number").map((item) => item.id);
   const detailsQuery = useQuery({
-    queryKey: ["subject-totals", ...(subjectsQuery.data?.map((item) => item.id) ?? [])],
-    enabled: Boolean(subjectsQuery.data),
-    queryFn: async () => Promise.allSettled((subjectsQuery.data ?? []).map((item) => fetchSubjectDetail(item.id))),
+    queryKey: ["subject-totals", ...missingTotals],
+    enabled: Boolean(subjectsQuery.data) && missingTotals.length > 0,
+    queryFn: async () => Promise.allSettled(missingTotals.map((id) => fetchSubjectDetail(id))),
     staleTime: 5 * 60_000,
   });
 
-  if (subjectsQuery.isLoading || learningQuery.isLoading || detailsQuery.isLoading) {
+  if (subjectsQuery.isLoading || learningQuery.isLoading || (missingTotals.length > 0 && detailsQuery.isLoading)) {
     return <div className="screen dashboard-screen"><Skeleton height={30} width="50%" />{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} height={72} radius="16px" />)}</div>;
   }
   if (subjectsQuery.isError || learningQuery.isError || !subjectsQuery.data || !learningQuery.data) {
     return <div className="screen dashboard-screen"><StateMessage title="Не удалось загрузить прогресс" onRetry={() => { subjectsQuery.refetch(); learningQuery.refetch(); }} /></div>;
   }
 
-  const totals = new Map((detailsQuery.data ?? []).flatMap((result) => result.status === "fulfilled" && result.value ? [result.value] : []).map((subject) => [
-    subject!.id,
-    subject!.sections.reduce((sum, section) => sum + section.itemCount, 0),
-  ]));
+  const totals = new Map<string, number>([
+    ...subjectsQuery.data.flatMap((subject) => typeof subject.totalItems === "number" ? [[subject.id, subject.totalItems] as [string, number]] : []),
+    ...(detailsQuery.data ?? []).flatMap((result) => result.status === "fulfilled" && result.value ? [result.value] : []).map((subject) => [
+      subject.id,
+      subject.sections.reduce((sum, section) => sum + section.itemCount, 0),
+    ] as [string, number]),
+  ]);
   const learning = learningQuery.data;
   const accuracy = learning.quizAttempts ? Math.round((learning.quizCorrect / learning.quizAttempts) * 100) : 0;
   const visibleSubjects = subjectsQuery.data.filter((subject) => (!course || isSubjectOnCourse(subject, course))
     && subject.title.toLocaleLowerCase("ru").includes(search.trim().toLocaleLowerCase("ru")));
-  const partialTotals = detailsQuery.isError || detailsQuery.data?.some((result) => result.status === "rejected");
+  const partialTotals = missingTotals.length > 0 && (detailsQuery.isError || detailsQuery.data?.some((result) => result.status === "rejected"));
 
   return (
     <div className="screen dashboard-screen">

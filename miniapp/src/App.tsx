@@ -20,6 +20,7 @@ import { ProfilePage } from "./pages/Profile";
 import { ReferralPage } from "./pages/Referral";
 import { FavoritesPage } from "./pages/Favorites";
 import { ProgressPage } from "./pages/Progress";
+import { SearchPage } from "./pages/Search";
 import { NotFoundPage } from "./pages/NotFound";
 import { HistologyCatalogPage, HistologyExamPage, HistologyGuessPage } from "./pages/HistologyExam";
 import { HistologyTestPage, HistologyTheoryPage } from "./pages/HistologyStudy";
@@ -66,6 +67,7 @@ export function App() {
         <Route path="/subjects/:subjectId/sections/:sectionId/groups/:groupId" element={<GroupPage />} />
         <Route path="/materials/:subjectId/:sectionId/:materialId" element={<MaterialPage />} />
         <Route path="/tests/:subjectId" element={<TestPage />} />
+        <Route path="/search" element={<SearchPage />} />
         <Route path="/histology/exam" element={<HistologyExamPage />} />
         <Route path="/histology/exam/specimens" element={<HistologyCatalogPage key="exam" />} />
         <Route path="/histology/exam/tests/:questionId?" element={<HistologyTestPage />} />
