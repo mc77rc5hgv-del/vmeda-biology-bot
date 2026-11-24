@@ -17,7 +17,7 @@
   font-weight: 850;
   letter-spacing: 0.12em;
   color: var(--navy);
-  background: linear-gradient(105deg, var(--academic-blue), var(--brand-violet) 62%, var(--brand-cyan));
+  background: var(--wordmark-gradient);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;

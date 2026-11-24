@@ -85,6 +85,10 @@
   --shadow-pop: 0 18px 42px rgb(57 107 238 / 12%);
   --shadow-brand: 0 14px 32px rgb(57 107 238 / 18%);
 
+  --surface-nav: rgb(255 255 255 / 97%);
+  --skeleton-shine: rgb(255 255 255 / 35%);
+  --wordmark-gradient: linear-gradient(105deg, var(--academic-blue), var(--brand-violet) 62%, var(--brand-cyan));
+
   --tap-min: 44px; /* минимальная область нажатия, см. §18 ТЗ */
 
   /* Реальная высота BottomNav (см. components/BottomNav.module.css) без safe-area:
@@ -127,6 +131,28 @@
     --shadow-pop: 0 22px 46px rgb(0 0 0 / 38%);
     --shadow-brand: 0 18px 38px rgb(31 84 214 / 28%);
 
+    /* Подложки иконок: 10% на тёмном фоне почти не видны — в тёмной теме плотнее. */
+    --academy-red-tint: #F04F6842;
+    --academic-blue-tint: #5B86F542;
+    --muted-teal-tint: #18A9A042;
+    --amber-tint: #D9942B42;
+    --success-tint: #2BB98A42;
+    --navy-tint: rgb(255 255 255 / 7%);
+    --surface-nav: rgb(24 40 64 / 97%);
+    --skeleton-shine: rgb(255 255 255 / 6%);
+    --wordmark-gradient: linear-gradient(105deg, #8FB0FF, #B9AEFF 62%, #7FE0F5);
+    --subject-physiology-fg: #FFA1B0;
+    --subject-operative-surgery-fg: #80DBD4;
+    --subject-biochemistry-fg: #9CBAFF;
+    --subject-pharmacology-fg: #F1C27E;
+    --subject-biology-fg: #8CD3A8;
+    --subject-physics-fg: #D3A0FF;
+    --subject-chemistry-fg: #8EB6FF;
+    --subject-anatomy-fg: #F58B97;
+    --subject-histology-fg: #CDA5FF;
+    --subject-latin-fg: #DBB18E;
+    --subject-law-fg: #C5A48E;
+
     color-scheme: dark;
   }
 }
@@ -150,6 +176,28 @@
   --shadow-pop: 0 22px 46px rgb(0 0 0 / 38%);
   --shadow-brand: 0 18px 38px rgb(31 84 214 / 28%);
 
+  /* Подложки иконок: 10% на тёмном фоне почти не видны — в тёмной теме плотнее. */
+  --academy-red-tint: #F04F6842;
+  --academic-blue-tint: #5B86F542;
+  --muted-teal-tint: #18A9A042;
+  --amber-tint: #D9942B42;
+  --success-tint: #2BB98A42;
+  --navy-tint: rgb(255 255 255 / 7%);
+  --surface-nav: rgb(24 40 64 / 97%);
+  --skeleton-shine: rgb(255 255 255 / 6%);
+  --wordmark-gradient: linear-gradient(105deg, #8FB0FF, #B9AEFF 62%, #7FE0F5);
+  --subject-physiology-fg: #FFA1B0;
+  --subject-operative-surgery-fg: #80DBD4;
+  --subject-biochemistry-fg: #9CBAFF;
+  --subject-pharmacology-fg: #F1C27E;
+  --subject-biology-fg: #8CD3A8;
+  --subject-physics-fg: #D3A0FF;
+  --subject-chemistry-fg: #8EB6FF;
+  --subject-anatomy-fg: #F58B97;
+  --subject-histology-fg: #CDA5FF;
+  --subject-latin-fg: #DBB18E;
+  --subject-law-fg: #C5A48E;
+
   color-scheme: dark;
 }
 
@@ -169,6 +217,19 @@
   --subject-histology: #7944C6;
   --subject-latin: #875633;
   --subject-law: #573B2A;
+
+  /* Цвет предмета для текста, иконок и прогресса: в тёмной теме переопределён светлее. */
+  --subject-physiology-fg: var(--subject-physiology);
+  --subject-operative-surgery-fg: var(--subject-operative-surgery);
+  --subject-biochemistry-fg: var(--subject-biochemistry);
+  --subject-pharmacology-fg: var(--subject-pharmacology);
+  --subject-biology-fg: var(--subject-biology);
+  --subject-physics-fg: var(--subject-physics);
+  --subject-chemistry-fg: var(--subject-chemistry);
+  --subject-anatomy-fg: var(--subject-anatomy);
+  --subject-histology-fg: var(--subject-histology);
+  --subject-latin-fg: var(--subject-latin);
+  --subject-law-fg: var(--subject-law);
 }
 
 /* Наследуемые акценты предмета: кнопки и прогресс сохраняют общую геометрию. */
@@ -190,23 +251,24 @@
   --academic-blue-tint: var(--subject-tint, #396BEE1A);
   --navy-surface: var(--subject-deep, #071A38);
 }
-:root[data-theme="dark"] .subject-theme[data-subject] { --subject-ink: var(--subject-dark-ink); }
+/* Подложка иконок внутри предмета: 10% тёмного цвета предмета на тёмной карточке не видна. */
+:root[data-theme="dark"] .subject-theme[data-subject] { --subject-ink: var(--subject-dark-ink); --subject-tint: rgb(255 255 255 / 9%); }
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .subject-theme[data-subject] { --subject-ink: var(--subject-dark-ink); }
+  :root:not([data-theme="light"]) .subject-theme[data-subject] { --subject-ink: var(--subject-dark-ink); --subject-tint: rgb(255 255 255 / 9%); }
 }
 
 /* Мягкие предметные поверхности: явные цвета совместимы со старыми WebView. */
-.subject-theme[data-subject="anatomy"] { --subject-page: #FDF8F9; --subject-card: #FBF2F3; --subject-secondary: #F9E9EB; --subject-border: #F2CFD3; --subject-page-dark: #2C1C25; --subject-card-dark: #4D2E39; --subject-secondary-dark: #5B353F; --subject-border-dark: #7F5764; }
-.subject-theme[data-subject="histology"] { --subject-page: #FAF8FD; --subject-card: #F6F3FB; --subject-secondary: #F0EAF9; --subject-border: #DFD2F1; --subject-page-dark: #211E36; --subject-card-dark: #3B3256; --subject-secondary-dark: #443863; --subject-border-dark: #675B8A; }
-.subject-theme[data-subject="chemistry"] { --subject-page: #F7FAFD; --subject-card: #F1F5FC; --subject-secondary: #E7EEF9; --subject-border: #CBDAF3; --subject-page-dark: #172236; --subject-card-dark: #283957; --subject-secondary-dark: #2E4164; --subject-border-dark: #4F658C; }
-.subject-theme[data-subject="biology"] { --subject-page: #F7FAF9; --subject-card: #F1F6F3; --subject-secondary: #E7F0EB; --subject-border: #CBDFD3; --subject-page-dark: #172525; --subject-card-dark: #283E39; --subject-secondary-dark: #2E483F; --subject-border-dark: #4F6B64; }
-.subject-theme[data-subject="latin"] { --subject-page: #FBF9F8; --subject-card: #F7F4F2; --subject-secondary: #F2ECE9; --subject-border: #E2D6CE; --subject-page-dark: #232022; --subject-card-dark: #3E3634; --subject-secondary-dark: #483E39; --subject-border-dark: #6C605E; }
-.subject-theme[data-subject="law"] { --subject-page: #F9F8F8; --subject-card: #F4F2F1; --subject-secondary: #EDE9E8; --subject-border: #D7D0CC; --subject-page-dark: #1D1D21; --subject-card-dark: #332F32; --subject-secondary-dark: #3B3637; --subject-border-dark: #5D585B; }
-.subject-theme[data-subject="physics"] { --subject-page: #FBF8FE; --subject-card: #F8F2FD; --subject-secondary: #F3EAFC; --subject-border: #E5D0F8; --subject-page-dark: #241D39; --subject-card-dark: #40305C; --subject-secondary-dark: #4B376A; --subject-border-dark: #6F5992; }
-.subject-theme[data-subject="physiology"] { --subject-page: #FEF9FA; --subject-card: #FEF4F5; --subject-secondary: #FDECEE; --subject-border: #FBD5DB; --subject-page-dark: #311F29; --subject-card-dark: #563440; --subject-secondary-dark: #663C48; --subject-border-dark: #8B5E6E; }
-.subject-theme[data-subject="operative_surgery"] { --subject-page: #F7FCFC; --subject-card: #F0F9F9; --subject-secondary: #E6F6F5; --subject-border: #C8EAE8; --subject-page-dark: #152B31; --subject-card-dark: #24494D; --subject-secondary-dark: #295558; --subject-border-dark: #4A797E; }
-.subject-theme[data-subject="biochemistry"] { --subject-page: #F8FAFE; --subject-card: #F2F5FE; --subject-secondary: #E9EFFD; --subject-border: #CFDBFB; --subject-page-dark: #19233B; --subject-card-dark: #2C3A5F; --subject-secondary-dark: #33436E; --subject-border-dark: #546796; }
-.subject-theme[data-subject="pharmacology"] { --subject-page: #FEFBF8; --subject-card: #FDF8F1; --subject-secondary: #FBF3E8; --subject-border: #F6E5CC; --subject-page-dark: #2E2821; --subject-card-dark: #514432; --subject-secondary-dark: #5F4F37; --subject-border-dark: #84735B; }
+.subject-theme[data-subject="anatomy"] { --subject-page: #FDF8F9; --subject-card: #FBF2F3; --subject-secondary: #F9E9EB; --subject-border: #F2CFD3; --subject-page-dark: #1C1A28; --subject-card-dark: #3D2D3C; --subject-secondary-dark: #473240; --subject-border-dark: #7F5764; }
+.subject-theme[data-subject="histology"] { --subject-page: #FAF8FD; --subject-card: #F6F3FB; --subject-secondary: #F0EAF9; --subject-border: #DFD2F1; --subject-page-dark: #171C31; --subject-card-dark: #313050; --subject-secondary-dark: #373459; --subject-border-dark: #675B8A; }
+.subject-theme[data-subject="chemistry"] { --subject-page: #F7FAFD; --subject-card: #F1F5FC; --subject-secondary: #E7EEF9; --subject-border: #CBDAF3; --subject-page-dark: #121E31; --subject-card-dark: #243451; --subject-secondary-dark: #283A5A; --subject-border-dark: #4F658C; }
+.subject-theme[data-subject="biology"] { --subject-page: #F7FAF9; --subject-card: #F1F6F3; --subject-secondary: #E7F0EB; --subject-border: #CBDFD3; --subject-page-dark: #121F28; --subject-card-dark: #24383C; --subject-secondary-dark: #283F40; --subject-border-dark: #4F6B64; }
+.subject-theme[data-subject="latin"] { --subject-page: #FBF9F8; --subject-card: #F7F4F2; --subject-secondary: #F2ECE9; --subject-border: #E2D6CE; --subject-page-dark: #181C27; --subject-card-dark: #333238; --subject-secondary-dark: #3A383C; --subject-border-dark: #6C605E; }
+.subject-theme[data-subject="law"] { --subject-page: #F9F8F8; --subject-card: #F4F2F1; --subject-secondary: #EDE9E8; --subject-border: #D7D0CC; --subject-page-dark: #151B26; --subject-card-dark: #2B2E37; --subject-secondary-dark: #31323B; --subject-border-dark: #5D585B; }
+.subject-theme[data-subject="physics"] { --subject-page: #FBF8FE; --subject-card: #F8F2FD; --subject-secondary: #F3EAFC; --subject-border: #E5D0F8; --subject-page-dark: #181B32; --subject-card-dark: #342E54; --subject-secondary-dark: #3C335E; --subject-border-dark: #6F5992; }
+.subject-theme[data-subject="physiology"] { --subject-page: #FEF9FA; --subject-card: #FEF4F5; --subject-secondary: #FDECEE; --subject-border: #FBD5DB; --subject-page-dark: #1F1C2A; --subject-card-dark: #443141; --subject-secondary-dark: #4F3746; --subject-border-dark: #8B5E6E; }
+.subject-theme[data-subject="operative_surgery"] { --subject-page: #F7FCFC; --subject-card: #F0F9F9; --subject-secondary: #E6F6F5; --subject-border: #C8EAE8; --subject-page-dark: #11222E; --subject-card-dark: #21404A; --subject-secondary-dark: #244852; --subject-border-dark: #4A797E; }
+.subject-theme[data-subject="biochemistry"] { --subject-page: #F8FAFE; --subject-card: #F2F5FE; --subject-secondary: #E9EFFD; --subject-border: #CFDBFB; --subject-page-dark: #131E34; --subject-card-dark: #263557; --subject-secondary-dark: #2B3C61; --subject-border-dark: #546796; }
+.subject-theme[data-subject="pharmacology"] { --subject-page: #FEFBF8; --subject-card: #FDF8F1; --subject-secondary: #FBF3E8; --subject-border: #F6E5CC; --subject-page-dark: #1E2026; --subject-card-dark: #403C37; --subject-secondary-dark: #4A443B; --subject-border-dark: #84735B; }
 .subject-theme[data-subject] {
   --surface: var(--subject-card, #FFFFFF);
   --surface-elevated: var(--subject-card, #FFFFFF);

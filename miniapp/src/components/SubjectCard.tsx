@@ -18,7 +18,10 @@ interface SubjectCardProps {
 export function SubjectCard({ subject, completed = 0 }: SubjectCardProps) {
   const navigate = useNavigate();
   const IconComponent = subjectIcon(subject.id);
-  const accentVar = `var(--subject-${subject.accent})`;
+  // Фон карточки тонируется основным цветом предмета, а иконка/полоски — его вариантом для
+  // переднего плана, который в тёмной теме светлее (иначе тёмно-коричневый тонет в тёмно-синем).
+  const accentVar = `var(--subject-${subject.accent}-fg)`;
+  const surfaceAccent = `var(--subject-${subject.accent})`;
   const total = subject.totalItems ?? 0;
   const percent = total ? Math.min(100, Math.round((completed / total) * 100)) : (subject.readiness ?? 0);
 
@@ -32,7 +35,7 @@ export function SubjectCard({ subject, completed = 0 }: SubjectCardProps) {
       className={[styles.card, subject.locked ? styles.locked : ""].join(" ")}
       onClick={handleOpen}
       aria-label={subject.locked ? `${subject.title} — заблокировано` : subject.title}
-      style={{ "--subject-accent": accentVar } as React.CSSProperties}
+      style={{ "--subject-accent": surfaceAccent } as React.CSSProperties}
     >
       <span className={styles.accentBar} style={{ background: accentVar }} aria-hidden="true" />
       <div className={styles.top}>

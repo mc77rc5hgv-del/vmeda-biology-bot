@@ -94,7 +94,7 @@ export function SubjectPage() {
           />
         ) : (
           <div className={styles.readinessRow}>
-            <ProgressBar percent={readiness} color={`var(--subject-${subject.accent})`} label="Готовность" />
+            <ProgressBar percent={readiness} color={`var(--subject-${subject.accent}-fg)`} label="Готовность" />
             <span className={styles.readinessValue}>Изучено {completedMaterials} · {readiness}%</span>
           </div>
         )}
