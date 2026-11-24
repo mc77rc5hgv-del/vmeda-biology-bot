@@ -114,6 +114,8 @@ class AccessStatusResponse(BaseModel):
     promo_access: bool = False
     subscription_required: bool = False
     trial_available: bool = False
+    trial_expires_at: str | None = None
+    trial_duration_hours: int | None = None
     can_open_subject: bool
     can_download: bool
     can_use_ai: bool

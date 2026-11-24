@@ -5,11 +5,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from .. import learning
-from ..deps import get_current_user_id, get_fresh_bot_module
+from ..deps import get_current_user_id, get_fresh_bot_module, require_anatomy_test_access
 from .subjects import _anatomy_exam_question_by_num, _anatomy_exam_public_question, ANATOMY_EXAM_OPTION_LETTERS
 from services.anatomy_feedback import get_anatomy_answer_feedback
 
-router = APIRouter(prefix='/api/v1/anatomy/exam', tags=['anatomy'])
+router = APIRouter(prefix='/api/v1/anatomy/exam', tags=['anatomy'], dependencies=[Depends(require_anatomy_test_access)])
 
 
 class Start(BaseModel):

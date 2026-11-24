@@ -239,6 +239,8 @@ interface AccessStatusWire {
   promo_access?: boolean;
   subscription_required?: boolean;
   trial_available?: boolean;
+  trial_expires_at?: string | null;
+  trial_duration_hours?: number | null;
   can_open_subject: boolean;
   can_download: boolean;
   can_use_ai: boolean;
@@ -255,6 +257,8 @@ function toAccessStatus(wire: AccessStatusWire): AccessStatus {
     subscriptionRequired: wire.subscription_required ?? false,
     canOpenSubject: wire.can_open_subject,
     trialAvailable: wire.trial_available ?? false,
+    trialExpiresAt: wire.trial_expires_at ?? null,
+    trialDurationHours: wire.trial_duration_hours ?? null,
     canDownload: wire.can_download,
     canUseAi: wire.can_use_ai,
     aiRequestsLeft: wire.ai_requests_left,

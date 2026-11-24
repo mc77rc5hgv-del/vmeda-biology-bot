@@ -1,6 +1,10 @@
 """Public launcher is permanent; promo revocation never edits paid entitlements."""
 from concurrent.futures import Future
 from copy import deepcopy
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+import asyncio
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -47,7 +51,9 @@ def test_promo_all_subjects_off_revokes_on_existing_token_preserves_everything(p
     c, h = client()
     assert c.get('/api/v1/me', headers=h).status_code == 200
     for subject in PAID_SUBJECTS:
-        assert c.get(f'/api/v1/access/{subject}', headers=h).json()['subscription_required']
+        access = c.get(f'/api/v1/access/{subject}', headers=h).json()
+        assert access['subscription_required'] is (subject != 'histology')
+        assert access['trial_available'] is (subject == 'histology')
     set_promo(tb, ADMIN, True).result()
     set_promo(tb, ADMIN, True).result()  # idempotent button retry
     sync = c.get('/api/v1/sync/state', headers=h).json()
@@ -114,6 +120,96 @@ def test_subscription_header_exposed_to_cross_origin_client(public_state):
 def test_contextual_plan_coverage():
     assert _plan_subjects({'histology_until_rule': 'expiry', 'anatomy': True}) == ['biology', 'physics', 'chemistry', 'histology', 'anatomy']
     assert _plan_subjects({'histology_until_rule': 1, 'anatomy': False}) == ['biology', 'physics', 'chemistry']
+
+
+def test_exam_trial_shared_by_bot_and_public_api_without_extending(public_state, monkeypatch):
+    from handlers.anatomy import anatomy_exam_access_middleware
+    from services.content_access import can_visit
+
+    c, h = client()
+    key = str(USER)
+    anatomy = '/api/v1/access/anatomy_tests'
+    histology = '/api/v1/access/histology'
+    anatomy_bank = '/api/v1/anatomy/exam/parts'
+    histology_bank = '/api/v1/histology/exam/catalog'
+    guard_paths = (anatomy_bank, histology_bank, '/api/v1/anatomy/exam/runs/active', '/api/v1/anatomy/exam/mistakes')
+    old_button = SimpleNamespace(
+        data='anatomy_exam_feedback_next', from_user=SimpleNamespace(id=USER), answer=AsyncMock(), message=object(),
+    )
+    handler = AsyncMock()
+    monkeypatch.setattr(tb, 'safe_edit_text', AsyncMock())
+
+    assert all(c.get(path, headers=h).json()['trial_available'] for path in (anatomy, histology))
+    assert all(c.get(path, headers=h).status_code == 403 for path in guard_paths)
+    assert key not in public_state['exam_trial_access']
+
+    start = c.post(histology + '/enter', headers=h).json()
+    assert start['trial_started'] and start['access']['trial_duration_hours'] == 24
+    deadline = public_state['exam_trial_access'][key]
+    assert 86390 < deadline - time.time() <= 86400
+    assert c.get(anatomy, headers=h).json()['trial_expires_at'] == start['access']['trial_expires_at']
+    assert c.get(anatomy_bank, headers=h).status_code == 200
+    assert c.get(histology_bank, headers=h).status_code == 200
+    asyncio.run(anatomy_exam_access_middleware(handler, old_button, {}))
+    handler.assert_awaited_once()
+    assert not c.post(anatomy + '/enter', headers=h).json()['trial_started']
+    assert public_state['exam_trial_access'][key] == deadline
+    assert c.get('/api/v1/subjects/anatomy/sections/course', headers=h).status_code == 403
+
+    public_state['exam_trial_access'][key] = time.time() - 1
+    assert all(c.get(path, headers=h).status_code == 403 for path in guard_paths)
+    denied = c.post('/api/v1/anatomy/exam/runs/example/answer', json={'position': 0, 'selected_index': 0}, headers=h)
+    assert denied.status_code == 403
+    trial = c.post(histology + '/enter', headers=h).json()
+    assert not trial['allowed'] and not trial['access']['trial_available']
+    asyncio.run(anatomy_exam_access_middleware(handler, old_button, {}))
+    handler.assert_awaited_once()
+    assert 'Пробный доступ закончился' in tb.safe_edit_text.await_args.args[1]
+
+    public_state['referral_monthly'][key] = {'month': tb._current_referral_month_key(), 'count': 1}
+    assert not can_visit(tb, USER, 'anatomy_tests')
+    public_state['referral_monthly'][key]['count'] = 2
+    assert c.get(anatomy_bank, headers=h).status_code == 200
+    assert c.get(histology_bank, headers=h).status_code == 200
+    assert public_state['exam_trial_access'][key] < time.time()
+    assert key not in public_state['subscriptions']
+
+
+def test_legacy_trial_and_paid_access_are_preserved(public_state):
+    key = str(USER)
+    deadline = time.time() + 100
+    public_state['histology_temp_access'][key] = deadline
+    c, h = client()
+    histology = '/api/v1/access/histology'
+    anatomy = '/api/v1/access/anatomy_tests'
+    assert c.get(histology, headers=h).json()['trial_expires_at'] == c.get(anatomy, headers=h).json()['trial_expires_at']
+    assert not c.post(anatomy + '/enter', headers=h).json()['trial_started']
+    assert public_state['histology_temp_access'][key] == deadline and key not in public_state['exam_trial_access']
+
+    public_state['histology_temp_access'][key] = 1
+    public_state['subscriptions'][key] = {
+        'tier': 24, 'expires': 4_000_000_000, 'histology_access': True,
+        'histology_until': 4_000_000_000, 'anatomy': True,
+    }
+    before = deepcopy(public_state)
+    for scope in (histology, anatomy):
+        decision = c.post(scope + '/enter', headers=h).json()
+        assert decision['allowed'] and decision['access']['trial_expires_at'] is None
+        assert not decision['trial_started']
+    assert public_state == before
+
+
+def test_start_greets_and_keeps_channel_check_without_spending_trial(public_state, monkeypatch):
+    message = SimpleNamespace(from_user=SimpleNamespace(id=USER), text='/start', answer=AsyncMock())
+    monkeypatch.setattr(tb, 'is_subscribed', AsyncMock(side_effect=[False, True]))
+    asyncio.run(tb.cmd_start(message))
+    welcome = message.answer.await_args.args[0]
+    assert 'VMedA AI' in welcome and '24 часов' in welcome and 'гистологию' in welcome
+    button = message.answer.await_args.kwargs['reply_markup'].inline_keyboard[0][0]
+    assert button.url == 'https://t.me/Vmeda_examen'
+    asyncio.run(tb.cmd_start(message))
+    assert 'Выбери предмет для подготовки' in message.answer.await_args.args[0]
+    assert str(USER) not in public_state['exam_trial_access']
 
 
 @pytest.mark.parametrize('subject', sorted(PAID_SUBJECTS))

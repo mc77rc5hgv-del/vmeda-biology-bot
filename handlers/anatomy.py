@@ -24,9 +24,27 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 import telegram_bot as tb
 from services.anatomy_feedback import get_anatomy_answer_feedback
+from services.content_access import EXAM_TRIAL_CLOSED, enter
 from services.telegram_ui import safe_delete_message
 
 router = Router()
+
+
+@router.callback_query.middleware()
+async def anatomy_exam_access_middleware(handler, callback: CallbackQuery, data):
+    key = callback.data or ""
+    if not key.startswith(("anatomy_exam_test_", "anatomy_exam_flash_", "anatomy_exam_mistake_work_")) and key != "anatomy_exam_feedback_next":
+        return await handler(callback, data)
+    if enter(tb, callback.from_user.id, 'anatomy_tests')['allowed']:
+        return await handler(callback, data)
+    await callback.answer("Пробный доступ закончился", show_alert=True)
+    await tb.safe_edit_text(
+        callback.message,
+        f"🦴 <b>Тесты по анатомии</b>\n{tb.DIVIDER}\n\n<b>Пробный доступ закончился.</b>\n\n{EXAM_TRIAL_CLOSED}",
+        parse_mode="HTML",
+        reply_markup=tb.get_exam_access_keyboard("anatomy_exam_menu"),
+    )
+
 
 # ==================== АНАТОМИЯ (В РАЗРАБОТКЕ, ПОКА ДОСТУПНО ТОЛЬКО АДМИНАМ) ====================
 ANATOMY_PUBLIC = False  # когда раздел будет готов для всех — переключить на True
@@ -793,6 +811,7 @@ def get_anatomy_maintenance_text() -> str:
 
 def get_anatomy_maintenance_keyboard():
     builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Тесты по анатомии", callback_data="anatomy_exam_test_menu")
     builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
     return builder.as_markup()
 
@@ -1323,8 +1342,7 @@ async def cb_anatomy_picture(callback: CallbackQuery):
     )
 
 # ---- Экзамен (Вопросы практики / Вопросы теории / ТЕСТ) ----
-# Второй подраздел Анатомии, отдельный от «Весь курс анатомии» — намеренно бесплатен для всех
-# независимо от ANATOMY_FREE_SECTIONS/anatomy_access_ok, как и глобальный тест по латыни.
+# Теория и практика экзамена открываются отдельно, для тестового банка действует своё окно доступа.
 def get_anatomy_exam_menu_keyboard():
     builder = InlineKeyboardBuilder()
     builder.button(text="🖐 Вопросы практики", callback_data="anatomy_exam_practice")
@@ -1803,10 +1821,11 @@ async def render_anatomy_exam_test_menu(message, user_id: int):
         "",
         "⚡ <b>Флэш-тест</b> — 50 случайных вопросов из всего банка.",
         "",
-        "Бесплатно для всех, без ограничений.",
-        "",
         "<b>Содержание частей:</b>",
     ]
+    trial_notice = tb.get_exam_trial_notice(user_id, 'anatomy_tests')
+    if trial_notice:
+        lines[1:1] = [trial_notice, ""]
     for part in tb.ANATOMY_EXAM_TEST_PARTS:
         lines.append(f"\n<b>{part['title']}</b>")
         lines.append(part["topics"])

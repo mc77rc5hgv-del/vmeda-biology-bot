@@ -8,6 +8,7 @@ import { saveLearningNavigation } from "./lib/apiClient";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLastStepStore } from "./lib/lastStep";
 import { BottomNav } from "./components/BottomNav";
+import { ExamAccessGate, type ExamScope } from "./components/ExamAccessGate";
 import { HomePage } from "./pages/Home";
 import { SubjectPage } from "./pages/Subject";
 import { SectionPage } from "./pages/Section";
@@ -26,9 +27,16 @@ import { HistologyCatalogPage, HistologyExamPage, HistologyGuessPage } from "./p
 import { HistologyTestPage, HistologyTheoryPage } from "./pages/HistologyStudy";
 import { HistologySpecimenPage } from "./pages/HistologySpecimen";
 
+function examScopeForPath(pathname: string): ExamScope | undefined {
+  if (/^\/tests\/anatomy\/?$/.test(pathname)) return "anatomy_tests";
+  if (/^\/(?:histology|subjects\/histology|materials\/histology)(?:\/|$)/.test(pathname)) return "histology";
+}
+
 export function App() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const examScope = examScopeForPath(pathname);
   useEffect(() => {
     const handle = (event: Event) => {
       const subjectId = (event as CustomEvent<{subjectId: string}>).detail?.subjectId;
@@ -36,15 +44,18 @@ export function App() {
       const currentSubject = pathname.match(/^\/(?:subjects|materials|tests)\/([^/]+)/)?.[1]
         ?? (pathname.startsWith("/histology/") ? "histology" : undefined);
       if (subjectId && Object.hasOwn(paidSubjectTitles, subjectId) && currentSubject === subjectId) {
+        if (examScope) {
+          void queryClient.invalidateQueries({ queryKey: ["access", examScope] });
+          return;
+        }
         navigate(subscriptionPath(subjectId, pathname), {replace: true});
       }
     };
     window.addEventListener("vmeda:subscription-required", handle);
     return () => window.removeEventListener("vmeda:subscription-required", handle);
-  }, [pathname, navigate]);
+  }, [pathname, navigate, examScope, queryClient]);
   const owner = useAuthStore((state) => String(state.profile?.userId ?? "preview"));
   const remember = useLastStepStore((state) => state.remember);
-  const queryClient = useQueryClient();
   useEffect(() => {
     remember(owner, pathname);
     const step = useLastStepStore.getState().steps[owner];
@@ -60,6 +71,7 @@ export function App() {
   return (
     <>
       <SubjectTheme subjectId={subjectId} appShell>
+      <ExamAccessGate scope={examScope}>
       <Routes>
         <Route path="/" element={<HomePage />} />
         <Route path="/subjects/:subjectId" element={<SubjectPage />} />
@@ -83,6 +95,7 @@ export function App() {
         <Route path="/profile/favorites" element={<FavoritesPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
+      </ExamAccessGate>
       <BottomNav />
       </SubjectTheme>
     </>

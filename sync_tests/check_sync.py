@@ -42,6 +42,7 @@ tb.stats = {
 tb.save_stats = lambda: saved.append(copy.deepcopy(tb.stats))
 sys.modules['telegram_bot'] = tb
 from services import access as real_access
+from services.content_access import can_visit, enter, trial_expiry
 for name in dir(real_access):
     if not name.startswith('__'): setattr(tb, name, getattr(real_access, name))
 tb.stats['histology_learning']['11'] = {'attempts': 4, 'known': 2, 'wrong': 2, 'mastered': ['d1'], 'mistakes': ['d2']}
@@ -61,7 +62,7 @@ def extract(names: set[str], environment: dict, filename='handlers/histology.py'
     module=ast.Module(body=[ast.ImportFrom(module='__future__',names=[ast.alias(name='annotations')],level=0)]+nodes,type_ignores=[])
     exec(compile(ast.fix_missing_locations(module),'isolated-histology','exec'),environment)
 
-env={'tb':tb,'time':time,'HISTOLOGY_PUBLIC':False,'HISTOLOGY_WARNING_THRESHOLD':3}
+env={'tb':tb,'time':time,'HISTOLOGY_PUBLIC':False,'can_visit':can_visit,'trial_expiry':trial_expiry}
 extract({'get_histology_temp_expiry','has_histology_temp_access','histology_permanently_unlocked','histology_access_ok'},env)
 tb.histology_access_ok=env['histology_access_ok']
 tb.histology_permanently_unlocked=env['histology_permanently_unlocked']
@@ -105,9 +106,12 @@ assert snapshot['anatomy_modules']['module1_osteology']
 assert not snapshot['anatomy_modules']['module7_nervous']
 tb.stats['histology_temp_access']['11']=time.time()+60
 tb.stats['histology_warnings']['11']={'count':3,'last_warn_at':0}
-assert not tb.histology_access_ok(11)
-tb.stats['histology_warnings']['11']['count']=0
 assert tb.histology_access_ok(11)
+assert can_visit(tb,11,'anatomy_tests')
+assert not enter(tb,11,'anatomy_tests')['trial_started']
+tb.stats['histology_temp_access']['11']=time.time()-1
+assert not tb.histology_access_ok(11)
+assert not enter(tb,11,'anatomy_tests')['allowed']
 
 # Referent month, manual access, old subscriptions and expiry are evaluated by native code.
 tb.stats['referral_monthly']['11']={'month':tb.local_today().strftime('%Y-%m'),'count':2}
@@ -118,12 +122,19 @@ tb.stats['manual_access_granted'].add(11)
 assert api_access._subject_is_open(tb,11,'biology')
 tb.stats['manual_access_granted'].clear()
 
-# Public Mini App paid admission deliberately excludes beta trials/referrals/manual grants.
+# Public admission keeps trial and referral access confined to the exam scopes.
 os.environ['MINIAPP_ACCESS_MODE']='public'
 from services.miniapp_policy import PAID_SUBJECTS
 before=copy.deepcopy(tb.stats)
 for subject in PAID_SUBJECTS:
     assert not api_access._subject_is_open(tb,11,subject)
+assert tb.stats==before
+assert enter(tb,12,'anatomy_tests')['trial_started']
+assert api_access._subject_is_open(tb,12,'anatomy_tests')
+assert api_access._subject_is_open(tb,12,'histology')
+assert not api_access._subject_is_open(tb,12,'anatomy')
+assert not enter(tb,12,'histology')['trial_started']
+before=copy.deepcopy(tb.stats)
 tb.stats['miniapp_public_promo']={'active':True, 'history':[]}
 assert all(api_access._subject_is_open(tb,11,subject) for subject in api_access.SUBJECT_IDS)
 tb.stats['miniapp_public_promo']['active']=False
@@ -164,7 +175,10 @@ assert tb.stats['user_username']['11']=='preserve_me'
 assert learning.get_dashboard(11)['xp']>0
 
 # Stale and simultaneously arriving callbacks cannot advance two questions.
-callback_env={'tb':tb,'asyncio':asyncio,'os':os,'HISTOLOGY_GUESS_SESSIONS':{}}
+async def authorized_trial(callback):
+    return can_visit(tb,callback.from_user.id,'histology')
+
+callback_env={'tb':tb,'asyncio':asyncio,'os':os,'HISTOLOGY_GUESS_SESSIONS':{},'histology_gate_ok':authorized_trial}
 extract({'cb_histology_guess_answer', '_learning_call'},callback_env)
 def record(*args):time.sleep(0.01)
 callback_env['record_histology_result']=record
@@ -173,11 +187,11 @@ callback_env['render_histology_guess_question']=render
 callback_env['render_histology_guess_summary']=render
 class Callback:
     data='histology_guess_know:synthetic-run:0'
-    from_user=types.SimpleNamespace(id=11)
+    from_user=types.SimpleNamespace(id=12)
     async def answer(self,*args,**kwargs):await asyncio.sleep(0)
 async def duplicate_callbacks():
     session={'id':'synthetic-run','index':0,'know':0,'dont_know':0,'items':[('g','d1'),('g','d2')]}
-    callback_env['HISTOLOGY_GUESS_SESSIONS'][11]=session
+    callback_env['HISTOLOGY_GUESS_SESSIONS'][12]=session
     async def synthetic_io(function,*args,**kwargs):
         await asyncio.sleep(0)
         return function(*args,**kwargs)

@@ -322,6 +322,8 @@ export interface AccessStatus {
   promoAccess?: boolean;
   subscriptionRequired?: boolean;
   trialAvailable?: boolean;
+  trialExpiresAt?: string | null;
+  trialDurationHours?: number | null;
   canOpenSubject: boolean;
   canDownload: boolean;
   canUseAi: boolean;
