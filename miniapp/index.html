@@ -20,7 +20,10 @@
          @telegram-apps/transformers, а его преемник @tma.js/sdk на момент разработки ещё не стабилен) —
          тонкая обёртка над официальным скриптом в src/lib/telegram.ts даёт то же самое без лишней
          зависимости и без ReDoS-уязвимости в дереве. -->
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <!-- Копия официального скрипта отдаётся с нашего домена (см. vendor/PROVENANCE.json): у части
+         провайдеров telegram.org недоступен, и без этого скрипта приложение внутри Telegram
+         не видело данных входа и молча открывалось в демо-режиме. -->
+    <script src="/telegram-web-app.js"></script>
   </head>
   <body>
     <div id="root"></div>

@@ -19,8 +19,10 @@ import {
 import { useSearchParams } from "react-router-dom";
 import { fetchSubjects, fetchSubscriptionSummary, solveAiTask } from "../lib/api";
 import { ApiError } from "../lib/apiClient";
-import { hapticImpact, useTelegramBackButton } from "../lib/telegram";
+import { hapticImpact, openTelegramLink, useTelegramBackButton } from "../lib/telegram";
+import { useAuthStore } from "../lib/store";
 import { Icon } from "../components/Icon";
+import { StateMessage } from "../components/StateMessage";
 import { Skeleton } from "../components/Skeleton";
 import styles from "./Ai.module.css";
 
@@ -134,7 +136,8 @@ export function AiPage() {
     requestAnimationFrame(() => resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
   }, [result]);
 
-  const canSubmit = mode === "text" ? text.trim().length > 0 : photoFile !== null;
+  const authenticated = useAuthStore((state) => state.status === "authenticated");
+  const canSubmit = authenticated && (mode === "text" ? text.trim().length > 0 : photoFile !== null);
 
   function resetOutcome() {
     setResult(null);
@@ -246,6 +249,16 @@ export function AiPage() {
           <span><Icon icon={ShieldCheck} size={14} /> Проверка полноты</span>
         </div>
       </section>
+
+      {!authenticated && (
+        <StateMessage
+          icon={ShieldCheck}
+          title="AI работает только из Telegram"
+          body="Открой мини-приложение кнопкой в боте @VMEDA_examen_bot — тогда разбор заданий заработает."
+          onRetry={() => openTelegramLink("https://t.me/VMEDA_examen_bot")}
+          actionLabel="Открыть бота"
+        />
+      )}
 
       <section className={styles.composer} aria-label="Новый запрос к VMEDA AI">
         <div className={styles.composerHeader}>

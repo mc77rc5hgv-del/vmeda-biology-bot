@@ -30,7 +30,13 @@
     "vendor/source-map-js/lib/base64-vlq.js": "f3407e528f54ec0787bd0a71eeac0c99fffd98445916fcbe116dc69ca3be928b",
     "vendor/source-map-js/lib/source-map-consumer.js": "9ad10db386da13c1f95e6a680d6298dbb306c77f57a9a3539e4595b723a7654b",
     "vendor/source-map-js/lib/source-map-consumer.d.ts": "2ca1c32e3bd72c64662adf034d97df8606ba1e1399cafc75567809ecff4bca95",
-    "vendor/source-map-js/lib/util.js": "0629f3ae2f3049cda3a2e87ea651dcf0cc71108f4681795ab989a8ac1573fc03"
+    "vendor/source-map-js/lib/util.js": "0629f3ae2f3049cda3a2e87ea651dcf0cc71108f4681795ab989a8ac1573fc03",
+    "public/telegram-web-app.js": "baa788a6f686f4238db1b82ce8e76470930af7411b18b521ebb95a2c1480a267"
   },
-  "packaging": "Production files preserved; package manifests stripped of upstream development scripts/dependencies. Git-tracked SHA256 verifies bytes."
+  "packaging": "Production files preserved; package manifests stripped of upstream development scripts/dependencies. Git-tracked SHA256 verifies bytes.",
+  "telegram-web-app": {
+    "version": "webAppVersion 6.0 (retrieved 2026-11-24)",
+    "source": "https://telegram.org/js/telegram-web-app.js",
+    "license": "Telegram official Mini Apps script, redistributed unmodified"
+  }
 }

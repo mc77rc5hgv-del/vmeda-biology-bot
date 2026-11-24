@@ -17,7 +17,6 @@ import type {
   TestSummary,
   UserProfile,
 } from "./types";
-import type { AiSolveResult } from "./apiClient";
 
 // Гость браузерного превью: без чужого имени, прогресса и подписки, чтобы публичная ссылка
 // не выглядела как настоящий аккаунт.
@@ -229,16 +228,3 @@ export function getAccessStatus(subjectId: string): AccessStatus {
  * недостижим — он требует реального user_id из провалидированной initData (см. docstring там).
  * Эта заглушка только для верстки экрана VMEDA AI без сети, ровно как остальной lib/mockData.ts —
  * реальный ответ приходит через apiClient.solveAiTask, когда сессия есть (см. lib/api.ts). */
-export function getAiMockAnswer(mode: "text" | "photo"): AiSolveResult {
-  const body =
-    mode === "photo"
-      ? "По материалам курса: краткий разбор задания появится здесь после открытия из бота VMEDA — это макет без реального AI-пайплайна."
-      : "Краткий ответ — заглушка для прототипа вне Telegram. Открой мини-приложение из бота, чтобы получить настоящий разбор от VMEDA AI.";
-  return {
-    answerHtml: `<p>${body}</p>`,
-    lowConfidence: mode === "photo",
-    confidenceNote: mode === "photo" ? "Фото не отправлялось — это демонстрационный ответ вне Telegram." : null,
-    requestsLeft: 12,
-    sessionActive: true,
-  };
-}

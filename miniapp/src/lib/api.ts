@@ -205,7 +205,11 @@ export function setLearningFlag(
  * сессии для чего-то большего, чем чтение уже готового контента: вне Telegram (нет initData —
  * см. docstring web_api/routers/ai.py) настоящий эндпоинт недостижим в принципе, поэтому здесь
  * mock-ветка не искусственное упрощение, а единственный вариант вообще что-то показать. */
+export const AI_NEEDS_TELEGRAM = "VMEDA AI работает только в мини-приложении, открытом из бота @VMEDA_examen_bot.";
+
 export function solveAiTask(input: AiSolveInput): Promise<AiSolveResult> {
-  if (!hasSession()) return resolveAfterDelay(mock.getAiMockAnswer(input.mode));
+  // Без проверенной Telegram-сессии никаких демо-ответов: фальшивый «разбор» внутри Telegram
+  // выглядит как настоящий ответ AI.
+  if (!hasSession()) return Promise.reject(new apiClient.ApiError(403, AI_NEEDS_TELEGRAM));
   return apiClient.solveAiTask(input);
 }

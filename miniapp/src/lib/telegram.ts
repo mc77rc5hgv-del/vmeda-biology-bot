@@ -75,8 +75,21 @@ declare global {
 
 const webApp = typeof window !== "undefined" ? window.Telegram?.WebApp : undefined;
 
+/** Запасной источник initData: Telegram кладёт его в hash при запуске (#tgWebAppData=...), даже если
+ * SDK-скрипт не загрузился. Читаем до normalizeTelegramLaunchHash(), которая этот hash заменяет. */
+const launchInitData = (() => {
+  if (typeof window === "undefined") return "";
+  try {
+    const hash = window.location.hash;
+    if (!hash || hash.startsWith("#/")) return "";
+    return new URLSearchParams(hash.slice(1)).get("tgWebAppData") ?? "";
+  } catch {
+    return "";
+  }
+})();
+
 /** true только внутри настоящего Telegram-клиента; false в обычном браузере при разработке. */
-export const isInsideTelegram = Boolean(webApp);
+export const isInsideTelegram = Boolean(webApp) || Boolean(launchInitData);
 
 /** Telegram на iOS/Android добавляет initData и параметры темы в URL-фрагмент вида
  * #tgWebAppData=... . HashRouter использует тот же фрагмент как путь и без нормализации
@@ -155,7 +168,7 @@ function syncViewportHeight(): void {
  * Вне Telegram (локальная разработка) — пустая строка, вызывающий код должен сам решать,
  * что делать (см. lib/mockData.ts — Этап 2 работает без сети вообще). */
 export function getRawInitData(): string {
-  return webApp?.initData ?? "";
+  return webApp?.initData || launchInitData;
 }
 
 export function hapticSelection(): void {

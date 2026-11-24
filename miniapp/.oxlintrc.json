@@ -15,6 +15,7 @@
     ]
   },
   "ignorePatterns": [
-    "vendor/**"
+    "vendor/**",
+    "public/telegram-web-app.js"
   ]
 }
