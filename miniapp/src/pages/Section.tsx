@@ -1,9 +1,9 @@
 import { subscriptionPath } from "../lib/subscriptions";
 import { useCallback, useState } from "react";
-import { CheckCircle2, ChevronRight, Layers, Lock } from "lucide-react";
+import { ChevronRight, Layers, Lock } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
-import { fetchLearningState, fetchSection, hasContentSession } from "../lib/api";
+import { fetchLearningState, fetchSection, fetchSubjectDetail, hasContentSession } from "../lib/api";
 import { ApiError } from "../lib/apiClient";
 import { formatMaterialCount } from "../lib/format";
 import { hapticSelection, useTelegramBackButton } from "../lib/telegram";
@@ -13,6 +13,8 @@ import { Skeleton } from "../components/Skeleton";
 import { StateMessage } from "../components/StateMessage";
 import { TelegramContentGate } from "../components/TelegramContentGate";
 import { LoadMore } from "../components/LoadMore";
+import { MaterialRow } from "../components/MaterialRow";
+import { PageHeader } from "../components/PageHeader";
 import styles from "./Section.module.css";
 
 // Раздел приходит целиком одним ответом: это только заголовки (самый большой раздел — 540,
@@ -34,6 +36,9 @@ export function SectionPage() {
     enabled: hasSession,
   });
   const learningQuery = useQuery({ queryKey: ["learning"], queryFn: fetchLearningState, enabled: hasSession });
+  // Тот же ключ, что у экрана предмета: название раздела обычно уже лежит в кэше.
+  const subjectQuery = useQuery({ queryKey: ["subject", subjectId], queryFn: () => fetchSubjectDetail(subjectId), enabled: hasSession });
+  const sectionRef = subjectQuery.data?.sections.find((item) => item.id === sectionId);
 
   if (!hasSession) {
     return (
@@ -74,7 +79,11 @@ export function SectionPage() {
   if (section.kind === "grouped") {
     return (
       <div className="screen">
-        <h1 className={styles.header}>Разделы</h1>
+        <PageHeader
+          eyebrow={subjectQuery.data?.title}
+          title={sectionRef?.title ?? "Разделы"}
+          meta={sectionRef?.itemCount ? formatMaterialCount(sectionRef.itemCount) : undefined}
+        />
         <div className={styles.list} role="list">
           {section.groups.map((group) => (
             <PressableCard
@@ -88,16 +97,16 @@ export function SectionPage() {
                 navigate(`/subjects/${subjectId}/sections/${sectionId}/groups/${group.id}`);
               }}
             >
-              <div>
-                <div className={styles.rowTitle}>
-                  {group.locked ? "🔒 " : ""}
-                  {group.title}
-                </div>
+              <span className={styles.rowIcon} aria-hidden="true">
+                <Icon icon={group.locked ? Lock : Layers} size={18} />
+              </span>
+              <div className={styles.rowCopy}>
+                <div className={styles.rowTitle}>{group.title}</div>
                 <div className={styles.rowMeta}>
                   {group.locked ? (group.lockedReason ?? "Доступно по подписке") : formatMaterialCount(group.itemCount)}
                 </div>
               </div>
-              <Icon icon={group.locked ? Lock : Layers} size={18} color="var(--ink-secondary)" />
+              <Icon icon={ChevronRight} size={18} color="var(--ink-secondary)" />
             </PressableCard>
           ))}
         </div>
@@ -106,32 +115,26 @@ export function SectionPage() {
   }
 
   const visibleItems = section.items.slice(0, visibleCount);
+  const completedKeys = new Set(learningQuery.data?.completedKeys ?? []);
+  const completedHere = section.items.filter((item) => completedKeys.has(`${subjectId}/${sectionId}/${item.id}`)).length;
 
   return (
     <div className="screen">
-      <h1 className={styles.header}>Темы</h1>
+      <PageHeader
+        eyebrow={subjectQuery.data?.title}
+        title={sectionRef?.title ?? "Темы"}
+        meta={`${formatMaterialCount(section.items.length)}${completedHere ? ` · изучено ${completedHere}` : ""}`}
+      />
       <div className={styles.list} role="list">
-        {visibleItems.map((item) => {
-          const done = learningQuery.data?.completedKeys.includes(`${subjectId}/${sectionId}/${item.id}`) ?? false;
-          return (
-          <PressableCard
+        {visibleItems.map((item) => (
+          <MaterialRow
             key={item.id}
-            className={styles.row}
-            onClick={() => {
-              hapticSelection();
-              navigate(`/materials/${subjectId}/${sectionId}/${item.id}`);
-            }}
-          >
-            <div>
-              <div className={styles.rowTitle}>{item.title}</div>
-              <div className={styles.rowMeta}>
-                {item.order} из {item.total}
-              </div>
-            </div>
-            <Icon icon={done ? CheckCircle2 : ChevronRight} size={18} color={done ? "var(--success)" : "var(--ink-secondary)"} />
-          </PressableCard>
-          );
-        })}
+            order={item.order}
+            title={item.title}
+            done={completedKeys.has(`${subjectId}/${sectionId}/${item.id}`)}
+            onOpen={() => navigate(`/materials/${subjectId}/${sectionId}/${item.id}`)}
+          />
+        ))}
       </div>
       {visibleCount < section.items.length && (
         <LoadMore

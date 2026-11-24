@@ -31,8 +31,8 @@
 
 @media (min-width: 900px) {
   .subjectGrid, .skeletonGrid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
-  .sectionHeading h2 { font-size: 20px; }
-  .sectionHeading span { font-size: 12px; }
+  .sectionHeading h2 { font-size: var(--text-xl); }
+  .sectionHeading span { font-size: var(--text-sm); }
 }
 
 .searchEntry {

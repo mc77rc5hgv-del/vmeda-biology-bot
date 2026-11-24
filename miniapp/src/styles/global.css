@@ -116,21 +116,21 @@ img, svg {
 .page-intro {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: var(--space-1);
 }
 
 .page-intro h1 {
-  font-size: 26px !important;
-  font-weight: 820 !important;
+  font-size: var(--text-2xl) !important;
+  font-weight: var(--weight-bold) !important;
   line-height: 1.15;
-  letter-spacing: -.035em;
+  letter-spacing: -.03em;
 }
 
 .page-intro p {
   max-width: 44ch;
   margin-top: 0 !important;
   color: var(--ink-secondary) !important;
-  font-size: 13px !important;
+  font-size: var(--text-md) !important;
   line-height: 1.45;
 }
 

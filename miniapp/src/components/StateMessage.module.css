@@ -24,13 +24,13 @@
 }
 
 .title {
-  font-size: 18px;
-  font-weight: 780;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-bold);
   color: var(--ink);
 }
 
 .body {
-  font-size: 13px;
+  font-size: var(--text-sm);
   line-height: 1.4;
   max-width: 280px;
 }
@@ -42,7 +42,7 @@
   border-radius: var(--radius-pill);
   background: linear-gradient(135deg, var(--academic-blue), var(--brand-violet));
   color: #fff;
-  font-weight: 720;
+  font-weight: var(--weight-semibold);
   box-shadow: var(--shadow-brand);
-  font-size: 13px;
+  font-size: var(--text-sm);
 }

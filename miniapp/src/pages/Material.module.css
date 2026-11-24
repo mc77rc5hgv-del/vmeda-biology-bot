@@ -16,9 +16,9 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  padding: var(--space-5);
+  padding: var(--pad-card);
   border: 1px solid var(--border-highlight);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-card);
   background:
     radial-gradient(circle at 96% 0%, var(--academic-blue-tint), transparent 38%),
     var(--surface-glass);
@@ -26,16 +26,16 @@
 }
 
 .eyebrow {
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--subject-ink, var(--academic-blue));
-  font-weight: 720;
+  font-weight: var(--weight-semibold);
   text-transform: uppercase;
   letter-spacing: .055em;
 }
 
 .title {
-  font-size: 23px;
-  font-weight: 800;
+  font-size: var(--text-xl);
+  font-weight: var(--weight-bold);
   line-height: 1.22;
   letter-spacing: -.025em;
 }
@@ -50,15 +50,15 @@
 .actionButton {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   min-height: var(--tap-min);
-  padding: 0 14px;
+  padding: 0 var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius-pill);
   background: var(--surface-elevated);
   color: var(--ink-secondary);
-  font-size: 13px;
-  font-weight: 650;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
 }
 
 .actionButtonActive {
@@ -81,15 +81,15 @@
 }
 
 .blockTitle {
-  font-size: 13px;
-  font-weight: 760;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
   color: var(--subject-ink, var(--academic-blue));
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 
 .blockBody {
-  font-size: 15px;
+  font-size: var(--text-md);
   line-height: 1.68;
   color: var(--ink);
   white-space: pre-line;
@@ -107,7 +107,7 @@
   background: var(--surface-secondary);
   border-radius: var(--radius-md);
   font-family: ui-monospace, "SF Mono", "Roboto Mono", Consolas, monospace;
-  font-size: 13px;
+  font-size: var(--text-sm);
   line-height: 1.45;
   color: var(--ink-secondary);
   white-space: pre-wrap;
@@ -150,8 +150,8 @@
   flex: 1;
   min-height: var(--tap-min);
   border-radius: var(--radius-pill);
-  font-weight: 600;
-  font-size: 14px;
+  font-weight: var(--weight-medium);
+  font-size: var(--text-md);
 }
 
 .navPrimary {
@@ -177,9 +177,14 @@
   .media { max-height: 72vh; }
 }
 
-.blockBody h2 { font-size: 19px; line-height: 1.4; margin: 24px 0 12px; }
+.blockBody h2 { font-size: var(--text-xl); line-height: 1.4; margin: 24px 0 12px; }
 .blockBody ul, .blockBody ol { padding-left: 24px; margin: 12px 0; }
 .blockBody li { margin: 8px 0; }
-.blockBody details { border: 1px solid var(--border); border-radius: 14px; padding: 14px; margin: 10px 0; }
-.blockBody summary { cursor: pointer; font-weight: 650; min-height: 24px; }
+.blockBody details { border: 1px solid var(--border); border-radius: var(--radius-control); padding: 14px; margin: 10px 0; }
+.blockBody summary { cursor: pointer; font-weight: var(--weight-medium); min-height: 24px; }
 .blockBody details[open] summary { margin-bottom: 12px; }
+
+.quizVerdict { font-size: var(--text-md); font-weight: var(--weight-semibold); }
+.mediaList { display: flex; flex-direction: column; gap: var(--space-2); }
+.figure { margin: 0; }
+.caption { margin-top: var(--space-1); color: var(--ink-secondary); font-size: var(--text-sm); line-height: 1.45; }

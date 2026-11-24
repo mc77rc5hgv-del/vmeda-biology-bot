@@ -47,9 +47,10 @@
   --navy-tint: #071A3812;
 
   /* ---- Геометрия / типографика ---- */
-  --radius-sm: 12px;
-  --radius-md: 18px;
-  --radius-lg: 26px;
+  /* Старые имена — псевдонимы единой шкалы ниже (--radius-icon/-control/-card). */
+  --radius-sm: var(--radius-icon);
+  --radius-md: var(--radius-control);
+  --radius-lg: var(--radius-card);
   --radius-pill: 999px;
 
   --space-1: 4px;

@@ -1,7 +1,7 @@
 .shell {
   overflow: hidden;
   border: 1px solid rgb(255 255 255 / 10%);
-  border-radius: 19px;
+  border-radius: var(--radius-card);
   background: #070912;
   box-shadow: 0 10px 28px rgb(4 6 15 / 18%);
 }
@@ -41,7 +41,7 @@
   flex: 1;
   min-height: 0;
   aspect-ratio: auto;
-  border-radius: 18px;
+  border-radius: var(--radius-card);
 }
 
 .canvas {
@@ -69,8 +69,8 @@
   transform: translate(-50%, -50%);
   place-items: center;
   color: #16081b;
-  font-size: 11px;
-  font-weight: 900;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
   border: 2px solid #fff;
   border-radius: 50%;
   background: #f3a8ff;
@@ -95,19 +95,19 @@
   place-items: center;
   color: #fff;
   border: 1px solid rgb(255 255 255 / 13%);
-  border-radius: 12px;
+  border-radius: var(--radius-icon);
   background: rgb(255 255 255 / 8%);
 }
 
 .controls button:disabled { opacity: .32; }
 .controls button.active { color: #f3a8ff; border-color: rgb(243 168 255 / 45%); }
-.controls button.closeButton { display: flex; justify-content: center; gap: 6px; width: auto; padding-inline: 10px; font-size: 12px; font-weight: 750; }
-.controls span { min-width: 36px; text-align: center; font-size: 12px; font-weight: 750; }
+.controls button.closeButton { display: flex; justify-content: center; gap: 6px; width: auto; padding-inline: 10px; font-size: var(--text-sm); font-weight: var(--weight-semibold); }
+.controls span { min-width: 36px; text-align: center; font-size: var(--text-sm); font-weight: var(--weight-semibold); }
 
 .hint {
   padding: 0 10px 9px;
   color: rgb(255 255 255 / 65%);
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.35;
   text-align: center;
 }
@@ -124,14 +124,14 @@
   padding: 12px;
   color: #e5e7f0;
   text-align: center;
-  font-size: 14px;
+  font-size: var(--text-md);
   cursor: default;
 }
 .state button {
   min-height: 44px;
   padding: 7px 14px;
   border: 1px solid rgb(255 255 255 / 30%);
-  border-radius: 11px;
+  border-radius: var(--radius-icon);
   color: #fff;
   background: rgb(255 255 255 / 12%);
 }
