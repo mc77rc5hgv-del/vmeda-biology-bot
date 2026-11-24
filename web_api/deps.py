@@ -1,6 +1,6 @@
 from services.miniapp_testers import has_test_access
 
-from fastapi import Header, HTTPException, Request
+from fastapi import Depends, Header, HTTPException, Request
 
 from . import bot_state, config
 from .session import SessionTokenError, verify_session_token
@@ -31,9 +31,7 @@ def get_current_user_id(request: Request, authorization: str | None = Header(def
     if config.MINIAPP_ACCESS_MODE == 'public':
         import re
         match = re.match(r'/api/v1/(?:subjects|materials)/([a-z_-]+)/', path)
-        subject = match.group(1) if match else (
-            'histology' if path.startswith('/api/v1/histology/') else
-            'anatomy' if path.startswith('/api/v1/anatomy/exam/') else None)
+        subject = match.group(1) if match else None
         if subject:
             from services.miniapp_policy import require_subject
             require_subject(get_fresh_bot_module(), user_id, subject)
@@ -67,3 +65,10 @@ def get_fresh_bot_module():
     except bot_state.BotStateUnavailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return bot_state.get_bot_module()
+
+
+def require_anatomy_test_access(
+    user_id: int = Depends(get_current_user_id), tb=Depends(get_fresh_bot_module),
+) -> None:
+    from services.miniapp_policy import require_exam_content
+    require_exam_content(tb, user_id, 'anatomy_tests')

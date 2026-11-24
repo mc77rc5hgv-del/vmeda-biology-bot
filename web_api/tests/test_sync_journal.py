@@ -126,14 +126,15 @@ def test_grace_and_trial_use_one_state_without_regrant(monkeypatch):
     assert not enter(tb, uid, 'biology')['allowed']
     tb.stats['histology_temp_access'].pop(key, None)
     tb.stats['histology_warnings'].pop(key, None)
-    assert enter(tb, uid, 'histology')['trial_started']
-    expiry = tb.stats['histology_temp_access'][key]
+    assert enter(tb, uid, 'anatomy_tests')['trial_started']
+    expiry = tb.stats['exam_trial_access'][key]
+    assert can_visit(tb, uid, 'histology')
     assert not enter(tb, uid, 'histology')['trial_started']
-    assert tb.stats['histology_temp_access'][key] == expiry
-    tb.stats['histology_temp_access'][key] = 1
-    tb.stats['histology_warnings'].pop(key, None)
-    assert not enter(tb, uid, 'histology')['allowed']
-    assert tb.stats['histology_temp_access'][key] == 1
+    assert tb.stats['exam_trial_access'][key] == expiry
+    tb.stats['exam_trial_access'][key] = 1
+    for subject in ('histology', 'anatomy_tests'):
+        assert not enter(tb, uid, subject)['allowed']
+    assert tb.stats['exam_trial_access'][key] == 1
 
 
 def test_owner_refresh_never_replaces_live_unflushed_stats(monkeypatch):

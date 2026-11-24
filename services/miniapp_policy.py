@@ -2,6 +2,7 @@
 import os
 from datetime import datetime, timezone
 
+from services.content_access import EXAM_TRIAL_CLOSED, can_visit
 from services.miniapp_testers import has_test_access
 
 PAID_SUBJECTS = frozenset({'biology', 'physics', 'chemistry', 'anatomy', 'histology'})
@@ -37,10 +38,20 @@ def subscription_required(tb, user_id, subject):
 
 
 def require_subject(tb, user_id, subject):
+    if subject == 'histology' and public_launch():
+        require_exam_content(tb, user_id, subject)
+        return
     if subscription_required(tb, user_id, subject):
         from fastapi import HTTPException
         raise HTTPException(403, 'Для этого предмета нужна соответствующая подписка.',
                             headers={'X-VMEDA-Subscription-Required': subject})
+
+
+def require_exam_content(tb, user_id, scope):
+    if not (full_content_access(tb, user_id) or can_visit(tb, user_id, scope)):
+        from fastapi import HTTPException
+        subject = 'anatomy' if scope == 'anatomy_tests' else scope
+        raise HTTPException(403, EXAM_TRIAL_CLOSED, headers={'X-VMEDA-Subscription-Required': subject})
 
 
 def set_promo(tb, admin_id, active):

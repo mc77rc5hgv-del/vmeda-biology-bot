@@ -207,52 +207,44 @@ async def main():
     assert ADMIN_ID not in histology._TEST_SESSIONS
     print("theory, random exam and complete topic run with back navigation: OK")
 
-    # 4. Access control: first-ever visit silently grants a free trial week (like the others'
-    # grace period), so a brand-new non-admin sees the REAL menu, not a locked screen.
+    # 4. First visit opens a time-limited trial and shows its deadline.
     assert tb.HISTOLOGY_PUBLIC is False
     non_admin = random.randint(10_000_000, 99_999_999)
     assert not tb.histology_access_ok(non_admin)
-    assert str(non_admin) not in tb.stats["histology_temp_access"]
+    assert str(non_admin) not in tb.stats["exam_trial_access"]
     cb = FakeCB("histology_menu", uid=non_admin)
     await tb.cb_histology_menu(cb)
     assert cb.message.edits, "expected menu render, not locked screen, on first-ever visit"
     first_text, first_kb = cb.message.edits[0]
     assert "Гистология" in first_text and "Экзамен" in kb_texts(first_kb)
-    assert tb.has_histology_temp_access(non_admin), "first visit should silently grant a trial"
-    assert str(non_admin) not in tb.stats["histology_warnings"], "no warning yet on the granting visit"
-    days_left = (tb.get_histology_temp_expiry(non_admin) - tb.time.time()) / 86400
-    assert 6.9 < days_left <= 7.0, days_left
-    print("first-ever histology visit silently grants a 1-week trial and shows real content: OK")
+    assert "Пробный доступ до" in first_text and tb.has_histology_temp_access(non_admin)
+    expiry = tb.get_histology_temp_expiry(non_admin)
+    hours_left = (expiry - tb.time.time()) / 3600
+    assert 23.9 < hours_left <= 24.0, hours_left
+    print("first histology visit starts a 24-hour trial: OK")
 
-    # 4b. Second visit (still within the trial): warning #1 fires as a separate nudge message,
-    # but the requested content still renders — same non-blocking pattern as the referral gate.
+    # 4b. Returning keeps the deadline and shows the same content without a separate warning.
     cb2 = FakeCB("histology_menu", uid=non_admin)
     await tb.cb_histology_menu(cb2)
-    assert len(cb2.message.edits) == 2, "expected a separate warning message + the actual content"
-    warn_sent_text = cb2.message.edits[0][0]
-    check_html(warn_sent_text)
-    assert "Гистология скоро закроется" in warn_sent_text
-    assert "Экзамен" in kb_texts(cb2.message.edits[-1][1]), "content should still render during the trial"
-    warn_entry = tb.stats["histology_warnings"][str(non_admin)]
-    assert warn_entry["count"] == 1
-    print("second visit fires warning 1/3 but still lets content through: OK")
+    assert len(cb2.message.edits) == 1
+    assert "Экзамен" in kb_texts(cb2.message.edits[0][1])
+    assert tb.get_histology_temp_expiry(non_admin) == expiry
+    assert str(non_admin) not in tb.stats["histology_warnings"]
+    print("repeat visit keeps the same trial deadline: OK")
 
-    # 4c. Trial exhausted (expired) + 3 warnings already given, no referrals/subscription -> hard block
-    tb.stats["histology_temp_access"][str(non_admin)] = tb.time.time() - 1
-    tb.stats["histology_warnings"][str(non_admin)] = {"count": tb.HISTOLOGY_WARNING_THRESHOLD, "last_warn_at": 0}
+    # 4c. Trial expires and shows both ways to restore access.
+    tb.stats["exam_trial_access"][str(non_admin)] = tb.time.time() - 1
     assert not tb.histology_access_ok(non_admin)
     cb3 = FakeCB("histology_menu", uid=non_admin)
     await tb.cb_histology_menu(cb3)
     assert cb3.message.edits, "locked screen should render"
     locked_text, locked_kb = cb3.message.edits[0]
     check_html(locked_text)
-    assert "по подписке" in locked_text and str(tb.cheapest_histology_tier()["price_rub"]) in locked_text
-    assert str(tb.REFERRAL_FULL_ACCESS_THRESHOLD) in locked_text
-    assert any("Оформить подписку" in t for t in kb_texts(locked_kb))
-    assert any("Пригласить друзей" in t for t in kb_texts(locked_kb))
+    assert "Пробный доступ закончился" in locked_text
+    assert any("Выбрать подписку" in t for t in kb_texts(locked_kb))
+    assert any("Пригласить однокурсников" in t for t in kb_texts(locked_kb))
     print("exhausted trial + no referrals/subscription -> locked screen: OK")
-    tb.stats["histology_temp_access"].pop(str(non_admin), None)
-    tb.stats["histology_warnings"].pop(str(non_admin), None)
+    tb.stats["exam_trial_access"].pop(str(non_admin), None)
 
     # 4d. Referral threshold alone (no subscription, no trial) unlocks Histology for the current
     # month, bypassing the trial/warning system entirely (see get_referral_count_this_month —
@@ -267,7 +259,7 @@ async def main():
     cb_ref = FakeCB("histology_menu", uid=referral_uid)
     await tb.cb_histology_menu(cb_ref)
     assert "Экзамен" in kb_texts(cb_ref.message.edits[0][1])
-    assert str(referral_uid) not in tb.stats["histology_temp_access"], "referral access shouldn't touch the trial"
+    assert str(referral_uid) not in tb.stats["exam_trial_access"], "referral access shouldn't touch the trial"
     tb.stats["referrals"].pop(str(referral_uid), None)
     tb.stats["referral_monthly"].pop(str(referral_uid), None)
     print("referral threshold alone unlocks Histology this month, bypassing the trial: OK")
@@ -393,11 +385,11 @@ async def main():
     # 10. Course-menu button (Histology appears in both 1st and 2nd course submenus): always
     # visible, labeled per access level while HISTOLOGY_PUBLIC=False
     assert tb._histology_menu_label(ADMIN_ID) == "🔬 Гистология (админ)"
-    assert tb._histology_menu_label(non_admin) == "🔬 Гистология (рефералы/подписка)"
+    assert tb._histology_menu_label(non_admin) == "🔬 Гистология · можно попробовать"
     admin_course1 = tb.get_course_menu_keyboard(1, user_id=ADMIN_ID)
     assert "🔬 Гистология (админ)" in kb_texts(admin_course1)
     non_admin_course2 = tb.get_course_menu_keyboard(2, user_id=non_admin)
-    assert "🔬 Гистология (рефералы/подписка)" in kb_texts(non_admin_course2)
+    assert "🔬 Гистология · можно попробовать" in kb_texts(non_admin_course2)
     print("course menu gating: OK")
 
     # 11. is_gated_callback exempts histology (should behave like anatomy: never gated)

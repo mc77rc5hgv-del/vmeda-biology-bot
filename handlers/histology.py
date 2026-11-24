@@ -20,6 +20,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 import telegram_bot as tb
 from services import histology_content, histology_exam
+from services.content_access import EXAM_TRIAL_CLOSED, can_visit, enter, trial_expiry
 from services.telegram_ui import safe_delete_message
 
 router = Router()
@@ -37,16 +38,13 @@ HISTOLOGY_WARNING_THRESHOLD = tb.REFERRAL_WARNING_THRESHOLD  # 3 предупр�
 HISTOLOGY_WARNING_COOLDOWN_SECONDS = tb.REFERRAL_WARNING_COOLDOWN_SECONDS  # не чаще раза в 4ч
 
 def get_histology_temp_expiry(user_id: int) -> float:
-    return tb.stats["histology_temp_access"].get(str(user_id), 0)
+    return trial_expiry(tb, user_id)
 
 def has_histology_temp_access(user_id: int) -> bool:
     return time.time() < get_histology_temp_expiry(user_id)
 
 def histology_permanently_unlocked(user_id: int) -> bool:
-    """Доступ, не зависящий от тающего пробного окна (в отличие от has_histology_temp_access) —
-    имя осталось от старой (разовой навсегда) модели рефералов; сейчас реферальная ветка сама по
-    себе ЕЖЕМЕСЯЧНО обновляемая (см. tb.get_referral_count_this_month), просто в контрасте с
-    неделей пробного доступа она по-прежнему "не временная"."""
+    """Проверить доступ по подписке, рефералам или промо без учёта пробного периода."""
     return (
         HISTOLOGY_PUBLIC or tb.is_admin_or_assistant(user_id)
         or tb.is_section_promo_active("histology") or tb.is_section_promo_active("global")
@@ -55,25 +53,13 @@ def histology_permanently_unlocked(user_id: int) -> bool:
     )
 
 def histology_access_ok(user_id: int) -> bool:
-    if histology_permanently_unlocked(user_id):
-        return True
-    warnings = tb.stats['histology_warnings'].get(str(user_id), {})
-    return has_histology_temp_access(user_id) and warnings.get('count', 0) < HISTOLOGY_WARNING_THRESHOLD
+    return can_visit(tb, user_id, 'histology')
 
 async def histology_gate_ok(callback: CallbackQuery) -> bool:
-    """Единый шлюз для контента гистологии — как у Биологии/Физики/Химии, только пробное окно
-    без рефералов/подписки ограничено неделей, а не только числом предупреждений:
-    1) первый визит — молча выдаём неделю пробного доступа (TEMP_ACCESS_GRANT_SECONDS);
-    2) дальше — до HISTOLOGY_WARNING_THRESHOLD (3) предупреждений с кулдауном между ними;
-    3) блок наступает по любому из двух условий: предупреждения исчерпаны ИЛИ неделя истекла —
-       и снимается только рефералами (REFERRAL_FULL_ACCESS_THRESHOLD) или подпиской.
-    Возвращает True, если хендлер должен продолжить (и сам обязан вызвать callback.answer()).
-    Возвращает False, если гейт уже сам ответил на callback и отредактировал сообщение."""
-    user_id = callback.from_user.id
-    from services.content_access import enter
-    decision = enter(tb, user_id, 'histology')
+    """Проверить доступ до показа контента, в том числе после нажатия старой кнопки."""
+    decision = enter(tb, callback.from_user.id, 'histology')
     if not decision['allowed']:
-        await callback.answer("🚨 Гистология закрыта — пригласи друзей или оформи подписку!", show_alert=True)
+        await callback.answer("Пробный доступ закончился", show_alert=True)
         await tb.safe_edit_text(
             callback.message,
             get_histology_locked_text(),
@@ -81,33 +67,6 @@ async def histology_gate_ok(callback: CallbackQuery) -> bool:
             reply_markup=get_histology_locked_keyboard()
         )
         return False
-
-    now = time.time()
-    if decision['warning']:
-        remaining = decision['warnings_remaining']
-        days_left = max(int((get_histology_temp_expiry(user_id) - now) // 86400), 0)
-        cheapest_histology = tb.cheapest_histology_tier()
-        price_rub = cheapest_histology["price_rub"]
-        price_stars = cheapest_histology["price_stars"]
-        if remaining > 0:
-            warn_text = (
-                "⚠️❗️ <b>Гистология скоро закроется!</b> ❗️⚠️\n\n"
-                f"Бесплатный пробный доступ действует ещё примерно <b>{days_left} дн.</b> Пригласи "
-                f"{tb.REFERRAL_FULL_ACCESS_THRESHOLD} друзей в этом месяце или оформи подписку от "
-                f"<b>{price_rub}₽ / {price_stars}⭐</b> — и раздел откроется (рефералами — доступ "
-                "нужно будет подтверждать новыми друзьями каждый месяц)."
-            )
-        else:
-            warn_text = (
-                "🚨‼️ <b>ПОСЛЕДНЕЕ ПРЕДУПРЕЖДЕНИЕ!</b> ‼️🚨\n\n"
-                f"В следующий раз доступ к Гистологии закроется, если не пригласишь "
-                f"{tb.REFERRAL_FULL_ACCESS_THRESHOLD} друзей или не оформишь подписку от "
-                f"<b>{price_rub}₽ / {price_stars}⭐</b>."
-            )
-        try:
-            await callback.message.answer(warn_text, parse_mode="HTML", reply_markup=get_histology_locked_keyboard())
-        except Exception:
-            tb.logger.exception("Не удалось отправить предупреждение о гистологии пользователю %s", user_id)
 
     return True
 
@@ -125,23 +84,13 @@ def get_histology_locked_text() -> str:
     cheapest = tb.cheapest_histology_tier()
     return (
         f"🔬 <b>Гистология</b>\n{tb.DIVIDER}\n\n"
-        "Микрофотографии, учебные схемы, описания и ориентиры для подготовки "
-        "к распознаванию препаратов. Пояснения к каждому кадру помогают "
-        "сопоставить изображение с теорией.\n\n"
-        f"Открывается бесплатно — как Биология, Физика и Химия — после "
-        f"<b>{tb.REFERRAL_FULL_ACCESS_THRESHOLD}</b> приглашённых друзей в этом месяце, либо сразу по подписке от "
-        f"<b>{cheapest['price_rub']}₽ / {cheapest['price_stars']}⭐</b> "
-        f"(тариф «{cheapest['title']}») и выше.\n\n"
-        f"Новым пользователям раздел открыт бесплатно на пробный период (до недели)."
+        f"<b>Пробный доступ закончился.</b>\n\n{EXAM_TRIAL_CLOSED}\n\n"
+        "В разделе есть препараты, учебные схемы, тесты и вопросы по теории. "
+        f"Подписка с гистологией — от <b>{cheapest['price_rub']} ₽ / {cheapest['price_stars']} ⭐</b>."
     )
 
 def get_histology_locked_keyboard():
-    builder = InlineKeyboardBuilder()
-    builder.button(text="👥 Пригласить друзей", callback_data="referral_info")
-    builder.button(style="success", text="💎 Оформить подписку", callback_data="subscription_menu")
-    builder.button(text="🔙 Назад в меню", callback_data="back_to_main")
-    builder.adjust(1)
-    return builder.as_markup()
+    return tb.get_exam_access_keyboard("back_to_main")
 
 async def announce_histology_promo_start() -> None:
     builder = InlineKeyboardBuilder()
@@ -266,9 +215,10 @@ async def cb_histology_menu(callback: CallbackQuery):
     if not await histology_gate_ok(callback):
         return
     await callback.answer()
+    trial_notice = tb.get_exam_trial_notice(callback.from_user.id, 'histology')
     await tb.safe_edit_text(
         callback.message,
-        f"🔬 <b>Гистология</b>\n{tb.DIVIDER}",
+        f"🔬 <b>Гистология</b>\n{tb.DIVIDER}" + (f"\n\n{trial_notice}" if trial_notice else ""),
         parse_mode="HTML",
         reply_markup=get_histology_menu_keyboard(),
     )
@@ -530,6 +480,8 @@ async def cb_histology_guess_start(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("histology_guess_show_answer:"))
 async def cb_histology_guess_show_answer(callback: CallbackQuery):
+    if not await histology_gate_ok(callback):
+        return
     user_id = callback.from_user.id
     session = HISTOLOGY_GUESS_SESSIONS.get(user_id)
     fields = callback.data.split(':')
@@ -541,6 +493,8 @@ async def cb_histology_guess_show_answer(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith('histology_guess_know:') | F.data.startswith('histology_guess_dont_know:'))
 async def cb_histology_guess_answer(callback: CallbackQuery):
+    if not await histology_gate_ok(callback):
+        return
     user_id = callback.from_user.id
     session = HISTOLOGY_GUESS_SESSIONS.get(user_id)
     if not session:
@@ -587,6 +541,8 @@ async def cb_histology_guess_answer(callback: CallbackQuery):
 
 @router.callback_query(F.data == "histology_guess_stop")
 async def cb_histology_guess_stop(callback: CallbackQuery):
+    if not await histology_gate_ok(callback):
+        return
     session = HISTOLOGY_GUESS_SESSIONS.get(callback.from_user.id)
     if session and session.get('saving'):
         await callback.answer('Дождись сохранения ответа')

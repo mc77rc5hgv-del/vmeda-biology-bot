@@ -1,4 +1,5 @@
 from services.stats_writer import StatsWriter
+from services.content_access import EXAM_TRIAL_HOURS
 import asyncio
 import html
 import io
@@ -239,6 +240,7 @@ def load_stats() -> dict:
             data.setdefault("section_promos", {})
             data.setdefault("histology_warnings", {})
             data.setdefault("histology_temp_access", {})
+            data.setdefault("exam_trial_access", {})
             data.setdefault("histology_learning", {})
             data.setdefault("rollcall_confirmed", {})
             data.setdefault("badge_drafts", {})
@@ -301,6 +303,7 @@ def load_stats() -> dict:
         "section_promos": {},
         "histology_warnings": {},
         "histology_temp_access": {},
+        "exam_trial_access": {},
         "histology_learning": {},
         "rollcall_confirmed": {},
         "badge_drafts": {},
@@ -1435,10 +1438,8 @@ def get_anatomy_announcement_keyboard():
 def get_anatomy_exam_announcement_text() -> str:
     return (
         f"🎓 <b>Открыт раздел «Экзамен» по Анатомии!</b>\n{DIVIDER}\n\n"
-        "Готовься к экзамену прицельно — три инструмента, и все бесплатно, без рефералов "
-        "и подписки:\n\n"
-        "✅ <b>ТЕСТ</b> — официальный банк вопросов кафедры нормальной анатомии ВМедА "
-        "(Гайворонский и др.), 1040 вопросов, 10 частей\n"
+        "✅ <b>ТЕСТ</b> — вопросы по темам, пояснения и работа над ошибками. "
+        f"Пробный доступ на {EXAM_TRIAL_HOURS} часа, затем — подписка или два приглашённых однокурсника.\n"
         "📖 <b>Вопросы теории</b> — разбор экзаменационных вопросов с полными ответами\n"
         "🖐 <b>Вопросы практики</b> — «покажите и назовите» с фото атласа к каждому ответу\n\n"
         "🏆 Включи <b>рейтинговый режим</b> в ТЕСТе — результаты идут в общий рейтинг лучших. "
@@ -1949,6 +1950,8 @@ def _anatomy_menu_label(user_id: int = None) -> str:
 
 
 def _histology_menu_label(user_id: int = None) -> str:
+    from services.content_access import trial_available
+
     sub_histology = user_id is not None and has_subscription_histology_access(user_id)
     if HISTOLOGY_PUBLIC:
         return "🔬 Гистология"
@@ -1962,8 +1965,32 @@ def _histology_menu_label(user_id: int = None) -> str:
         return "🔬 Гистология 💎"
     elif user_id is not None and has_histology_temp_access(user_id):
         return "🔬 Гистология (пробный период)"
+    elif user_id is not None and trial_available(sys.modules['telegram_bot'], user_id):
+        return "🔬 Гистология · можно попробовать"
     else:
         return "🔬 Гистология (рефералы/подписка)"
+
+
+def get_exam_trial_notice(user_id: int, subject: str) -> str:
+    from services.content_access import exam_entitled, trial_expiry
+
+    tb = sys.modules['telegram_bot']
+    expires = trial_expiry(tb, user_id)
+    if expires <= time.time() or exam_entitled(tb, user_id, subject):
+        return ""
+    deadline = datetime.fromtimestamp(expires, APP_TIMEZONE).strftime('%d.%m в %H:%M')
+    return (
+        f"⏳ <b>Пробный доступ до {deadline} МСК.</b> Он общий для гистологии и тестов по анатомии. "
+        "Затем можно оформить подписку или пригласить двух однокурсников по своей ссылке в этом месяце."
+    )
+
+
+def get_exam_access_keyboard(back: str):
+    builder = InlineKeyboardBuilder()
+    builder.button(text="👥 Пригласить однокурсников", callback_data="referral_info")
+    builder.button(style="success", text="💎 Выбрать подписку", callback_data="subscription_menu")
+    builder.button(text="🔙 Назад", callback_data=back)
+    return builder.adjust(1).as_markup()
 
 
 def miniapp_launch_allowed(user_id: int) -> bool:
@@ -2673,13 +2700,12 @@ async def cmd_start(message: Message):
         builder = InlineKeyboardBuilder()
         builder.button(text="📢 Открыть канал Vmeda_examen", url="https://t.me/Vmeda_examen")
         await message.answer(
-            "👋 <b>Добро пожаловать!</b>\n\n"
-            "Этот бот поможет подготовиться к экзаменам ВМедА:\n"
-            "🧬 биология · ⚛️ физика · 🧪 химия\n\n"
-            f"{DIVIDER}\n"
-            "🔒 Чтобы пользоваться ботом, подпишись на канал:\n"
-            "👉 https://t.me/Vmeda_examen\n\n"
-            "После подписки нажми /start ещё раз.",
+            "👋 <b>Добро пожаловать в VMEDA!</b>\n\n"
+            "Здесь материалы для занятий, подготовка к зачётам и экзаменам, тесты с разбором ошибок "
+            "и VMedA AI для разбора заданий по фото.\n\n"
+            "🦴 <b>Тесты по анатомии</b> и 🔬 <b>гистологию</b> можно попробовать бесплатно "
+            f"в течение {EXAM_TRIAL_HOURS} часов с первого входа в один из этих разделов.\n\n"
+            "Чтобы открыть меню, подпишись на канал по кнопке ниже и снова нажми /start.",
             parse_mode="HTML",
             reply_markup=builder.as_markup()
         )
@@ -2703,6 +2729,16 @@ async def cmd_start(message: Message):
             return
 
     greeting = "🎉 <b>С возвращением!</b>" if not is_new_user else "👋 <b>Привет!</b>"
+    from services.content_access import exam_entitled, trial_available
+    tb = sys.modules['telegram_bot']
+    if trial_available(tb, user_id) and not all(
+        exam_entitled(tb, user_id, subject) for subject in ('anatomy_tests', 'histology')
+    ):
+        greeting += (
+            "\n\n"
+            f"Попробуй тесты по анатомии и гистологию: пробные {EXAM_TRIAL_HOURS} часа начнутся, "
+            "когда ты впервые откроешь один из этих разделов."
+        )
     await message.answer(
         get_main_menu_text(user_id, greeting),
         parse_mode="HTML",

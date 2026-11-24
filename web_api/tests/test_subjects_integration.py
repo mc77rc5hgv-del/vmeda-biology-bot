@@ -377,9 +377,9 @@ def test_anatomy_unknown_module_is_not_found_not_locked():
 
 
 def test_anatomy_exam_exposes_all_parts_without_leaking_answer_keys():
-    """Exam tests stay available independently from the course maintenance/subscription gate."""
+    """Exam tests have their own gate, independent from course maintenance."""
     _set_anatomy_maintenance_override(None)
-    headers = _auth_headers()
+    headers = _auth_headers(next(iter(tb.ADMIN_IDS)))
     parts = client.get("/api/v1/anatomy/exam/parts", headers=headers)
     assert parts.status_code == 200, parts.text
     assert len(parts.json()) == 12
@@ -398,7 +398,7 @@ def test_anatomy_exam_exposes_all_parts_without_leaking_answer_keys():
 
 
 def test_anatomy_exam_answer_returns_verified_key_and_explanation_only_after_choice():
-    headers = _auth_headers()
+    headers = _auth_headers(next(iter(tb.ADMIN_IDS)))
     questions = client.get("/api/v1/anatomy/exam/parts/1/questions", headers=headers).json()
     first_question = questions[0]
     with open("anatomy_exam_test_2026.json", encoding="utf-8") as stream:
@@ -444,7 +444,7 @@ def test_anatomy_exam_answer_returns_verified_key_and_explanation_only_after_cho
 
 
 def test_anatomy_run_exposes_feedback_only_for_saved_answers_and_keeps_them_immutable():
-    headers = _auth_headers(user_id=900_777_888_741)
+    headers = _auth_headers(next(iter(tb.ADMIN_IDS)))
     started = client.post(
         "/api/v1/anatomy/exam/runs",
         headers=headers,
@@ -487,7 +487,7 @@ def test_anatomy_run_exposes_feedback_only_for_saved_answers_and_keeps_them_immu
 
 
 def test_anatomy_exam_flash_returns_fifty_unique_questions():
-    response = client.get("/api/v1/anatomy/exam/flash", headers=_auth_headers())
+    response = client.get("/api/v1/anatomy/exam/flash", headers=_auth_headers(next(iter(tb.ADMIN_IDS))))
     assert response.status_code == 200, response.text
     ids = [question["id"] for question in response.json()]
     assert len(ids) == 50

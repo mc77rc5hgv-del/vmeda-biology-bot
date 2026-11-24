@@ -3,15 +3,15 @@ import random
 from typing import Literal
 
 from services import histology_content, histology_exam
-from services.miniapp_policy import full_content_access, promo_active, public_launch, require_subject, subscription_required
+from services.miniapp_policy import full_content_access, promo_active, public_launch, require_exam_content, require_subject, subscription_required
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 
 from .. import content, schemas, search, static_content, attempt_tokens
-from services.content_access import can_visit
+from services.content_access import EXAM_TRIAL_CLOSED, can_visit
 from services.anatomy_feedback import get_anatomy_answer_feedback
-from ..deps import get_current_user_id, get_fresh_bot_module
+from ..deps import get_current_user_id, get_fresh_bot_module, require_anatomy_test_access
 
 router = APIRouter(prefix="/api/v1", tags=["subjects"])
 
@@ -326,12 +326,11 @@ def _anatomy_exam_public_question(question: dict) -> dict:
     }
 
 
-@router.get("/anatomy/exam/parts")
+@router.get("/anatomy/exam/parts", dependencies=[Depends(require_anatomy_test_access)])
 def get_anatomy_exam_parts(
     _user_id: int = Depends(get_current_user_id),
     tb=Depends(get_fresh_bot_module),
 ) -> list[dict]:
-    """The exam bank is free, mirroring the Telegram bot's dedicated exam section."""
     return [
         {
             "id": part["id"],
@@ -343,7 +342,7 @@ def get_anatomy_exam_parts(
     ]
 
 
-@router.get("/anatomy/exam/parts/{part_id}/questions")
+@router.get("/anatomy/exam/parts/{part_id}/questions", dependencies=[Depends(require_anatomy_test_access)])
 def get_anatomy_exam_part_questions(
     part_id: int,
     _user_id: int = Depends(get_current_user_id),
@@ -355,7 +354,7 @@ def get_anatomy_exam_part_questions(
     return [_anatomy_exam_public_question(question) for question in part["questions"]]
 
 
-@router.get("/anatomy/exam/flash")
+@router.get("/anatomy/exam/flash", dependencies=[Depends(require_anatomy_test_access)])
 def get_anatomy_exam_flash_questions(
     limit: int = 50,
     _user_id: int = Depends(get_current_user_id),
@@ -368,7 +367,7 @@ def get_anatomy_exam_flash_questions(
     return [_anatomy_exam_public_question(question) for question in picked]
 
 
-@router.post("/anatomy/exam/questions/{question_num}/answer")
+@router.post("/anatomy/exam/questions/{question_num}/answer", dependencies=[Depends(require_anatomy_test_access)])
 def answer_anatomy_exam_question(
     question_num: int,
     body: schemas.AnatomyExamAnswerRequest,
@@ -487,33 +486,14 @@ def _get_material_data(tb, user_id: int, subject_id: str, section_id: str, item_
     return content.get_material(tb.DYNAMIC_COURSES, subject_id, section_id, item_id)
 
 
-# ==================== Гейт Гистологии ====================
-# В отличие от Анатомии (гейт ПО МОДУЛЯМ), у Гистологии в самом боте один гейт на ВЕСЬ раздел
-# сразу (см. handlers/histology.py::histology_access_ok -- пробный период 7 дней с момента
-# первого визита, ИЛИ подписка, ИЛИ 2 реферала в этом месяце, ИЛИ активное промо секции/глобальное
-# промо) -- поэтому здесь один флаг на весь предмет, а не по группам-диагностикам, как у Анатомии.
-# Используем ЧИСТЫЙ предикат histology_access_ok(user_id), а не стейтфул histology_gate_ok(callback)
-# -- та же причина, что уже объясняет routers/access.py::_subject_is_open (docstring там): read-only
-# API не должно выдавать пробный доступ как побочный эффект простого GET-запроса.
-
-
 def _histology_locked_reason(tb, user_id: int) -> str | None:
-    if subscription_required(tb, user_id, "histology"):
-        return "Для этого предмета нужна соответствующая подписка."
-    if full_content_access(tb, user_id) or tb.histology_access_ok(user_id):
+    if full_content_access(tb, user_id) or can_visit(tb, user_id, 'histology'):
         return None
-    cheapest = tb.cheapest_histology_tier()
-    return (
-        "Гистология открывается пробным доступом (при первом визите в разделе бота), подпиской "
-        f"от «{cheapest['short']}» ({cheapest['price_rub']}₽ / {cheapest['price_stars']}⭐) или "
-        "двумя рефералами в этом месяце."
-    )
+    return EXAM_TRIAL_CLOSED
 
 
 def _check_histology_access(tb, user_id: int) -> None:
-    reason = _histology_locked_reason(tb, user_id)
-    if reason is not None:
-        raise HTTPException(status_code=403, detail=reason)
+    require_exam_content(tb, user_id, 'histology')
 
 
 def _annotate_histology_groups(tb, user_id: int, section: dict) -> dict:

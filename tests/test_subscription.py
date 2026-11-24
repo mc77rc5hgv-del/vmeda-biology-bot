@@ -1241,14 +1241,14 @@ async def main():
         assert [b.text for b in sub_buttons] == [f"💎 Подписка от {cheapest_price}₽ — без рефералов"]
         assert sub_buttons[0].style == "success", "subscription CTA is the menu's green button"
         assert tb._anatomy_menu_label(non_admin) == "🔥🦴 Анатомия"
-        assert tb._histology_menu_label(non_admin) == "🔬 Гистология (рефералы/подписка)"
+        assert tb._histology_menu_label(non_admin) == "🔬 Гистология · можно попробовать"
 
         tb.grant_subscription(non_admin, 21, "stars", 129)  # no histology, no anatomy
         menu_tier21 = tb.get_main_menu(user_id=non_admin)
         tier21_texts = kb_texts(menu_tier21)
         assert "💎 Моя подписка" in tier21_texts
         assert [b.style for row in menu_tier21.inline_keyboard for b in row if b.callback_data == "subscription_menu"] == [None]
-        assert tb._histology_menu_label(non_admin) == "🔬 Гистология (рефералы/подписка)", "tier 21 has no histology"
+        assert tb._histology_menu_label(non_admin) == "🔬 Гистология · можно попробовать", "tier 21 has no histology"
         assert tb._anatomy_menu_label(non_admin) == "🔥🦴 Анатомия", "tier 21 has no anatomy — button stays plain (not the 💎 variant)"
         tb.stats["subscriptions"].pop(str(non_admin), None)
 
@@ -1285,7 +1285,7 @@ async def main():
     assert "учебные схемы" in hist_locked_text
     assert "сверено с преподавателями" not in hist_locked_text
     assert str(tb.cheapest_histology_tier()["price_rub"]) in hist_locked_text
-    assert any("Оформить подписку" in t for t in kb_texts(hist_locked_kb))
+    assert any("Выбрать подписку" in t for t in kb_texts(hist_locked_kb))
     tb.stats["histology_temp_access"].pop(str(non_admin), None)
     tb.stats["histology_warnings"].pop(str(non_admin), None)
 
