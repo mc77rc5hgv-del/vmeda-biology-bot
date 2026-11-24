@@ -85,7 +85,7 @@ export function ProgressPage() {
             const completed = learning.completedBySubject[subject.id] ?? 0;
             const total = totals.get(subject.id);
             const percent = total ? Math.min(100, Math.round((completed / total) * 100)) : 0;
-            const accent = `var(--subject-${subject.accent})`;
+            const accent = `var(--subject-${subject.accent}-fg)`;
             return (
               <SubjectTheme key={subject.id} subjectId={subject.id}>
               <PressableCard onClick={() => navigate(`/subjects/${subject.id}`)} className={styles.subjectCard}>

@@ -37,8 +37,8 @@ export function HomeReminders() {
         <div className={styles.reminder} role="status">
           <span className={styles.icon} style={{ color: "var(--academic-blue)" }}><Icon icon={Gem} size={20} /></span>
           <p>
-            Подписка{access?.subscriptionTitle ? ` «${access.subscriptionTitle}»` : ""} закончится{" "}
-            {daysLeft === 1 ? "завтра" : `через ${formatDayCount(daysLeft)}`}.
+            <strong>Подписка закончится {daysLeft === 1 ? "завтра" : `через ${formatDayCount(daysLeft)}`}</strong>
+            {access?.subscriptionTitle && <span>{access.subscriptionTitle}</span>}
           </p>
           <button type="button" onClick={() => navigate("/profile/subscriptions")}>Продлить</button>
         </div>

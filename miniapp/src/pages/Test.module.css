@@ -1,5 +1,5 @@
 .progressLabel {
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--ink-secondary);
   text-align: center;
 }
@@ -10,8 +10,8 @@
   border-radius: var(--radius-lg);
   background: var(--surface-glass);
   box-shadow: var(--shadow-card);
-  font-size: 18px;
-  font-weight: 720;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
   line-height: 1.48;
 }
 
@@ -30,7 +30,7 @@
   border-radius: var(--radius-md);
   border: 1px solid var(--border);
   background: var(--surface-glass);
-  font-size: 14px;
+  font-size: var(--text-md);
   text-align: left;
   box-shadow: var(--shadow-card);
   transition: transform 120ms ease, border-color 150ms ease, background 150ms ease;
@@ -61,7 +61,7 @@
 
 .resultScore {
   font-size: 36px;
-  font-weight: 800;
+  font-weight: var(--weight-bold);
   color: transparent;
   background: linear-gradient(135deg, var(--academic-blue), var(--brand-violet));
   -webkit-background-clip: text;
@@ -74,6 +74,6 @@
   border-radius: var(--radius-pill);
   background: linear-gradient(135deg, var(--academic-blue), var(--brand-violet));
   color: #fff;
-  font-weight: 720;
+  font-weight: var(--weight-semibold);
   box-shadow: var(--shadow-brand);
 }

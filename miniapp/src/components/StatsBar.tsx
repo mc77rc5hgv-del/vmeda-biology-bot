@@ -51,7 +51,7 @@ export function StatsBar({ completed, accuracy, favorites }: StatsBarProps) {
         ))}
       </div>
       {active && (
-        <p style={{ fontSize: 12, color: "var(--ink-secondary)", marginTop: "var(--space-2)", lineHeight: 1.4 }}>
+        <p className={styles.hint}>
           {EXPLANATIONS[active]}
         </p>
       )}

@@ -1,10 +1,11 @@
 import { subscriptionPath } from "../lib/subscriptions";
 import { useEffect, useRef } from "react";
-import { BookOpenCheck, ChevronRight, Lock, Microscope, Sparkles, SquareCheckBig } from "lucide-react";
+import { BookOpenCheck, ChevronRight, Layers, ListChecks, Lock, Microscope, Sparkles, SquareCheckBig } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 import { enterSubject, hasContentSession, fetchAccessStatus, fetchLearningState, fetchSubjectDetail, isRealBackedSubject } from "../lib/api";
 import { formatMaterialCount } from "../lib/format";
+import { subjectIcon } from "../lib/subjectIcons";
 import { hapticSelection, useTelegramBackButton } from "../lib/telegram";
 import { PressableCard } from "../components/Card";
 import { Icon } from "../components/Icon";
@@ -78,7 +79,13 @@ export function SubjectPage() {
       <div className={styles.header}>
         {entryMutation.isError && <StateMessage title="Не удалось открыть доступ" onRetry={() => entryMutation.mutate()} />}
         {accessQuery.data.trialAvailable && <button type="button" className={styles.trialButton} disabled={entryMutation.isPending} onClick={() => entryMutation.mutate()}>{entryMutation.isPending ? "Открываем…" : "Открыть пробный доступ к гистологии"}</button>}
-        <h1 className={styles.title}>{subject.title}</h1>
+        <div className={styles.titleRow}>
+          <span className={styles.subjectIcon} aria-hidden="true"><Icon icon={subjectIcon(subject.id)} size={24} /></span>
+          <div className={styles.titleCopy}>
+            <h1 className={styles.title}>{subject.title}</h1>
+            {!locked && totalMaterials > 0 && <span className={styles.subtitle}>{formatMaterialCount(totalMaterials)}</span>}
+          </div>
+        </div>
         {locked ? (
           <StateMessage
             icon={Lock}
@@ -87,8 +94,8 @@ export function SubjectPage() {
           />
         ) : (
           <div className={styles.readinessRow}>
-            <ProgressBar percent={readiness} color={`var(--subject-${subject.accent})`} label="Готовность" />
-            <span className={styles.readinessValue}>Изучено: {completedMaterials} из {totalMaterials} · {readiness}%</span>
+            <ProgressBar percent={readiness} color={`var(--subject-${subject.accent}-fg)`} label="Готовность" />
+            <span className={styles.readinessValue}>Изучено {completedMaterials} · {readiness}%</span>
           </div>
         )}
       </div>
@@ -138,6 +145,7 @@ export function SubjectPage() {
 
       {!locked && (
         <>
+          <h2 className={styles.sectionsHeading}>Разделы</h2>
           <div className={styles.sectionList}>
             {subject.sections.filter((section) => !(subject.id === "histology" && section.id === "specimens")).map((section) => (
               <PressableCard
@@ -155,7 +163,10 @@ export function SubjectPage() {
                   }
                 }}
               >
-                <div>
+                <span className={styles.sectionIcon} aria-hidden="true">
+                  <Icon icon={section.kind === "grouped" ? Layers : ListChecks} size={20} />
+                </span>
+                <div className={styles.sectionCopy}>
                   <div className={styles.sectionTitle}>{section.title}</div>
                   {section.itemCount > 0 && (
                     <div className={styles.sectionCount}>{formatMaterialCount(section.itemCount)}</div>

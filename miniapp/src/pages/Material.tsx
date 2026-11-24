@@ -281,7 +281,7 @@ export function MaterialPage() {
             })}
           </div>
           {answerResult && (
-            <p style={{ fontSize: 14, fontWeight: 600, color: answerResult.correct ? "var(--success)" : "var(--danger)" }}>
+            <p className={styles.quizVerdict} style={{ color: answerResult.correct ? "var(--success)" : "var(--danger)" }}>
               {answerResult.correct ? "✅ Верно!" : "❌ Неверно."}
             </p>
           )}
@@ -289,12 +289,12 @@ export function MaterialPage() {
       )}
 
       {material.media && material.media.length > 0 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <div className={styles.mediaList}>
           {material.media.map((m, i) => (
-            <figure key={i} style={{ margin: 0 }}>
+            <figure key={i} className={styles.figure}>
               <AuthenticatedImage src={m.url} alt={m.caption || `Иллюстрация ${i + 1}`} className={styles.media} />
               {m.caption && (
-                <figcaption style={{ fontSize: 12, color: "var(--ink-secondary)", marginTop: 4 }}>
+                <figcaption className={styles.caption}>
                   {m.caption}
                 </figcaption>
               )}
@@ -304,7 +304,7 @@ export function MaterialPage() {
       )}
 
       {material.sources && material.sources.length > 0 && (
-        <p style={{ fontSize: 12, color: "var(--ink-secondary)" }}>
+        <p className={styles.caption}>
           📎 Источники: {material.sources.join(", ")}
         </p>
       )}

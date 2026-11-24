@@ -1,13 +1,13 @@
 .header {
-  font-size: 26px;
-  font-weight: 820;
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-bold);
   letter-spacing: -.035em;
 }
 
 .list {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--gap-list);
 }
 
 .row {
@@ -15,21 +15,36 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
-  min-height: var(--tap-min);
-  padding: 16px 18px;
-  border-radius: 20px;
+  min-height: 64px;
+  padding: var(--space-3) var(--pad-card) var(--space-3) var(--space-3);
+  border-radius: var(--radius-card);
+}
+
+.rowIcon {
+  display: grid;
+  flex: 0 0 40px;
+  height: 40px;
+  place-items: center;
+  border-radius: var(--radius-icon);
+  color: var(--subject-ink, var(--academic-blue));
+  background: var(--subject-tint, var(--academic-blue-tint));
+}
+
+.rowCopy {
+  flex: 1;
+  min-width: 0;
 }
 
 .rowTitle {
-  font-size: 14px;
-  font-weight: 700;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
   line-height: 1.35;
 }
 
 .rowMeta {
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--ink-secondary);
-  margin-top: 4px;
+  margin-top: 2px;
 }
 
 /* Только у Анатомии (см. lib/types.ts::SectionGroupRef.locked) — платный/временно закрытый
@@ -43,5 +58,5 @@
   .row { height: 100%; }
 }
 
-.sectionHeading { grid-column: 1 / -1; font-size: 18px; line-height: 1.4; margin: 18px 0 4px; overflow-wrap: anywhere; }
+.sectionHeading { grid-column: 1 / -1; font-size: var(--text-lg); line-height: 1.4; margin: 18px 0 4px; overflow-wrap: anywhere; }
 .row > div { min-width: 0; overflow-wrap: anywhere; }

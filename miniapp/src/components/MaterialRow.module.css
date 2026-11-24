@@ -1,0 +1,35 @@
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 60px;
+  padding: var(--space-3) var(--pad-card) var(--space-3) var(--space-3);
+  border-radius: var(--radius-card);
+}
+
+.badge {
+  display: grid;
+  flex: 0 0 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: var(--radius-icon);
+  color: var(--subject-ink, var(--academic-blue));
+  background: var(--subject-tint, var(--academic-blue-tint));
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+  font-variant-numeric: tabular-nums;
+}
+
+.done {
+  color: #fff;
+  background: var(--success);
+}
+
+.title {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}

@@ -1,9 +1,10 @@
 import { subscriptionPath } from "../lib/subscriptions";
 import { Fragment, useCallback, useState } from "react";
-import { CheckCircle2, ChevronRight, Lock } from "lucide-react";
+import { ChevronRight, Layers, Lock } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
-import { fetchGroup, fetchLearningState, hasContentSession } from "../lib/api";
+import { fetchGroup, fetchLearningState, fetchSubjectDetail, hasContentSession } from "../lib/api";
+import { formatMaterialCount } from "../lib/format";
 import { ApiError } from "../lib/apiClient";
 import { hapticSelection, useTelegramBackButton } from "../lib/telegram";
 import { PressableCard } from "../components/Card";
@@ -12,6 +13,8 @@ import { Skeleton } from "../components/Skeleton";
 import { StateMessage } from "../components/StateMessage";
 import { TelegramContentGate } from "../components/TelegramContentGate";
 import { LoadMore } from "../components/LoadMore";
+import { MaterialRow } from "../components/MaterialRow";
+import { PageHeader } from "../components/PageHeader";
 import styles from "./Section.module.css";
 
 const PAGE_SIZE = 50; // порционная отрисовка с автодогрузкой, см. Section.tsx
@@ -32,6 +35,8 @@ export function GroupPage() {
     enabled: hasSession,
   });
   const learningQuery = useQuery({ queryKey: ["learning"], queryFn: fetchLearningState, enabled: hasSession });
+  const subjectQuery = useQuery({ queryKey: ["subject", subjectId], queryFn: () => fetchSubjectDetail(subjectId), enabled: hasSession });
+  const sectionTitle = subjectQuery.data?.sections.find((item) => item.id === sectionId)?.title;
 
   if (!hasSession) {
     return (
@@ -77,13 +82,18 @@ export function GroupPage() {
 
   return (
     <div className="screen">
-      <h1 className={styles.header}>{group.title}</h1>
+      <PageHeader
+        eyebrow={[subjectQuery.data?.title, sectionTitle].filter(Boolean).join(" · ") || undefined}
+        title={group.title}
+        meta={group.items.length ? formatMaterialCount(group.items.length) : undefined}
+      />
       {group.subgroups?.map((subgroup) => (
         <PressableCard key={subgroup.id} className={styles.row} onClick={() => {
           hapticSelection();
           navigate(`/subjects/${subjectId}/sections/${sectionId}/groups/${subgroup.id}`);
         }}>
-          <div><div className={styles.rowTitle}>{subgroup.title}</div><div className={styles.rowMeta}>{subgroup.item_count} тем</div></div>
+          <span className={styles.rowIcon} aria-hidden="true"><Icon icon={Layers} size={18} /></span>
+          <div className={styles.rowCopy}><div className={styles.rowTitle}>{subgroup.title}</div><div className={styles.rowMeta}>{formatMaterialCount(subgroup.item_count)}</div></div>
           <Icon icon={ChevronRight} size={18} color="var(--ink-secondary)" />
         </PressableCard>
       ))}
@@ -93,21 +103,12 @@ export function GroupPage() {
           return (
           <Fragment key={item.id}>
           {headings.has(item.id) && <h2 className={styles.sectionHeading}>{headings.get(item.id)}</h2>}
-          <PressableCard
-            className={styles.row}
-            onClick={() => {
-              hapticSelection();
-              navigate(`/materials/${subjectId}/${sectionId}/${item.id}`);
-            }}
-          >
-            <div>
-              <div className={styles.rowTitle}>{item.title}</div>
-              <div className={styles.rowMeta}>
-                {item.order} из {item.total}
-              </div>
-            </div>
-            <Icon icon={done ? CheckCircle2 : ChevronRight} size={18} color={done ? "var(--success)" : "var(--ink-secondary)"} />
-          </PressableCard>
+          <MaterialRow
+            order={item.order}
+            title={item.title}
+            done={done}
+            onOpen={() => navigate(`/materials/${subjectId}/${sectionId}/${item.id}`)}
+          />
           </Fragment>
           );
         })}

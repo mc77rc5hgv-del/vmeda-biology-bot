@@ -96,7 +96,7 @@ export function AiPage() {
 
   const activeSubject = availableSubjects.find((subject) => subject.id === subjectId) ?? availableSubjects[0];
   const subjectStyle = activeSubject
-    ? ({ "--subject-accent": `var(--subject-${activeSubject.accent})` } as CSSProperties)
+    ? ({ "--subject-accent": `var(--subject-${activeSubject.accent}-fg)` } as CSSProperties)
     : undefined;
 
   useEffect(() => {
@@ -273,7 +273,7 @@ export function AiPage() {
                 role="tab"
                 aria-selected={subject.id === activeSubject?.id}
                 className={[styles.subjectChip, subject.id === activeSubject?.id ? styles.subjectChipActive : ""].join(" ")}
-                style={{ "--chip-accent": `var(--subject-${subject.accent})` } as CSSProperties}
+                style={{ "--chip-accent": `var(--subject-${subject.accent}-fg)` } as CSSProperties}
                 onClick={() => {
                   setSubjectId(subject.id);
                   resetOutcome();
