@@ -406,6 +406,13 @@ async def main():
     await tb.cb_histology_guess_start(cb_g0)
     assert cb_g0._answers and cb_g0._answers[0][1] is True
     assert not cb_g0.message.deleted and not cb_g0.message.photos
+    for callback, data in (
+        (tb.cb_histology_guess_show_answer, "histology_guess_show_answer:old:0"),
+        (tb.cb_histology_guess_answer, "histology_guess_know:old:0"),
+    ):
+        expired = FakeCB(data, uid=non_admin)
+        await callback(expired)
+        assert expired._answers[0][1] and "Пробный доступ закончился" in expired.message.edits[0][0]
     tb.stats["histology_temp_access"].pop(str(non_admin), None)
     tb.stats["histology_warnings"].pop(str(non_admin), None)
     print("guess mode blocked once trial exhausted: OK")

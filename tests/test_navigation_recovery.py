@@ -119,6 +119,7 @@ async def test_saved_histology_answer_resumes_after_failed_delivery():
     async def direct(fn,*args):
         return fn(*args)
     with ExitStack() as stack:
+        patched(stack,tb,histology_permanently_unlocked=lambda _:True)
         patched(stack,histology,HISTOLOGY_GUESS_SESSIONS={1:session},_learning_call=direct,
                 record_histology_result=lambda *args:records.append(args),get_histology_specimen=lambda *_, **__:{'guess_image':'test.jpg'})
         callback=Callback('histology_guess_know:recovery:0',fail_send=True)
