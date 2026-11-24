@@ -66,7 +66,7 @@ export function SubjectPage() {
   if (accessQuery.isError || !accessQuery.data) {
     return <div className="screen"><StateMessage title="Не удалось проверить доступ" body="Повтори проверку. Твоя подписка не изменена." onRetry={() => accessQuery.refetch()} /></div>;
   }
-  if (accessQuery.data.subscriptionRequired) {
+  if (accessQuery.data.subscriptionRequired && subjectId !== "anatomy") {
     return <Navigate to={subscriptionPath(subjectId, pathname)} replace />;
   }
   const locked = !accessQuery.data.canOpenSubject;
@@ -78,7 +78,6 @@ export function SubjectPage() {
     <div className="screen">
       <div className={styles.header}>
         {entryMutation.isError && <StateMessage title="Не удалось открыть доступ" onRetry={() => entryMutation.mutate()} />}
-        {accessQuery.data.trialAvailable && <button type="button" className={styles.trialButton} disabled={entryMutation.isPending} onClick={() => entryMutation.mutate()}>{entryMutation.isPending ? "Открываем…" : "Открыть пробный доступ к гистологии"}</button>}
         <div className={styles.titleRow}>
           <span className={styles.subjectIcon} aria-hidden="true"><Icon icon={subjectIcon(subject.id)} size={24} /></span>
           <div className={styles.titleCopy}>
@@ -86,13 +85,13 @@ export function SubjectPage() {
             {!locked && totalMaterials > 0 && <span className={styles.subtitle}>{formatMaterialCount(totalMaterials)}</span>}
           </div>
         </div>
-        {locked ? (
+        {locked && subjectId !== "anatomy" ? (
           <StateMessage
             icon={Lock}
             title="Раздел пока недоступен"
             body={accessQuery.data?.lockedReason ?? subject.lockedReason ?? "Открой доступ через подписку или рефералов."}
           />
-        ) : (
+        ) : !locked && (
           <div className={styles.readinessRow}>
             <ProgressBar percent={readiness} color={`var(--subject-${subject.accent}-fg)`} label="Готовность" />
             <span className={styles.readinessValue}>Изучено {completedMaterials} · {readiness}%</span>
@@ -114,10 +113,20 @@ export function SubjectPage() {
           </span>
           <div className={styles.anatomyExamContent}>
             <div className={styles.anatomyExamTitle}>Экзаменационный тест</div>
-            <div className={styles.anatomyExamDescription}>1 040 вопросов · пояснения · работа над ошибками</div>
+            <div className={styles.anatomyExamDescription}>Вопросы по темам · пояснения · работа над ошибками</div>
           </div>
           <Icon icon={ChevronRight} size={18} color="currentColor" />
         </PressableCard>
+      )}
+
+      {subject.id === "anatomy" && locked && (
+        <StateMessage
+          icon={Lock}
+          title="Курс анатомии"
+          body={accessQuery.data.lockedReason ?? "Материалы курса пока недоступны."}
+          actionLabel="Выбрать подписку"
+          onRetry={accessQuery.data.subscriptionRequired ? () => navigate(subscriptionPath(subjectId, pathname)) : undefined}
+        />
       )}
 
       {subject.id === "histology" && !locked && (
