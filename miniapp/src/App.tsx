@@ -86,6 +86,7 @@ export function App() {
         <Route path="/histology/exam/theory/:number?" element={<HistologyTheoryPage />} />
         <Route path="/histology/exam/guess" element={<HistologyGuessPage />} />
         <Route path="/histology/diagnostics" element={<HistologyCatalogPage key="diagnostics" diagnostics />} />
+        <Route path="/histology/diagnostics/:diagnosticId/guess" element={<HistologyGuessPage />} />
         <Route path="/histology/specimens/:specimenId" element={<HistologySpecimenPage />} />
         <Route path="/ai" element={<AiPage />} />
         <Route path="/progress" element={<ProgressPage />} />

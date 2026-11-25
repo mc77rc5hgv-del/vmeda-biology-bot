@@ -4,8 +4,9 @@ import { subjectMeta } from "./subjectRegistry";
 
 export function stepFromPath(path: string): ContinueItem | null {
   const match = path.match(/^\/(subjects|materials|tests)\/([\w-]+)(?:\/[^?#]*)?$/);
+  const diagnosticGuess = path.match(/^\/histology\/diagnostics\/diagnostika_([1-5])\/guess$/);
   const histology = path.match(/^\/histology\/(diagnostics|specimens\/[^/?#]+|exam(?:\/(?:specimens|guess|tests(?:\/[^/?#]+)?|theory(?:\/\d+)?))?)$/);
-  const subjectId = match?.[2] ?? (histology ? "histology" : "");
+  const subjectId = match?.[2] ?? (histology || diagnosticGuess ? "histology" : "");
   const meta = subjectMeta(subjectId);
   if (!meta) return null;
   // /tests/<предмет> — экран-прототип; у подключённых предметов он перенаправляет на предмет.
@@ -15,6 +16,7 @@ export function stepFromPath(path: string): ContinueItem | null {
     : path === "/histology/diagnostics" ? "Диагностики"
     : path === "/histology/exam/specimens" ? "Препараты"
     : path === "/histology/exam/guess" ? "Угадай препарат"
+    : diagnosticGuess ? `Угадай препарат · Диагностика №${diagnosticGuess[1]}`
     : path.startsWith("/histology/exam/theory") ? "Теоретические вопросы"
     : path.startsWith("/histology/exam/tests") ? "Тесты"
     : path.startsWith("/histology/specimens/") ? "Препарат"
