@@ -230,7 +230,7 @@ export function HistologyGuessPage() {
     if (!current) return;
     setLoadingAction(true);
     setActionError(null);
-    try { setAnswer(await revealHistologyAnswer(current.id)); }
+    try { setAnswer(await revealHistologyAnswer(current.id, current.photoId)); }
     catch { setActionError('Не удалось показать ответ. Повтори попытку.'); }
     finally { setLoadingAction(false); }
   };
@@ -313,11 +313,11 @@ export function HistologyGuessPage() {
                   <p className={styles.eyebrow}>Правильный ответ</p>
                   <h2 ref={answerHeading} tabIndex={-1}>{answer.title}</h2>
                   <div className={styles.metaLine}>
-                    {answer.stain && <span>{answer.stain}</span>}
+                    {answer.stain && <span>По перечню: {answer.stain}</span>}
                     {answer.magnification && <span>×{answer.magnification}</span>}
                   </div>
                   <p className={styles.protocolPreview}>{answer.protocol.split(/\n\s*\n/)[0]}</p>
-                  {answer.guessImageNote && <p className={styles.protocolPreview}>{answer.guessImageNote}</p>}
+                  {answer.guessImageNote && <p className={`${styles.protocolPreview} ${styles.guessCaption}`}>{answer.guessImageNote}</p>}
                 </article>
               )}
               <div className={styles.guessActions}>

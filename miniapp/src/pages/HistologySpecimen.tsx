@@ -13,9 +13,14 @@ import type { HistologySpecimen } from "../lib/types";
 import styles from "./HistologySpecimen.module.css";
 
 function SpecimenImages({ specimen, viewer }: { specimen: HistologySpecimen; viewer: Ref<MicrographHandle> }) {
-  const [imageIndex, setImageIndex] = useState(0);
+  const [imageIndex, setImageIndex] = useState(() => Math.max(0, specimen.imageGuides.findIndex((guide) => guide.examCaption)));
   const guide = specimen.imageGuides[imageIndex];
   const src = specimen.images[imageIndex];
+  const examCaption = guide?.examCaption;
+  const markers = examCaption ? [] : specimen.markers;
+  const guideTitle = examCaption
+    ? "Подпись к экзаменационному фото"
+    : guide?.kind === "diagram" ? "Что показано на схеме" : "Что видно на снимке";
 
   return (
     <div className={styles.gallery}>
@@ -23,13 +28,16 @@ function SpecimenImages({ specimen, viewer }: { specimen: HistologySpecimen; vie
         <div className={styles.imagePicker} role="group" aria-label="Выбор изображения">
           <p><Icon icon={Images} size={18} /> Изображение {imageIndex + 1} из {specimen.images.length}</p>
           <div>
-            {specimen.images.map((image, index) => (
-              <button type="button" key={image} aria-pressed={index === imageIndex}
-                aria-label={`${specimen.imageGuides[index]?.kind === "diagram" ? "Схема" : "Изображение"} ${index + 1}`}
-                onClick={() => setImageIndex(index)}>
-                {index + 1}
-              </button>
-            ))}
+            {specimen.images.map((image, index) => {
+              const item = specimen.imageGuides[index];
+              const label = item?.examCaption ? "Экзаменационное фото" : item?.kind === "diagram" ? "Схема" : "Изображение";
+              return (
+                <button type="button" key={image} aria-pressed={index === imageIndex}
+                  aria-label={`${label} ${index + 1}`} onClick={() => setImageIndex(index)}>
+                  {index + 1}
+                </button>
+              );
+            })}
           </div>
         </div>
       )}
@@ -40,23 +48,24 @@ function SpecimenImages({ specimen, viewer }: { specimen: HistologySpecimen; vie
           ref={viewer}
           src={src}
           alt={`${specimen.title} · ${guide?.kind === "diagram" ? "схема" : "микрофотография"} ${imageIndex + 1}`}
-          markers={specimen.markers}
+          markers={markers}
         />
       ) : <StateMessage icon={Images} title="Изображений пока нет" />}
 
-      {guide && (
+      {guide && (examCaption || guide.visible || guide.note || guide.kind === "diagram") && (
         <section className={styles.imageGuide} aria-live="polite">
-          <h2><Icon icon={ScanSearch} size={20} /> {guide.kind === "diagram" ? "Что показано на схеме" : "Что видно на снимке"}</h2>
-          <p>{guide.visible}</p>
+          <h2><Icon icon={ScanSearch} size={20} /> {guideTitle}</h2>
+          {examCaption && <p className={styles.examCaption}>{examCaption}</p>}
+          {guide.visible && <p>{guide.visible}</p>}
           {guide.kind === "diagram" && <p className={styles.guideNote}>Учебная схема · не в масштабе</p>}
           {guide.note && <p className={styles.guideNote}>{guide.note}</p>}
         </section>
       )}
 
-      {specimen.markers.length > 0 && (
+      {markers.length > 0 && (
         <section className={styles.markerLegend}>
           <h2>Метки на изображении</h2>
-          {specimen.markers.map((marker, index) => (
+          {markers.map((marker, index) => (
             <div key={`${marker.label}-${index}`}><span>{index + 1}</span>{marker.label}</div>
           ))}
         </section>
