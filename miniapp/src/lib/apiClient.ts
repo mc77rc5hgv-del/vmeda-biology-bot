@@ -679,7 +679,7 @@ export async function fetchHistologySpecimen(specimenId: string, scope: Histolog
   const wire = await apiFetch<HistologySpecimenWire & {
     protocol: string;
     images: string[];
-    image_guides?: HistologySpecimen["imageGuides"];
+    image_guides?: Array<Omit<HistologySpecimen["imageGuides"][number], "examCaption"> & { exam_caption?: string }>;
     metadata_note?: string;
     sources?: HistologySpecimen["sources"];
     markers: Array<{ x: number; y: number; label: string }>;
@@ -688,7 +688,7 @@ export async function fetchHistologySpecimen(specimenId: string, scope: Histolog
     ...toHistologySummary(wire),
     protocol: wire.protocol,
     images: wire.images.map(absoluteApiUrl),
-    imageGuides: wire.image_guides ?? [],
+    imageGuides: (wire.image_guides ?? []).map(({ exam_caption, ...guide }) => ({ ...guide, examCaption: exam_caption })),
     metadataNote: wire.metadata_note ?? "",
     sources: wire.sources ?? [],
     markers: wire.markers,
@@ -699,15 +699,22 @@ export async function fetchHistologyPractical(
   scope: "all" | "mistakes" | string = "all",
   limit = 10,
 ): Promise<HistologyPracticalQuestion[]> {
-  const wire = await apiFetch<Array<{ id: string; position: number; image_url: string; attempt_id: string }>>(
-    `/api/v1/histology/exam/practical?scope=${encodeURIComponent(scope)}&limit=${limit}`,
+  const wire = await apiFetch<Array<{ id: string; position: number; image_url: string; attempt_id: string; photo_id?: string }>>(
+    `/api/v1/histology/exam/practical?scope=${encodeURIComponent(scope)}&limit=${limit}&photo_variants=true`,
   );
-  return wire.map((item) => ({ id: item.id, position: item.position, imageUrl: absoluteApiUrl(item.image_url), attemptId: item.attempt_id }));
+  return wire.map((item) => ({
+    id: item.id,
+    position: item.position,
+    imageUrl: absoluteApiUrl(item.image_url),
+    attemptId: item.attempt_id,
+    photoId: item.photo_id,
+  }));
 }
 
-export async function revealHistologyAnswer(specimenId: string): Promise<HistologySpecimenSummary & { protocol: string; guessImageNote: string }> {
+export async function revealHistologyAnswer(specimenId: string, photoId?: string): Promise<HistologySpecimenSummary & { protocol: string; guessImageNote: string }> {
+  const query = photoId ? `?photo_id=${encodeURIComponent(photoId)}` : "";
   const wire = await apiFetch<HistologySpecimenWire & { protocol: string; guess_image_note?: string }>(
-    `/api/v1/histology/exam/specimens/${encodeURIComponent(specimenId)}/reveal`,
+    `/api/v1/histology/exam/specimens/${encodeURIComponent(specimenId)}/reveal${query}`,
     { method: "POST" },
   );
   return { ...toHistologySummary(wire), protocol: wire.protocol, guessImageNote: wire.guess_image_note ?? "" };

@@ -151,6 +151,7 @@
 .guessAnswer h2 { overflow-wrap: anywhere; }
 .guessAnswer .metaLine span { font-size: var(--text-xs); }
 .guessAnswer .protocolPreview { font-size: var(--text-sm); line-height: 1.55; overflow-wrap: anywhere; }
+.guessCaption { white-space: pre-line; }
 .guessActions {
   align-self: start;
   padding: 8px;

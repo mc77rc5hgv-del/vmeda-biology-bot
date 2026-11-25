@@ -47,6 +47,7 @@
 .imageGuide h2, .theory h2 { display: flex; align-items: center; gap: 8px; }
 .imageGuide h2, .theory h2, .markerLegend h2 { font-size: var(--text-lg); line-height: 1.35; }
 .imageGuide > p { margin-top: 7px; color: var(--ink); font-size: var(--text-md); line-height: 1.55; overflow-wrap: anywhere; }
+.examCaption { white-space: pre-line; }
 .imageGuide .guideNote { color: var(--ink-secondary); font-size: var(--text-sm); }
 .protocol { display: grid; gap: 14px; margin-top: 12px; }
 .protocol > div + div { padding-top: 13px; border-top: 1px solid var(--border); }

@@ -195,7 +195,7 @@ export interface HistologySpecimenSummary {
 export interface HistologySpecimen extends HistologySpecimenSummary {
   protocol: string;
   images: string[];
-  imageGuides: Array<{ kind: "micrograph" | "diagram"; visible: string; note: string }>;
+  imageGuides: Array<{ kind?: "micrograph" | "diagram"; visible?: string; note?: string; examCaption?: string }>;
   metadataNote: string;
   sources: Array<{ title: string; url: string }>;
   markers: HistologyMarker[];
@@ -230,6 +230,7 @@ export interface HistologyPracticalQuestion {
   id: string;
   position: number;
   imageUrl: string;
+  photoId?: string;
 }
 
 export interface TestSummary {
