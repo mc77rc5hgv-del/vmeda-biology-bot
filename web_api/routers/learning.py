@@ -42,7 +42,12 @@ async def dashboard(user_id: int = Depends(get_current_user_id), tb=Depends(get_
 async def navigation(body: LearningNavigationRequest, user_id: int = Depends(get_current_user_id)):
     import re
     from fastapi import HTTPException
-    if not re.fullmatch(r'/(?:subjects/[a-z_-]+(?:/sections/[\w-]+(?:/groups/[\w-]+)?)?|materials/[a-z_-]+/[\w-]+/[\w-]+|tests/[a-z_-]+|histology/(?:diagnostics|specimens/[\w-]+|exam(?:/(?:specimens|guess|tests(?:/[\w-]+)?|theory(?:/\d+)?))?))', body.path):
+    if not re.fullmatch(
+        r'/(?:subjects/[a-z_-]+(?:/sections/[\w-]+(?:/groups/[\w-]+)?)?|materials/[a-z_-]+/[\w-]+/[\w-]+'
+        r'|tests/[a-z_-]+|histology/(?:diagnostics(?:/diagnostika_[1-5]/guess)?|specimens/[\w-]+'
+        r'|exam(?:/(?:specimens|guess|tests(?:/[\w-]+)?|theory(?:/\d+)?))?))',
+        body.path,
+    ):
         raise HTTPException(422, 'Некорректный учебный экран')
     return await asyncio.to_thread(learning.set_navigation, user_id, body.path)
 

@@ -64,6 +64,14 @@ def quiz_photos(specimen: dict) -> dict[str | None, tuple[str, str]]:
     return photos
 
 
+def diagnostic_quiz_photos(specimen: dict) -> dict[str | None, tuple[str, str]]:
+    """Reuse reviewed frames by specimen ID while keeping the diagnostic card's content."""
+    specimen_id = specimen["id"]
+    photos = quiz_photos(specimen) or quiz_photos(exam_specimens().get(specimen_id, {}))
+    photos.update(quiz_photos({"exam_photos": exam_photo_catalog().get(specimen_id, [])}))
+    return photos
+
+
 def find_specimen(bank: dict, specimen_id: str) -> tuple[str, dict, dict] | None:
     for group_id, group in bank.items():
         for specimen in group["specimens"]:
