@@ -99,8 +99,8 @@ async def main():
     # labels/legend text in every available source photo.
     KNOWN_UNRELIABLE = {
         "d3_12", "d3_13", "d3_14", "d3_15", "d3_16", "d3_17", "d3_18", "d3_19",
-        "d3_20", "d3_21", "d3_22", "d3_23", "d3_24", "d3_25", "d3_26", "d3_28",
-        "d3_29", "d3_30", "d3_31", "d3_32", "d3_33", "d4_46", "d4_53",
+        "d3_20", "d3_21", "d3_22", "d3_24", "d3_26", "d3_28",
+        "d3_29", "d3_30", "d3_31", "d3_32", "d4_46",
     }
     n_guess = 0
     for diag_key, diag in tb.HISTOLOGY.items():
@@ -113,8 +113,8 @@ async def main():
                 assert spec["id"] not in KNOWN_UNRELIABLE, f"{spec['id']} should not have a guess_image"
             else:
                 assert spec["id"] in KNOWN_UNRELIABLE, f"{spec['id']} unexpectedly has no guess_image"
-    assert n_guess == 48, n_guess
-    print(f"guess_image integrity OK: {n_guess} specimens eligible for guess mode")
+    assert n_guess == 52, n_guess
+    print(f"guess_image integrity OK: {n_guess} specimens with a diagnostic source photo")
 
     # 2. Text rendering HTML-balance + length for every specimen
     for diag_key, diag in tb.HISTOLOGY.items():
@@ -132,10 +132,17 @@ async def main():
     diagnostics_groups = histology.get_histology_catalog_keyboard().inline_keyboard
     assert len(diagnostics_groups) == len(tb.HISTOLOGY) + 1
     assert len(exam_groups) == 5
-    assert all(
-        not button.callback_data.startswith("histology_guess_start:")
-        for key in tb.HISTOLOGY
-        for row in tb.get_histology_topic_keyboard(key).inline_keyboard
+    for key, group in tb.HISTOLOGY.items():
+        assert tb.get_histology_topic_keyboard(key).inline_keyboard[0][0].callback_data == (
+            f"histology_guess_start:diagnostics:{key}"
+        )
+        assert {sid for _, sid in histology.get_histology_guess_pool(key, diagnostics=True)} == {
+            spec["id"] for spec in group["specimens"]
+        }
+    assert not histology.get_histology_guess_pool("all", diagnostics=True)
+    assert not any(
+        button.callback_data.startswith("histology_guess_start:")
+        for row in tb.get_histology_topic_keyboard("diagnostika_3", exam=True).inline_keyboard
         for button in row
     )
     assert all(
@@ -485,6 +492,27 @@ async def main():
     await tb.cb_histology_guess_start(cb_g3s)
     assert len(tb.HISTOLOGY_GUESS_SESSIONS[ADMIN_ID]["items"]) == tb.HISTOLOGY_GUESS_SESSION_SIZE
     await tb.cb_histology_guess_stop(FakeCB("histology_guess_stop"))
+    practice = FakeCB("histology_guess_start:diagnostics:diagnostika_3")
+    await tb.cb_histology_guess_start(practice)
+    session = tb.HISTOLOGY_GUESS_SESSIONS[ADMIN_ID]
+    assert session["diagnostics"]
+    expected = {s["id"] for s in tb.HISTOLOGY["diagnostika_3"]["specimens"]}
+    assert len(session["items"]) == len(expected) == 23
+    assert {sid for _, sid in session["items"]} == expected
+    assert "Диагностика №3" in practice.message.photos[0][1]
+    _, first_id = session["items"][0]
+    await tb.cb_histology_guess_show_answer(FakeCB("histology_guess_show_answer"))
+    assert tb.get_histology_specimen("diagnostika_3", first_id)["title"] in session["msg"].caption_edits[-1][0]
+    with patch.object(histology, "record_histology_result") as save_exam:
+        await tb.cb_histology_guess_answer(FakeCB("histology_guess_know"))
+        save_exam.assert_not_called()
+    assert session["know"] == 1 and session["index"] == 1
+    await tb.cb_histology_guess_stop(FakeCB("histology_guess_stop"))
+    summary_buttons = session["msg"].caption_edits[-1][1].inline_keyboard
+    assert [row[0].callback_data for row in summary_buttons] == [
+        "histology_guess_start:diagnostics:diagnostika_3",
+        "histology_topic:diagnostika_3",
+    ]
     print("guess mode pool matches the official exam list: OK")
 
     # A reviewed photo opens in its exam card and keeps its own caption after reveal.

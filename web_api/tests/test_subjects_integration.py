@@ -716,6 +716,43 @@ def test_all_reviewed_histology_cards_and_media_preserve_previous_learning():
     assert tb.stats['histology_learning'][str(user_id)] == previous_learning
 
 
+def test_diagnostic_practical_round_contains_the_entire_selected_group():
+    headers = _auth_headers(next(iter(tb.ADMIN_IDS)))
+    practical = "/api/v1/histology/exam/practical"
+    specimens = "/api/v1/histology/exam/specimens"
+    catalog = client.get("/api/v1/histology/exam/catalog?scope=diagnostics", headers=headers).json()
+    assert [len(group["specimens"]) for group in catalog["groups"]] == [10, 10, 23, 20, 8]
+    assert client.get(f"{practical}?catalog_scope=diagnostics", headers=headers).status_code == 400
+    for group in catalog["groups"]:
+        expected = {spec["id"]: spec for spec in group["specimens"]}
+        query = {"scope": group["id"], "catalog_scope": "diagnostics", "limit": 30, "photo_variants": True}
+        round_response = client.get(practical, params=query, headers=headers)
+        assert round_response.status_code == 200
+        questions = round_response.json()
+        assert len(questions) == len(expected)
+        assert {question["id"] for question in questions} == expected.keys()
+        for question in questions:
+            assert "title" not in question
+            question_id = question["id"]
+            assert expected[question_id]["practical_available"]
+            image = client.get(question["image_url"], headers=headers)
+            assert image.status_code == 200 and image.headers["content-type"].startswith("image/")
+            reveal_query = {"catalog_scope": "diagnostics"}
+            if "photo_id" in question:
+                reveal_query["photo_id"] = question["photo_id"]
+            answer = client.post(f"{specimens}/{question_id}/reveal", params=reveal_query, headers=headers).json()
+            assert answer["title"] == expected[question_id]["title"]
+            assert answer["number"] == expected[question_id]["number"]
+            assert answer["group_id"] == group["id"]
+            assert answer["protocol"]
+            if question_id == "d3_11":
+                response = client.post(f"{specimens}/d3_11/grade", headers=headers, json={
+                    "known": True, "scope": group["id"], "attempt_id": question["attempt_id"],
+                })
+                assert response.status_code == 409
+    assert client.get(f"{specimens}/d1_01/guess-image", headers=headers).status_code == 404
+
+
 def test_histology_unknown_diagnostic_is_not_found_not_locked():
     headers = _auth_headers(900_444_555_666)  # уже разблокирован предыдущим тестом
     resp = client.get(

@@ -1,6 +1,7 @@
 import os
 import random
 from typing import Literal
+from urllib.parse import urlencode
 
 from services import histology_content, histology_exam
 from services.miniapp_policy import full_content_access, promo_active, public_launch, require_exam_content, require_subject, subscription_required
@@ -54,7 +55,8 @@ def _histology_stats(tb, user_id: int) -> dict:
     return histology_content.exam_progress(learning.get_histology_stats(user_id))
 
 
-def _histology_specimen_payload(group_id: str, group: dict, specimen: dict) -> dict:
+def _histology_specimen_payload(group_id: str, group: dict, specimen: dict, *, diagnostics: bool = False) -> dict:
+    quiz_photos = histology_content.diagnostic_quiz_photos if diagnostics else histology_content.quiz_photos
     return {
         "id": specimen["id"],
         "number": specimen["number"],
@@ -64,11 +66,16 @@ def _histology_specimen_payload(group_id: str, group: dict, specimen: dict) -> d
         "group_id": group_id,
         "group_title": group.get("title", ""),
         "image_count": len(specimen.get("images", [])),
-        "practical_available": bool(histology_content.quiz_photos(specimen)),
+        "practical_available": bool(quiz_photos(specimen)),
     }
 
 
-def _histology_practical_pool(tb, scope: str, user_id: int) -> list[dict]:
+def _histology_practical_pool(tb, scope: str, user_id: int, *, diagnostics: bool = False) -> list[dict]:
+    if diagnostics:
+        return [
+            specimen for specimen in tb.HISTOLOGY[scope]["specimens"]
+            if histology_content.diagnostic_quiz_photos(specimen)
+        ]
     mistake_ids = set(_histology_stats(tb, user_id)['mistake_ids']) if scope == "mistakes" else None
     return [
         specimen
@@ -86,8 +93,14 @@ def _histology_exam_item(tb, specimen_id: str) -> tuple[str, dict, dict]:
     return found
 
 
-def _histology_quiz_photo(specimen: dict, photo_id: str | None) -> tuple[str, str]:
-    photos = histology_content.quiz_photos(specimen)
+def _histology_diagnostic_item(tb, specimen_id: str) -> tuple[str, dict, dict]:
+    found = histology_content.find_specimen(tb.HISTOLOGY, specimen_id)
+    if found is None:
+        raise HTTPException(status_code=404, detail="Препарат не найден")
+    return found
+
+
+def _histology_quiz_photo(photos: dict, photo_id: str | None) -> tuple[str, str]:
     chosen = photos.get(photo_id) if photo_id is not None else next(iter(photos.values()), None)
     if chosen is None:
         raise HTTPException(status_code=404, detail="Изображение для зачёта не найдено")
@@ -161,7 +174,7 @@ def get_histology_exam_catalog(
     bank = histology_content.exam_groups(tb.HISTOLOGY) if scope == "exam" else tb.HISTOLOGY
     for group_id, group in bank.items():
         specimens = [
-            _histology_specimen_payload(group_id, group, specimen)
+            _histology_specimen_payload(group_id, group, specimen, diagnostics=scope == "diagnostics")
             for specimen in group.get("specimens", [])
         ]
         groups.append({
@@ -202,13 +215,10 @@ def get_histology_exam_specimen(
         group_id, group, specimen = _histology_exam_item(tb, specimen_id)
         media_base = f"/api/v1/histology/exam/specimens/{specimen_id}/media"
     else:
-        found = histology_content.find_specimen(tb.HISTOLOGY, specimen_id)
-        if found is None:
-            raise HTTPException(status_code=404, detail="Препарат не найден")
-        group_id, group, specimen = found
+        group_id, group, specimen = _histology_diagnostic_item(tb, specimen_id)
         media_base = f"/api/v1/materials/histology/specimens/{specimen_id}/media"
     return {
-        **_histology_specimen_payload(group_id, group, specimen),
+        **_histology_specimen_payload(group_id, group, specimen, diagnostics=scope == "diagnostics"),
         "protocol": specimen.get("protocol", ""),
         "images": [f"{media_base}/{index}" for index, _ in enumerate(specimen.get("images", []))],
         "image_guides": specimen.get("image_guides", []),
@@ -223,31 +233,38 @@ def get_histology_practical_questions(
     scope: str = "all",
     limit: int = 10,
     photo_variants: bool = False,
+    catalog_scope: Literal["exam", "diagnostics"] = "exam",
     user_id: int = Depends(get_current_user_id),
     tb=Depends(get_fresh_bot_module),
 ) -> list[dict]:
     _check_histology_access(tb, user_id)
     if not 1 <= limit <= 30:
         raise HTTPException(status_code=400, detail="число препаратов должно быть от 1 до 30")
-    if scope not in {'all', 'mistakes'} and scope not in tb.HISTOLOGY:
+    diagnostics = catalog_scope == "diagnostics"
+    if scope not in tb.HISTOLOGY and (diagnostics or scope not in {"all", "mistakes"}):
         raise HTTPException(status_code=400, detail='Неизвестный режим зачёта')
-    pool = _histology_practical_pool(tb, scope, user_id)
+    pool = _histology_practical_pool(tb, scope, user_id, diagnostics=diagnostics)
     if not pool:
         return []
     picked = random.sample(pool, min(limit, len(pool)))
+    quiz_photos = histology_content.diagnostic_quiz_photos if diagnostics else histology_content.quiz_photos
+    attempt_scope = f"diagnostics:{scope}" if diagnostics else scope
     questions = []
     for position, specimen in enumerate(picked, 1):
         specimen_id = specimen["id"]
         image_url = f"/api/v1/histology/exam/specimens/{specimen_id}/guess-image"
+        params = {"catalog_scope": "diagnostics"} if diagnostics else {}
         question = {
-            "attempt_id": attempt_tokens.issue(user_id, specimen_id, scope),
+            "attempt_id": attempt_tokens.issue(user_id, specimen_id, attempt_scope),
             "id": specimen_id,
             "position": position,
             "image_url": image_url,
         }
-        if photo_variants and (photo_id := random.choice(tuple(histology_content.quiz_photos(specimen)))):
-            question["image_url"] = f"{image_url}?photo_id={photo_id}"
+        if photo_variants and (photo_id := random.choice(tuple(quiz_photos(specimen)))):
+            params["photo_id"] = photo_id
             question["photo_id"] = photo_id
+        if params:
+            question["image_url"] = f"{image_url}?{urlencode(params)}"
         questions.append(question)
     return questions
 
@@ -278,12 +295,18 @@ def _histology_image_response(image: str) -> FileResponse:
 def get_histology_guess_image(
     specimen_id: str,
     photo_id: str | None = None,
+    catalog_scope: Literal["exam", "diagnostics"] = "exam",
     user_id: int = Depends(get_current_user_id),
     tb=Depends(get_fresh_bot_module),
 ):
     _check_histology_access(tb, user_id)
-    _, _, specimen = _histology_exam_item(tb, specimen_id)
-    guess_image, _ = _histology_quiz_photo(specimen, photo_id)
+    if catalog_scope == "diagnostics":
+        _, _, specimen = _histology_diagnostic_item(tb, specimen_id)
+        photos = histology_content.diagnostic_quiz_photos(specimen)
+    else:
+        _, _, specimen = _histology_exam_item(tb, specimen_id)
+        photos = histology_content.quiz_photos(specimen)
+    guess_image, _ = _histology_quiz_photo(photos, photo_id)
     return _histology_image_response(guess_image)
 
 
@@ -291,16 +314,23 @@ def get_histology_guess_image(
 def reveal_histology_practical_answer(
     specimen_id: str,
     photo_id: str | None = None,
+    catalog_scope: Literal["exam", "diagnostics"] = "exam",
     user_id: int = Depends(get_current_user_id),
     tb=Depends(get_fresh_bot_module),
 ) -> dict:
     _check_histology_access(tb, user_id)
-    group_id, group, specimen = _histology_exam_item(tb, specimen_id)
-    note = _histology_quiz_photo(specimen, photo_id)[1] if photo_id is not None else next(
-        (caption for _, caption in histology_content.quiz_photos(specimen).values()), ""
+    diagnostics = catalog_scope == "diagnostics"
+    if diagnostics:
+        group_id, group, specimen = _histology_diagnostic_item(tb, specimen_id)
+        photos = histology_content.diagnostic_quiz_photos(specimen)
+    else:
+        group_id, group, specimen = _histology_exam_item(tb, specimen_id)
+        photos = histology_content.quiz_photos(specimen)
+    note = _histology_quiz_photo(photos, photo_id)[1] if photo_id is not None else next(
+        (caption for _, caption in photos.values()), ""
     )
     return {
-        **_histology_specimen_payload(group_id, group, specimen),
+        **_histology_specimen_payload(group_id, group, specimen, diagnostics=diagnostics),
         "protocol": specimen.get("protocol", ""),
         "guess_image_note": note,
     }

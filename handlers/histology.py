@@ -154,6 +154,12 @@ def get_histology_topic_keyboard(diag_key: str, exam: bool = False):
     bank = histology_content.exam_groups(tb.HISTOLOGY) if exam else tb.HISTOLOGY
     diag = bank[diag_key]
     builder = InlineKeyboardBuilder()
+    if not exam:
+        builder.button(
+            text="🎯 Угадай препарат",
+            callback_data=f"histology_guess_start:diagnostics:{diag_key}",
+            style="primary",
+        )
     for spec in diag["specimens"]:
         builder.button(text=f"№{spec['number']}. {spec['title']}", callback_data=f"histology_specimen:{diag_key}:{spec['id']}{suffix}")
     builder.adjust(1)
@@ -392,26 +398,29 @@ def get_histology_stats_text(user_id: int) -> str:
         f"В активной работе над ошибками: <b>{len(exam_ids & entry['mistakes'])}</b>"
     )
 
-def get_histology_guess_pool(scope: str):
+def get_histology_guess_pool(scope: str, diagnostics: bool = False):
+    bank = tb.HISTOLOGY if diagnostics else histology_content.exam_groups(tb.HISTOLOGY)
+    quiz_photos = histology_content.diagnostic_quiz_photos if diagnostics else histology_content.quiz_photos
     return [
         (diag_key, spec["id"])
-        for diag_key, diag in histology_content.exam_groups(tb.HISTOLOGY).items()
-        if scope in {"all", "mistakes", diag_key}
+        for diag_key, diag in bank.items()
+        if scope == diag_key or (not diagnostics and scope in {"all", "mistakes"})
         for spec in diag["specimens"]
-        if histology_content.quiz_photos(spec)
+        if quiz_photos(spec)
     ]
 
-def start_histology_guess_session(user_id: int, scope: str) -> bool:
-    pool = get_histology_guess_pool(scope)
-    if scope == "mistakes":
+def start_histology_guess_session(user_id: int, scope: str, diagnostics: bool = False) -> bool:
+    pool = get_histology_guess_pool(scope, diagnostics)
+    if not diagnostics and scope == "mistakes":
         mistake_ids = set(get_histology_learning(user_id)["mistakes"])
         pool = [(diag_key, spec_id) for diag_key, spec_id in pool if spec_id in mistake_ids]
     if not pool:
         return False
-    size = min(HISTOLOGY_GUESS_SESSION_SIZE, len(pool))
+    size = len(pool) if diagnostics else min(HISTOLOGY_GUESS_SESSION_SIZE, len(pool))
     HISTOLOGY_GUESS_SESSIONS[user_id] = {
         'id': uuid.uuid4().hex[:12],
         "scope": scope,
+        "diagnostics": diagnostics,
         "items": random.sample(pool, size),
         "index": 0,
         "know": 0,
@@ -436,12 +445,23 @@ def get_histology_guess_answer_keyboard(session=None):
     builder.row(InlineKeyboardButton(style="danger", text="🛑 Закончить", callback_data="histology_guess_stop"))
     return builder.as_markup()
 
-def get_histology_guess_summary_keyboard(scope: str):
+def get_histology_guess_summary_keyboard(scope: str, diagnostics: bool = False):
     builder = InlineKeyboardBuilder()
-    builder.button(text="🔁 Пройти ещё раз", callback_data=f"histology_guess_start:{scope}")
-    builder.button(text="🔙 К тренажёру", callback_data="histology_guess_menu")
+    start_scope = f"diagnostics:{scope}" if diagnostics else scope
+    builder.button(text="🔁 Пройти ещё раз", callback_data=f"histology_guess_start:{start_scope}")
+    if diagnostics:
+        builder.button(text="🔙 К диагностике", callback_data=f"histology_topic:{scope}")
+    else:
+        builder.button(text="🔙 К тренажёру", callback_data="histology_guess_menu")
     builder.adjust(1)
     return builder.as_markup()
+
+def _histology_guess_mode(session: dict) -> str:
+    scope = session["scope"]
+    if session.get("diagnostics"):
+        return f"Диагностика №{tb.HISTOLOGY[scope]['number']}"
+    return "Работа над ошибками" if scope == "mistakes" else "Практический зачёт"
+
 
 async def render_histology_guess_question(callback: CallbackQuery, user_id: int):
     session = HISTOLOGY_GUESS_SESSIONS[user_id]
@@ -452,12 +472,13 @@ async def render_histology_guess_question(callback: CallbackQuery, user_id: int)
         total = len(session["items"])
         index = session["index"]
         diag_key, spec_id = session["items"][index]
-        spec = get_histology_specimen(diag_key, spec_id, exam=True)
-        mode = "Работа над ошибками" if session["scope"] == "mistakes" else "Практический зачёт"
-        caption = f"🎓 {mode} — {index + 1}/{total}\n\nЧто это за препарат?"
+        diagnostics = session.get("diagnostics", False)
+        spec = get_histology_specimen(diag_key, spec_id, exam=not diagnostics)
+        caption = f"🎓 {_histology_guess_mode(session)} — {index + 1}/{total}\n\nЧто это за препарат?"
         photos = session.setdefault("photos", {})
         if index not in photos:
-            photos[index] = random.choice(list(histology_content.quiz_photos(spec).values()))
+            quiz_photos = histology_content.diagnostic_quiz_photos if diagnostics else histology_content.quiz_photos
+            photos[index] = random.choice(list(quiz_photos(spec).values()))
         photo = FSInputFile(os.path.join(tb.HISTOLOGY_IMAGES_DIR, photos[index][0]))
         sent = await callback.message.answer_photo(photo, caption=caption, reply_markup=get_histology_guess_question_keyboard(session))
         session["msg"] = sent
@@ -474,10 +495,12 @@ async def render_histology_guess_answer(user_id: int):
     session = HISTOLOGY_GUESS_SESSIONS[user_id]
     total = len(session["items"])
     diag_key, spec_id = session["items"][session["index"]]
-    spec = get_histology_specimen(diag_key, spec_id, exam=True)
-    lines = [f"🎓 Практический зачёт — {session['index'] + 1}/{total}", "", f"№{spec['number']}. {spec['title']}"]
+    diagnostics = session.get("diagnostics", False)
+    spec = get_histology_specimen(diag_key, spec_id, exam=not diagnostics)
+    lines = [f"🎓 {_histology_guess_mode(session)} — {session['index'] + 1}/{total}", "", f"№{spec['number']}. {spec['title']}"]
     if spec.get("stain"):
-        lines.append(f"Окраска по экзаменационному перечню: {spec['stain']}")
+        label = "Окраска по перечню диагностики" if diagnostics else "Окраска по экзаменационному перечню"
+        lines.append(f"{label}: {spec['stain']}")
     _, note = session["photos"][session["index"]]
     caption, separate_note = _photo_caption("\n".join(lines), note, "Ты угадал(а)?")
     message = session["msg"]
@@ -495,15 +518,20 @@ async def render_histology_guess_summary(user_id: int, aborted: bool = False):
         f"{title}\n\n"
         f"Отвечено: {answered}\n✅ Угадано: {session['know']}\n❌ Не угадано: {session['dont_know']}"
     )
-    await session["msg"].edit_caption(caption=caption, reply_markup=get_histology_guess_summary_keyboard(scope))
+    await session["msg"].edit_caption(
+        caption=caption, reply_markup=get_histology_guess_summary_keyboard(scope, session.get("diagnostics", False))
+    )
 
 @router.callback_query(F.data.startswith("histology_guess_start:"))
 async def cb_histology_guess_start(callback: CallbackQuery):
     if not await histology_gate_ok(callback):
         return
     scope = callback.data.split(":", 1)[1]
+    diagnostics = scope.startswith("diagnostics:")
+    if diagnostics:
+        scope = scope.removeprefix("diagnostics:")
     user_id = callback.from_user.id
-    if not await _learning_call(start_histology_guess_session, user_id, scope):
+    if not await _learning_call(start_histology_guess_session, user_id, scope, diagnostics):
         message = "Ошибок для повторения пока нет" if scope == "mistakes" else "Препаратов пока нет"
         await callback.answer(message, show_alert=True)
         return
@@ -548,10 +576,11 @@ async def cb_histology_guess_answer(callback: CallbackQuery):
         await callback.answer('Этот ответ уже обработан или вопрос устарел')
         return
     session['saving'] = True
-    diag_key, spec_id = session["items"][session["index"]]
+    _, spec_id = session["items"][session["index"]]
     known = fields[0] == "histology_guess_know"
     try:
-        await _learning_call(record_histology_result, user_id, spec_id, known, f"bot:{session['id']}:{session['index']}")
+        if not session.get("diagnostics"):
+            await _learning_call(record_histology_result, user_id, spec_id, known, f"bot:{session['id']}:{session['index']}")
         if known:
             session["know"] += 1
         else:
