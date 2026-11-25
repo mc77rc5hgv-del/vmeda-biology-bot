@@ -24,7 +24,7 @@ def exam_entitled(tb, user_id, subject):
         tb.is_admin_or_assistant(user_id)
         or tb.is_section_promo_active('global')
         or tb.is_section_promo_active('anatomy')
-        or tb.access.has_subscription_anatomy_tests_access(user_id)
+        or tb.has_subscription_anatomy_tests_access(user_id)
         or tb.get_referral_count_this_month(user_id) >= tb.REFERRAL_FULL_ACCESS_THRESHOLD
     )
 

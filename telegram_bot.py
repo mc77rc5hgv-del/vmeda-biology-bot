@@ -414,6 +414,7 @@ _sub_has_biology_download = access._sub_has_biology_download
 has_subscription_scope_all = access.has_subscription_scope_all
 has_subscription_histology_access = access.has_subscription_histology_access
 has_subscription_anatomy_access = access.has_subscription_anatomy_access
+has_subscription_anatomy_tests_access = access.has_subscription_anatomy_tests_access
 biology_tickets_download_ok = access.biology_tickets_download_ok
 grant_subscription = access.grant_subscription
 get_monthly_payment_stats = access.get_monthly_payment_stats

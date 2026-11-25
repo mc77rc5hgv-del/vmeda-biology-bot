@@ -92,7 +92,9 @@ for tier in real_access.SUBSCRIPTION_TIERS:
             checks+=1
             assert tb.anatomy_section_access_ok(11,'module1_osteology')
             assert tb.anatomy_section_access_ok(11,'module7_nervous')==tb.has_subscription_anatomy_access(11)
-            checks+=2
+            expected_tests = not expired and (tier == real_access.ANATOMY_TEST_TIER_ID or tb.has_subscription_anatomy_access(11))
+            assert api_access._subject_is_open(tb,11,'anatomy_tests')==expected_tests
+            checks+=3
 tb.stats['subscriptions'].clear()
 before=copy.deepcopy(tb.stats)
 for subject in api_access.SUBJECT_IDS:
