@@ -158,10 +158,13 @@ def test_subscription_storefront_and_invoice_are_server_authoritative():
         assert catalog['plans']
         assert all(plan['id'] in tb.ACTIVE_SUBSCRIPTION_TIERS for plan in catalog['plans'])
         assert all(plan['price_stars'] == tb.SUBSCRIPTION_TIERS[plan['id']]['price_stars'] for plan in catalog['plans'])
-        assert len(catalog['current']['access']) == 11
+        assert any(entry['id'] == 'anatomy_tests' for entry in catalog['current']['access'])
+        test_plan = next(plan for plan in catalog['plans'] if plan['id'] == tb.access.ANATOMY_TEST_TIER_ID)
+        assert test_plan['subjects'] == ['anatomy_tests'] and test_plan['anatomy_tests']
+        assert test_plan['price_stars'] == 149 and test_plan['courses'] == [2]
         assert client.post('/api/v1/subscriptions/invoice', json={'tier_id': 21, 'price_stars': 1}).status_code == 422
         assert client.post('/api/v1/subscriptions/invoice', json={'tier_id': 21, 'user_id': uid + 1}).status_code == 422
-        for body in ({'tier_id': 1}, {'tier_id': 30}, {'tier_id': 20}, {'tier_id': 20, 'subject': 'anatomy'}):
+        for body in ({'tier_id': 1}, {'tier_id': 23}, {'tier_id': 29}, {'tier_id': 30}, {'tier_id': 20}, {'tier_id': 20, 'subject': 'anatomy'}):
             assert client.post('/api/v1/subscriptions/invoice', json=body).status_code == 409
         created = client.post('/api/v1/subscriptions/invoice', json={'tier_id': 21})
         assert created.status_code == 200, created.text

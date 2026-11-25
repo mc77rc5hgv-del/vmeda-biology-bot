@@ -121,16 +121,18 @@ class BillingRuntime:
                     raise ValueError(reason)
             if not self.provider.public_status()['available']:
                 raise ProviderNotReady('СБП временно недоступна')
+            price = cfg.get('price_rub') if kind == 'badge' else self.tb.access.subscription_price(user_id, tier_id, 'rubles')
+            if type(price) is not int or price <= 0:
+                raise ValueError('Нет рублёвой цены тарифа')
             for previous in self.ledger.history(user_id, limit=50):
                 previous_url = self.checkout_url(previous)
-                if previous.get('kind', 'subscription') == kind and previous['state'] == 'pending' and previous['tier_id'] == tier_id and previous['subject'] == subject and previous['created'] > time.time() - 900 and previous_url:
+                if (previous.get('kind', 'subscription') == kind and previous['state'] == 'pending'
+                        and previous['tier_id'] == tier_id and previous['subject'] == subject
+                        and previous['amount_minor'] == price * 100 and previous['created'] > time.time() - 900 and previous_url):
                     return {**previous, 'url': previous_url}
             if self.ledger.uncertain_creation(
                     user_id, newer_than=time.time() - UNKNOWN_CREATION_RETRY_SECONDS):
                 raise ProviderNotReady('Предыдущий счёт требует сверки с codeePay. Напиши @vmeda_helper перед повторной оплатой.')
-            price = cfg.get('price_rub')
-            if type(price) is not int or price <= 0:
-                raise ValueError('Нет рублёвой цены тарифа')
             if existing:
                 if existing['amount_minor'] != price * 100:
                     raise ValueError('Цена изменилась. Создай новый счёт.')
@@ -248,7 +250,7 @@ class BillingRuntime:
                 if receipt['status'] != 'review':
                     raise ValueError('Счёт уже завершён другим решением')
                 if action == 'apply_review':
-                    reason = purchase_reason(self.tb, row['user_id'], row['tier_id'], row['subject'])
+                    reason = purchase_reason(self.tb, row['user_id'], row['tier_id'], row['subject'], settling=True)
                     if reason:
                         raise ValueError('Безопасная выдача пока невозможна: ' + reason)
                     old = copy.deepcopy(self.tb.get_subscription(row['user_id']))
@@ -318,7 +320,7 @@ class BillingRuntime:
                 return
             old = copy.deepcopy(tb.get_subscription(row['user_id']))
             try:
-                reason = purchase_reason(tb, row['user_id'], row['tier_id'], row['subject'])
+                reason = purchase_reason(tb, row['user_id'], row['tier_id'], row['subject'], settling=True)
             except ValueError as exc:
                 reason = str(exc)
             receipt = {'user_id': row['user_id'], 'payment_id': row['id'], 'tier': row['tier_id'],

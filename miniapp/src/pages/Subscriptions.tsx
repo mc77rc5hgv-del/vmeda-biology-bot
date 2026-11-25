@@ -11,6 +11,13 @@ import { Skeleton } from "../components/Skeleton";
 import styles from "./Subscriptions.module.css";
 const date = (value: string) => new Date(value).toLocaleDateString("ru-RU", {day: "numeric", month: "long", year: "numeric"});
 const term = (plan: SubscriptionPlan) => plan.duration_days ? `${plan.duration_days} дней` : plan.expires_at ? `до ${date(plan.expires_at)}` : "Без срока окончания";
+
+function offersSubject(plan: SubscriptionPlan, subjectId: string): boolean {
+  if (!subjectId || !plan.subjects) return true;
+  if (subjectId === "anatomy_tests") return plan.anatomy_tests ?? plan.subjects.includes("anatomy");
+  return plan.subjects.includes(subjectId);
+}
+
 export function SubscriptionsPage() {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
@@ -115,13 +122,15 @@ export function SubscriptionsPage() {
       {(notice || pending) && <section className={styles.notice} role="status"><p>{receipt.data?.status === "review" ? "Оплата получена. Твоя текущая подписка сохранена. Обратись в поддержку для проверки платежа." : notice || "Проверяем оплату и активацию подписки…"}</p>{pending && <><button onClick={() => receipt.refetch()}>Проверить статус</button>{pendingUrl && !busy && receipt.data?.status !== "review" && <button disabled={!pending.startsWith("sbp_") && !canOpenInvoice()} onClick={() => { try { if (pending.startsWith("sbp_")) { openPaymentLink(pendingUrl); return; } openInvoice(pendingUrl, status => { if (status === "cancelled" || status === "failed") { remember(null); setNotice(status === "cancelled" ? "Оплата отменена. Можно выбрать тариф снова." : "Telegram не подтвердил оплату. Попробуй ещё раз."); } void receipt.refetch(); }); } catch (error) { setNotice(error instanceof Error ? error.message : "Не удалось открыть счёт"); } }}>Продолжить оплату</button>}<button onClick={support}>Помощь с оплатой</button>{<button onClick={() => { remember(null); setNotice("Можно выбрать тариф снова. Если предыдущий счёт оплачен, подписка активируется автоматически."); }}>Вернуться к тарифам</button>}{receipt.isError && <small>Не удалось проверить статус. Проверь соединение и повтори.</small>}</>}</section>}
       {subjectId && <section className={styles.notice}><p>Показаны тарифы для предмета «{paidSubjectTitles[subjectId]}».</p><button onClick={() => { setParams({}); setCourse(0); }}>Посмотреть все тарифы</button>{catalog.data.current.access.some(item => item.id === subjectId && item.available) && <button onClick={() => navigate(returnTo)}>Открыть предмет</button>}</section>}
       <div className={styles.tabs} role="group" aria-label="Тарифы по курсу">{[{id: 1, title: "1 курс"}, {id: 2, title: "2 курс"}, {id: 0, title: "Все тарифы"}].map(item => <button key={item.id} aria-pressed={course === item.id} onClick={() => setCourse(item.id)}>{item.title}</button>)}</div>
-      <div className={styles.plans}>{catalog.data.plans.filter(plan => (!subjectId || !plan.subjects || plan.subjects.includes(subjectId)) && (!course || plan.courses.includes(course))).map(plan => {
+      <div className={styles.plans}>{catalog.data.plans.filter(plan => offersSubject(plan, subjectId) && (!course || plan.courses.includes(course))).map(plan => {
         const current = catalog.data.current.tier_id === plan.id;
         const choice = plan.subject_options.find(option => option.id === chosenSubject(plan));
         const reason = plan.unavailable_reason || choice?.unavailable_reason;
         const missingChoice = plan.subject_options.length > 0 && !choice;
+        const upgradeCredit = plan.upgrade_credit_rub ? `${plan.upgrade_credit_rub} ₽` : plan.upgrade_credit_stars ? `${plan.upgrade_credit_stars} Stars` : null;
         return <article key={plan.id} className={`${styles.plan} ${current ? styles.active : ""}`}>
           <div className={styles.planTop}><span>{current ? "Текущий тариф" : plan.badge || "VMEDA"}</span><span>{term(plan)}</span></div><h2>{plan.title}</h2><div className={styles.price}><strong>{plan.price_rub} ₽</strong><span>или {plan.price_stars} Telegram Stars</span></div><p className={styles.caption}>Разовая оплата · без автоматических списаний</p>
+          {upgradeCredit && <p className={styles.caption}>Учтена оплата недельного доступа · {upgradeCredit}</p>}
           <ul className={styles.benefits}>{plan.benefits.map((benefit, i) => <li key={i}><Check size={16} /><span>{benefit}</span></li>)}</ul>
           {plan.subject_options.length > 0 && <label className={styles.choice}>Выбери предмет<select value={chosenSubject(plan) ?? ""} onChange={event => setChoices({...choices, [plan.id]: event.target.value})}><option value="" disabled>Выбрать предмет</option>{plan.subject_options.map(option => <option key={option.id} value={option.id} disabled={Boolean(option.unavailable_reason)}>{option.title}</option>)}</select></label>}
           <div className={styles.purchase}>{catalog.data.sbp_available && <button disabled={busy || Boolean(pending) || Boolean(reason) || missingChoice} onClick={() => void buySbp(plan)}>{current && plan.duration_days ? "Продлить" : "Оплатить"} по СБП · {plan.price_rub} ₽</button>}<button className={styles.secondary} disabled={busy || Boolean(pending) || Boolean(reason) || missingChoice || !canOpenInvoice()} onClick={() => void buy(plan)}>{current && plan.duration_days ? "Продлить" : current ? "Уже активен" : `Оформить за ${plan.price_stars} Stars`}</button><button className={styles.secondary} disabled={busy || Boolean(reason) || missingChoice} onClick={() => transfer(plan)}>Перевод на карту · {plan.price_rub} ₽</button>{reason && <small>{reason}</small>}{!canOpenInvoice() && <small>Для оплаты Stars нужен актуальный Telegram. СБП и перевод на карту доступны отдельно.</small>}</div>

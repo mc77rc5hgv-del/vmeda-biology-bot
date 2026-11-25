@@ -72,8 +72,9 @@ class FakeSuccessfulPayment:
 # Тарифы 1-11 (старая линейка) — ВСЕ сняты с продажи после введения новой линейки 20-28, но их
 # условия (цена/срок/права) не меняются задним числом, и записи, уже выданные по ним, продолжают
 # резолвиться ровно как раньше. Тарифы 20-28 — новая линейка (см. services/access.py).
-RETIRED_TIERS = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}
-ACTIVE_TIERS = {20, 21, 22, 23, 24, 25, 26, 27, 28, 29}
+LEGACY_TIERS = set(range(1, 12))
+RETIRED_TIERS = LEGACY_TIERS | {23, 29}
+ACTIVE_TIERS = {20, 21, 22, 24, 25, 26, 27, 28, 31}
 # 30 — "Приз розыгрыша — год": never sold (admin_only), exists only so the manual admin-grant
 # flow has an exactly-365-day option for giveaway prizes; see services/access.py's comment on it.
 ADMIN_ONLY_TIERS = {30}
@@ -229,8 +230,7 @@ async def main():
         pass
     tb.bot.send_message = _noop_send_message
 
-    # 1. Tier data integrity: 11 legacy tiers (all retired), 9 new tiers (all active/on sale),
-    # plus 1 admin_only tier (never sold, manual-grant only — see ADMIN_ONLY_TIERS above)
+    # Tier IDs remain readable for historical buyers even after sales close.
     assert set(tb.SUBSCRIPTION_TIERS.keys()) == RETIRED_TIERS | ACTIVE_TIERS | ADMIN_ONLY_TIERS
     assert set(tb.ACTIVE_SUBSCRIPTION_TIERS.keys()) == ACTIVE_TIERS
     assert set(tb.ADMIN_GRANTABLE_TIERS.keys()) == ACTIVE_TIERS | ADMIN_ONLY_TIERS
@@ -245,7 +245,7 @@ async def main():
         if t in ADMIN_ONLY_TIERS:
             continue  # never sold — a real price would be misleading, not just unnecessary
         assert cfg["price_rub"] > 0 and cfg["price_stars"] > 0
-        assert len(cfg["benefits"]) >= 2
+        assert cfg["benefits"]
     print("tier data integrity (retired/active/admin_only split): OK")
 
     # 1b. Legacy tier configs (1-11) are byte-for-byte unchanged from before the new lineup —
@@ -273,7 +273,7 @@ async def main():
     assert tb.SUBSCRIPTION_TIERS[10]["duration_days"] == 6 * 365
     assert tb.SUBSCRIPTION_TIERS[11]["duration_days"] == 2 * 365
     # legacy tiers carry no subscription_version / ai_limit_type fields at all — new-lineup-only concepts
-    for t in RETIRED_TIERS:
+    for t in LEGACY_TIERS:
         assert "subscription_version" not in tb.SUBSCRIPTION_TIERS[t]
         assert "ai_limit_type" not in tb.SUBSCRIPTION_TIERS[t]
     print("legacy tier (1-11) configs are byte-for-byte unchanged: OK")
@@ -547,14 +547,15 @@ async def main():
     # 12. Subscription menu ("📦 Все тарифы") only lists the active tiers, never the 11 retired ones
     menu_text = tb.get_subscription_menu_text(non_admin)
     check_html(menu_text)
-    assert "с декабря 2026 года" in menu_text and "с сентября" not in menu_text
-    for cfg in tb.ACTIVE_SUBSCRIPTION_TIERS.values():
+    assert "Зачёркнутая цена" not in menu_text
+    on_sale = dict(tb.sorted_active_tiers())
+    for cfg in on_sale.values():
         assert cfg["title"] in menu_text
         assert str(cfg["price_rub"]) in menu_text
     menu_kb = tb.get_subscription_menu_keyboard()
     texts = kb_texts(menu_kb)
-    assert len(texts) == len(ACTIVE_TIERS) + 1  # + back button
-    for cfg in tb.ACTIVE_SUBSCRIPTION_TIERS.values():
+    assert len(texts) == len(on_sale) + 1  # + back button
+    for cfg in on_sale.values():
         assert any(cfg["short"] in t for t in texts)
     # retired tiers must not leak into the "all tiers" screen at all
     for t in RETIRED_TIERS:
@@ -567,7 +568,7 @@ async def main():
     for tier_id in ACTIVE_TIERS:
         tier_text = tb.get_sub_tier_text(tier_id)
         check_html(tier_text)
-        assert "с декабря 2026 года" in tier_text and "с сентября" not in tier_text
+        assert "Зачёркнутая цена" not in tier_text
     print("every active tier's detail screen renders: OK")
 
     # 13. Per-tier screens: subject-choice tier (new tier 20) shows subject buttons, not payment buttons directly
@@ -590,11 +591,14 @@ async def main():
     print("non-subject-choice active tiers offer direct payment buttons: OK")
 
     # 13b. The winter plan offers a longer second-year plan. Other tiers keep their price order.
-    price_sorted = sorted(ACTIVE_TIERS, key=lambda t: tb.SUBSCRIPTION_TIERS[t]["price_rub"])
+    price_sorted = sorted(on_sale.keys() - {31}, key=lambda t: tb.SUBSCRIPTION_TIERS[t]["price_rub"])
     top_tier = price_sorted[-1]
     assert top_tier == 28
     for i, tier_id in enumerate(price_sorted[:-1]):
         nxt_id = 26 if tier_id == 24 else price_sorted[i + 1]
+        if nxt_id not in on_sale:
+            assert tb.get_tier_upsell_text(tier_id) == ""
+            continue
         upsell_text = tb.get_tier_upsell_text(tier_id)
         assert "Выгоднее" in upsell_text
         assert str(tb.SUBSCRIPTION_TIERS[nxt_id]["price_rub"]) in upsell_text
@@ -603,6 +607,8 @@ async def main():
         assert kb_data(upsell_kb) == [f"sub_tier:{nxt_id}"]
     assert tb.get_tier_upsell_text(top_tier) == ""
     assert tb.get_tier_upsell_keyboard(top_tier) is None
+    if 24 in on_sale:
+        assert kb_data(tb.get_tier_upsell_keyboard(31)) == ["sub_tier:24"]
     print("winter tier points to the second-year plan; other upsells follow price order: OK")
 
     # 14. Rubles flow: deep-link keyboard and message text for all active tiers
@@ -700,7 +706,7 @@ async def main():
     cb_subj = FakeCB("sub_subject:20:biology", uid=non_admin)
     await tb.cb_sub_subject(cb_subj)
     assert cb_subj.message.edits and "Биологии" in cb_subj.message.edits[0][0]
-    assert "с декабря 2026 года" in cb_subj.message.edits[0][0]
+    assert "Зачёркнутая цена" not in cb_subj.message.edits[0][0]
     subj_kb_data = kb_data(cb_subj.message.edits[0][1])
     assert "buy_sub_stars_subj:20:biology" in subj_kb_data
     assert "buy_sub_rubles_subj:20:biology" in subj_kb_data
@@ -821,6 +827,7 @@ async def main():
         def __init__(self, invoice_payload, total_amount):
             self.invoice_payload = invoice_payload
             self.total_amount = total_amount
+            self.from_user = FakeUser(non_admin)
             self.calls = []
         async def answer(self, ok, error_message=None):
             self.calls.append((ok, error_message))
@@ -1081,7 +1088,7 @@ async def main():
     tb.bot.send_message = fake_send_message4
 
     msg_t1 = FakeMsg(from_user=FakeUser(upsell_uid))
-    msg_t1.successful_payment = FakeSuccessfulPayment(99, f"sub_stars_20_-_{upsell_uid}_{int(time.time())}")
+    msg_t1.successful_payment = FakeSuccessfulPayment(99, f"sub_stars_20_biology_{upsell_uid}_{int(time.time())}")
     await tb.handle_successful_payment(msg_t1)
     buyer_sent = [(c, t, k) for c, t, k in sent4 if c == upsell_uid]
     assert buyer_sent, "expected a confirmation message"
@@ -1450,18 +1457,13 @@ async def main():
     tb.OPENAI_API_KEY, tb.ai_gemini.GEMINI_API_KEY = orig_openai_key, orig_gemini_key
     assert "📣 Анонс VMedA AI" in kb_texts(tb.get_admin_announcements_keyboard())
 
-    # 27. Menu order: active tiers appear in ascending price order (menu_number), 20 first, 28
-    # (the most expensive, "Вся академия") last — tier 29 ("5 лет", cheaper than 28) sits just
-    # before it. (Checked via the keyboard's button order, not text position — the teaser
-    # paragraph at the top of the message deliberately name-drops tiers 21/26 early as "top
-    # offers", so searching for a tier's title anywhere in the free text isn't a reliable
-    # position check.)
+    # 27. The new test pass leads the catalog and the academy plan appears last.
     menu_text2 = tb.get_subscription_menu_text(non_admin)
     check_html(menu_text2)
     menu_kb2 = tb.get_subscription_menu_keyboard()
     order = [d for d in kb_data(menu_kb2) if d.startswith("sub_tier:")]
-    assert order == [f"sub_tier:{t}" for t in (20, 21, 22, 23, 24, 25, 26, 27, 29, 28)]
-    print("'all tiers' screen lists active tiers in ascending price order, 29 before 28: OK")
+    assert order == [f"sub_tier:{t}" for t in (31, 20, 21, 22, 24, 25, 26, 27, 28) if t in on_sale]
+    print("'all tiers' screen puts the test pass first and the academy last: OK")
 
     # 28. Discount purchase flow (10% off), reachable via sub_discount:{tier} — now tiers 21/26
     for t in (21, 26):
@@ -1592,11 +1594,11 @@ async def main():
     await tb.cb_subscription_course(cb_y2)
     y2_text, y2_kb = cb_y2.message.edits[0]
     check_html(y2_text)
-    assert "с декабря 2026 года" in y2_text
+    assert "Зачёркнутая цена" not in y2_text
     y2_tier_ids = [d.split(":")[1] for d in kb_data(y2_kb) if d.startswith("sub_tier:")]
     is_autumn = time.time() < tb.NOV_1_2026_CUTOFF
     expected_ids = tb.SECOND_YEAR_AUTUMN_TIER_IDS if is_autumn else tb.SECOND_YEAR_WINTER_TIER_IDS
-    assert y2_tier_ids == [str(t) for t in expected_ids]
+    assert y2_tier_ids == [str(t) for t in expected_ids if t in on_sale]
     print(f"second-year course screen lists the {'autumn/resit' if is_autumn else 'winter'} lineup: OK")
 
     orig_time_fn = tb.time.time

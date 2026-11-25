@@ -92,7 +92,7 @@ function ExamAccessContent({ scope, children }: { scope: ExamScope; children: Re
           <>
             <p><strong>Пробный доступ закончился.</strong> Оформи подходящую подписку или пригласи двух однокурсников по своей ссылке в этом месяце.</p>
             <div className={styles.actions}>
-              <Link className={styles.primary} to={subscriptionPath(subjectId, pathname)}>Выбрать подписку</Link>
+              <Link className={styles.primary} to={subscriptionPath(scope, pathname)}>Выбрать подписку</Link>
               <Link className={styles.secondary} to="/profile/referrals">Пригласить однокурсников</Link>
             </div>
             <button type="button" className={styles.refresh} disabled={access.isFetching} onClick={() => void refresh()}>

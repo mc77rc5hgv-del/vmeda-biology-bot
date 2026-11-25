@@ -157,6 +157,10 @@ FIRST_YEAR_END_2027 = _msk_deadline(2027, 8, 1)  # тариф 25 «Весь пе
 # подписки (anatomy/histology/scope/...) этот бонус никак не трогает.
 LEGACY_PAID_AI_MONTHLY_BONUS = 60
 
+ANATOMY_TEST_TIER_ID = 31
+WINTER_TIER_ID = 24
+ANATOMY_TEST_SUBJECT = "anatomy_tests"
+
 SUBSCRIPTION_TIERS = {
     1: {
         "retired": True,
@@ -467,6 +471,7 @@ SUBSCRIPTION_TIERS = {
         ],
     },
     23: {
+        "retired": True,
         "title": "До зачёта по химии — Биология, Физика, Химия",
         "short": "до зачёта по химии",
         "emoji": "🧪",
@@ -623,6 +628,7 @@ SUBSCRIPTION_TIERS = {
         ],
     },
     29: {
+        "retired": True,
         "title": "5 лет",
         "short": "5 лет",
         "emoji": "🗓",
@@ -680,6 +686,19 @@ SUBSCRIPTION_TIERS = {
             "VMedA AI (решение заданий по фото) — 375 запросов в месяц (fair use)",
         ],
     },
+    ANATOMY_TEST_TIER_ID: {
+        "title": "Тесты по анатомии — 7 дней",
+        "short": "Тесты по анатомии на 7 дней",
+        "emoji": "🦴",
+        "price_rub": 149,
+        "price_stars": 149,
+        "duration_days": 7,
+        "fixed_subject": ANATOMY_TEST_SUBJECT,
+        "subscription_version": 2,
+        "upsell_tier_id": WINTER_TIER_ID,
+        "menu_number": 0,
+        "benefits": ["Все тесты по анатомии, карточки и работа над ошибками на 7 дней"],
+    },
 }
 # Витрина/оплата/анонсы: только то, что реально продаётся (без retired и без admin_only).
 ACTIVE_SUBSCRIPTION_TIERS = {
@@ -691,39 +710,41 @@ ACTIVE_SUBSCRIPTION_TIERS = {
 # выше про "никогда не переиспользовать id снятого с продажи тарифа".
 ADMIN_GRANTABLE_TIERS = {t: cfg for t, cfg in SUBSCRIPTION_TIERS.items() if not cfg.get("retired")}
 
-SUBSCRIPTION_PRICE_NOTE = "Зачёркнутая цена — планируемая цена с декабря 2026 года."
-SEPTEMBER_PRICE_INCREASE = 1.4  # Историческое имя коэффициента зачёркнутой цены.
-
-def september_price(price: int) -> int:
-    return round(price * SEPTEMBER_PRICE_INCREASE)
-
 DISCOUNT_RATE = 0.10  # разовая скидка 10% для пользователей без рефералов, промо-рассылкой
 
 def discount_price(price: int) -> int:
     return round(price * (1 - DISCOUNT_RATE))
 
+def subscription_price(user_id: int | None, tier_id: int, method: str) -> int:
+    price_key = "price_stars" if method == "stars" else "price_rub"
+    price = SUBSCRIPTION_TIERS[tier_id][price_key]
+    if user_id is not None and tier_id == WINTER_TIER_ID and has_active_subscription(user_id):
+        sub = get_subscription(user_id)
+        if sub.get("tier") == ANATOMY_TEST_TIER_ID and sub.get("method") == method:
+            price -= min(max(sub.get("price", 0), 0), SUBSCRIPTION_TIERS[ANATOMY_TEST_TIER_ID][price_key])
+    return price
+
 def get_tier_price_line(cfg: dict) -> str:
-    """Текущая и зачёркнутая планируемая цена для витрины подписок."""
-    return (
-        f"<b>{cfg['price_rub']}₽</b> <s>{september_price(cfg['price_rub'])}₽</s> / "
-        f"<b>{cfg['price_stars']}⭐</b> <s>{september_price(cfg['price_stars'])}⭐</s>"
-    )
+    return f"<b>{cfg['price_rub']}₽</b> / <b>{cfg['price_stars']}⭐</b>"
 
 def sorted_active_tiers() -> list[tuple[int, dict]]:
     """Тарифы в порядке показа (menu_number), а не в порядке ключей SUBSCRIPTION_TIERS —
     так самые выгодные для нас предложения можно выводить первыми, не трогая сами tier id."""
-    return sorted(ACTIVE_SUBSCRIPTION_TIERS.items(), key=lambda kv: kv[1].get("menu_number", 999))
+    now = time.time()
+    on_sale = ((tier, cfg) for tier, cfg in ACTIVE_SUBSCRIPTION_TIERS.items()
+               if cfg.get("expires_at") is None or cfg["expires_at"] > now)
+    return sorted(on_sale, key=lambda kv: kv[1].get("menu_number", 999))
 
 def cheapest_active_tier(predicate=lambda cfg: True) -> dict:
     """Самый дешёвый тариф из числа продающихся сейчас, подходящий под predicate — чтобы не
     хардкодить цены/тарифы в текстах отдельно от SUBSCRIPTION_TIERS (см. CLAUDE.md pitfalls)."""
-    candidates = [cfg for cfg in ACTIVE_SUBSCRIPTION_TIERS.values() if predicate(cfg)]
+    candidates = [cfg for _, cfg in sorted_active_tiers() if predicate(cfg)]
     return min(candidates, key=lambda c: c["price_rub"])
 
 def cheapest_gated3_tier() -> dict:
     """Самый дешёвый тариф, открывающий все три предмета Био/Физ/Хим (не тариф с выбором
     одного предмета)."""
-    return cheapest_active_tier(lambda cfg: not cfg.get("subject_choice_required"))
+    return cheapest_active_tier(lambda cfg: not cfg.get("subject_choice_required") and not cfg.get("fixed_subject"))
 
 def cheapest_histology_tier() -> dict:
     return cheapest_active_tier(lambda cfg: cfg.get("histology_until_rule") is not None)
@@ -800,6 +821,12 @@ def has_subscription_anatomy_access(user_id: int) -> bool:
         return False
     return _sub_has_anatomy(sub)
 
+
+def has_subscription_anatomy_tests_access(user_id: int) -> bool:
+    return has_subscription_anatomy_access(user_id) or (
+        has_active_subscription(user_id) and get_subscription(user_id).get("restricted_subject") == ANATOMY_TEST_SUBJECT
+    )
+
 def biology_tickets_download_ok(user_id: int) -> bool:
     if is_admin_or_assistant(user_id):
         return True
@@ -824,7 +851,7 @@ def grant_subscription(user_id: int, tier: int, method: str, price: int, subject
 
     tb.stats["subscriptions"][str(user_id)] = {
         "tier": tier,
-        "restricted_subject": subject if cfg.get("subject_choice_required") else None,
+        "restricted_subject": subject if cfg.get("subject_choice_required") else cfg.get("fixed_subject"),
         "expires": expires,
         "histology_access": histology_access,
         "histology_until": histology_until,
@@ -914,7 +941,7 @@ def has_free_access(user_id: int) -> bool:
         or get_referral_count_this_month(user_id) >= REFERRAL_FULL_ACCESS_THRESHOLD
         or user_id in tb.stats["manual_access_granted"]
         or has_temp_access(user_id)
-        or has_active_subscription(user_id)
+        or (has_active_subscription(user_id) and get_subscription(user_id).get("restricted_subject") != ANATOMY_TEST_SUBJECT)
     )
 
 def get_exhausted_users() -> list:

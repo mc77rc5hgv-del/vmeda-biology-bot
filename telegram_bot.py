@@ -396,8 +396,6 @@ LEGACY_PAID_AI_MONTHLY_BONUS = access.LEGACY_PAID_AI_MONTHLY_BONUS
 SUBSCRIPTION_TIERS = access.SUBSCRIPTION_TIERS
 ACTIVE_SUBSCRIPTION_TIERS = access.ACTIVE_SUBSCRIPTION_TIERS
 ADMIN_GRANTABLE_TIERS = access.ADMIN_GRANTABLE_TIERS
-SEPTEMBER_PRICE_INCREASE = access.SEPTEMBER_PRICE_INCREASE
-september_price = access.september_price
 DISCOUNT_RATE = access.DISCOUNT_RATE
 discount_price = access.discount_price
 get_tier_price_line = access.get_tier_price_line
@@ -516,6 +514,8 @@ def get_admin_subject_reply_keyboard() -> ReplyKeyboardMarkup:
 
 def get_subscription_scope_label(sub: dict) -> str:
     restricted = sub.get("restricted_subject")
+    if restricted == access.ANATOMY_TEST_SUBJECT:
+        return "только к тестам по анатомии"
     if restricted:
         return f"только к {SUBJECT_TITLES[restricted]}"
     if sub.get("scope") == "all":
@@ -545,8 +545,7 @@ def get_referral_status_text(user_id: int) -> str:
             f"👥 <b>Твои приглашения</b>\n{DIVIDER}\n\n"
             f"💎 У тебя активна подписка «{cfg.get('title', '')}» — доступ {scope_label}, "
             f"{format_subscription_expiry(sub['expires'])}.\n\n"
-            "Рефералы тебе не нужны, но можно продолжать приглашать друзей и участвовать "
-            "в <b>битве рефералов</b> за призы!\n\n"
+            "Можно продолжать приглашать друзей и участвовать в <b>битве рефералов</b> за призы!\n\n"
             f"Твоя ссылка:\n{link}"
         )
     manual = user_id in stats["manual_access_granted"]
@@ -1985,10 +1984,14 @@ def get_exam_trial_notice(user_id: int, subject: str) -> str:
     )
 
 
-def get_exam_access_keyboard(back: str):
+def get_exam_access_keyboard(back: str, *, anatomy_tests=False):
     builder = InlineKeyboardBuilder()
     builder.button(text="👥 Пригласить однокурсников", callback_data="referral_info")
-    builder.button(style="success", text="💎 Выбрать подписку", callback_data="subscription_menu")
+    if anatomy_tests:
+        builder.button(style="success", text="🦴 Тесты по анатомии на 7 дней", callback_data=f"sub_tier:{access.ANATOMY_TEST_TIER_ID}")
+        builder.button(text="💎 Зимняя сессия и другие тарифы", callback_data="subscription_course:year2")
+    else:
+        builder.button(style="success", text="💎 Выбрать подписку", callback_data="subscription_menu")
     builder.button(text="🔙 Назад", callback_data=back)
     return builder.adjust(1).as_markup()
 
@@ -3664,14 +3667,19 @@ async def grant_subscription_and_notify_buyer(
     сообщение об активации + апсейл на следующий тариф. method различает источник для
     статистики платежей: "stars"/"rubles" — реальная подтверждённая оплата, "rubles_manual" —
     ручная выдача админом (например, бесплатно другу) и в выручку не считается."""
-    grant_subscription(target_id, tier_id, method, price, subject)
+    if tier_id == access.ANATOMY_TEST_TIER_ID:
+        from web_api.subscriptions import grant_preserving_history
+        grant_preserving_history(sys.modules[__name__], target_id, tier_id, subject, method, price, get_subscription(target_id))
+        save_stats()
+    else:
+        grant_subscription(target_id, tier_id, method, price, subject)
     cfg = SUBSCRIPTION_TIERS[tier_id]
     sub = get_subscription(target_id)
     scope_label = get_subscription_scope_label(sub)
     text = (
         f"🎉 <b>Подписка «{cfg['title']}» активирована!</b>\n\n"
         f"Доступ {scope_label} открыт — {format_subscription_expiry(sub['expires'])}.\n"
-        "Правило про рефералов для тебя больше не действует. Спасибо за поддержку! 🙏😇"
+        "Спасибо за поддержку! 🙏😇"
     )
     text += get_tier_upsell_text(tier_id)
     keyboard = get_tier_upsell_keyboard(tier_id)
@@ -3683,7 +3691,7 @@ async def grant_subscription_and_notify_buyer(
 def get_admin_payment_confirm_text(cfg: dict, user, subject: str | None = None, price: int | None = None) -> str:
     price = price if price is not None else cfg["price_rub"]
     subject_line = f"\nПредмет: {SUBJECT_TITLES[subject]}" if subject else ""
-    discount_line = " (со скидкой 10%)" if price != cfg["price_rub"] else ""
+    discount_line = " (со скидкой)" if price != cfg["price_rub"] else ""
     return (
         f"💰 <b>Запрос на подтверждение оплаты</b>\n{DIVIDER}\n\n"
         f"Тариф: «{cfg['title']}» — {price}₽{discount_line}{subject_line}\n"
@@ -3746,9 +3754,9 @@ def _next_upsell_tier_id(tier_id: int) -> int | None:
         return None
     preferred = cfg.get("upsell_tier_id")
     if preferred is not None:
-        return preferred if preferred in ACTIVE_SUBSCRIPTION_TIERS else None
+        return preferred if preferred in dict(sorted_active_tiers()) else None
     candidates = sorted(
-        (t for t, c in ACTIVE_SUBSCRIPTION_TIERS.items() if c["price_rub"] > cfg["price_rub"]),
+        (t for t, c in sorted_active_tiers() if not c.get("fixed_subject") and c["price_rub"] > cfg["price_rub"]),
         key=lambda t: ACTIVE_SUBSCRIPTION_TIERS[t]["price_rub"]
     )
     return candidates[0] if candidates else None
@@ -3792,9 +3800,7 @@ def get_subscription_menu_text(user_id: int) -> str:
     if status:
         lines.append(status)
     lines.append(
-        "Не хочешь ждать или звать друзей? Открой доступ сразу оплатой — без рефералов "
-        "и ограничений. Выбери вариант:\n\n"
-        f"⏳ {access.SUBSCRIPTION_PRICE_NOTE}\n"
+        "Выбери тариф, чтобы открыть нужные разделы без рефералов:\n\n"
     )
     best21, best26 = SUBSCRIPTION_TIERS[21], SUBSCRIPTION_TIERS[26]
     lines.append(
@@ -3810,8 +3816,7 @@ def get_subscription_menu_text(user_id: int) -> str:
         lines.append("")
     lines.append(
         "👆 Полное описание каждого тарифа — при выборе ниже.\n\n"
-        "После оплаты правило про рефералов для тебя больше не действует — доступ "
-        "открывается сразу и держится всё оплаченное время."
+        "После оплаты выбранные разделы открываются на срок подписки."
     )
     return "\n".join(lines)
 
@@ -3836,9 +3841,9 @@ def get_subscription_menu_keyboard():
 # (get_subscription_menu_text/_keyboard выше, поведение не менялось) остаётся доступен через
 # кнопку "📦 Все тарифы" на любом экране курса. Выбор курса нигде не сохраняется — состояние
 # целиком живёт в callback_data, ничего не пишется в stats.
-FIRST_YEAR_TIER_IDS = (21, 23, 25, 26)  # Месяц / До зачёта по химии / Весь 1 курс / До конца 2 курса
+FIRST_YEAR_TIER_IDS = (20, 21)
 SECOND_YEAR_AUTUMN_TIER_IDS = (20, 22, 24, 26)  # Пересдача 7 дней / Все пересдачи / Зимняя сессия / До конца 2 курса
-SECOND_YEAR_WINTER_TIER_IDS = (21, 24, 26, 27)  # Месяц / Зимняя сессия / До конца 2 курса / 2 года MAX
+SECOND_YEAR_WINTER_TIER_IDS = (access.ANATOMY_TEST_TIER_ID, access.WINTER_TIER_ID)
 _COURSE_TITLES = {"year1": "1 курс", "year2": "2 курс"}
 
 def _second_year_tier_ids() -> tuple[int, ...]:
@@ -3850,7 +3855,8 @@ def _course_tier_ids(course: str) -> tuple[int, ...]:
     if course == "year1":
         return FIRST_YEAR_TIER_IDS
     if course == "year2":
-        return _second_year_tier_ids()
+        on_sale = dict(sorted_active_tiers())
+        return tuple(tier_id for tier_id in _second_year_tier_ids() if tier_id in on_sale)
     return ()
 
 def get_subscription_course_picker_text(user_id: int) -> str:
@@ -3882,21 +3888,20 @@ def get_subscription_course_tiers_text(user_id: int, course: str) -> str:
     if status:
         lines.append(status)
     for tier_id in _course_tier_ids(course):
-        cfg = SUBSCRIPTION_TIERS[tier_id]
+        cfg = _subscription_quote(tier_id, user_id)
         if cfg.get("badge"):
             lines.append(f"<b>{cfg['badge']}</b>")
         lines.append(f"{cfg['emoji']} <b>{cfg['title']}</b> — {get_tier_price_line(cfg)}")
         for b in cfg["benefits"]:
             lines.append(f"• {b}")
         lines.append("")
-    lines.append(f"⏳ {access.SUBSCRIPTION_PRICE_NOTE}")
     lines.append("📦 Не подошёл ни один вариант? Смотри «Все тарифы» ниже.")
     return "\n".join(lines)
 
-def get_subscription_course_tiers_keyboard(course: str):
+def get_subscription_course_tiers_keyboard(course: str, user_id: int | None = None):
     builder = InlineKeyboardBuilder()
     for tier_id in _course_tier_ids(course):
-        cfg = SUBSCRIPTION_TIERS[tier_id]
+        cfg = _subscription_quote(tier_id, user_id)
         badge = f"{cfg['badge']} — " if cfg.get("badge") else ""
         builder.button(
             text=f"{badge}{cfg['emoji']} {cfg['short']} — {cfg['price_rub']}₽/{cfg['price_stars']}⭐",
@@ -3908,8 +3913,14 @@ def get_subscription_course_tiers_keyboard(course: str):
     builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="subscription_menu"))
     return builder.as_markup()
 
-def get_sub_tier_text(tier_id: int) -> str:
-    cfg = SUBSCRIPTION_TIERS[tier_id]
+def _subscription_quote(tier_id: int, user_id: int | None) -> dict:
+    return {**SUBSCRIPTION_TIERS[tier_id],
+            "price_rub": access.subscription_price(user_id, tier_id, "rubles"),
+            "price_stars": access.subscription_price(user_id, tier_id, "stars")}
+
+
+def get_sub_tier_text(tier_id: int, user_id: int | None = None) -> str:
+    cfg = _subscription_quote(tier_id, user_id)
     lines = [f"{cfg['emoji']} <b>{cfg['title']}</b>"]
     if cfg.get("badge"):
         lines.append(f"<b>{cfg['badge']}</b>")
@@ -3919,7 +3930,8 @@ def get_sub_tier_text(tier_id: int) -> str:
     for b in cfg["benefits"]:
         lines.append(f"• {b}")
     lines.append(f"\nЦена: {get_tier_price_line(cfg)}")
-    lines.append(f"⏳ {access.SUBSCRIPTION_PRICE_NOTE}")
+    if cfg["price_rub"] != SUBSCRIPTION_TIERS[tier_id]["price_rub"] or cfg["price_stars"] != SUBSCRIPTION_TIERS[tier_id]["price_stars"]:
+        lines.append("Стоимость недельного доступа зачтена при оплате в той же валюте.")
     if upsell := get_tier_upsell_text(tier_id):
         lines.append("\n" + upsell.lstrip("\n"))
     if cfg.get("subject_choice_required"):
@@ -3928,8 +3940,8 @@ def get_sub_tier_text(tier_id: int) -> str:
         lines.append("\nВыбери способ оплаты:")
     return "\n".join(lines)
 
-def get_sub_tier_keyboard(tier_id: int):
-    cfg = SUBSCRIPTION_TIERS[tier_id]
+def get_sub_tier_keyboard(tier_id: int, user_id: int | None = None):
+    cfg = _subscription_quote(tier_id, user_id)
     builder = InlineKeyboardBuilder()
     if cfg.get("subject_choice_required"):
         builder.button(text="🧬 Биология", callback_data=f"sub_subject:{tier_id}:biology")
@@ -3998,14 +4010,18 @@ async def send_subscription_stars_invoice(
     chat_id: int, tier_id: int, subject: str | None = None, discount: bool = False
 ) -> None:
     cfg = SUBSCRIPTION_TIERS[tier_id]
-    price_stars = discount_price(cfg["price_stars"]) if discount else cfg["price_stars"]
+    price_stars = discount_price(cfg["price_stars"]) if discount else access.subscription_price(chat_id, tier_id, "stars")
     subject_line = f" ({SUBJECT_TITLES[subject]})" if subject else ""
     discount_line = " — скидка 10%" if discount else ""
+    payload = f"sub_stars_{tier_id}_{subject or '-'}_{chat_id}_{int(time.time())}"
+    if not discount and tier_id in (access.ANATOMY_TEST_TIER_ID, access.WINTER_TIER_ID):
+        from web_api.subscriptions import BOT_PREFIX, make_payload
+        payload, _ = make_payload(sys.modules[__name__], chat_id, tier_id, subject, prefix=BOT_PREFIX, amount=price_stars)
     await bot.send_invoice(
         chat_id=chat_id,
         title=f"Подписка: {cfg['title']}{subject_line}{discount_line}",
         description=f"VMEDA_examen_bot — подписка «{cfg['title']}»{subject_line}{discount_line}. Доступ откроется сразу после оплаты.",
-        payload=f"sub_stars_{tier_id}_{subject or '-'}_{chat_id}_{int(time.time())}",
+        payload=payload,
         provider_token="",
         currency="XTR",
         prices=[LabeledPrice(label=cfg["title"], amount=price_stars)],
@@ -4077,7 +4093,7 @@ async def cb_subscription_course(callback: CallbackQuery):
         callback.message,
         get_subscription_course_tiers_text(callback.from_user.id, course),
         parse_mode="HTML",
-        reply_markup=get_subscription_course_tiers_keyboard(course),
+        reply_markup=get_subscription_course_tiers_keyboard(course, callback.from_user.id),
         disable_web_page_preview=True,
     )
 
@@ -4094,6 +4110,22 @@ def get_tier_retired_keyboard():
     builder.row(InlineKeyboardButton(style="success", text="💎 Посмотреть актуальные тарифы", callback_data="subscription_menu"))
     return builder.as_markup()
 
+
+def _bot_subscription_purchase_reason(user_id, tier_id, subject=None, *, settling=False):
+    from web_api.subscriptions import purchase_reason, validate_tier
+
+    tb = sys.modules[__name__]
+    current = get_subscription(user_id) or {}
+    try:
+        validate_tier(tb, tier_id, subject, settling=settling)
+        if (tier_id in (access.ANATOMY_TEST_TIER_ID, access.WINTER_TIER_ID, 23, 29)
+                or current.get('tier') == access.ANATOMY_TEST_TIER_ID):
+            return purchase_reason(tb, user_id, tier_id, subject, settling=settling)
+    except ValueError as exc:
+        return str(exc)
+    return None
+
+
 @dp.callback_query(F.data.startswith("sub_tier:"))
 async def cb_sub_tier(callback: CallbackQuery):
     tier_id = int(callback.data.split(":")[1])
@@ -4101,7 +4133,7 @@ async def cb_sub_tier(callback: CallbackQuery):
         await callback.answer("Тариф не найден", show_alert=True)
         return
     await callback.answer()
-    if tier_id not in ACTIVE_SUBSCRIPTION_TIERS:
+    if tier_id not in dict(sorted_active_tiers()):
         await safe_edit_text(
             callback.message,
             get_tier_retired_text(tier_id),
@@ -4109,11 +4141,18 @@ async def cb_sub_tier(callback: CallbackQuery):
             reply_markup=get_tier_retired_keyboard()
         )
         return
+    user_id = callback.from_user.id
+    cfg = SUBSCRIPTION_TIERS[tier_id]
+    reason = None if cfg.get('subject_choice_required') else _bot_subscription_purchase_reason(user_id, tier_id)
+    if reason:
+        await safe_edit_text(callback.message, f"{cfg['emoji']} <b>{cfg['title']}</b>\n\n{reason}.",
+                             parse_mode="HTML", reply_markup=get_subscription_course_picker_keyboard())
+        return
     await safe_edit_text(
         callback.message,
-        get_sub_tier_text(tier_id),
+        get_sub_tier_text(tier_id, user_id),
         parse_mode="HTML",
-        reply_markup=get_sub_tier_keyboard(tier_id)
+        reply_markup=get_sub_tier_keyboard(tier_id, user_id)
     )
 
 @dp.callback_query(F.data.startswith("sub_subject:"))
@@ -4136,7 +4175,7 @@ async def cb_sub_subject(callback: CallbackQuery):
     text = (
         f"{cfg['emoji']} <b>{cfg['title']}</b> — {SUBJECT_TITLES[subject]}\n{DIVIDER}\n\n"
         f"Цена: {get_tier_price_line(cfg)}\n"
-        f"⏳ {access.SUBSCRIPTION_PRICE_NOTE}\n\n"
+        "\n"
         "Выбери способ оплаты:"
     )
     await safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=get_sub_subject_keyboard(tier_id, subject))
@@ -4150,6 +4189,9 @@ async def cb_buy_sub_stars(callback: CallbackQuery):
     if tier_id not in ACTIVE_SUBSCRIPTION_TIERS:
         await callback.answer("Этот тариф больше не продаётся", show_alert=True)
         return
+    if reason := _bot_subscription_purchase_reason(callback.from_user.id, tier_id):
+        await callback.answer(reason, show_alert=True)
+        return
     await callback.answer()
     await send_subscription_stars_invoice(callback.from_user.id, tier_id)
 
@@ -4162,6 +4204,9 @@ async def cb_buy_sub_stars_subj(callback: CallbackQuery):
         return
     if tier_id not in ACTIVE_SUBSCRIPTION_TIERS:
         await callback.answer("Этот тариф больше не продаётся", show_alert=True)
+        return
+    if reason := _bot_subscription_purchase_reason(callback.from_user.id, tier_id, subject):
+        await callback.answer(reason, show_alert=True)
         return
     await callback.answer()
     await send_subscription_stars_invoice(callback.from_user.id, tier_id, subject)
@@ -4246,15 +4291,20 @@ async def cb_buy_sub_rubles(callback: CallbackQuery):
     if tier_id not in ACTIVE_SUBSCRIPTION_TIERS:
         await callback.answer("Этот тариф больше не продаётся", show_alert=True)
         return
+    user_id = callback.from_user.id
+    if reason := _bot_subscription_purchase_reason(user_id, tier_id):
+        await callback.answer(reason, show_alert=True)
+        return
+    price = access.subscription_price(user_id, tier_id, 'rubles')
     await callback.answer()
     await safe_edit_text(
         callback.message,
-        get_sub_rubles_message_text(tier_id),
+        get_sub_rubles_message_text(tier_id, price=price),
         parse_mode="HTML",
-        reply_markup=get_sub_rubles_keyboard(tier_id),
+        reply_markup=get_sub_rubles_keyboard(tier_id, price=price),
         disable_web_page_preview=True,
     )
-    await notify_admins_of_payment_request(tier_id, callback.from_user.id, callback.from_user)
+    await notify_admins_of_payment_request(tier_id, user_id, callback.from_user, price=price)
 
 @dp.callback_query(F.data.startswith("buy_sub_rubles_subj:"))
 async def cb_buy_sub_rubles_subj(callback: CallbackQuery):
@@ -4265,6 +4315,9 @@ async def cb_buy_sub_rubles_subj(callback: CallbackQuery):
         return
     if tier_id not in ACTIVE_SUBSCRIPTION_TIERS:
         await callback.answer("Этот тариф больше не продаётся", show_alert=True)
+        return
+    if reason := _bot_subscription_purchase_reason(callback.from_user.id, tier_id, subject):
+        await callback.answer(reason, show_alert=True)
         return
     await callback.answer()
     await safe_edit_text(
@@ -4303,6 +4356,9 @@ async def cb_buy_sub_stars_discount(callback: CallbackQuery):
     if tier_id not in ACTIVE_SUBSCRIPTION_TIERS:
         await callback.answer("Этот тариф больше не продаётся", show_alert=True)
         return
+    if reason := _bot_subscription_purchase_reason(callback.from_user.id, tier_id):
+        await callback.answer(reason, show_alert=True)
+        return
     await callback.answer()
     await send_subscription_stars_invoice(callback.from_user.id, tier_id, discount=True)
 
@@ -4314,6 +4370,9 @@ async def cb_buy_sub_rubles_discount(callback: CallbackQuery):
         return
     if tier_id not in ACTIVE_SUBSCRIPTION_TIERS:
         await callback.answer("Этот тариф больше не продаётся", show_alert=True)
+        return
+    if reason := _bot_subscription_purchase_reason(callback.from_user.id, tier_id):
+        await callback.answer(reason, show_alert=True)
         return
     await callback.answer()
     price = discount_price(SUBSCRIPTION_TIERS[tier_id]["price_rub"])
@@ -4357,8 +4416,11 @@ async def cb_admin_confirm_sub(callback: CallbackQuery):
         )
         return
 
-    await callback.answer("Подтверждено ✅", show_alert=True)
+    if reason := _bot_subscription_purchase_reason(target_id, tier_id, subject, settling=True):
+        await callback.answer(reason, show_alert=True)
+        return
     await grant_subscription_and_notify_buyer(target_id, tier_id, "rubles", price, subject)
+    await callback.answer("Подтверждено ✅", show_alert=True)
     await safe_edit_text(
         callback.message,
         f"✅ Подтверждено — подписка «{SUBSCRIPTION_TIERS[tier_id]['title']}» "
@@ -4397,8 +4459,8 @@ async def handle_pre_checkout(pre_checkout_query) -> None:
     из-за бага при формировании инвойса; отклонить здесь дешевле и безопаснее, чем молча выдать
     несоответствующую payload'у подписку в handle_successful_payment)."""
     payload = pre_checkout_query.invoice_payload or ""
-    if payload.startswith("vmeda-miniapp:"):
-        from web_api.subscriptions import pre_checkout
+    from web_api.subscriptions import BOT_PREFIX, PREFIX, pre_checkout
+    if payload.startswith((PREFIX, BOT_PREFIX)):
         await pre_checkout(sys.modules[__name__], pre_checkout_query)
         return
     if payload.startswith("sub_stars_"):
@@ -4411,6 +4473,10 @@ async def handle_pre_checkout(pre_checkout_query) -> None:
         cfg = SUBSCRIPTION_TIERS.get(tier_id)
         if cfg is None or cfg.get("retired"):
             await pre_checkout_query.answer(ok=False, error_message="Этот тариф больше не продаётся — выбери другой в разделе «Подписка».")
+            return
+        subject = parts[3] if len(parts) > 3 and parts[3] != "-" else None
+        if reason := _bot_subscription_purchase_reason(pre_checkout_query.from_user.id, tier_id, subject):
+            await pre_checkout_query.answer(ok=False, error_message=reason)
             return
         expected_prices = {cfg["price_stars"], discount_price(cfg["price_stars"])}
         if pre_checkout_query.total_amount not in expected_prices:
@@ -4425,8 +4491,8 @@ async def handle_pre_checkout(pre_checkout_query) -> None:
 @dp.message(F.successful_payment)
 async def handle_successful_payment(message: Message):
     payment = message.successful_payment
-    if (payment.invoice_payload or "").startswith("vmeda-miniapp:"):
-        from web_api.subscriptions import successful_payment
+    from web_api.subscriptions import BOT_PREFIX, PREFIX, successful_payment
+    if (payment.invoice_payload or "").startswith((PREFIX, BOT_PREFIX)):
         await successful_payment(sys.modules[__name__], message)
         return
     stars = payment.total_amount
@@ -4456,6 +4522,15 @@ async def handle_successful_payment(message: Message):
         tier_id = int(parts[2])
         subject = parts[3] if len(parts) > 3 and parts[3] != "-" else None
         cfg = SUBSCRIPTION_TIERS[tier_id]
+        user_id = message.from_user.id
+        if reason := _bot_subscription_purchase_reason(user_id, tier_id, subject, settling=True):
+            if charge_id:
+                stats['processed_payment_charge_ids'][charge_id].update(status='review', reason=reason, tier=tier_id)
+            stats['subscription_purchase_log'].append({'user_id': user_id, 'tier': tier_id,
+                'method': 'stars', 'price': stars, 'ts': time.time(), 'status': 'review'})
+            save_stats()
+            await message.answer("Оплата получена. Текущий доступ сохранён. Напиши @vmeda_helper для проверки платежа.")
+            return
         await grant_subscription_and_notify_buyer(message.from_user.id, tier_id, "stars", stars, subject)
         user = message.from_user
         for admin_id in ADMIN_IDS:
