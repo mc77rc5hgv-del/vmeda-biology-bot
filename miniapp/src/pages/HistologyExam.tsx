@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, BookOpen, Check, ChevronRight, ClipboardList, GraduationCap, Images, Microscope, RotateCcw, ScanSearch, Search, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Icon } from "../components/Icon";
 import { Skeleton } from "../components/Skeleton";
 import { StateMessage } from "../components/StateMessage";
@@ -133,6 +133,14 @@ export function HistologyCatalogPage({ diagnostics = false }: { diagnostics?: bo
                       <div><h2>{title}</h2>{topic && <p>{topic}</p>}</div>
                       <span><span className="visually-hidden">Препаратов: </span>{group.specimens.length}</span>
                     </header>
+                    {diagnostics && (
+                      <button type="button" aria-label={`Угадай препарат · ${title}`}
+                        onClick={() => navigate(`/histology/diagnostics/${encodeURIComponent(group.id)}/guess`)}>
+                        <span className={styles.specimenNumber}><Icon icon={ScanSearch} size={20} /></span>
+                        <span className={styles.specimenLabel}><strong>Угадай препарат</strong></span>
+                        <Icon icon={ChevronRight} size={18} />
+                      </button>
+                    )}
                     {group.specimens.map((specimen) => (
                       <button key={specimen.id} type="button" onClick={() => openSpecimen(specimen.id)}>
                         <span className={styles.specimenNumber}><span className="visually-hidden">Препарат №</span>{specimen.number}</span>
@@ -162,14 +170,22 @@ export function HistologyCatalogPage({ diagnostics = false }: { diagnostics?: bo
 }
 
 export function HistologyGuessPage() {
+  const { diagnosticId } = useParams();
+  return <HistologyGuessTrainer key={diagnosticId ?? "exam"} diagnosticId={diagnosticId} />;
+}
+
+function HistologyGuessTrainer({ diagnosticId }: { diagnosticId?: string }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const catalogScope = diagnosticId ? "diagnostics" : "exam";
+  const back = diagnosticId ? `/histology/diagnostics?group=${encodeURIComponent(diagnosticId)}` : "/histology/exam";
   const [session, setSession] = useState<{ scope: Scope; items: HistologyPracticalQuestion[] } | null>(null);
   const [index, setIndex] = useState(0);
   const [answer, setAnswer] = useState<Awaited<ReturnType<typeof revealHistologyAnswer>> | null>(null);
   const [sessionKnown, setSessionKnown] = useState(0);
   const [loadingAction, setLoadingAction] = useState(false);
   const busy = useRef(false);
+  const lastDiagnosticAttempt = useRef<string | null>(null);
   const viewer = useRef<MicrographHandle>(null);
   const questionHeading = useRef<HTMLHeadingElement>(null);
   const answerHeading = useRef<HTMLHeadingElement>(null);
@@ -184,24 +200,27 @@ export function HistologyGuessPage() {
   useTelegramBackButton(() => {
     if (viewer.current?.closeFullscreen()) return;
     if (session) backToTrainer();
-    else navigate("/histology/exam");
+    else navigate(back);
   });
 
-  const catalogQuery = useQuery({ queryKey: ["histology-catalog", "exam"], queryFn: () => fetchHistologyCatalog("exam") });
-  const statsQuery = useQuery({ queryKey: ["histology-stats"], queryFn: fetchHistologyStats });
+  const catalogQuery = useQuery({ queryKey: ["histology-catalog", catalogScope], queryFn: () => fetchHistologyCatalog(catalogScope) });
+  const statsQuery = useQuery({ queryKey: ["histology-stats"], queryFn: fetchHistologyStats, enabled: !diagnosticId });
+  const groups = catalogQuery.data?.groups ?? [];
+  const diagnostic = groups.find((group) => group.id === diagnosticId);
+  const diagnosticTitle = diagnostic?.title.split(": ")[0];
 
   const startSession = async (scope: Scope) => {
     setLoadingAction(true);
     setActionError(null);
     try {
-      const items = await fetchHistologyPractical(scope, 10);
+      const items = await fetchHistologyPractical(diagnosticId ?? scope, diagnosticId ? 30 : 10, catalogScope);
       setPendingGrade(null);
       setSession({ scope, items });
       setIndex(0);
       setAnswer(null);
       setSessionKnown(0);
     } catch {
-      setActionError('Не удалось начать зачёт. Повтори попытку.');
+      setActionError('Не удалось начать тренировку. Повтори попытку.');
     } finally {
       setLoadingAction(false);
     }
@@ -230,26 +249,31 @@ export function HistologyGuessPage() {
     if (!current) return;
     setLoadingAction(true);
     setActionError(null);
-    try { setAnswer(await revealHistologyAnswer(current.id, current.photoId)); }
+    try { setAnswer(await revealHistologyAnswer(current.id, current.photoId, catalogScope)); }
     catch { setActionError('Не удалось показать ответ. Повтори попытку.'); }
     finally { setLoadingAction(false); }
   };
 
   const grade = async (known: boolean) => {
-    if (!current || !session || busy.current || (pendingGrade !== null && pendingGrade !== known)) return;
+    if (!current || !session || !answer || busy.current || (pendingGrade !== null && pendingGrade !== known)) return;
+    if (diagnosticId && lastDiagnosticAttempt.current === current.attemptId) return;
     busy.current = true;
     setPendingGrade(known);
     setLoadingAction(true);
     setActionError(null);
     try {
-      await gradeHistologyAnswer(current.id, known, session.scope, current.attemptId);
+      if (diagnosticId) {
+        lastDiagnosticAttempt.current = current.attemptId;
+      } else {
+        await gradeHistologyAnswer(current.id, known, session.scope, current.attemptId);
+        queryClient.invalidateQueries({ queryKey: ["histology-stats"] });
+        queryClient.invalidateQueries({ queryKey: ["learning"] });
+        queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+      }
       setPendingGrade(null);
       if (known) setSessionKnown((value) => value + 1);
       setIndex((value) => value + 1);
       setAnswer(null);
-      queryClient.invalidateQueries({ queryKey: ["histology-stats"] });
-      queryClient.invalidateQueries({ queryKey: ["learning"] });
-      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
       hapticSelection();
     } catch {
       setActionError('Не удалось подтвердить сохранение ответа. Повтори ту же оценку: попытка не будет задвоена.');
@@ -264,6 +288,13 @@ export function HistologyGuessPage() {
   }
   if (!session && (catalogQuery.isError || !catalogQuery.data)) {
     return <div className="screen"><StateMessage title="Не удалось открыть тренажёр" onRetry={() => catalogQuery.refetch()} /></div>;
+  }
+  if (diagnosticId && !diagnostic) {
+    return (
+      <div className="screen">
+        <StateMessage title="Диагностика не найдена" onRetry={() => navigate("/histology/diagnostics")} actionLabel="К диагностикам" />
+      </div>
+    );
   }
 
   if (session) {
@@ -283,17 +314,18 @@ export function HistologyGuessPage() {
         ) : finished ? (
           <div className={styles.resultCard}>
             <span className={styles.resultIcon}><Icon icon={GraduationCap} size={28} /></span>
-            <p className={styles.eyebrow}>Практический зачёт завершён</p>
+            <p className={styles.eyebrow}>{diagnosticTitle ?? "Практический зачёт завершён"}</p>
             <h1>{sessionKnown} из {session.items.length}</h1>
-            <p>Результат сохранён. Нераспознанные препараты уже добавлены в работу над ошибками.</p>
-            <button type="button" onClick={() => startSession(session.scope)}>Пройти ещё раз</button>
-            <button type="button" className={styles.secondaryButton} onClick={backToTrainer}>К тренажёру</button>
+            <p>{diagnosticId ? "Препаратов определено верно" : "Результат сохранён. Нераспознанные препараты уже добавлены в работу над ошибками."}</p>
+            <button type="button" disabled={loadingAction} onClick={() => startSession(session.scope)}>Пройти ещё раз</button>
+            <button type="button" className={styles.secondaryButton}
+              onClick={diagnosticId ? () => navigate(back) : backToTrainer}>{diagnosticId ? "К диагностике" : "К тренажёру"}</button>
           </div>
         ) : current ? (
           <>
             <div className={styles.examHead}>
               <div>
-                <p className={styles.eyebrow}>{session.scope === "mistakes" ? "Работа над ошибками" : "Практический зачёт"}</p>
+                <p className={styles.eyebrow}>{diagnosticTitle ?? (session.scope === "mistakes" ? "Работа над ошибками" : "Практический зачёт")}</p>
                 <h1 ref={questionHeading} tabIndex={-1}>Определите препарат</h1>
               </div>
               <span>{index + 1}/{session.items.length}</span>
@@ -344,39 +376,43 @@ export function HistologyGuessPage() {
   }
 
   const stats = statsQuery.data;
-  const practicalCount = catalogQuery.data?.groups.reduce((sum, group) => sum + group.specimens.filter(item => item.practicalAvailable).length, 0) ?? 0;
+  const practicalCount = (diagnostic ? [diagnostic] : groups)
+    .reduce((sum, group) => sum + group.specimens.filter(item => item.practicalAvailable).length, 0);
   return (
     <div className={["screen", styles.examScreen].join(" ")}>
       {actionError && <p role="alert">{actionError}</p>}
-      <button type="button" className={styles.backButton} onClick={() => navigate("/histology/exam")}>
-        <Icon icon={ArrowLeft} size={18} /> Экзамен
+      <button type="button" className={styles.backButton} onClick={() => navigate(back)}>
+        <Icon icon={ArrowLeft} size={18} /> {diagnosticTitle ?? "Экзамен"}
       </button>
       {statsQuery.isError && <StateMessage title="Статистика временно недоступна" body="Это ошибка загрузки, а не обнуление данных." onRetry={() => statsQuery.refetch()} />}
-      <section className={styles.hero}>
+      <section className={diagnosticId ? `${styles.hero} ${styles.diagnosticHero}` : styles.hero}>
         <div className={styles.heroTop}>
           <span className={styles.heroIcon}><Icon icon={Microscope} size={24} /></span>
-          <span className={styles.heroBadge}>{practicalCount} препаратов</span>
+          <span className={styles.heroBadge}>{diagnosticId ? `В раунде ${practicalCount}` : `${practicalCount} препаратов`}</span>
         </div>
-        <p className={styles.eyebrow}>Гистология</p>
+        <p className={styles.eyebrow}>{diagnosticTitle ?? "Гистология"}</p>
         <h1>УГАДАЙ ПРЕПАРАТ</h1>
-        <div className={styles.statsGrid}>
+        {!diagnosticId && <div className={styles.statsGrid}>
           <div><strong>{stats?.mastered ?? 0}</strong><span>освоено</span></div>
           <div><strong>{stats?.accuracy ?? 0}%</strong><span>точность</span></div>
           <div><strong>{stats?.activeMistakes ?? 0}</strong><span>ошибок</span></div>
-        </div>
+        </div>}
       </section>
 
       <div className={styles.actions}>
-        <button type="button" disabled={loadingAction} onClick={() => startSession("all")}>
+        <button type="button" disabled={loadingAction || practicalCount === 0} onClick={() => startSession("all")}>
           <span><Icon icon={GraduationCap} size={21} /></span>
-          <div><strong>Практический зачёт</strong><small>10 микрофотографий из {practicalCount} доступных</small></div>
+          <div>
+            <strong>{diagnosticId ? "Начать тренировку" : "Практический зачёт"}</strong>
+            <small>{diagnosticId ? "Весь перечень этой диагностики" : `10 микрофотографий из ${practicalCount} доступных`}</small>
+          </div>
           <Icon icon={ChevronRight} size={18} />
         </button>
-        <button type="button" disabled={loadingAction} onClick={() => startSession("mistakes")}>
+        {!diagnosticId && <button type="button" disabled={loadingAction} onClick={() => startSession("mistakes")}>
           <span className={styles.mistakeIcon}><Icon icon={RotateCcw} size={20} /></span>
           <div><strong>Работа над ошибками</strong><small>{stats?.activeMistakes ?? 0} препаратов для повторения</small></div>
           <Icon icon={ChevronRight} size={18} />
-        </button>
+        </button>}
       </div>
 
     </div>

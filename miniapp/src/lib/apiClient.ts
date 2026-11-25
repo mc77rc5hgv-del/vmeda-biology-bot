@@ -696,11 +696,14 @@ export async function fetchHistologySpecimen(specimenId: string, scope: Histolog
 }
 
 export async function fetchHistologyPractical(
-  scope: "all" | "mistakes" | string = "all",
+  scope = "all",
   limit = 10,
+  catalogScope: HistologyCatalogScope = "exam",
 ): Promise<HistologyPracticalQuestion[]> {
+  const params = new URLSearchParams({ scope, limit: String(limit), photo_variants: "true" });
+  if (catalogScope === "diagnostics") params.set("catalog_scope", catalogScope);
   const wire = await apiFetch<Array<{ id: string; position: number; image_url: string; attempt_id: string; photo_id?: string }>>(
-    `/api/v1/histology/exam/practical?scope=${encodeURIComponent(scope)}&limit=${limit}&photo_variants=true`,
+    `/api/v1/histology/exam/practical?${params}`,
   );
   return wire.map((item) => ({
     id: item.id,
@@ -711,8 +714,15 @@ export async function fetchHistologyPractical(
   }));
 }
 
-export async function revealHistologyAnswer(specimenId: string, photoId?: string): Promise<HistologySpecimenSummary & { protocol: string; guessImageNote: string }> {
-  const query = photoId ? `?photo_id=${encodeURIComponent(photoId)}` : "";
+export async function revealHistologyAnswer(
+  specimenId: string,
+  photoId?: string,
+  catalogScope: HistologyCatalogScope = "exam",
+): Promise<HistologySpecimenSummary & { protocol: string; guessImageNote: string }> {
+  const params = new URLSearchParams();
+  if (photoId) params.set("photo_id", photoId);
+  if (catalogScope === "diagnostics") params.set("catalog_scope", catalogScope);
+  const query = params.size ? `?${params}` : "";
   const wire = await apiFetch<HistologySpecimenWire & { protocol: string; guess_image_note?: string }>(
     `/api/v1/histology/exam/specimens/${encodeURIComponent(specimenId)}/reveal${query}`,
     { method: "POST" },

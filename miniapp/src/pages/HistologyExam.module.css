@@ -20,6 +20,12 @@
 .heroBadge { padding: 7px 10px; color: rgb(255 255 255 / 70%); font-size: var(--text-xs); font-weight: var(--weight-semibold); border: 1px solid rgb(255 255 255 / 11%); border-radius: 999px; background: rgb(255 255 255 / 6%); }
 .hero h1 { margin-top: 5px; font-size: 36px; font-weight: var(--weight-bold); letter-spacing: -.055em; }
 .hero > p:last-of-type { max-width: 38ch; margin-top: 7px; color: rgb(255 255 255 / 62%); font-size: var(--text-sm); line-height: 1.5; }
+@media (max-height: 480px) {
+  .diagnosticHero { padding: 9px 14px; }
+  .diagnosticHero .heroTop { margin-bottom: 4px; }
+  .diagnosticHero .heroIcon { width: 32px; height: 32px; }
+  .diagnosticHero h1 { font-size: 28px; }
+}
 .statsGrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 19px; }
 .statsGrid div { padding: 11px 10px; border: 1px solid rgb(255 255 255 / 9%); border-radius: var(--radius-control); background: rgb(255 255 255 / 6%); }
 .statsGrid strong, .statsGrid span { display: block; }
