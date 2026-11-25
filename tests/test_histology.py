@@ -2,7 +2,9 @@
 import os, asyncio, random
 from _bootstrap import tb
 from handlers import histology
+from html import unescape
 from html.parser import HTMLParser
+from unittest.mock import patch
 from aiogram.types import FSInputFile
 
 ADMIN_ID = next(iter(tb.ADMIN_IDS))
@@ -484,6 +486,41 @@ async def main():
     assert len(tb.HISTOLOGY_GUESS_SESSIONS[ADMIN_ID]["items"]) == tb.HISTOLOGY_GUESS_SESSION_SIZE
     await tb.cb_histology_guess_stop(FakeCB("histology_guess_stop"))
     print("guess mode pool matches the official exam list: OK")
+
+    # A reviewed photo opens in its exam card and keeps its own caption after reveal.
+    photo_file = "_exam_2026/d3_12.jpg"
+    caption = "Ориентир на фото < 100×.\nСледующая строка."
+    group, specimen_id = "diagnostika_3", "d3_11"
+    photo_catalog = {specimen_id: [{"file": photo_file, "caption": caption, "quiz_file": photo_file}]}
+    with patch.object(histology.histology_content, "exam_photo_catalog", return_value=photo_catalog):
+        keyboard = tb.get_histology_specimen_keyboard(group, specimen_id, exam=True)
+        photo_button = keyboard.inline_keyboard[0][0]
+        assert "Экзаменационные фото" in photo_button.text
+        gallery = FakeCB(photo_button.callback_data)
+        await histology.cb_histology_img(gallery)
+        assert caption in gallery.message.photos[0][1]
+
+        with (
+            patch.object(histology, "get_histology_guess_pool", return_value=[(group, specimen_id)]),
+            patch.object(histology.random, "choice", side_effect=lambda variants: variants[-1]),
+        ):
+            prompt = FakeCB("histology_guess_start:all")
+            await tb.cb_histology_guess_start(prompt)
+        sent_photo, prompt_caption, _ = prompt.message.photos[0]
+        assert sent_photo.path == os.path.join(tb.HISTOLOGY_IMAGES_DIR, photo_file)
+        assert caption not in prompt_caption
+        await tb.cb_histology_guess_show_answer(FakeCB("histology_guess_show_answer"))
+        revealed = tb.HISTOLOGY_GUESS_SESSIONS[ADMIN_ID]["msg"]
+        assert caption in revealed.caption_edits[0][0]
+        await tb.cb_histology_guess_stop(FakeCB("histology_guess_stop"))
+
+    long_note = (caption + " 🔬\n") * 120
+    short_caption, separate_note = histology._photo_caption("Препарат", long_note, "1/1")
+    assert len(short_caption.encode("utf-16-le")) <= 2048
+    note_message = FakeMsg()
+    await histology._send_photo_note(note_message, separate_note)
+    assert len(note_message.edits) > 1
+    assert unescape("".join(page for page, _ in note_message.edits)) == long_note
 
     # 18. Full run-through to completion (scope=all) tallies know/dont_know and ends with summary
     cb_start = FakeCB("histology_guess_start:all")

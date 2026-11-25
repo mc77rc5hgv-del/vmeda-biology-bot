@@ -624,6 +624,68 @@ def test_histology_exam_catalog_practical_reveal_and_grade():
     assert {item["id"] for item in repeated.json()} == {specimen_id}
 
 
+def test_histology_import_serves_the_same_reviewed_frame_and_caption(monkeypatch, tmp_path):
+    from PIL import Image
+    from scripts import import_histology_exam_photos as importer
+    from services import histology_content
+    from web_api.routers import subjects
+
+    catalog_path = tmp_path / "photo_catalog.json"
+    catalog_path.write_text("{}\n", encoding="utf-8")
+    monkeypatch.setattr(importer, "PHOTO_CATALOG", catalog_path)
+    monkeypatch.setattr(importer, "IMAGE_ROOT", tmp_path / "images" / "histology")
+    monkeypatch.setattr(subjects, "REPO_ROOT", str(tmp_path))
+    monkeypatch.setattr(histology_content, "exam_photo_catalog", lambda: json.loads(catalog_path.read_text(encoding="utf-8")))
+    for name, color in (("full", "purple"), ("crop", "navy"), ("labelled", "green")):
+        Image.new("RGB", (32, 24), color).save(tmp_path / f"{name}.png")
+
+    caption = "Подпись к кадру: роговой слой.\nЛиния 2 < 3."
+    rows = [
+        {"specimen_id": "d3_11", "file": "full.png", "caption": caption, "quiz": "crop.png"},
+        {"specimen_id": "d3_11", "file": "labelled.png", "caption": "Кадр с надписями"},
+    ]
+    specimen_url = "/api/v1/histology/exam/specimens/d3_11"
+    headers = _auth_headers(next(iter(tb.ADMIN_IDS)))
+    before = client.get(specimen_url, headers=headers).json()
+    assert len(importer.import_batch(rows, tmp_path, apply=False)) == 2
+    assert not importer.IMAGE_ROOT.exists()
+    with pytest.raises(ValueError, match="unknown exam specimen"):
+        importer.import_batch([*rows, {**rows[0], "specimen_id": "d1_01"}], tmp_path, apply=True)
+    assert catalog_path.read_text(encoding="utf-8") == "{}\n"
+    assert not importer.IMAGE_ROOT.exists()
+    importer.import_batch(rows, tmp_path, apply=True)
+    assert all(line.startswith("already imported:") for line in importer.import_batch(rows, tmp_path, apply=True))
+    assert len(list(importer.IMAGE_ROOT.rglob("*.jpg"))) == 3
+
+    response = client.get(specimen_url, headers=headers)
+    assert response.status_code == 200
+    card = response.json()
+    assert (card["number"], card["protocol"]) == (before["number"], before["protocol"])
+    assert card["images"][:-2] == before["images"]
+    assert card["image_guides"][-2:] == [
+        {"kind": "micrograph", "exam_caption": caption},
+        {"kind": "micrograph", "exam_caption": "Кадр с надписями"},
+    ]
+    gallery_photo = client.get(card["images"][-2], headers=headers)
+    assert gallery_photo.status_code == 200
+
+    monkeypatch.setattr(subjects.random, "choice", lambda variants: variants[-1])
+    round_url = "/api/v1/histology/exam/practical?limit=30&scope=diagnostika_3"
+    questions = client.get(f"{round_url}&photo_variants=true", headers=headers).json()
+    question = next(item for item in questions if item["id"] == "d3_11")
+    assert set(question) == {"id", "position", "image_url", "attempt_id", "photo_id"}
+    assert caption not in json.dumps(question, ensure_ascii=False)
+    legacy = client.get(round_url, headers=headers).json()
+    assert "photo_id" not in next(item for item in legacy if item["id"] == "d3_11")
+    variant = client.get(question["image_url"], headers=headers)
+    assert variant.status_code == 200
+    assert variant.content != gallery_photo.content
+    assert client.get(question["image_url"]).status_code == 401
+    answer = client.post(f"{specimen_url}/reveal?photo_id={question['photo_id']}", headers=headers)
+    assert answer.json()["guess_image_note"] == caption
+    assert client.get(f"{specimen_url}/guess-image?photo_id=missing", headers=headers).status_code == 404
+
+
 def test_all_reviewed_histology_cards_and_media_preserve_previous_learning():
     import copy
     user_id = 900_444_555_778

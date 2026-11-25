@@ -5,6 +5,14 @@ from functools import lru_cache
 from pathlib import Path
 
 
+PHOTO_CATALOG = Path(__file__).resolve().parents[1] / "histology_exam_photo_catalog.json"
+
+
+@lru_cache(maxsize=1)
+def exam_photo_catalog() -> dict[str, list[dict]]:
+    return json.loads(PHOTO_CATALOG.read_text(encoding="utf-8"))
+
+
 @lru_cache(maxsize=1)
 def exam_specimens() -> dict[str, dict]:
     path = Path(__file__).resolve().parents[1] / "histology_exam_specimens.json"
@@ -20,6 +28,7 @@ def exam_groups(bank: dict) -> dict:
         for specimen in group["specimens"]
     }
     groups: dict = {}
+    photo_catalog = exam_photo_catalog()
     for id_, entry in exam_specimens().items():
         if id_ in diagnostic_items:
             group_id, base = diagnostic_items[id_]
@@ -32,8 +41,27 @@ def exam_groups(bank: dict) -> dict:
             "Отдельные учебные кадры могут отличаться по окраске и увеличению."
         ) if base else ""
         spec = {**base, "magnification": None, "metadata_note": note, **entry}
+        if photos := photo_catalog.get(id_):
+            images = spec.get("images", [])
+            spec["image_guides"] = [
+                *(image_guide(spec, index) for index in range(len(images))),
+                *({"kind": "micrograph", "exam_caption": photo["caption"]} for photo in photos),
+            ]
+            spec["images"] = [*images, *(photo["file"] for photo in photos)]
+            spec["exam_photos"] = photos
         groups[group_id]["specimens"].append(spec)
     return groups
+
+
+def quiz_photos(specimen: dict) -> dict[str | None, tuple[str, str]]:
+    """Keep the existing quiz photo as the default and index each new one separately."""
+    photos = {}
+    if legacy_photo := specimen.get("guess_image"):
+        photos[None] = (legacy_photo, specimen.get("guess_image_note", ""))
+    for photo in specimen.get("exam_photos", []):
+        if quiz_file := photo.get("quiz_file"):
+            photos[Path(quiz_file).stem] = (quiz_file, photo["caption"])
+    return photos
 
 
 def find_specimen(bank: dict, specimen_id: str) -> tuple[str, dict, dict] | None:
@@ -74,4 +102,6 @@ def image_caption(specimen: dict, index: int) -> str:
         parts.append("Ориентиры: " + guide["visible"])
     if guide.get("note"):
         parts.append("Пояснение: " + guide["note"])
+    if guide.get("exam_caption"):
+        parts.append("Подпись к экзаменационному фото:\n" + guide["exam_caption"])
     return "\n\n".join(parts)
