@@ -21,7 +21,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 import telegram_bot as tb
 from services import histology_content, histology_exam
 from services.content_access import EXAM_TRIAL_CLOSED, can_visit, enter, trial_expiry
-from services.telegram_ui import safe_delete_message
+from services.telegram_ui import escaped_text_pages, safe_delete_message
 
 router = Router()
 
@@ -180,6 +180,12 @@ def get_histology_specimen_keyboard(diag_key: str, spec_id: str, exam: bool = Fa
     spec = get_histology_specimen(diag_key, spec_id, exam)
     builder = InlineKeyboardBuilder()
     n_img = len(spec.get("images", []))
+    n_exam_photos = len(spec.get("exam_photos", []))
+    if n_exam_photos:
+        builder.button(
+            text=f"🔬 Экзаменационные фото ({n_exam_photos})",
+            callback_data=f"histology_img:{diag_key}:{spec_id}:{n_img - n_exam_photos}{suffix}",
+        )
     if n_img:
         builder.button(text=f"🖼 Изображения ({n_img})", callback_data=f"histology_img:{diag_key}:{spec_id}:0{suffix}")
     builder.adjust(1)
@@ -199,15 +205,38 @@ def get_histology_image_keyboard(diag_key: str, spec_id: str, idx: int, total: i
     builder.row(InlineKeyboardButton(text="🔙 К препарату", callback_data=f"histology_specimen:{diag_key}:{spec_id}{suffix}"))
     return builder.as_markup()
 
+def _photo_caption(header: str, note: str, footer: str) -> tuple[str, str]:
+    caption = "\n\n".join(part for part in (header, note, footer) if part)
+    if len(caption.encode("utf-16-le")) <= 2048:
+        return caption, ""
+    return f"{header}\n\nПодпись в сообщении ниже.\n\n{footer}", note
+
+
+async def _send_photo_note(message, note: str):
+    if note:
+        for page in escaped_text_pages(note):
+            await message.answer(page, parse_mode="HTML")
+
+
 async def render_histology_image(callback: CallbackQuery, diag_key: str, spec_id: str, idx: int,
                                  exam: bool = False):
     spec = get_histology_specimen(diag_key, spec_id, exam)
     images = spec.get("images", [])
-    from services.histology_content import image_caption
-    caption = f"🔬 №{spec['number']}. " + image_caption(spec, idx) + f"\n\n{idx + 1}/{len(images)}"
+    footer = f"{idx + 1}/{len(images)}"
+    guide = histology_content.image_guide(spec, idx)
+    separate_note = ""
+    if exam_caption := guide.get("exam_caption"):
+        caption, separate_note = _photo_caption(
+            f"🔬 №{spec['number']}. {spec['title']}",
+            f"Подпись к экзаменационному фото:\n{exam_caption}",
+            footer,
+        )
+    else:
+        caption = f"🔬 №{spec['number']}. {histology_content.image_caption(spec, idx)}\n\n{footer}"
     keyboard = get_histology_image_keyboard(diag_key, spec_id, idx, len(images), exam)
     photo = FSInputFile(os.path.join(tb.HISTOLOGY_IMAGES_DIR, images[idx]))
-    await callback.message.answer_photo(photo, caption=caption, reply_markup=keyboard)
+    sent = await callback.message.answer_photo(photo, caption=caption, reply_markup=keyboard)
+    await _send_photo_note(sent, separate_note)
     await safe_delete_message(callback.message)
 
 @router.callback_query(F.data == "histology_menu")
@@ -369,7 +398,7 @@ def get_histology_guess_pool(scope: str):
         for diag_key, diag in histology_content.exam_groups(tb.HISTOLOGY).items()
         if scope in {"all", "mistakes", diag_key}
         for spec in diag["specimens"]
-        if spec.get("guess_image")
+        if histology_content.quiz_photos(spec)
     ]
 
 def start_histology_guess_session(user_id: int, scope: str) -> bool:
@@ -426,7 +455,10 @@ async def render_histology_guess_question(callback: CallbackQuery, user_id: int)
         spec = get_histology_specimen(diag_key, spec_id, exam=True)
         mode = "Работа над ошибками" if session["scope"] == "mistakes" else "Практический зачёт"
         caption = f"🎓 {mode} — {index + 1}/{total}\n\nЧто это за препарат?"
-        photo = FSInputFile(os.path.join(tb.HISTOLOGY_IMAGES_DIR, spec["guess_image"]))
+        photos = session.setdefault("photos", {})
+        if index not in photos:
+            photos[index] = random.choice(list(histology_content.quiz_photos(spec).values()))
+        photo = FSInputFile(os.path.join(tb.HISTOLOGY_IMAGES_DIR, photos[index][0]))
         sent = await callback.message.answer_photo(photo, caption=caption, reply_markup=get_histology_guess_question_keyboard(session))
         session["msg"] = sent
         session["displayed_index"] = index
@@ -445,12 +477,12 @@ async def render_histology_guess_answer(user_id: int):
     spec = get_histology_specimen(diag_key, spec_id, exam=True)
     lines = [f"🎓 Практический зачёт — {session['index'] + 1}/{total}", "", f"№{spec['number']}. {spec['title']}"]
     if spec.get("stain"):
-        lines.append(f"Окраска: {spec['stain']}")
-    if spec.get("guess_image_note"):
-        lines.append(spec["guess_image_note"])
-    lines.append("")
-    lines.append("Ты угадал(а)?")
-    await session["msg"].edit_caption(caption="\n".join(lines), reply_markup=get_histology_guess_answer_keyboard(session))
+        lines.append(f"Окраска по экзаменационному перечню: {spec['stain']}")
+    _, note = session["photos"][session["index"]]
+    caption, separate_note = _photo_caption("\n".join(lines), note, "Ты угадал(а)?")
+    message = session["msg"]
+    await message.edit_caption(caption=caption, reply_markup=get_histology_guess_answer_keyboard(session))
+    await _send_photo_note(message, separate_note)
 
 async def render_histology_guess_summary(user_id: int, aborted: bool = False):
     session = HISTOLOGY_GUESS_SESSIONS.pop(user_id, None)
