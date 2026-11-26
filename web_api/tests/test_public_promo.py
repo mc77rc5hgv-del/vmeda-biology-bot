@@ -74,7 +74,7 @@ def test_promo_all_subjects_off_revokes_on_existing_token_preserves_everything(p
     for path in (url, url + '/media/0', '/api/v1/histology/exam/catalog', '/api/v1/anatomy/exam/parts'):
         response = c.get(path, headers=h)
         assert response.status_code == 403, (path, response.text)
-        assert response.headers['X-VMEDA-Subscription-Required'] in ('histology', 'anatomy')
+        assert response.headers['X-VMEDA-Subscription-Required'] == ('anatomy_tests' if '/anatomy/' in path else 'histology')
     assert c.get('/api/v1/me', headers=h).status_code == 200
     assert len(public_state['miniapp_public_promo']['history']) == 2
     assert {k: v for k, v in public_state.items() if k != 'miniapp_public_promo'} == before

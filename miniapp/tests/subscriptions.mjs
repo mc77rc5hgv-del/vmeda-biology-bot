@@ -22,7 +22,8 @@ function load(name) {
   return loaded.get(name);
 }
 const api = load('subscriptions');
-assert.deepEqual(Object.keys(api.paidSubjectTitles).sort(), ['anatomy', 'biology', 'chemistry', 'histology', 'physics']);
+assert.deepEqual(Object.keys(api.paidSubjectTitles).sort(), ['anatomy', 'anatomy_tests', 'biology', 'chemistry', 'histology', 'physics']);
+assert.equal(api.paidSubjectTitles.anatomy_tests, 'Тесты по анатомии');
 assert.equal(api.paidSubjectTitles.histology, 'Гистология');
 for (const value of ['https://bad.example', '//bad.example', '/profile/subscriptions', '/subjects/../profile']) {
   assert.equal(api.subscriptionReturnPath(value), '/profile');

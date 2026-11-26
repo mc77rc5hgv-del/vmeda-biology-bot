@@ -3,6 +3,7 @@ import { SUBJECTS } from "./subjectRegistry";
 export const paidSubjectTitles: Record<string, string> = Object.fromEntries(
   Object.entries(SUBJECTS).filter(([, meta]) => meta.paid).map(([id, meta]) => [id, meta.title]),
 );
+paidSubjectTitles.anatomy_tests = "Тесты по анатомии";
 
 export function subscriptionPath(subjectId: string, returnTo: string): string {
   const params = new URLSearchParams({ subject: subjectId, returnTo: subscriptionReturnPath(returnTo) });

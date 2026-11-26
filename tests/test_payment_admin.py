@@ -140,19 +140,19 @@ async def main():
     # ---- 8. notify_admins_of_payment_request pings payment admins too, not just ADMIN_IDS ----
     tb.stats["subscriptions"].pop(str(buyer_id), None)
     sent_msgs.clear()
-    cb_rub = FakeCB("buy_sub_rubles:22", uid=buyer_id)
+    cb_rub = FakeCB("buy_sub_rubles:21", uid=buyer_id)
     await tb.cb_buy_sub_rubles(cb_rub)
     payer_requests = [(c, t, k) for c, t, k in sent_msgs if c == payer_id]
     assert payer_requests, "payment admin must receive the one-tap confirm request too"
     confirm_cb_data = payer_requests[0][2].inline_keyboard[0][0].callback_data
-    assert confirm_cb_data == f"admin_confirm_sub:22:{buyer_id}:-:249"
+    assert confirm_cb_data == f"admin_confirm_sub:21:{buyer_id}:-:129"
     print("8. notify_admins_of_payment_request also notifies payment admins: OK")
 
     # ---- 9. payment admin can tap confirm and actually grant the subscription ----
     sent_msgs.clear()
     cb_confirm = FakeCB(confirm_cb_data, uid=payer_id)
     await tb.cb_admin_confirm_sub(cb_confirm)
-    assert tb.get_subscription(buyer_id)["tier"] == 22
+    assert tb.get_subscription(buyer_id)["tier"] == 21
     assert cb_confirm.message.edits and "Подтверждено" in cb_confirm.message.edits[0][0]
     tb.stats["subscriptions"].pop(str(buyer_id), None)
     tb.bot.send_message = orig_send

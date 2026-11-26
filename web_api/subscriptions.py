@@ -10,6 +10,7 @@ import time
 from datetime import datetime, timezone
 
 PREFIX = 'vmeda-miniapp:'
+BOT_PREFIX = 'vmeda-bot-sub:'
 SUBJECTS = {'biology': 'Биология', 'physics': 'Физика', 'chemistry': 'Химия'}
 _pending_checkouts: dict[int, tuple[str, float]] = {}
 
@@ -22,32 +23,40 @@ def _signature(tb, body: str) -> str:
     return hmac.new(tb.BOT_TOKEN.encode(), body.encode(), hashlib.sha256).hexdigest()[:24]
 
 
-def make_payload(tb, user_id: int, tier_id: int, subject: str | None) -> tuple[str, str]:
+def make_payload(tb, user_id: int, tier_id: int, subject: str | None, *, prefix=PREFIX, amount=None) -> tuple[str, str]:
     payment_id = secrets.token_hex(6)
-    body = f'{user_id}:{tier_id}:{subject or "-"}:{tb.SUBSCRIPTION_TIERS[tier_id]["price_stars"]}:{int(time.time())}:{payment_id}'
-    return PREFIX + body + ':' + _signature(tb, body), payment_id
+    price = tb.access.subscription_price(user_id, tier_id, 'stars') if amount is None else amount
+    body = f'{user_id}:{tier_id}:{subject or "-"}:{price}:{int(time.time())}:{payment_id}'
+    return prefix + body + ':' + _signature(tb, prefix + body if prefix == BOT_PREFIX else body), payment_id
 
 
 def parse_payload(tb, payload: str) -> dict:
-    if not payload.startswith(PREFIX):
+    prefix = payload.partition(':')[0] + ':'
+    if prefix not in (PREFIX, BOT_PREFIX):
         raise ValueError('Некорректный счёт')
-    fields = payload[len(PREFIX):].split(':')
+    fields = payload[len(prefix):].split(':')
     if len(fields) != 7:
         raise ValueError('Некорректный счёт')
     uid, tier, subject, amount, issued, payment_id, signature = fields
-    if not hmac.compare_digest(signature, _signature(tb, ':'.join(fields[:-1]))):
+    body = ':'.join(fields[:-1])
+    if not hmac.compare_digest(signature, _signature(tb, prefix + body if prefix == BOT_PREFIX else body)):
         raise ValueError('Некорректная подпись счёта')
     if len(payment_id) != 12 or any(c not in '0123456789abcdef' for c in payment_id):
         raise ValueError('Некорректный счёт')
     result = {'user_id': int(uid), 'tier_id': int(tier), 'subject': None if subject == '-' else subject,
-              'amount': int(amount), 'issued': int(issued), 'payment_id': payment_id}
+              'amount': int(amount), 'issued': int(issued), 'payment_id': payment_id,
+              'source': 'bot' if prefix == BOT_PREFIX else 'miniapp'}
     if result['user_id'] <= 0 or result['amount'] <= 0:
         raise ValueError('Некорректный счёт')
     return result
 
 
-def validate_tier(tb, tier_id: int, subject: str | None, *, require_subject=True) -> dict:
+def validate_tier(tb, tier_id: int, subject: str | None, *, require_subject=True, settling=False) -> dict:
     cfg = tb.ACTIVE_SUBSCRIPTION_TIERS.get(tier_id)
+    if settling and not cfg:
+        retired = tb.SUBSCRIPTION_TIERS.get(tier_id, {})
+        if retired.get('retired'):
+            cfg = retired
     if not cfg or cfg.get('price_stars', 0) <= 0:
         raise ValueError('Тариф больше не продаётся')
     if cfg.get('expires_at') is not None and cfg['expires_at'] <= time.time():
@@ -60,12 +69,13 @@ def validate_tier(tb, tier_id: int, subject: str | None, *, require_subject=True
     return cfg
 
 
-def purchase_reason(tb, user_id: int, tier_id: int, subject: str | None) -> str | None:
-    cfg = validate_tier(tb, tier_id, subject, require_subject=False)
+def purchase_reason(tb, user_id: int, tier_id: int, subject: str | None, *, settling=False) -> str | None:
+    cfg = validate_tier(tb, tier_id, subject, require_subject=False, settling=settling)
     current = tb.get_subscription(user_id)
     if not current or not tb.has_active_subscription(user_id):
         return None
-    same = current.get('tier') == tier_id and current.get('restricted_subject') == subject
+    requested_subject = cfg.get('fixed_subject') or subject
+    same = current.get('tier') == tier_id and current.get('restricted_subject') == requested_subject
     renewal = bool(same and cfg.get('duration_days'))
     if renewal and current.get('expires') is None:
         return 'Текущая подписка уже бессрочная'
@@ -78,7 +88,9 @@ def purchase_reason(tb, user_id: int, tier_id: int, subject: str | None) -> str 
     if old_end is None and new_end is not None or old_end is not None and new_end is not None and new_end < old_end:
         return 'Этот тариф сократит уже оплаченный срок'
     old_subjects = {current['restricted_subject']} if current.get('restricted_subject') else set(SUBJECTS)
-    new_subjects = {subject} if cfg.get('subject_choice_required') else set(SUBJECTS)
+    new_subjects = {requested_subject} if requested_subject else set(SUBJECTS)
+    if cfg.get('anatomy') or cfg.get('scope') == 'all':
+        new_subjects.add(tb.access.ANATOMY_TEST_SUBJECT)
     if not old_subjects <= new_subjects:
         return 'Этот тариф уменьшит доступ к предметам'
     old_cfg = tb.SUBSCRIPTION_TIERS.get(current.get('tier'), {})
@@ -116,7 +128,8 @@ async def pre_checkout(tb, query):
         if age < -30 or age > 15 * 60:
             raise ValueError('Счёт устарел — открой подписки и создай новый')
         cfg = validate_tier(tb, data['tier_id'], data['subject'])
-        if query.currency != 'XTR' or query.total_amount != data['amount'] or data['amount'] != cfg['price_stars']:
+        quote = tb.access.subscription_price(query.from_user.id, data['tier_id'], 'stars')
+        if query.currency != 'XTR' or query.total_amount != data['amount'] or data['amount'] not in (quote, cfg['price_stars']):
             raise ValueError('Цена изменилась — создай новый счёт')
         if payment_receipt(tb, query.from_user.id, data['payment_id']):
             raise ValueError('Этот счёт уже оплачен')
@@ -161,9 +174,9 @@ async def successful_payment(tb, message):
     old = copy.deepcopy(tb.get_subscription(message.from_user.id))
     receipt = {'user_id': message.from_user.id, 'stars': payment.total_amount, 'payload': payment.invoice_payload,
                'at': time.time(), 'payment_id': data['payment_id'], 'tier': data['tier_id'],
-               'source': 'miniapp', 'previous_subscription': old}
+               'source': data['source'], 'previous_subscription': old}
     try:
-        reason = purchase_reason(tb, message.from_user.id, data['tier_id'], data['subject'])
+        reason = purchase_reason(tb, message.from_user.id, data['tier_id'], data['subject'], settling=True)
     except ValueError as exc:
         reason = str(exc)
     if payment_receipt(tb, message.from_user.id, data['payment_id']):

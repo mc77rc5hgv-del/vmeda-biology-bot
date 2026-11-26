@@ -2,6 +2,7 @@
 import asyncio
 import copy
 from dataclasses import replace
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -40,6 +41,70 @@ def paid(row, **changes):
     result = VerifiedPayment('codeepay', 'charge-' + row['id'], row['provider_id'], row['id'], row['amount_minor'], 'RUB', PaymentStatus.PAID,
                              {'proof': row['proof'], 'net_minor': row['amount_minor'] * 95 // 100, 'fee_minor': row['amount_minor'] * 5 // 100})
     return replace(result, **changes)
+
+
+@pytest.mark.asyncio
+async def test_weekly_anatomy_pass_and_winter_upgrade_are_scoped_and_charged_once(service, monkeypatch):
+    from services.content_access import exam_entitled
+
+    tb = service.tb
+    uid = 777123
+    pass_id = tb.access.ANATOMY_TEST_TIER_ID
+    winter_id = tb.access.WINTER_TIER_ID
+    row = await service.checkout(uid, pass_id, None, 'anatomy-week-sbp', 'bot')
+    assert row['amount_minor'] == 14900
+    await service.settle(row, paid(row))
+    assert exam_entitled(tb, uid, 'anatomy_tests')
+    assert not tb.has_subscription_anatomy_access(uid)
+    assert not exam_entitled(tb, uid, 'histology')
+    assert not tb.has_subject_access(uid, 'biology') and not tb.has_free_access(uid)
+    assert tb.access.subscription_price(uid, winter_id, 'stars') == 599
+
+    before = copy.deepcopy(tb.get_subscription(uid))
+    with pytest.raises(ValueError):
+        await service.checkout(uid, 21, None, 'would-remove-anatomy', 'miniapp')
+    assert tb.get_subscription(uid) == before
+    winter = await service.checkout(uid, winter_id, None, 'anatomy-sbp-upgrade', 'miniapp')
+    assert winter['amount_minor'] == 45000
+    await service.settle(winter, paid(winter))
+    await service.settle(winter, paid(winter))
+    assert tb.get_subscription(uid)['tier'] == winter_id
+    assert exam_entitled(tb, uid, 'anatomy_tests') and exam_entitled(tb, uid, 'histology')
+    assert [entry['price'] for entry in tb.stats['subscription_purchase_log']] == [149, 450]
+    with pytest.raises(ValueError):
+        await service.checkout(uid, pass_id, None, 'would-remove-winter', 'miniapp')
+
+    user = SimpleNamespace(id=uid + 1)
+    send_invoice = AsyncMock()
+    monkeypatch.setattr(tb.bot, 'send_invoice', send_invoice)
+    for tier_id, amount in ((pass_id, 149), (winter_id, 450)):
+        await tb.send_subscription_stars_invoice(user.id, tier_id)
+        invoice = send_invoice.await_args.kwargs
+        assert invoice['prices'][0].amount == amount
+        query = SimpleNamespace(id=f'query-{tier_id}', invoice_payload=invoice['payload'], from_user=user,
+                                currency='XTR', total_amount=amount, answer=AsyncMock())
+        await tb.handle_pre_checkout(query)
+        query.answer.assert_awaited_once_with(ok=True)
+        payment = SimpleNamespace(invoice_payload=invoice['payload'], currency='XTR', total_amount=amount,
+                                  telegram_payment_charge_id=f'charge-{tier_id}')
+        await tb.handle_successful_payment(SimpleNamespace(from_user=user, successful_payment=payment))
+    assert tb.get_subscription(user.id)['tier'] == winter_id
+    assert tb.stats['processed_payment_charge_ids']['charge-24']['source'] == 'bot'
+
+
+@pytest.mark.asyncio
+async def test_retired_plan_accepts_an_existing_provider_payment_without_allowing_new_sales(service, monkeypatch):
+    tb = service.tb
+    tier_id = 29
+    monkeypatch.setitem(tb.ACTIVE_SUBSCRIPTION_TIERS, tier_id, tb.SUBSCRIPTION_TIERS[tier_id])
+    pending = await service.checkout(777123, tier_id, None, 'already-created', 'miniapp')
+    monkeypatch.delitem(tb.ACTIVE_SUBSCRIPTION_TIERS, tier_id)
+    with pytest.raises(ValueError, match='больше не продаётся'):
+        await service.checkout(777124, tier_id, None, 'cannot-buy-retired', 'miniapp')
+    await service.settle(pending, paid(pending))
+    assert service.ledger.get(pending['id'])['state'] == 'applied'
+    assert tb.get_subscription(777123)['tier'] == tier_id
+    assert tb.has_subscription_histology_access(777123)
 
 
 @pytest.mark.asyncio

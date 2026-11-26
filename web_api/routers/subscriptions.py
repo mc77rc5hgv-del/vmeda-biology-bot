@@ -24,6 +24,8 @@ class InvoiceRequest(BaseModel):
 
 
 def _plan_subjects(cfg):
+    if subject := cfg.get('fixed_subject'):
+        return [subject]
     subjects = list(SUBJECTS)
     rule = cfg.get('histology_until_rule')
     if rule == 'expiry' or isinstance(rule, (int, float)) and rule > time.time() or cfg.get('scope') == 'all' or cfg.get('early_histology'):
@@ -45,12 +47,17 @@ def _catalog(tb, user_id):
                    for key, title in SUBJECTS.items()] if cfg.get('subject_choice_required') else []
         reason = purchase_reason(tb, user_id, tier_id, None) if not choices else (
             None if any(not choice['unavailable_reason'] for choice in choices) else choices[0]['unavailable_reason'])
-        plans.append({'id': tier_id, 'title': cfg['title'], 'short': cfg['short'], 'price_stars': cfg['price_stars'], 'price_rub': cfg['price_rub'],
+        price_rub = tb.access.subscription_price(user_id, tier_id, 'rubles')
+        price_stars = tb.access.subscription_price(user_id, tier_id, 'stars')
+        plans.append({'id': tier_id, 'title': cfg['title'], 'short': cfg['short'], 'price_stars': price_stars, 'price_rub': price_rub,
+                      'upgrade_credit_rub': cfg['price_rub'] - price_rub, 'upgrade_credit_stars': cfg['price_stars'] - price_stars,
                       'duration_days': cfg.get('duration_days'), 'expires_at': iso(cfg.get('expires_at')),
                       'benefits': cfg.get('benefits', []), 'badge': cfg.get('badge'),
                       'ai_limit': cfg.get('ai_limit'), 'ai_period': cfg.get('ai_limit_type'),
                       'courses': [course for course, name in [(1, 'year1'), (2, 'year2')] if tier_id in tb._course_tier_ids(name)],
-                      'subjects': _plan_subjects(cfg), 'subject_options': choices, 'unavailable_reason': reason, 'card_transfer_url': tb.get_sub_rubles_keyboard(tier_id).inline_keyboard[0][0].url})
+                      'subjects': _plan_subjects(cfg), 'anatomy_tests': bool(cfg.get('anatomy') or cfg.get('fixed_subject') == tb.access.ANATOMY_TEST_SUBJECT),
+                      'subject_options': choices, 'unavailable_reason': reason,
+                      'card_transfer_url': tb.get_sub_rubles_keyboard(tier_id, price=price_rub).inline_keyboard[0][0].url})
     active = tb.has_active_subscription(user_id)
     sub = tb.get_subscription(user_id) if active else None
     cfg = tb.SUBSCRIPTION_TIERS.get(sub.get('tier'), {}) if sub else {}
@@ -62,7 +69,8 @@ def _catalog(tb, user_id):
             'benefits': cfg.get('benefits', []), 'ai_remaining': None if unlimited else tb.ai_requests_left(user_id),
             'ai_limit': limit, 'ai_period': limit_type,
             'access': [{'id': key, 'title': title, 'available': get_subject_access(key, user_id, tb).can_open_subject}
-                       for key, title in ((s['id'], s['title']) for s in list_subjects(user_id, tb))]}}
+                       for key, title in [*((s['id'], s['title']) for s in list_subjects(user_id, tb)),
+                                          (tb.access.ANATOMY_TEST_SUBJECT, 'Тесты по анатомии')]]}}
 
 
 @router.get('/catalog')
@@ -79,16 +87,18 @@ async def invoice(body: InvoiceRequest, user_id: int = Depends(get_current_user_
             raise ValueError(reason)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    payload, payment_id = make_payload(tb, user_id, body.tier_id, body.subject)
+    price_stars = tb.access.subscription_price(user_id, body.tier_id, 'stars')
+    price_rub = tb.access.subscription_price(user_id, body.tier_id, 'rubles')
+    payload, payment_id = make_payload(tb, user_id, body.tier_id, body.subject, amount=price_stars)
     subject_line = f' — {SUBJECTS[body.subject]}' if body.subject else ''
     try:
         url = await tb.bot.create_invoice_link(title=cfg['short'][:32],
                 description=(f'VMEDA: {cfg["title"]}{subject_line}. Доступ откроется после подтверждения оплаты Telegram.')[:255],
                 payload=payload, provider_token='', currency='XTR',
-                prices=[LabeledPrice(label=cfg['short'], amount=cfg['price_stars'])])
+                prices=[LabeledPrice(label=cfg['short'], amount=price_stars)])
     except TelegramAPIError as exc:
         raise HTTPException(status_code=503, detail='Не удалось создать счёт Telegram. Попробуй ещё раз.') from exc
-    return {'url': url, 'payment_id': payment_id, 'price_stars': cfg['price_stars'], 'price_rub': cfg['price_rub'], 'tier_id': body.tier_id}
+    return {'url': url, 'payment_id': payment_id, 'price_stars': price_stars, 'price_rub': price_rub, 'tier_id': body.tier_id}
 
 
 @router.get('/payments/{payment_id}')

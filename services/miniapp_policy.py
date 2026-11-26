@@ -50,8 +50,7 @@ def require_subject(tb, user_id, subject):
 def require_exam_content(tb, user_id, scope):
     if not (full_content_access(tb, user_id) or can_visit(tb, user_id, scope)):
         from fastapi import HTTPException
-        subject = 'anatomy' if scope == 'anatomy_tests' else scope
-        raise HTTPException(403, EXAM_TRIAL_CLOSED, headers={'X-VMEDA-Subscription-Required': subject})
+        raise HTTPException(403, EXAM_TRIAL_CLOSED, headers={'X-VMEDA-Subscription-Required': scope})
 
 
 def set_promo(tb, admin_id, active):

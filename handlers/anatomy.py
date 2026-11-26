@@ -42,7 +42,7 @@ async def anatomy_exam_access_middleware(handler, callback: CallbackQuery, data)
         callback.message,
         f"🦴 <b>Тесты по анатомии</b>\n{tb.DIVIDER}\n\n<b>Пробный доступ закончился.</b>\n\n{EXAM_TRIAL_CLOSED}",
         parse_mode="HTML",
-        reply_markup=tb.get_exam_access_keyboard("anatomy_exam_menu"),
+        reply_markup=tb.get_exam_access_keyboard("anatomy_exam_menu", anatomy_tests=True),
     )
 
 

@@ -43,7 +43,7 @@ export function App() {
       // Ignore late failures from requests belonging to a page already left.
       const currentSubject = pathname.match(/^\/(?:subjects|materials|tests)\/([^/]+)/)?.[1]
         ?? (pathname.startsWith("/histology/") ? "histology" : undefined);
-      if (subjectId && Object.hasOwn(paidSubjectTitles, subjectId) && currentSubject === subjectId) {
+      if (subjectId && Object.hasOwn(paidSubjectTitles, subjectId) && (currentSubject === subjectId || examScope === subjectId)) {
         if (examScope) {
           void queryClient.invalidateQueries({ queryKey: ["access", examScope] });
           return;
