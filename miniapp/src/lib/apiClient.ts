@@ -915,7 +915,7 @@ export interface SubscriptionPlan {
   id: number; title: string; short: string; price_stars: number; price_rub: number; card_transfer_url: string; duration_days: number | null;
   expires_at: string | null; benefits: string[]; badge: string | null; ai_limit: number | null;
   ai_period: string | null; subjects?: string[]; courses: number[]; unavailable_reason: string | null;
-  anatomy_tests?: boolean; upgrade_credit_rub?: number; upgrade_credit_stars?: number;
+  anatomy_tests?: boolean; featured?: boolean; upgrade_credit_rub?: number; upgrade_credit_stars?: number;
   subject_options: { id: string; title: string; unavailable_reason: string | null }[];
 }
 export interface SubscriptionCatalog {

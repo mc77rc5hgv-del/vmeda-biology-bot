@@ -13,9 +13,11 @@
 .tabs button[aria-pressed="true"] { background: var(--academic-blue); color: white; }
 .plans { display: grid; grid-template-columns: 1fr; gap: 16px; }
 .plan { display: flex; flex-direction: column; min-width: 0; padding: 22px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-card); }
+.featured { border-color: var(--academic-blue); background: linear-gradient(135deg, color-mix(in srgb, var(--academic-blue) 10%, var(--surface)), var(--surface) 60%); }
 .active { border-color: var(--academic-blue); }
 .planTop { display: flex; gap: 12px; justify-content: space-between; color: var(--ink-secondary); font-size: var(--text-sm); line-height: 1.5; }
 .planTop span:first-child { color: var(--academic-blue); font-weight: var(--weight-semibold); }
+.featured .planTop span:first-child { color: var(--ink); }
 .plan h2 { font-size: var(--text-xl); margin: 16px 0; line-height: 1.4; }
 .price { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .price svg { color: var(--amber); fill: color-mix(in srgb, var(--amber) 20%, transparent); }
