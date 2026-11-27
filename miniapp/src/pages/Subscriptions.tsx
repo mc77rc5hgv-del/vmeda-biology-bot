@@ -128,7 +128,8 @@ export function SubscriptionsPage() {
         const reason = plan.unavailable_reason || choice?.unavailable_reason;
         const missingChoice = plan.subject_options.length > 0 && !choice;
         const upgradeCredit = plan.upgrade_credit_rub ? `${plan.upgrade_credit_rub} ₽` : plan.upgrade_credit_stars ? `${plan.upgrade_credit_stars} Stars` : null;
-        return <article key={plan.id} className={`${styles.plan} ${current ? styles.active : ""}`}>
+        const cardClassName = [styles.plan, plan.featured && styles.featured, current && styles.active].filter(Boolean).join(" ");
+        return <article key={plan.id} className={cardClassName}>
           <div className={styles.planTop}><span>{current ? "Текущий тариф" : plan.badge || "VMEDA"}</span><span>{term(plan)}</span></div><h2>{plan.title}</h2><div className={styles.price}><strong>{plan.price_rub} ₽</strong><span>или {plan.price_stars} Telegram Stars</span></div><p className={styles.caption}>Разовая оплата · без автоматических списаний</p>
           {upgradeCredit && <p className={styles.caption}>Учтена оплата недельного доступа · {upgradeCredit}</p>}
           <ul className={styles.benefits}>{plan.benefits.map((benefit, i) => <li key={i}><Check size={16} /><span>{benefit}</span></li>)}</ul>
