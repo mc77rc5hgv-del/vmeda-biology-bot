@@ -42,7 +42,7 @@ tb.stats = {
 tb.save_stats = lambda: saved.append(copy.deepcopy(tb.stats))
 sys.modules['telegram_bot'] = tb
 from services import access as real_access
-from services.content_access import can_visit, enter, trial_expiry
+from services.content_access import can_visit, enter, trial_active, trial_expiry
 for name in dir(real_access):
     if not name.startswith('__'): setattr(tb, name, getattr(real_access, name))
 tb.stats['histology_learning']['11'] = {'attempts': 4, 'known': 2, 'wrong': 2, 'mastered': ['d1'], 'mistakes': ['d2']}
@@ -66,8 +66,9 @@ env={'tb':tb,'time':time,'HISTOLOGY_PUBLIC':False,'can_visit':can_visit,'trial_e
 extract({'get_histology_temp_expiry','has_histology_temp_access','histology_permanently_unlocked','histology_access_ok'},env)
 tb.histology_access_ok=env['histology_access_ok']
 tb.histology_permanently_unlocked=env['histology_permanently_unlocked']
-anatomy_env={'tb':tb,'ANATOMY_PUBLIC':False,'ANATOMY_FREE_SECTIONS':{'module1_osteology'},'ANATOMY_MAINTENANCE_MODE':True}
-extract({'anatomy_access_ok','anatomy_section_access_ok','anatomy_maintenance_mode_enabled'},anatomy_env,'handlers/anatomy.py')
+anatomy_env={'tb':tb,'trial_active':trial_active,'ANATOMY_PUBLIC':False,'ANATOMY_FREE_SECTIONS':{'module1_osteology'},'ANATOMY_MAINTENANCE_MODE':True}
+extract({'anatomy_permanently_unlocked','anatomy_access_ok','anatomy_section_access_ok','anatomy_maintenance_mode_enabled'},anatomy_env,'handlers/anatomy.py')
+tb.anatomy_permanently_unlocked=anatomy_env['anatomy_permanently_unlocked']
 tb.has_manual_anatomy_demo_access=lambda uid:False
 tb.ANATOMY={'module1_osteology':{},'module7_nervous':{}}
 tb.anatomy_section_access_ok=anatomy_env['anatomy_section_access_ok']
@@ -124,7 +125,7 @@ tb.stats['manual_access_granted'].add(11)
 assert api_access._subject_is_open(tb,11,'biology')
 tb.stats['manual_access_granted'].clear()
 
-# Public admission keeps trial and referral access confined to the exam scopes.
+# Public admission gives the trial to both study subjects, independently of referral access.
 os.environ['MINIAPP_ACCESS_MODE']='public'
 from services.miniapp_policy import PAID_SUBJECTS
 before=copy.deepcopy(tb.stats)
@@ -134,7 +135,8 @@ assert tb.stats==before
 assert enter(tb,12,'anatomy_tests')['trial_started']
 assert api_access._subject_is_open(tb,12,'anatomy_tests')
 assert api_access._subject_is_open(tb,12,'histology')
-assert not api_access._subject_is_open(tb,12,'anatomy')
+assert api_access._subject_is_open(tb,12,'anatomy')
+assert not any(api_access._subject_is_open(tb,12,s) for s in ('biology','physics','chemistry'))
 assert not enter(tb,12,'histology')['trial_started']
 before=copy.deepcopy(tb.stats)
 tb.stats['miniapp_public_promo']={'active':True, 'history':[]}

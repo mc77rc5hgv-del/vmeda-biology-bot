@@ -3,8 +3,8 @@ import time
 
 
 GATED = frozenset({'biology', 'physics', 'chemistry'})
-EXAM_TRIAL_SUBJECTS = frozenset({'anatomy_tests', 'histology'})
-EXAM_TRIAL_HOURS = 24
+EXAM_TRIAL_SUBJECTS = frozenset({'anatomy', 'anatomy_tests', 'histology'})
+EXAM_TRIAL_HOURS = 12
 EXAM_TRIAL_CLOSED = 'Для доступа нужна подходящая подписка или два новых однокурсника по твоей ссылке в этом месяце.'
 
 
@@ -17,9 +17,15 @@ def trial_expiry(tb, user_id):
     return tb.stats.get('histology_temp_access', {}).get(uid, 0)
 
 
+def trial_active(tb, user_id):
+    return time.time() < trial_expiry(tb, user_id)
+
+
 def exam_entitled(tb, user_id, subject):
     if subject == 'histology':
         return tb.histology_permanently_unlocked(user_id)
+    if subject == 'anatomy':
+        return tb.anatomy_permanently_unlocked(user_id)
     return (
         tb.is_admin_or_assistant(user_id)
         or tb.is_section_promo_active('global')
@@ -31,16 +37,14 @@ def exam_entitled(tb, user_id, subject):
 
 def trial_available(tb, user_id):
     uid = str(user_id)
-    return all(uid not in tb.stats.get(key, {}) for key in (
-        'exam_trial_access', 'histology_temp_access', 'histology_warnings',
-    ))
+    return all(uid not in tb.stats.get(key, {}) for key in ('exam_trial_access', 'histology_temp_access'))
 
 
 def can_visit(tb, user_id, subject):
     if subject in GATED:
         return tb.has_subject_access(user_id, subject) or tb.stats['referral_warnings'].get(str(user_id), {}).get('count', 0) < tb.REFERRAL_WARNING_THRESHOLD
     if subject in EXAM_TRIAL_SUBJECTS:
-        return exam_entitled(tb, user_id, subject) or time.time() < trial_expiry(tb, user_id)
+        return exam_entitled(tb, user_id, subject) or trial_active(tb, user_id)
     return True
 
 

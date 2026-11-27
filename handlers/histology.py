@@ -20,7 +20,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 import telegram_bot as tb
 from services import histology_content, histology_exam
-from services.content_access import EXAM_TRIAL_CLOSED, can_visit, enter, trial_expiry
+from services.content_access import can_visit, trial_available, trial_expiry
 from services.telegram_ui import escaped_text_pages, safe_delete_message
 
 router = Router()
@@ -34,8 +34,6 @@ async def _learning_call(function, *args):
 
 HISTOLOGY_PUBLIC = False  # когда раздел будет готов для всех — переключить на True
 HISTOLOGY_PROMO_SECONDS = 24 * 60 * 60
-HISTOLOGY_WARNING_THRESHOLD = tb.REFERRAL_WARNING_THRESHOLD  # 3 предупреждения, как у Биологии/Физики/Химии
-HISTOLOGY_WARNING_COOLDOWN_SECONDS = tb.REFERRAL_WARNING_COOLDOWN_SECONDS  # не чаще раза в 4ч
 
 def get_histology_temp_expiry(user_id: int) -> float:
     return trial_expiry(tb, user_id)
@@ -57,14 +55,17 @@ def histology_access_ok(user_id: int) -> bool:
 
 async def histology_gate_ok(callback: CallbackQuery) -> bool:
     """Проверить доступ до показа контента, в том числе после нажатия старой кнопки."""
-    decision = enter(tb, callback.from_user.id, 'histology')
-    if not decision['allowed']:
-        await callback.answer("Пробный доступ закончился", show_alert=True)
+    user_id = callback.from_user.id
+    if not can_visit(tb, user_id, 'histology'):
+        if trial_available(tb, user_id):
+            await callback.answer()
+        else:
+            await callback.answer("Пробный доступ закончился", show_alert=True)
         await tb.safe_edit_text(
             callback.message,
-            get_histology_locked_text(),
+            get_histology_locked_text(user_id),
             parse_mode="HTML",
-            reply_markup=get_histology_locked_keyboard()
+            reply_markup=get_histology_locked_keyboard(user_id)
         )
         return False
 
@@ -80,17 +81,17 @@ def get_histology_specimen(diag_key: str, spec_id: str, exam: bool = False):
             return spec
     return None
 
-def get_histology_locked_text() -> str:
+def get_histology_locked_text(user_id: int) -> str:
     cheapest = tb.cheapest_histology_tier()
     return (
         f"🔬 <b>Гистология</b>\n{tb.DIVIDER}\n\n"
-        f"<b>Пробный доступ закончился.</b>\n\n{EXAM_TRIAL_CLOSED}\n\n"
+        f"{tb.get_exam_access_title(user_id, 'histology')}\n\n"
         "В разделе есть препараты, учебные схемы, тесты и вопросы по теории. "
         f"Подписка с гистологией — от <b>{cheapest['price_rub']} ₽ / {cheapest['price_stars']} ⭐</b>."
     )
 
-def get_histology_locked_keyboard():
-    return tb.get_exam_access_keyboard("back_to_main")
+def get_histology_locked_keyboard(user_id: int):
+    return tb.get_exam_access_keyboard("back_to_main", user_id=user_id, subject="histology")
 
 async def announce_histology_promo_start() -> None:
     builder = InlineKeyboardBuilder()

@@ -52,8 +52,8 @@ def test_promo_all_subjects_off_revokes_on_existing_token_preserves_everything(p
     assert c.get('/api/v1/me', headers=h).status_code == 200
     for subject in PAID_SUBJECTS:
         access = c.get(f'/api/v1/access/{subject}', headers=h).json()
-        assert access['subscription_required'] is (subject != 'histology')
-        assert access['trial_available'] is (subject == 'histology')
+        assert access['subscription_required'] is (subject not in {'anatomy', 'histology'})
+        assert access['trial_available'] is (subject in {'anatomy', 'histology'})
     set_promo(tb, ADMIN, True).result()
     set_promo(tb, ADMIN, True).result()  # idempotent button retry
     sync = c.get('/api/v1/sync/state', headers=h).json()
@@ -129,6 +129,7 @@ def test_exam_trial_shared_by_bot_and_public_api_without_extending(public_state,
     c, h = client()
     key = str(USER)
     anatomy = '/api/v1/access/anatomy_tests'
+    course = '/api/v1/access/anatomy'
     histology = '/api/v1/access/histology'
     anatomy_bank = '/api/v1/anatomy/exam/parts'
     histology_bank = '/api/v1/histology/exam/catalog'
@@ -139,25 +140,37 @@ def test_exam_trial_shared_by_bot_and_public_api_without_extending(public_state,
     handler = AsyncMock()
     monkeypatch.setattr(tb, 'safe_edit_text', AsyncMock())
 
-    assert all(c.get(path, headers=h).json()['trial_available'] for path in (anatomy, histology))
+    public_state['histology_warnings'][key] = {'count': 3}
+    assert all(c.get(path, headers=h).json()['trial_available'] for path in (course, anatomy, histology))
     assert all(c.get(path, headers=h).status_code == 403 for path in guard_paths)
+    asyncio.run(anatomy_exam_access_middleware(handler, old_button, {}))
+    handler.assert_not_awaited()
+    preview = c.get('/api/v1/study-preview', headers=h).json()
+    assert len(preview['anatomy']) == 3 and all(q['explanation'] for q in preview['anatomy'])
+    assert (preview['bundle'], preview['test_pass']) == ({'id': 32, 'price_rub': 449}, {'id': 31, 'price_rub': 149})
+    image = c.get(preview['histology']['image_url'], headers=h)
+    assert image.status_code == 200 and image.content.startswith(b'\xff\xd8\xff')
     assert key not in public_state['exam_trial_access']
 
-    start = c.post(histology + '/enter', headers=h).json()
-    assert start['trial_started'] and start['access']['trial_duration_hours'] == 24
+    start = c.post(course + '/enter', headers=h).json()
+    assert start['trial_started'] and start['access']['trial_duration_hours'] == 12
     deadline = public_state['exam_trial_access'][key]
-    assert 86390 < deadline - time.time() <= 86400
-    assert c.get(anatomy, headers=h).json()['trial_expires_at'] == start['access']['trial_expires_at']
+    assert 43190 < deadline - time.time() <= 43200
+    assert all(c.get(path, headers=h).json()['trial_expires_at'] == start['access']['trial_expires_at']
+               for path in (anatomy, histology))
     assert c.get(anatomy_bank, headers=h).status_code == 200
     assert c.get(histology_bank, headers=h).status_code == 200
     asyncio.run(anatomy_exam_access_middleware(handler, old_button, {}))
     handler.assert_awaited_once()
     assert not c.post(anatomy + '/enter', headers=h).json()['trial_started']
     assert public_state['exam_trial_access'][key] == deadline
-    assert c.get('/api/v1/subjects/anatomy/sections/course', headers=h).status_code == 403
+    assert c.get('/api/v1/subjects/anatomy/sections/course', headers=h).status_code == 200
+    assert all(c.get(f'/api/v1/subjects/{s}/sections/course', headers=h).status_code == 403
+               for s in ('biology', 'physics', 'chemistry'))
 
     public_state['exam_trial_access'][key] = time.time() - 1
     assert all(c.get(path, headers=h).status_code == 403 for path in guard_paths)
+    assert c.get('/api/v1/subjects/anatomy/sections/course', headers=h).status_code == 403
     denied = c.post('/api/v1/anatomy/exam/runs/example/answer', json={'position': 0, 'selected_index': 0}, headers=h)
     assert denied.status_code == 403
     trial = c.post(histology + '/enter', headers=h).json()
@@ -186,6 +199,14 @@ def test_legacy_trial_and_paid_access_are_preserved(public_state):
     assert not c.post(anatomy + '/enter', headers=h).json()['trial_started']
     assert public_state['histology_temp_access'][key] == deadline and key not in public_state['exam_trial_access']
 
+    public_state['histology_temp_access'].pop(key)
+    old_24_hour_deadline = time.time() + 21 * 3600
+    public_state['exam_trial_access'][key] = old_24_hour_deadline
+    assert c.get('/api/v1/access/anatomy', headers=h).json()['can_open_subject']
+    assert not c.post(histology + '/enter', headers=h).json()['trial_started']
+    assert public_state['exam_trial_access'][key] == old_24_hour_deadline
+    public_state['exam_trial_access'].pop(key)
+
     public_state['histology_temp_access'][key] = 1
     public_state['subscriptions'][key] = {
         'tier': 24, 'expires': 4_000_000_000, 'histology_access': True,
@@ -204,9 +225,11 @@ def test_start_greets_and_keeps_channel_check_without_spending_trial(public_stat
     monkeypatch.setattr(tb, 'is_subscribed', AsyncMock(side_effect=[False, True]))
     asyncio.run(tb.cmd_start(message))
     welcome = message.answer.await_args.args[0]
-    assert 'VMedA AI' in welcome and '24 часов' in welcome and 'гистологию' in welcome
-    button = message.answer.await_args.kwargs['reply_markup'].inline_keyboard[0][0]
-    assert button.url == 'https://t.me/Vmeda_examen'
+    assert 'VMedA AI' in welcome and '12 часов' in welcome and 'гистологию' in welcome
+    buttons = [row[0] for row in message.answer.await_args.kwargs['reply_markup'].inline_keyboard]
+    assert buttons[0].callback_data == 'study_sample:anatomy_tests:0'
+    assert buttons[1].callback_data == 'study_sample:histology:0'
+    assert buttons[2].url == 'https://t.me/Vmeda_examen'
     asyncio.run(tb.cmd_start(message))
     assert 'Выбери предмет для подготовки' in message.answer.await_args.args[0]
     assert str(USER) not in public_state['exam_trial_access']

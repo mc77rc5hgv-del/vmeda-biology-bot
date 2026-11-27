@@ -1284,7 +1284,7 @@ async def main():
 
     # 23. Locked Histology screen: dynamic cheapest-histology-tier price, not a stale literal
     tb.stats["histology_temp_access"][str(non_admin)] = tb.time.time() - 1
-    tb.stats["histology_warnings"][str(non_admin)] = {"count": tb.HISTOLOGY_WARNING_THRESHOLD, "last_warn_at": 0}
+    tb.stats["histology_warnings"][str(non_admin)] = {"count": tb.REFERRAL_WARNING_THRESHOLD, "last_warn_at": 0}
     cb_hist_locked = FakeCB("histology_menu", uid=non_admin)
     await tb.cb_histology_menu(cb_hist_locked)
     assert cb_hist_locked.message.edits
@@ -1293,7 +1293,7 @@ async def main():
     assert "учебные схемы" in hist_locked_text
     assert "сверено с преподавателями" not in hist_locked_text
     assert str(tb.cheapest_histology_tier()["price_rub"]) in hist_locked_text
-    assert any("Выбрать подписку" in t for t in kb_texts(hist_locked_kb))
+    assert any("449 ₽" in t for t in kb_texts(hist_locked_kb))
     tb.stats["histology_temp_access"].pop(str(non_admin), None)
     tb.stats["histology_warnings"].pop(str(non_admin), None)
 
@@ -1341,7 +1341,8 @@ async def main():
     for cfg in tb.ACTIVE_SUBSCRIPTION_TIERS.values():
         if cfg.get("anatomy"):
             assert cfg["title"] in section_locked_text
-    assert any("Оформить подписку" in t for t in kb_texts(section_locked_kb))
+    assert any("449 ₽" in t for t in kb_texts(section_locked_kb))
+    assert "study_trial:anatomy" in kb_data(section_locked_kb)
     print("locked section screen lists all anatomy-granting tiers dynamically: OK")
 
     # 24c. The short callback-answer alert for in-handler anatomy locks stays under Telegram's ~200-char cap

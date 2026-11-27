@@ -1,5 +1,5 @@
 from services.stats_writer import StatsWriter
-from services.content_access import EXAM_TRIAL_HOURS
+from services.content_access import EXAM_TRIAL_HOURS, EXAM_TRIAL_SUBJECTS, trial_active, trial_available
 import asyncio
 import html
 import io
@@ -1441,7 +1441,7 @@ def get_anatomy_exam_announcement_text() -> str:
     return (
         f"🎓 <b>Открыт раздел «Экзамен» по Анатомии!</b>\n{DIVIDER}\n\n"
         "✅ <b>ТЕСТ</b> — вопросы по темам, пояснения и работа над ошибками. "
-        f"Пробный доступ на {EXAM_TRIAL_HOURS} часа, затем — подписка или два приглашённых однокурсника.\n"
+        f"Полный пробный доступ к анатомии и гистологии на {EXAM_TRIAL_HOURS} часов по кнопке.\n"
         "📖 <b>Вопросы теории</b> — разбор экзаменационных вопросов с полными ответами\n"
         "🖐 <b>Вопросы практики</b> — «покажите и назовите» с фото атласа к каждому ответу\n\n"
         "🏆 Включи <b>рейтинговый режим</b> в ТЕСТе — результаты идут в общий рейтинг лучших. "
@@ -1943,17 +1943,20 @@ def _anatomy_menu_label(user_id: int = None) -> str:
     sub_anatomy = user_id is not None and has_subscription_anatomy_access(user_id)
     if user_id is not None and is_admin(user_id):
         return "🔥🦴 Анатомия (админ)"
-    elif anatomy_handlers.anatomy_maintenance_mode_enabled():
+    elif anatomy_handlers.anatomy_maintenance_mode_enabled() and (
+        stats.get("anatomy_maintenance_override") is True
+        or user_id is None or not anatomy_access_ok(user_id)
+    ):
         return "🦴 Анатомия (техобслуживание)"
     elif sub_anatomy:
         return "🔥🦴 Анатомия 💎"
+    elif user_id is not None and trial_active(sys.modules['telegram_bot'], user_id):
+        return "🦴 Анатомия (пробный период)"
     else:
         return "🔥🦴 Анатомия"
 
 
 def _histology_menu_label(user_id: int = None) -> str:
-    from services.content_access import trial_available
-
     sub_histology = user_id is not None and has_subscription_histology_access(user_id)
     if HISTOLOGY_PUBLIC:
         return "🔬 Гистология"
@@ -1982,21 +1985,107 @@ def get_exam_trial_notice(user_id: int, subject: str) -> str:
         return ""
     deadline = datetime.fromtimestamp(expires, APP_TIMEZONE).strftime('%d.%m в %H:%M')
     return (
-        f"⏳ <b>Пробный доступ до {deadline} МСК.</b> Он общий для гистологии и тестов по анатомии. "
-        "Затем можно оформить подписку или пригласить двух однокурсников по своей ссылке в этом месяце."
+        f"⏳ <b>Пробный доступ до {deadline} МСК.</b> "
+        "Анатомия и гистология доступны в боте и Mini App."
     )
 
 
-def get_exam_access_keyboard(back: str, *, anatomy_tests=False):
+def add_study_trial_buttons(builder, user_id, subject):
+    label = "Угадай препарат · пример" if subject == "histology" else "3 пробных вопроса"
+    builder.button(text=label, callback_data=f"study_sample:{subject}:0")
+    if trial_available(sys.modules['telegram_bot'], user_id):
+        builder.button(style="success", text=f"Попробовать бесплатно на {EXAM_TRIAL_HOURS} часов",
+                       callback_data=f"study_trial:{subject}")
+
+
+def get_exam_access_title(user_id: int, subject: str) -> str:
+    if trial_available(sys.modules['telegram_bot'], user_id):
+        return f"<b>Попробуй бесплатно.</b> Примеры доступны сразу. Кнопка откроет всю анатомию и гистологию на {EXAM_TRIAL_HOURS} часов одновременно в боте и Mini App."
+    options = "по подписке." if subject == "anatomy" else "по подписке или пригласи однокурсников."
+    return f"<b>Пробный доступ закончился.</b> Продолжи подготовку {options}"
+
+
+def get_exam_access_keyboard(back: str, *, user_id: int, subject: str):
     builder = InlineKeyboardBuilder()
-    builder.button(text="👥 Пригласить однокурсников", callback_data="referral_info")
-    if anatomy_tests:
-        builder.button(style="success", text="🦴 Тесты по анатомии на 7 дней", callback_data=f"sub_tier:{access.ANATOMY_TEST_TIER_ID}")
-        builder.button(text="💎 Зимняя сессия и другие тарифы", callback_data="subscription_course:year2")
-    else:
-        builder.button(style="success", text="💎 Выбрать подписку", callback_data="subscription_menu")
+    add_study_trial_buttons(builder, user_id, subject)
+    bundle_id = access.ANATOMY_HISTOLOGY_TIER_ID
+    builder.button(style="primary", text=f"Анатомия и гистология на 14 дней · {SUBSCRIPTION_TIERS[bundle_id]['price_rub']} ₽",
+                   callback_data=f"sub_tier:{bundle_id}")
+    if subject == "anatomy_tests":
+        test_id = access.ANATOMY_TEST_TIER_ID
+        builder.button(text=f"Тесты по анатомии на 7 дней · {SUBSCRIPTION_TIERS[test_id]['price_rub']} ₽",
+                       callback_data=f"sub_tier:{test_id}")
+    if subject != "anatomy":
+        builder.button(text="👥 Пригласить однокурсников", callback_data="referral_info")
     builder.button(text="🔙 Назад", callback_data=back)
     return builder.adjust(1).as_markup()
+
+
+@dp.callback_query(F.data.regexp(r"^study_trial:(anatomy|anatomy_tests|histology)$"))
+async def cb_study_trial(callback: CallbackQuery):
+    from services.content_access import enter
+
+    subject = callback.data.split(":")[1]
+    user_id = callback.from_user.id
+    if not enter(sys.modules['telegram_bot'], user_id, subject)['allowed']:
+        await callback.answer("Пробный доступ закончился", show_alert=True)
+        await safe_edit_text(callback.message, get_exam_access_title(user_id, subject), parse_mode="HTML",
+                             reply_markup=get_exam_access_keyboard("back_to_main", user_id=user_id, subject=subject))
+        return
+    destination = {"anatomy": cb_anatomy_root, "anatomy_tests": cb_anatomy_exam_test_menu,
+                   "histology": cb_histology_menu}[subject]
+    await destination(callback)
+
+
+@dp.callback_query(F.data.regexp(r"^study_(sample|answer):(anatomy|anatomy_tests|histology):[0-9](?::[0-9])?$"))
+async def cb_study_sample(callback: CallbackQuery):
+    from services.study_preview import ANATOMY_SAMPLES, HISTOLOGY_SAMPLE, HISTOLOGY_SAMPLE_IMAGE
+    from services.telegram_ui import safe_delete_message
+
+    action, subject, raw_index, *selected = callback.data.split(":")
+    samples = (HISTOLOGY_SAMPLE,) if subject == "histology" else ANATOMY_SAMPLES
+    index = int(raw_index)
+    if index >= len(samples) or (action == "study_answer") != bool(selected):
+        await callback.answer()
+        return
+    sample = samples[index]
+    choice = int(selected[0]) if selected else None
+    if choice is not None and choice >= len(sample["options"]):
+        await callback.answer()
+        return
+    await callback.answer()
+    text = f"<b>Пример {index + 1} из {len(samples)}</b>\n\n{sample['question']}"
+    builder = InlineKeyboardBuilder()
+    if choice is None:
+        for option_index, option in enumerate(sample["options"]):
+            builder.button(text=option, callback_data=f"study_answer:{subject}:{index}:{option_index}")
+    else:
+        correct = sample["correct"]
+        result = "Верно" if choice == correct else "Правильный ответ"
+        text += f"\n\n<b>{result} — {sample['options'][correct]}.</b>\n{sample['explanation']}"
+        if index + 1 < len(samples):
+            builder.button(text="Следующий вопрос", callback_data=f"study_sample:{subject}:{index + 1}")
+        other = "anatomy_tests" if subject == "histology" else "histology"
+        other_label = "Пример по анатомии" if other == "anatomy_tests" else "Угадай препарат · пример"
+        builder.button(text=other_label, callback_data=f"study_sample:{other}:0")
+    if trial_available(sys.modules['telegram_bot'], callback.from_user.id):
+        builder.button(style="success", text=f"Попробовать бесплатно на {EXAM_TRIAL_HOURS} часов",
+                       callback_data=f"study_trial:{subject}")
+    back = {"anatomy": "anatomy_root", "anatomy_tests": "anatomy_exam_test_menu", "histology": "histology_menu"}[subject]
+    builder.button(text="Назад", callback_data=back)
+    markup = builder.adjust(1).as_markup()
+    if subject != "histology":
+        await safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=markup)
+    elif choice is not None:
+        try:
+            await callback.message.edit_caption(caption=text, parse_mode="HTML", reply_markup=markup)
+        except TelegramBadRequest as exc:
+            if "message is not modified" not in str(exc).lower():
+                raise
+    else:
+        photo = FSInputFile(os.path.join(HISTOLOGY_IMAGES_DIR, HISTOLOGY_SAMPLE_IMAGE))
+        await callback.message.answer_photo(photo, caption=text, parse_mode="HTML", reply_markup=markup)
+        await safe_delete_message(callback.message)
 
 
 def miniapp_launch_allowed(user_id: int) -> bool:
@@ -2704,13 +2793,15 @@ async def cmd_start(message: Message):
 
     if not await is_subscribed(user_id):
         builder = InlineKeyboardBuilder()
-        builder.button(text="📢 Открыть канал Vmeda_examen", url="https://t.me/Vmeda_examen")
+        builder.row(InlineKeyboardButton(text="3 пробных вопроса по анатомии", callback_data="study_sample:anatomy_tests:0"))
+        builder.row(InlineKeyboardButton(text="Угадай препарат · пример", callback_data="study_sample:histology:0"))
+        builder.row(InlineKeyboardButton(text="📢 Открыть канал Vmeda_examen", url="https://t.me/Vmeda_examen"))
         await message.answer(
             "👋 <b>Добро пожаловать в VMEDA!</b>\n\n"
             "Здесь материалы для занятий, подготовка к зачётам и экзаменам, тесты с разбором ошибок "
             "и VMedA AI для разбора заданий по фото.\n\n"
-            "🦴 <b>Тесты по анатомии</b> и 🔬 <b>гистологию</b> можно попробовать бесплатно "
-            f"в течение {EXAM_TRIAL_HOURS} часов с первого входа в один из этих разделов.\n\n"
+            "🦴 <b>Анатомию</b> и 🔬 <b>гистологию</b> можно попробовать прямо сейчас. "
+            f"После примеров доступен единый пробный период на {EXAM_TRIAL_HOURS} часов.\n\n"
             "Чтобы открыть меню, подпишись на канал по кнопке ниже и снова нажми /start.",
             parse_mode="HTML",
             reply_markup=builder.as_markup()
@@ -2735,15 +2826,15 @@ async def cmd_start(message: Message):
             return
 
     greeting = "🎉 <b>С возвращением!</b>" if not is_new_user else "👋 <b>Привет!</b>"
-    from services.content_access import exam_entitled, trial_available
+    from services.content_access import exam_entitled
     tb = sys.modules['telegram_bot']
     if trial_available(tb, user_id) and not all(
-        exam_entitled(tb, user_id, subject) for subject in ('anatomy_tests', 'histology')
+        exam_entitled(tb, user_id, subject) for subject in EXAM_TRIAL_SUBJECTS
     ):
         greeting += (
             "\n\n"
-            f"Попробуй тесты по анатомии и гистологию: пробные {EXAM_TRIAL_HOURS} часа начнутся, "
-            "когда ты впервые откроешь один из этих разделов."
+            "В анатомии и гистологии есть бесплатные примеры. "
+            f"Кнопка «Попробовать бесплатно на {EXAM_TRIAL_HOURS} часов» откроет оба предмета."
         )
     await message.answer(
         get_main_menu_text(user_id, greeting),
@@ -5920,6 +6011,7 @@ ANATOMY_FLASH_SESSIONS = anatomy_handlers.ANATOMY_FLASH_SESSIONS
 ANATOMY_MATCH_SESSIONS = anatomy_handlers.ANATOMY_MATCH_SESSIONS
 ANATOMY_LATIN_SESSIONS = anatomy_handlers.ANATOMY_LATIN_SESSIONS
 anatomy_access_ok = anatomy_handlers.anatomy_access_ok
+anatomy_permanently_unlocked = anatomy_handlers.anatomy_permanently_unlocked
 ANATOMY_FREE_SECTIONS = anatomy_handlers.ANATOMY_FREE_SECTIONS
 anatomy_section_access_ok = anatomy_handlers.anatomy_section_access_ok
 get_anatomy_dev_alert_text = anatomy_handlers.get_anatomy_dev_alert_text
@@ -6091,8 +6183,6 @@ dp.include_router(histology_handlers.router)
 
 HISTOLOGY_PUBLIC = histology_handlers.HISTOLOGY_PUBLIC
 HISTOLOGY_PROMO_SECONDS = histology_handlers.HISTOLOGY_PROMO_SECONDS
-HISTOLOGY_WARNING_THRESHOLD = histology_handlers.HISTOLOGY_WARNING_THRESHOLD
-HISTOLOGY_WARNING_COOLDOWN_SECONDS = histology_handlers.HISTOLOGY_WARNING_COOLDOWN_SECONDS
 HISTOLOGY_GUESS_SESSION_SIZE = histology_handlers.HISTOLOGY_GUESS_SESSION_SIZE
 HISTOLOGY_GUESS_SESSIONS = histology_handlers.HISTOLOGY_GUESS_SESSIONS
 get_histology_temp_expiry = histology_handlers.get_histology_temp_expiry
