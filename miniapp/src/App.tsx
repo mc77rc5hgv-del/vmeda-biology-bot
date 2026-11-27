@@ -30,6 +30,7 @@ import { HistologySpecimenPage } from "./pages/HistologySpecimen";
 function examScopeForPath(pathname: string): ExamScope | undefined {
   if (/^\/tests\/anatomy\/?$/.test(pathname)) return "anatomy_tests";
   if (/^\/(?:histology|subjects\/histology|materials\/histology)(?:\/|$)/.test(pathname)) return "histology";
+  if (/^\/(?:subjects|materials)\/anatomy(?:\/|$)/.test(pathname)) return "anatomy";
 }
 
 export function App() {

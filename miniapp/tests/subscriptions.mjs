@@ -32,6 +32,9 @@ assert.equal(api.subscriptionReturnPath('/histology/exam'), '/histology/exam');
 const url = new URL(api.subscriptionPath('histology', '/histology/exam'), 'https://miniapp.test');
 assert.equal(url.searchParams.get('subject'), 'histology');
 assert.equal(url.searchParams.get('returnTo'), '/histology/exam');
+const trialOffer = new URL(api.subscriptionPath('anatomy_tests', '/tests/anatomy', 32), 'https://miniapp.test');
+assert.equal(trialOffer.searchParams.get('plan'), '32');
+assert.equal(trialOffer.searchParams.get('returnTo'), '/tests/anatomy');
 for (const [status, subject] of [[403, 'histology'], [403, null], [503, 'histology'], [403, 'unknown']]) {
   api.notifySubscriptionRequired({ status, headers: { get: () => subject } });
 }
