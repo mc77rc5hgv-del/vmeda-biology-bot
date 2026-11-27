@@ -93,6 +93,77 @@ async def test_weekly_anatomy_pass_and_winter_upgrade_are_scoped_and_charged_onc
 
 
 @pytest.mark.asyncio
+async def test_two_week_bundle_grants_exact_scope_and_duration_with_each_payment_flow(service, monkeypatch):
+    from services.content_access import exam_entitled
+    from web_api.subscriptions import parse_payload
+
+    tb = service.tb
+    tier_id = tb.access.ANATOMY_HISTOLOGY_TIER_ID
+    days = 14 * 86400
+    sbp_uid, stars_uid, transfer_uid, premium_uid = range(777123, 777127)
+    row = await service.checkout(sbp_uid, tier_id, None, 'two-week-sbp', 'miniapp')
+    assert row['amount_minor'] == 44900
+    assert not tb.has_active_subscription(sbp_uid)
+    await service.settle(row, paid(row))
+    await service.settle(row, paid(row))
+    assert sum(entry['user_id'] == sbp_uid for entry in tb.stats['subscription_purchase_log']) == 1
+
+    send_invoice = AsyncMock()
+    monkeypatch.setattr(tb.bot, 'send_invoice', send_invoice)
+    await tb.send_subscription_stars_invoice(stars_uid, tier_id)
+    invoice = send_invoice.await_args.kwargs
+    assert invoice['currency'] == 'XTR'
+    assert invoice['prices'][0].amount == 449
+    assert parse_payload(tb, invoice['payload'])['source'] == 'bot'
+    user = SimpleNamespace(id=stars_uid)
+    query = SimpleNamespace(id='two-week-query', invoice_payload=invoice['payload'], from_user=user,
+                            currency='XTR', total_amount=449, answer=AsyncMock())
+    await tb.handle_pre_checkout(query)
+    query.answer.assert_awaited_once_with(ok=True)
+    payment = SimpleNamespace(invoice_payload=invoice['payload'], currency='XTR', total_amount=449,
+                              telegram_payment_charge_id='two-week-stars')
+    await tb.handle_successful_payment(SimpleNamespace(from_user=user, successful_payment=payment))
+
+    callback = SimpleNamespace(data=f'admin_confirm_sub:{tier_id}:{transfer_uid}:-:449',
+                               from_user=SimpleNamespace(id=next(iter(tb.ADMIN_IDS))),
+                               message=SimpleNamespace(edit_text=AsyncMock()), answer=AsyncMock())
+    await tb.cb_admin_confirm_sub(callback)
+    callback.answer.assert_awaited_once_with('Подтверждено ✅', show_alert=True)
+
+    for uid in (sbp_uid, stars_uid, transfer_uid):
+        sub = tb.get_subscription(uid)
+        assert sub['tier'] == tier_id and sub['price'] == 449
+        assert sub['expires'] - sub['purchased_at'] == days
+        assert tb.has_subscription_anatomy_access(uid)
+        assert exam_entitled(tb, uid, 'anatomy_tests') and exam_entitled(tb, uid, 'histology')
+        assert tb.get_subscription_scope_label(sub) == 'к Анатомии и Гистологии'
+        assert not any(tb.has_subject_access(uid, key) for key in ('biology', 'physics', 'chemistry'))
+        assert not tb.chemistry_tickets_access_ok(uid)
+        assert not tb.biology_tickets_download_ok(uid) and not tb.has_free_access(uid)
+        with monkeypatch.context() as clock:
+            clock.setattr(tb.time, 'time', lambda: sub['expires'] - 1)
+            assert tb.has_subscription_anatomy_access(uid) and tb.has_subscription_histology_access(uid)
+            clock.setattr(tb.time, 'time', lambda: sub['expires'])
+            assert not tb.has_subscription_anatomy_access(uid) and not tb.has_subscription_histology_access(uid)
+
+    before_renewal = tb.get_subscription(sbp_uid)['expires']
+    renewal = await service.checkout(sbp_uid, tier_id, None, 'two-week-renewal', 'bot')
+    await service.settle(renewal, paid(renewal))
+    assert tb.get_subscription(sbp_uid)['expires'] == before_renewal + days
+
+    premium_order = await service.checkout(premium_uid, 26, None, 'premium-sbp', 'bot')
+    assert premium_order['amount_minor'] == 129000
+    await service.settle(premium_order, paid(premium_order))
+    premium = copy.deepcopy(tb.get_subscription(premium_uid))
+    assert premium['expires'] == tb.access.SECOND_YEAR_END_2027
+    assert premium['anatomy'] and premium['histology_access'] and premium['biology_download'] and premium['cheat_sheets']
+    with pytest.raises(ValueError, match='сократит|уменьшит'):
+        await service.checkout(premium_uid, tier_id, None, 'avoid-downgrade', 'bot')
+    assert tb._bot_subscription_purchase_reason(premium_uid, tier_id)
+    assert tb.get_subscription(premium_uid) == premium
+
+
+@pytest.mark.asyncio
 async def test_retired_plan_accepts_an_existing_provider_payment_without_allowing_new_sales(service, monkeypatch):
     tb = service.tb
     tier_id = 29

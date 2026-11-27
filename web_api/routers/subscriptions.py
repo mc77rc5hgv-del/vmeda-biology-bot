@@ -26,7 +26,7 @@ class InvoiceRequest(BaseModel):
 def _plan_subjects(cfg):
     if subject := cfg.get('fixed_subject'):
         return [subject]
-    subjects = list(SUBJECTS)
+    subjects = list(SUBJECTS) if cfg.get('first_year_access', True) else []
     rule = cfg.get('histology_until_rule')
     if rule == 'expiry' or isinstance(rule, (int, float)) and rule > time.time() or cfg.get('scope') == 'all' or cfg.get('early_histology'):
         subjects.append('histology')
@@ -52,7 +52,7 @@ def _catalog(tb, user_id):
         plans.append({'id': tier_id, 'title': cfg['title'], 'short': cfg['short'], 'price_stars': price_stars, 'price_rub': price_rub,
                       'upgrade_credit_rub': cfg['price_rub'] - price_rub, 'upgrade_credit_stars': cfg['price_stars'] - price_stars,
                       'duration_days': cfg.get('duration_days'), 'expires_at': iso(cfg.get('expires_at')),
-                      'benefits': cfg.get('benefits', []), 'badge': cfg.get('badge'),
+                      'benefits': cfg.get('benefits', []), 'badge': cfg.get('badge'), 'featured': cfg.get('featured', False),
                       'ai_limit': cfg.get('ai_limit'), 'ai_period': cfg.get('ai_limit_type'),
                       'courses': [course for course, name in [(1, 'year1'), (2, 'year2')] if tier_id in tb._course_tier_ids(name)],
                       'subjects': _plan_subjects(cfg), 'anatomy_tests': bool(cfg.get('anatomy') or cfg.get('fixed_subject') == tb.access.ANATOMY_TEST_SUBJECT),

@@ -517,6 +517,8 @@ def get_subscription_scope_label(sub: dict) -> str:
     restricted = sub.get("restricted_subject")
     if restricted == access.ANATOMY_TEST_SUBJECT:
         return "только к тестам по анатомии"
+    if not sub.get("first_year_access", True):
+        return "к Анатомии и Гистологии"
     if restricted:
         return f"только к {SUBJECT_TITLES[restricted]}"
     if sub.get("scope") == "all":
@@ -3668,7 +3670,7 @@ async def grant_subscription_and_notify_buyer(
     сообщение об активации + апсейл на следующий тариф. method различает источник для
     статистики платежей: "stars"/"rubles" — реальная подтверждённая оплата, "rubles_manual" —
     ручная выдача админом (например, бесплатно другу) и в выручку не считается."""
-    if tier_id == access.ANATOMY_TEST_TIER_ID:
+    if tier_id in (access.ANATOMY_TEST_TIER_ID, access.ANATOMY_HISTOLOGY_TIER_ID):
         from web_api.subscriptions import grant_preserving_history
         grant_preserving_history(sys.modules[__name__], target_id, tier_id, subject, method, price, get_subscription(target_id))
         save_stats()
@@ -3757,7 +3759,8 @@ def _next_upsell_tier_id(tier_id: int) -> int | None:
     if preferred is not None:
         return preferred if preferred in dict(sorted_active_tiers()) else None
     candidates = sorted(
-        (t for t, c in sorted_active_tiers() if not c.get("fixed_subject") and c["price_rub"] > cfg["price_rub"]),
+        (t for t, c in sorted_active_tiers() if c.get("first_year_access", True)
+         and not c.get("fixed_subject") and c["price_rub"] > cfg["price_rub"]),
         key=lambda t: ACTIVE_SUBSCRIPTION_TIERS[t]["price_rub"]
     )
     return candidates[0] if candidates else None
@@ -3844,7 +3847,7 @@ def get_subscription_menu_keyboard():
 # целиком живёт в callback_data, ничего не пишется в stats.
 FIRST_YEAR_TIER_IDS = (20, 21)
 SECOND_YEAR_AUTUMN_TIER_IDS = (20, 22, 24, 26)  # Пересдача 7 дней / Все пересдачи / Зимняя сессия / До конца 2 курса
-SECOND_YEAR_WINTER_TIER_IDS = (access.ANATOMY_TEST_TIER_ID, access.WINTER_TIER_ID)
+SECOND_YEAR_WINTER_TIER_IDS = (access.ANATOMY_TEST_TIER_ID, access.ANATOMY_HISTOLOGY_TIER_ID, access.WINTER_TIER_ID, 26)
 _COURSE_TITLES = {"year1": "1 курс", "year2": "2 курс"}
 
 def _second_year_tier_ids() -> tuple[int, ...]:
@@ -4015,7 +4018,7 @@ async def send_subscription_stars_invoice(
     subject_line = f" ({SUBJECT_TITLES[subject]})" if subject else ""
     discount_line = " — скидка 10%" if discount else ""
     payload = f"sub_stars_{tier_id}_{subject or '-'}_{chat_id}_{int(time.time())}"
-    if not discount and tier_id in (access.ANATOMY_TEST_TIER_ID, access.WINTER_TIER_ID):
+    if not discount and tier_id in (access.ANATOMY_TEST_TIER_ID, access.ANATOMY_HISTOLOGY_TIER_ID, access.WINTER_TIER_ID):
         from web_api.subscriptions import BOT_PREFIX, make_payload
         payload, _ = make_payload(sys.modules[__name__], chat_id, tier_id, subject, prefix=BOT_PREFIX, amount=price_stars)
     await bot.send_invoice(
@@ -4119,8 +4122,8 @@ def _bot_subscription_purchase_reason(user_id, tier_id, subject=None, *, settlin
     current = get_subscription(user_id) or {}
     try:
         validate_tier(tb, tier_id, subject, settling=settling)
-        if (tier_id in (access.ANATOMY_TEST_TIER_ID, access.WINTER_TIER_ID, 23, 29)
-                or current.get('tier') == access.ANATOMY_TEST_TIER_ID):
+        protected_tiers = (access.ANATOMY_TEST_TIER_ID, access.ANATOMY_HISTOLOGY_TIER_ID)
+        if tier_id in (*protected_tiers, access.WINTER_TIER_ID, 23, 29) or current.get('tier') in protected_tiers:
             return purchase_reason(tb, user_id, tier_id, subject, settling=settling)
     except ValueError as exc:
         return str(exc)
