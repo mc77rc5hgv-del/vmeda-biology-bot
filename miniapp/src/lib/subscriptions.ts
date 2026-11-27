@@ -5,8 +5,9 @@ export const paidSubjectTitles: Record<string, string> = Object.fromEntries(
 );
 paidSubjectTitles.anatomy_tests = "Тесты по анатомии";
 
-export function subscriptionPath(subjectId: string, returnTo: string): string {
+export function subscriptionPath(subjectId: string, returnTo: string, offerId?: number): string {
   const params = new URLSearchParams({ subject: subjectId, returnTo: subscriptionReturnPath(returnTo) });
+  if (offerId !== undefined) params.set("plan", String(offerId));
   return `/profile/subscriptions?${params}`;
 }
 

@@ -10,3 +10,6 @@
 .refresh { min-height: 44px; width: fit-content; color: var(--ink-secondary); text-decoration: underline; }
 .notice { display: flex; align-items: center; gap: 7px; width: fit-content; max-width: calc(100% - 32px); margin: 12px auto 0; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--ink); font-size: .8125rem; font-weight: 650; }
 .notice svg { flex-shrink: 0; }
+.sample { display: grid; gap: 12px; min-width: 0; padding: 14px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.options { display: flex; flex-wrap: wrap; gap: 8px; }
+.sampleImage { display: block; width: 100%; max-width: 420px; max-height: 320px; object-fit: contain; border-radius: var(--radius-sm); }

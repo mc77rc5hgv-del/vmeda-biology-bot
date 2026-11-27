@@ -277,6 +277,28 @@ export async function enterSubject(subjectId: string): Promise<AccessStatus> {
   return toAccessStatus(result.access);
 }
 
+export interface StudySample {
+  question: string;
+  options: string[];
+  correct: number;
+  explanation: string;
+  image_url?: string;
+}
+
+interface StudyOffer { id: number; price_rub: number }
+
+interface StudyPreviewData {
+  anatomy: StudySample[];
+  histology: StudySample & { image_url: string };
+  bundle: StudyOffer;
+  test_pass: StudyOffer;
+}
+
+export async function fetchStudyPreview(): Promise<StudyPreviewData> {
+  const data = await apiFetch<StudyPreviewData>("/api/v1/study-preview");
+  return {...data, histology: {...data.histology, image_url: absoluteApiUrl(data.histology.image_url)}};
+}
+
 interface AnatomyRunAnswerWire extends AnatomyExamAnswerWire {
   position: number;
   question_num: number;
