@@ -216,21 +216,35 @@ async def main():
     assert ADMIN_ID not in histology._TEST_SESSIONS
     print("theory, random exam and complete topic run with back navigation: OK")
 
-    # 4. First visit opens a time-limited trial and shows its deadline.
+    # 4. Opening the subject and taking a sample never starts the timer.
     assert tb.HISTOLOGY_PUBLIC is False
     non_admin = random.randint(10_000_000, 99_999_999)
     assert not tb.histology_access_ok(non_admin)
     assert str(non_admin) not in tb.stats["exam_trial_access"]
     cb = FakeCB("histology_menu", uid=non_admin)
     await tb.cb_histology_menu(cb)
-    assert cb.message.edits, "expected menu render, not locked screen, on first-ever visit"
+    assert cb.message.edits
     first_text, first_kb = cb.message.edits[0]
-    assert "Гистология" in first_text and "Экзамен" in kb_texts(first_kb)
-    assert "Пробный доступ до" in first_text and tb.has_histology_temp_access(non_admin)
+    assert "Гистология" in first_text and "Угадай препарат · пример" in kb_texts(first_kb)
+    sample = FakeCB("study_sample:histology:0", uid=non_admin)
+    await tb.cb_study_sample(sample)
+    hist_reply = FakeCB("study_answer:histology:0:0", uid=non_admin)
+    await tb.cb_study_sample(hist_reply)
+    anatomy_sample = FakeCB("study_answer:anatomy_tests:0:0", uid=non_admin)
+    await tb.cb_study_sample(anatomy_sample)
+    assert "Верно" in anatomy_sample.message.edits[0][0]
+    assert "Следующий вопрос" in kb_texts(anatomy_sample.message.edits[0][1])
+    assert str(non_admin) not in tb.stats["exam_trial_access"]
+    activation = FakeCB("study_trial:histology", uid=non_admin)
+    await tb.cb_study_trial(activation)
+    active_text, active_kb = activation.message.edits[0]
+    assert "Экзамен" in kb_texts(active_kb)
+    assert "Пробный доступ до" in active_text and tb.has_histology_temp_access(non_admin)
+    assert tb.anatomy_access_ok(non_admin)
     expiry = tb.get_histology_temp_expiry(non_admin)
     hours_left = (expiry - tb.time.time()) / 3600
-    assert 23.9 < hours_left <= 24.0, hours_left
-    print("first histology visit starts a 24-hour trial: OK")
+    assert 11.9 < hours_left <= 12.0, hours_left
+    print("explicit activation unlocks the shared 12-hour trial: OK")
 
     # 4b. Returning keeps the deadline and shows the same content without a separate warning.
     cb2 = FakeCB("histology_menu", uid=non_admin)
@@ -250,7 +264,7 @@ async def main():
     locked_text, locked_kb = cb3.message.edits[0]
     check_html(locked_text)
     assert "Пробный доступ закончился" in locked_text
-    assert any("Выбрать подписку" in t for t in kb_texts(locked_kb))
+    assert any("449 ₽" in t for t in kb_texts(locked_kb))
     assert any("Пригласить однокурсников" in t for t in kb_texts(locked_kb))
     print("exhausted trial + no referrals/subscription -> locked screen: OK")
     tb.stats["exam_trial_access"].pop(str(non_admin), None)
@@ -410,7 +424,7 @@ async def main():
 
     # 12. Guess-the-specimen mode: exhausted-trial non-admin blocked (same gate as histology_menu)
     tb.stats["histology_temp_access"][str(non_admin)] = tb.time.time() - 1
-    tb.stats["histology_warnings"][str(non_admin)] = {"count": tb.HISTOLOGY_WARNING_THRESHOLD, "last_warn_at": 0}
+    tb.stats["histology_warnings"][str(non_admin)] = {"count": tb.REFERRAL_WARNING_THRESHOLD, "last_warn_at": 0}
     cb_g0 = FakeCB("histology_guess_start:all", uid=non_admin)
     await tb.cb_histology_guess_start(cb_g0)
     assert cb_g0._answers and cb_g0._answers[0][1] is True

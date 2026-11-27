@@ -24,7 +24,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 import telegram_bot as tb
 from services.anatomy_feedback import get_anatomy_answer_feedback
-from services.content_access import EXAM_TRIAL_CLOSED, enter
+from services.content_access import can_visit, trial_active, trial_available
 from services.telegram_ui import safe_delete_message
 
 router = Router()
@@ -35,14 +35,18 @@ async def anatomy_exam_access_middleware(handler, callback: CallbackQuery, data)
     key = callback.data or ""
     if not key.startswith(("anatomy_exam_test_", "anatomy_exam_flash_", "anatomy_exam_mistake_work_")) and key != "anatomy_exam_feedback_next":
         return await handler(callback, data)
-    if enter(tb, callback.from_user.id, 'anatomy_tests')['allowed']:
+    user_id = callback.from_user.id
+    if can_visit(tb, user_id, 'anatomy_tests'):
         return await handler(callback, data)
-    await callback.answer("Пробный доступ закончился", show_alert=True)
+    if trial_available(tb, user_id):
+        await callback.answer()
+    else:
+        await callback.answer("Пробный доступ закончился", show_alert=True)
     await tb.safe_edit_text(
         callback.message,
-        f"🦴 <b>Тесты по анатомии</b>\n{tb.DIVIDER}\n\n<b>Пробный доступ закончился.</b>\n\n{EXAM_TRIAL_CLOSED}",
+        f"🦴 <b>Тесты по анатомии</b>\n{tb.DIVIDER}\n\n{tb.get_exam_access_title(user_id, 'anatomy_tests')}",
         parse_mode="HTML",
-        reply_markup=tb.get_exam_access_keyboard("anatomy_exam_menu", anatomy_tests=True),
+        reply_markup=tb.get_exam_access_keyboard("anatomy_exam_menu", user_id=user_id, subject="anatomy_tests"),
     )
 
 
@@ -73,7 +77,7 @@ ANATOMY_FLASH_SESSIONS: dict[int, dict] = {}
 ANATOMY_MATCH_SESSIONS: dict[int, dict] = {}
 ANATOMY_LATIN_SESSIONS: dict[int, dict] = {}
 
-def anatomy_access_ok(user_id: int) -> bool:
+def anatomy_permanently_unlocked(user_id: int) -> bool:
     # Раздел ещё в разработке — глобальное промо ("снять все ограничения") намеренно
     # его не открывает, в отличие от остальных предметов; только явный ANATOMY_PUBLIC,
     # админ/помощник админа, подписка с anatomy=True, либо ручной демо-доступ по username.
@@ -83,6 +87,11 @@ def anatomy_access_ok(user_id: int) -> bool:
         or tb.has_subscription_anatomy_access(user_id)
         or user_id in tb.stats["manual_anatomy_demo_granted"]
     )
+
+
+def anatomy_access_ok(user_id: int) -> bool:
+    return anatomy_permanently_unlocked(user_id) or trial_active(tb, user_id)
+
 
 # Free-funnel split: одна половина модулей открыта всем без каких-либо условий (даже без
 # рефералов), чтобы привлечь как можно больше пользователей и показать им возможности бота;
@@ -142,7 +151,9 @@ def get_anatomy_locked_text(section_key: str | None = None) -> str:
         f"А бесплатно уже сейчас доступны: {free_titles} — загляни в меню «🦴 Анатомия»."
     )
 
-def get_anatomy_locked_keyboard():
+def get_anatomy_locked_keyboard(user_id: int | None = None):
+    if user_id is not None:
+        return tb.get_exam_access_keyboard("anatomy_menu", user_id=user_id, subject="anatomy")
     builder = InlineKeyboardBuilder()
     builder.button(style="success", text="💎 Оформить подписку", callback_data="subscription_menu")
     builder.button(text="🔙 В меню Анатомии", callback_data="anatomy_menu")
@@ -794,10 +805,12 @@ def get_bone_mnemonic_text(topic_key: str, bone_id: str, idx: int) -> str:
     return f"🧠 <b>{mn['title']}</b>\n{tb.DIVIDER}\n\n{mn['text']}\n\n{tb.DIVIDER}\n{idx + 1}/{len(mnemonics)}"
 
 # ---- Хендлеры ----
-def get_anatomy_root_keyboard():
+def get_anatomy_root_keyboard(user_id: int | None = None):
     builder = InlineKeyboardBuilder()
     builder.button(text="📚 Весь курс анатомии", callback_data="anatomy_menu", style="primary")
     builder.button(text="🎓 Экзамен", callback_data="anatomy_exam_menu", style="primary")
+    if user_id is not None and not anatomy_access_ok(user_id) and trial_available(tb, user_id):
+        tb.add_study_trial_buttons(builder, user_id, "anatomy")
     builder.adjust(1)
     builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
     return builder.as_markup()
@@ -809,28 +822,34 @@ def get_anatomy_maintenance_text() -> str:
         "загляни немного позже."
     )
 
-def get_anatomy_maintenance_keyboard():
+def get_anatomy_maintenance_keyboard(user_id: int | None = None):
     builder = InlineKeyboardBuilder()
     builder.button(text="✅ Тесты по анатомии", callback_data="anatomy_exam_test_menu")
+    if user_id is not None and tb.stats.get("anatomy_maintenance_override") is None:
+        tb.add_study_trial_buttons(builder, user_id, "anatomy")
+        builder.adjust(1)
     builder.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_main"))
     return builder.as_markup()
 
 @router.callback_query(F.data == "anatomy_root")
 async def cb_anatomy_root(callback: CallbackQuery):
     await callback.answer()
-    if anatomy_maintenance_mode_enabled() and not tb.is_admin_or_assistant(callback.from_user.id):
+    user_id = callback.from_user.id
+    explicit_maintenance = tb.stats.get("anatomy_maintenance_override") is True
+    if anatomy_maintenance_mode_enabled() and not tb.is_admin_or_assistant(user_id) and (explicit_maintenance or not anatomy_access_ok(user_id)):
         await tb.safe_edit_text(
             callback.message,
             get_anatomy_maintenance_text(),
             parse_mode="HTML",
-            reply_markup=get_anatomy_maintenance_keyboard()
+            reply_markup=get_anatomy_maintenance_keyboard(user_id)
         )
         return
+    trial_notice = tb.get_exam_trial_notice(user_id, "anatomy")
     await tb.safe_edit_text(
         callback.message,
-        f"🦴 <b>Анатомия</b>\n{tb.DIVIDER}\n\nВыбери раздел:",
+        f"🦴 <b>Анатомия</b>\n{tb.DIVIDER}\n\n" + (f"{trial_notice}\n\n" if trial_notice else "") + "Выбери раздел:",
         parse_mode="HTML",
-        reply_markup=get_anatomy_root_keyboard()
+        reply_markup=get_anatomy_root_keyboard(user_id)
     )
 
 @router.callback_query(F.data == "anatomy_menu")
@@ -867,7 +886,7 @@ async def cb_anatomy_section(callback: CallbackQuery):
             callback.message,
             get_anatomy_locked_text(section_key),
             parse_mode="HTML",
-            reply_markup=get_anatomy_locked_keyboard()
+            reply_markup=get_anatomy_locked_keyboard(callback.from_user.id)
         )
         return
     await callback.answer()

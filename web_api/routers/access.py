@@ -1,16 +1,19 @@
 """Серверный расчёт подписки и прав Mini App без доверия к флагам клиента."""
 from datetime import datetime, timezone
+from pathlib import Path
 import time
 
 from services.content_access import (
     EXAM_TRIAL_CLOSED, EXAM_TRIAL_HOURS, EXAM_TRIAL_SUBJECTS,
-    can_visit, enter, exam_entitled, trial_available, trial_expiry,
+    can_visit, enter, exam_entitled, trial_active, trial_available, trial_expiry,
 )
+from services.study_preview import ANATOMY_SAMPLES, HISTOLOGY_SAMPLE, HISTOLOGY_SAMPLE_IMAGE
 
 from services.miniapp_testers import has_test_access
 from services.miniapp_policy import full_content_access, promo_active, public_launch, subscription_access, subscription_required
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import FileResponse
 
 from ..deps import get_current_user_id, get_fresh_bot_module
 from ..schemas import AccessStatusResponse
@@ -33,6 +36,30 @@ SUBJECT_IDS = {
 GATED_SUBJECT_IDS = {"physics", "chemistry", "biology"}
 MAINTENANCE_SUBJECT_IDS = {"pharmacology"}
 MAINTENANCE_REASON = "Раздел временно закрыт на полную переработку материалов и структуры."
+PREVIEW_IMAGE_URL = "/api/v1/study-preview/micrograph"
+
+
+@router.get("/study-preview")
+def study_preview(_user_id: int = Depends(get_current_user_id)):
+    from services.access import ANATOMY_HISTOLOGY_TIER_ID, ANATOMY_TEST_TIER_ID, SUBSCRIPTION_TIERS
+
+    def offer(tier_id):
+        return {"id": tier_id, "price_rub": SUBSCRIPTION_TIERS[tier_id]["price_rub"]}
+
+    return {
+        "anatomy": ANATOMY_SAMPLES,
+        "histology": {**HISTOLOGY_SAMPLE, "image_url": PREVIEW_IMAGE_URL},
+        "bundle": offer(ANATOMY_HISTOLOGY_TIER_ID),
+        "test_pass": offer(ANATOMY_TEST_TIER_ID),
+    }
+
+
+@router.get("/study-preview/micrograph")
+def study_preview_micrograph(_user_id: int = Depends(get_current_user_id)):
+    image = Path(__file__).resolve().parents[2] / "images" / "histology" / HISTOLOGY_SAMPLE_IMAGE
+    if not image.is_file():
+        raise HTTPException(status_code=404, detail="Учебное изображение не найдено")
+    return FileResponse(image, media_type="image/jpeg")
 
 
 def _subscription_fields(tb, user_id: int) -> tuple[str | None, str | None]:
@@ -60,7 +87,7 @@ def _subject_is_open(tb, user_id: int, subject_id: str) -> bool:
         return False
     if full_content_access(tb, user_id):
         return True
-    if subject_id in EXAM_TRIAL_SUBJECTS:
+    if subject_id in EXAM_TRIAL_SUBJECTS and (subject_id != 'anatomy' or public_launch() or trial_active(tb, user_id)):
         return can_visit(tb, user_id, subject_id)
     if public_launch() and subject_id in {'biology', 'physics', 'chemistry', 'anatomy'}:
         return subscription_access(tb, user_id, subject_id)

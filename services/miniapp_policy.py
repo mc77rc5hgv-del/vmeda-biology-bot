@@ -28,12 +28,13 @@ def subscription_access(tb, user_id, subject):
     if subject == 'anatomy':
         return tb.has_subscription_anatomy_access(user_id)
     sub = tb.get_subscription(user_id)
-    return sub.get('restricted_subject') in (None, subject)
+    return sub.get('first_year_access', True) and sub.get('restricted_subject') in (None, subject)
 
 
 def subscription_required(tb, user_id, subject):
     return (public_launch() and subject in PAID_SUBJECTS
             and not full_content_access(tb, user_id)
+            and not (subject in {'anatomy', 'histology'} and can_visit(tb, user_id, subject))
             and not subscription_access(tb, user_id, subject))
 
 
