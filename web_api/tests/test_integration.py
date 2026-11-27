@@ -140,7 +140,8 @@ def test_me_reflects_real_referral_and_admin_state():
 
 def test_subscription_storefront_and_invoice_are_server_authoritative():
     import copy
-    from unittest.mock import AsyncMock
+    from unittest.mock import AsyncMock, patch
+    from urllib.parse import unquote
     from web_api.deps import get_current_user_id, get_fresh_bot_module
     from web_api import bot_state
     from web_api.subscriptions import parse_payload
@@ -152,7 +153,8 @@ def test_subscription_storefront_and_invoice_are_server_authoritative():
     tb.bot.create_invoice_link = AsyncMock(return_value='https://t.me/$test-invoice')
     before = copy.deepcopy(tb.stats)
     try:
-        response = client.get('/api/v1/subscriptions/catalog')
+        with patch('services.access.time.time', return_value=tb.NOV_1_2026_CUTOFF + 86400):
+            response = client.get('/api/v1/subscriptions/catalog')
         assert response.status_code == 200, response.text
         catalog = response.json()
         assert catalog['plans']
@@ -162,19 +164,31 @@ def test_subscription_storefront_and_invoice_are_server_authoritative():
         test_plan = next(plan for plan in catalog['plans'] if plan['id'] == tb.access.ANATOMY_TEST_TIER_ID)
         assert test_plan['subjects'] == ['anatomy_tests'] and test_plan['anatomy_tests']
         assert test_plan['price_stars'] == 149 and test_plan['courses'] == [2]
+        assert [plan['price_rub'] for plan in catalog['plans'] if 2 in plan['courses']] == [149, 449, 599, 1290]
+        bundle = next(plan for plan in catalog['plans'] if plan['id'] == tb.access.ANATOMY_HISTOLOGY_TIER_ID)
+        assert set(bundle['subjects']) == {'anatomy', 'histology'} and bundle['anatomy_tests']
+        assert (bundle['price_rub'], bundle['price_stars'], bundle['duration_days'], bundle['courses']) == (449, 449, 14, [2])
+        assert not bundle['subject_options']
+        assert '449₽' in unquote(bundle['card_transfer_url'])
+        premium = next(plan for plan in catalog['plans'] if plan['id'] == 26)
+        assert premium['price_rub'] == premium['price_stars'] == 1290 and premium['featured']
+        assert any('225 запросов в месяц' in benefit for benefit in premium['benefits'])
         assert client.post('/api/v1/subscriptions/invoice', json={'tier_id': 21, 'price_stars': 1}).status_code == 422
         assert client.post('/api/v1/subscriptions/invoice', json={'tier_id': 21, 'user_id': uid + 1}).status_code == 422
         for body in ({'tier_id': 1}, {'tier_id': 23}, {'tier_id': 29}, {'tier_id': 30}, {'tier_id': 20}, {'tier_id': 20, 'subject': 'anatomy'}):
             assert client.post('/api/v1/subscriptions/invoice', json=body).status_code == 409
-        created = client.post('/api/v1/subscriptions/invoice', json={'tier_id': 21})
+        created = client.post('/api/v1/subscriptions/invoice', json={'tier_id': bundle['id']})
         assert created.status_code == 200, created.text
         args = tb.bot.create_invoice_link.call_args.kwargs
         signed = parse_payload(tb, args['payload'])
         assert signed['user_id'] == uid
-        assert signed['amount'] == tb.SUBSCRIPTION_TIERS[21]['price_stars']
+        assert signed['amount'] == 449 and signed['tier_id'] == bundle['id'] and signed['source'] == 'miniapp'
         assert args['currency'] == 'XTR' and args['provider_token'] == ''
         assert args['prices'][0].amount == signed['amount']
         assert client.get('/api/v1/subscriptions/payments/' + created.json()['payment_id']).json()['status'] == 'processing'
+        created_premium = client.post('/api/v1/subscriptions/invoice', json={'tier_id': premium['id']})
+        assert created_premium.status_code == 200
+        assert created_premium.json()['price_stars'] == tb.bot.create_invoice_link.call_args.kwargs['prices'][0].amount == 1290
         from aiogram.exceptions import TelegramNetworkError
         from aiogram.methods import CreateInvoiceLink
         tb.bot.create_invoice_link.side_effect = TelegramNetworkError(method=CreateInvoiceLink(title='test', description='test', payload='test', currency='XTR', prices=[]), message='synthetic timeout')

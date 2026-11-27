@@ -87,8 +87,10 @@ def purchase_reason(tb, user_id: int, tier_id: int, subject: str | None, *, sett
         new_end = max(current.get('expires') or 0, time.time()) + cfg['duration_days'] * 86400 if renewal else time.time() + cfg['duration_days'] * 86400
     if old_end is None and new_end is not None or old_end is not None and new_end is not None and new_end < old_end:
         return 'Этот тариф сократит уже оплаченный срок'
-    old_subjects = {current['restricted_subject']} if current.get('restricted_subject') else set(SUBJECTS)
-    new_subjects = {requested_subject} if requested_subject else set(SUBJECTS)
+    old_subjects = {current['restricted_subject']} if current.get('restricted_subject') else {
+        name for name in SUBJECTS if tb.access.subscription_grants_first_year_subject(current, name)
+    }
+    new_subjects = {requested_subject} if requested_subject else set(SUBJECTS) if cfg.get('first_year_access', True) else set()
     if cfg.get('anatomy') or cfg.get('scope') == 'all':
         new_subjects.add(tb.access.ANATOMY_TEST_SUBJECT)
     if not old_subjects <= new_subjects:

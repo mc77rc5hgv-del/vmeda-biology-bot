@@ -158,6 +158,7 @@ FIRST_YEAR_END_2027 = _msk_deadline(2027, 8, 1)  # тариф 25 «Весь пе
 LEGACY_PAID_AI_MONTHLY_BONUS = 60
 
 ANATOMY_TEST_TIER_ID = 31
+ANATOMY_HISTOLOGY_TIER_ID = 32
 WINTER_TIER_ID = 24
 ANATOMY_TEST_SUBJECT = "anatomy_tests"
 
@@ -565,15 +566,17 @@ SUBSCRIPTION_TIERS = {
         "ai_limit": 225,
         "subscription_version": 2,
         "future_second_year_sections": True,
-        "badge": "🔥 ЛУЧШИЙ ВЫБОР",
+        "badge": "ЛУЧШИЙ ВЫБОР",
+        "featured": True,
         "menu_number": 7,
         "benefits": [
-            "Полный доступ ко всем предметам — Биология, Физика, Химия, Гистология, Анатомия",
-            "Философия и другие новые разделы 1-2 курса — автоматически, как только появятся в боте",
-            "Все текущие зачёты, контрольные и диагностики по мере их появления в боте",
-            "Скачивание файлов с ответами и готовых шпаргалок для распечатки",
-            "Действует до конца второго курса",
-            "VMedA AI (решение заданий по фото) — 225 запросов в месяц",
+            "Анатомия — все разделы, экзаменационные билеты, теория, практика и тесты с работой над ошибками",
+            "Гистология — теория, тесты, диагностики 1–5 и «Угадай препарат» по перечню каждой диагностики",
+            "Биология, физика и химия — материалы, задачи, билеты и подготовка к зачётам",
+            "Новые разделы второго курса, включая философию, по мере публикации",
+            "Скачивание файлов с ответами и шпаргалок для печати там, где они доступны",
+            "VMedA AI для решения заданий по фото — 225 запросов в месяц",
+            "Доступ до конца 31 августа 2027 года по московскому времени",
         ],
     },
     27: {
@@ -699,6 +702,25 @@ SUBSCRIPTION_TIERS = {
         "menu_number": 0,
         "benefits": ["Все тесты по анатомии, карточки и работа над ошибками на 7 дней"],
     },
+    ANATOMY_HISTOLOGY_TIER_ID: {
+        "title": "Анатомия и гистология — 14 дней",
+        "short": "Анатомия и гистология",
+        "emoji": "🔬",
+        "price_rub": 449,
+        "price_stars": 449,
+        "duration_days": 14,
+        "first_year_access": False,
+        "histology_until_rule": "expiry",
+        "anatomy": True,
+        "subscription_version": 2,
+        "upsell_tier_id": WINTER_TIER_ID,
+        "menu_number": 4,
+        "benefits": [
+            "Полная анатомия — теория, практика, экзаменационные билеты и тесты с работой над ошибками",
+            "Полная гистология — теория, тесты, диагностики 1–5 и «Угадай препарат» по перечню каждой диагностики",
+            "Доступ на 14 дней с момента активации",
+        ],
+    },
 }
 # Витрина/оплата/анонсы: только то, что реально продаётся (без retired и без admin_only).
 ACTIVE_SUBSCRIPTION_TIERS = {
@@ -744,7 +766,8 @@ def cheapest_active_tier(predicate=lambda cfg: True) -> dict:
 def cheapest_gated3_tier() -> dict:
     """Самый дешёвый тариф, открывающий все три предмета Био/Физ/Хим (не тариф с выбором
     одного предмета)."""
-    return cheapest_active_tier(lambda cfg: not cfg.get("subject_choice_required") and not cfg.get("fixed_subject"))
+    return cheapest_active_tier(lambda cfg: cfg.get("first_year_access", True)
+                                and not cfg.get("subject_choice_required") and not cfg.get("fixed_subject"))
 
 def cheapest_histology_tier() -> dict:
     return cheapest_active_tier(lambda cfg: cfg.get("histology_until_rule") is not None)
@@ -765,6 +788,10 @@ def has_active_subscription(user_id: int) -> bool:
     expires = sub.get("expires")
     return expires is None or time.time() < expires
 
+def subscription_grants_first_year_subject(sub: dict, subject: str) -> bool:
+    return sub.get("first_year_access", True) and sub.get("restricted_subject") in (None, subject)
+
+
 def has_subject_access(user_id: int, subject: str) -> bool:
     """Доступ к конкретному гейтящемуся предмету (biology/physics/chemistry) — в отличие от
     has_free_access() учитывает, что тариф «3 дня, 1 предмет» открывает только ОДИН предмет."""
@@ -779,8 +806,7 @@ def has_subject_access(user_id: int, subject: str) -> bool:
     sub = get_subscription(user_id)
     if not sub or not has_active_subscription(user_id):
         return False
-    restricted = sub.get("restricted_subject")
-    return restricted is None or restricted == subject
+    return subscription_grants_first_year_subject(sub, subject)
 
 def _sub_has_histology(sub: dict) -> bool:
     if "histology_access" in sub:
@@ -852,6 +878,7 @@ def grant_subscription(user_id: int, tier: int, method: str, price: int, subject
     tb.stats["subscriptions"][str(user_id)] = {
         "tier": tier,
         "restricted_subject": subject if cfg.get("subject_choice_required") else cfg.get("fixed_subject"),
+        "first_year_access": cfg.get("first_year_access", True),
         "expires": expires,
         "histology_access": histology_access,
         "histology_until": histology_until,
@@ -941,7 +968,9 @@ def has_free_access(user_id: int) -> bool:
         or get_referral_count_this_month(user_id) >= REFERRAL_FULL_ACCESS_THRESHOLD
         or user_id in tb.stats["manual_access_granted"]
         or has_temp_access(user_id)
-        or (has_active_subscription(user_id) and get_subscription(user_id).get("restricted_subject") != ANATOMY_TEST_SUBJECT)
+        or (has_active_subscription(user_id)
+            and (sub := get_subscription(user_id)).get("first_year_access", True)
+            and sub.get("restricted_subject") != ANATOMY_TEST_SUBJECT)
     )
 
 def get_exhausted_users() -> list:
@@ -1065,7 +1094,6 @@ def chemistry_tickets_access_ok(user_id: int) -> bool:
     sub = get_subscription(user_id)
     if sub and has_active_subscription(user_id):
         cfg = SUBSCRIPTION_TIERS.get(sub.get("tier"), {})
-        restricted = sub.get("restricted_subject")
-        if cfg.get("price_rub", 0) >= 89 and (restricted is None or restricted == "chemistry"):
+        if cfg.get("price_rub", 0) >= 89 and subscription_grants_first_year_subject(sub, "chemistry"):
             return True
     return False
