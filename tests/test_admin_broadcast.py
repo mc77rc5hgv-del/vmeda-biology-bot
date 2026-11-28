@@ -254,7 +254,11 @@ async def main():
     assert '<b>' in offers.text and '<i>' in offers.text
     assert all(f'{price} ₽' in offers.text for price in (149, 449, 599, 1290))
     assert mocked.send_message.await_args.args == (ADMIN, offers.text)
-    for price, tier_id, row in zip((149, 449, 599, 1290), study.OFFER_TIER_IDS, offers.reply_markup.inline_keyboard, strict=True):
+    *offer_rows, miniapp_row = offers.reply_markup.inline_keyboard
+    assert miniapp_row == tb.get_miniapp_keyboard().inline_keyboard[0]
+    assert miniapp_row[0].web_app.url == tb.MINIAPP_URL
+    assert not miniapp_row[0].url and not miniapp_row[0].callback_data
+    for price, tier_id, row in zip((149, 449, 599, 1290), study.OFFER_TIER_IDS, offer_rows, strict=True):
         button = row[0]
         assert str(price) in button.text and button.callback_data == f'announce_offer:{tier_id}'
         checkout = SimpleNamespace(from_user=SimpleNamespace(id=outsider), data=button.callback_data,
@@ -273,7 +277,14 @@ async def main():
     trial = b.drafts[ADMIN]
     assert '<b>' in trial.text and '<i>' in trial.text and '12 часов' in trial.text
     assert mocked.send_message.await_args.args == (ADMIN, trial.text)
-    trial_buttons = [row[0].callback_data for row in trial.reply_markup.inline_keyboard]
+    *trial_rows, trial_miniapp_row = trial.reply_markup.inline_keyboard
+    assert trial_miniapp_row == miniapp_row
+    assert mocked.send_message.await_args.kwargs['reply_markup'].inline_keyboard[-1] == miniapp_row
+    for announcement in (offers, trial):
+        await b.deliver(mocked, outsider, announcement)
+        assert mocked.send_message.await_args.args == (outsider, announcement.text)
+        assert mocked.send_message.await_args.kwargs['reply_markup'].inline_keyboard[-1] == miniapp_row
+    trial_buttons = [row[0].callback_data for row in trial_rows]
     assert trial_buttons == ['study_trial:histology', 'study_sample:anatomy_tests:0', 'study_sample:histology:0']
     trial_chat = SimpleNamespace(answer_photo=AsyncMock(), delete=AsyncMock())
     trial_cb = SimpleNamespace(from_user=SimpleNamespace(id=outsider), message=trial_chat, answer=AsyncMock())
