@@ -4221,34 +4221,32 @@ def _bot_subscription_purchase_reason(user_id, tier_id, subject=None, *, settlin
     return None
 
 
-@dp.callback_query(F.data.startswith("sub_tier:"))
+@dp.callback_query(F.data.regexp(r"^(sub_tier|announce_offer):[0-9]+$"))
 async def cb_sub_tier(callback: CallbackQuery):
-    tier_id = int(callback.data.split(":")[1])
-    if tier_id not in SUBSCRIPTION_TIERS:
+    source, raw_tier = callback.data.split(":")
+    tier_id = int(raw_tier)
+    from_announcement = source == "announce_offer"
+    if tier_id not in SUBSCRIPTION_TIERS or (from_announcement and tier_id not in SECOND_YEAR_WINTER_TIER_IDS):
         await callback.answer("Тариф не найден", show_alert=True)
         return
     await callback.answer()
+
+    async def show(text, keyboard):
+        if from_announcement:
+            await callback.message.answer(text, parse_mode="HTML", reply_markup=keyboard)
+        else:
+            await safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=keyboard)
+
     if tier_id not in dict(sorted_active_tiers()):
-        await safe_edit_text(
-            callback.message,
-            get_tier_retired_text(tier_id),
-            parse_mode="HTML",
-            reply_markup=get_tier_retired_keyboard()
-        )
+        await show(get_tier_retired_text(tier_id), get_tier_retired_keyboard())
         return
     user_id = callback.from_user.id
     cfg = SUBSCRIPTION_TIERS[tier_id]
     reason = None if cfg.get('subject_choice_required') else _bot_subscription_purchase_reason(user_id, tier_id)
     if reason:
-        await safe_edit_text(callback.message, f"{cfg['emoji']} <b>{cfg['title']}</b>\n\n{reason}.",
-                             parse_mode="HTML", reply_markup=get_subscription_course_picker_keyboard())
+        await show(f"{cfg['emoji']} <b>{cfg['title']}</b>\n\n{reason}.", get_subscription_course_picker_keyboard())
         return
-    await safe_edit_text(
-        callback.message,
-        get_sub_tier_text(tier_id, user_id),
-        parse_mode="HTML",
-        reply_markup=get_sub_tier_keyboard(tier_id, user_id)
-    )
+    await show(get_sub_tier_text(tier_id, user_id), get_sub_tier_keyboard(tier_id, user_id))
 
 @dp.callback_query(F.data.startswith("sub_subject:"))
 async def cb_sub_subject(callback: CallbackQuery):

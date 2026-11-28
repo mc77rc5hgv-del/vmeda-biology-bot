@@ -4,9 +4,10 @@ import re
 import secrets
 from dataclasses import dataclass, replace
 from html import unescape
+from urllib.parse import urlsplit
 
 from aiogram.exceptions import TelegramRetryAfter
-from aiogram.types import InlineKeyboardMarkup, InputMediaPhoto, InputMediaVideo
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, InputMediaVideo
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 
@@ -24,6 +25,7 @@ albums: dict[tuple, dict] = {}
 jobs: set = set()
 busy = False
 ALBUM_DELAY = 1.5
+BUTTON_LIMIT = 12
 
 
 def without_command(text):
@@ -32,6 +34,38 @@ def without_command(text):
 
 def visible_length(text):
     return len(unescape(re.sub(r'<[^>]*>', '', text)).encode('utf-16-le')) // 2
+
+
+def parse_buttons(raw):
+    from services.study_announcements import QUICK_ACTIONS
+
+    rows = []
+    if raw.strip().casefold() == 'без кнопок':
+        return None
+    for line in raw.splitlines():
+        if not line.strip():
+            continue
+        label, _, target = line.partition('|')
+        label, target = label.strip(), target.strip()
+        if not label or not target or len(label) > 64:
+            raise ValueError('Укажи каждую кнопку в формате «Название | Ссылка или действие». Название — до 64 символов.')
+        action = QUICK_ACTIONS.get(target.casefold())
+        if action:
+            button = InlineKeyboardButton(text=label, callback_data=action)
+        else:
+            try:
+                url = urlsplit(target)
+                valid = url.scheme == 'https' and url.hostname and not url.username and not url.password
+                _ = url.port
+            except ValueError:
+                valid = False
+            if not valid or any(char.isspace() or ord(char) < 32 for char in target) or '\\' in target:
+                raise ValueError('Укажи полную HTTPS-ссылку или одно из действий VMEDA из подсказки.')
+            button = InlineKeyboardButton(text=label, url=target)
+        rows.append([button])
+    if not 1 <= len(rows) <= BUTTON_LIMIT:
+        raise ValueError(f'Добавь от 1 до {BUTTON_LIMIT} кнопок или напиши «без кнопок».')
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def build_draft(messages, override=None):
@@ -71,25 +105,25 @@ async def _preset_request(method, *args, **kwargs):
 
 
 async def deliver(bot, chat_id, draft):
-    if draft.reply_markup is not None:
-        messages = []
-        if len(draft.media) > 1:
-            messages = await _preset_request(bot.send_media_group, chat_id, media=draft.media)
-        elif draft.media:
-            item = draft.media[0]
-            method = bot.send_photo if isinstance(item, InputMediaPhoto) else bot.send_video
-            messages = [await _preset_request(method, chat_id, item.media, caption=item.caption, parse_mode='HTML')]
-        await _preset_request(bot.send_message, chat_id, draft.text, parse_mode='HTML',
-                              reply_markup=draft.reply_markup, disable_web_page_preview=True)
-        return messages
+    separate_text = bool(draft.media and (draft.text or (len(draft.media) > 1 and draft.reply_markup)))
+    request = _preset_request if separate_text else _direct_request
+    messages = []
     if len(draft.media) > 1:
-        return await bot.send_media_group(chat_id, media=draft.media)
-    if draft.media:
+        messages = await request(bot.send_media_group, chat_id, media=draft.media)
+    elif draft.media:
         item = draft.media[0]
-        if isinstance(item, InputMediaPhoto):
-            return await bot.send_photo(chat_id, item.media, caption=item.caption, parse_mode='HTML')
-        return await bot.send_video(chat_id, item.media, caption=item.caption, parse_mode='HTML')
-    return await bot.send_message(chat_id, draft.text, parse_mode='HTML')
+        send_media = bot.send_photo if isinstance(item, InputMediaPhoto) else bot.send_video
+        kwargs = {'reply_markup': draft.reply_markup} if draft.reply_markup and not separate_text else {}
+        messages = [await request(send_media, chat_id, item.media, caption=item.caption, parse_mode='HTML', **kwargs)]
+    if separate_text or not draft.media:
+        kwargs = {'reply_markup': draft.reply_markup, 'disable_web_page_preview': True} if draft.reply_markup else {}
+        method = _preset_request if separate_text or draft.reply_markup else _direct_request
+        await method(bot.send_message, chat_id, draft.text or 'Открыть ссылки', parse_mode='HTML', **kwargs)
+    return messages
+
+
+async def _direct_request(method, *args, **kwargs):
+    return await method(*args, **kwargs)
 
 
 async def preview(tb, message, messages, override=None):
@@ -98,25 +132,10 @@ async def preview(tb, message, messages, override=None):
         return
     try:
         draft = build_draft(messages, override)
-        await deliver(tb.bot, message.chat.id, draft)
     except ValueError as exc:
         await message.answer(str(exc))
         return
-    except Exception:
-        tb.logger.exception('Broadcast preview failed')
-        await message.answer('Не удалось показать предпросмотр. Рассылка не отправлена; попробуй ещё раз.')
-        return
-    drafts[admin_id] = draft
-    tb.ADMIN_PENDING.pop(admin_id, None)
-    keyboard = InlineKeyboardBuilder()
-    keyboard.button(text='✅ Отправить всем', callback_data='admin_broadcast_go:' + draft.token)
-    keyboard.button(text='❌ Отмена', callback_data='admin_broadcast_cancel:' + draft.token)
-    keyboard.adjust(1)
-    await message.answer(
-        f'👆 Предпросмотр рассылки. Получателей: {len(tb.stats["total_users"])}.\n'
-        'Фото и видео отправятся с подписью; несколько файлов — одним альбомом.',
-        reply_markup=keyboard.as_markup(),
-    )
+    await preview_preset(tb, message, draft, admin_id)
 
 
 def can_confirm(tb, admin_id, draft=None):
@@ -157,14 +176,18 @@ async def preview_preset(tb, message, draft, admin_id):
         builder = InlineKeyboardBuilder()
         builder.button(text='✅ Отправить всем', callback_data='admin_broadcast_go:' + draft.token)
         builder.button(text='Редактировать текст', callback_data=f'admin_broadcast_edit:text:{draft.token}')
+        if tb.is_admin(admin_id):
+            builder.button(text='Настроить кнопки' if draft.reply_markup else 'Добавить кнопки',
+                           callback_data=f'admin_broadcast_edit:buttons:{draft.token}')
         builder.button(text='Добавить фото или видео', callback_data=f'admin_broadcast_edit:media:{draft.token}')
         if draft.media:
             builder.button(text='Удалить вложения', callback_data=f'admin_broadcast_edit:clear:{draft.token}')
         builder.button(text='❌ Отмена', callback_data='admin_broadcast_cancel:' + draft.token)
         builder.adjust(1)
+        button_count = sum(map(len, draft.reply_markup.inline_keyboard)) if draft.reply_markup else 0
         await message.answer(
             f'Предпросмотр анонса · получателей: {len(tb.stats["total_users"])}\n'
-            f'Вложений: {len(draft.media)} из 10. Кнопки анонса сохраняются при редактировании.',
+            f'Кнопок: {button_count} · Вложений: {len(draft.media)} из 10',
             reply_markup=builder.as_markup(),
         )
     except Exception:
@@ -184,13 +207,15 @@ async def preview_preset(tb, message, draft, admin_id):
 
 
 async def edit(tb, callback):
+    from services.study_announcements import QUICK_ACTIONS
+
     admin_id = callback.from_user.id
     action, _, token = callback.data.removeprefix('admin_broadcast_edit:').partition(':')
     draft = drafts.get(admin_id)
     if not can_confirm(tb, admin_id, draft):
         await callback.answer('Нет доступа', show_alert=True)
         return
-    if (not draft or draft.reply_markup is None or draft.token != token
+    if (not draft or draft.token != token
             or getattr(getattr(callback.message, 'chat', None), 'type', None) != 'private'):
         await callback.answer('Открой актуальный предпросмотр в личном чате с ботом.', show_alert=True)
         return
@@ -198,13 +223,19 @@ async def edit(tb, callback):
         await callback.answer('Дождись предпросмотра.', show_alert=True)
         return
     if action in ('back', 'clear'):
+        if action == 'clear' and not draft.text.strip():
+            await callback.answer('Сначала добавь текст, чтобы анонс не оказался пустым.', show_alert=True)
+            return
         previous = tb.ADMIN_PENDING.get(admin_id)
         updated = replace(draft, token=secrets.token_hex(8), media=[] if action == 'clear' else draft.media)
         await callback.answer()
         if drafts.get(admin_id) is draft and tb.ADMIN_PENDING.get(admin_id) is previous:
             await preview_preset(tb, callback.message, updated, admin_id)
         return
-    if action not in ('text', 'media'):
+    if action == 'buttons' and not tb.is_admin(admin_id):
+        await callback.answer('Нет доступа', show_alert=True)
+        return
+    if action not in ('text', 'media', 'buttons'):
         await callback.answer()
         return
     pending = {'action': 'broadcast_edit', 'mode': action, 'draft': draft}
@@ -213,9 +244,20 @@ async def edit(tb, callback):
     builder.button(text='Назад к предпросмотру', callback_data=f'admin_broadcast_edit:back:{token}')
     await callback.answer()
     if tb.ADMIN_PENDING.get(admin_id) is pending:
-        prompt = ('Пришли новый текст одним сообщением. Telegram-форматирование сохранится.'
-                  if action == 'text' else 'Пришли фото, видео или альбом. Всего можно прикрепить до 10 файлов.')
-        await callback.message.answer(prompt, reply_markup=builder.as_markup())
+        prompts = {
+            'text': 'Пришли новый текст одним сообщением. Telegram-форматирование сохранится.',
+            'media': 'Пришли фото, видео или альбом. Всего можно прикрепить до 10 файлов.',
+            'buttons': (
+                f'<b>Кнопки анонса</b>\n\nПришли до {BUTTON_LIMIT} строк в одном сообщении. '
+                'Новый список заменит текущий. Кнопки появятся в порядке строк.\n\n'
+                '<code>Оплатить тесты | тесты</code>\n'
+                '<code>Открыть материалы | https://example.com</code>\n\n'
+                'Действия VMEDA\n'
+                + ', '.join(f'<code>{key}</code>' for key in QUICK_ACTIONS)
+                + '\n\n<code>без кнопок</code> удалит все кнопки.'
+            ),
+        }
+        await callback.message.answer(prompts[action], parse_mode='HTML', reply_markup=builder.as_markup())
 
 
 async def apply_edit(tb, message, messages, pending):
@@ -229,7 +271,22 @@ async def apply_edit(tb, message, messages, pending):
         if not updated_text or visible_length(updated_text) > 4096:
             await message.answer('Пришли текст одним сообщением, до 4096 символов.')
             return
-        updated = replace(draft, token=secrets.token_hex(8), text=updated_text)
+        media = draft.media
+        if media and not draft.text:
+            caption = updated_text if visible_length(updated_text) <= 1024 else None
+            media = [media[0].model_copy(update={'caption': caption}), *media[1:]]
+            if caption:
+                updated_text = ''
+        updated = replace(draft, token=secrets.token_hex(8), text=updated_text, media=media)
+    elif pending['mode'] == 'buttons':
+        if not tb.is_admin(admin_id):
+            return
+        try:
+            markup = parse_buttons(message.text or '')
+        except ValueError as exc:
+            await message.answer(str(exc))
+            return
+        updated = replace(draft, token=secrets.token_hex(8), reply_markup=markup)
     else:
         if not all(item.photo or item.video for item in messages):
             await message.answer('Пришли фото, видео или альбом.')
