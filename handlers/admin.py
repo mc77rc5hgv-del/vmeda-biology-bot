@@ -637,10 +637,19 @@ async def cb_admin_announce_study(callback: CallbackQuery):
     from services.admin_broadcast import preview_text_preset
 
     if callback.data == "admin_announce_study_offers":
-        await preview_text_preset(tb, callback, study_announcements.subscription_text,
-                                  study_announcements.subscription_keyboard)
+        text = study_announcements.subscription_text
+        keyboard = study_announcements.subscription_keyboard
     else:
-        await preview_text_preset(tb, callback, study_announcements.trial_text, study_announcements.trial_keyboard)
+        text = study_announcements.trial_text
+        keyboard = study_announcements.trial_keyboard
+
+    def keyboard_with_miniapp():
+        markup = keyboard()
+        if tb.MINIAPP_URL:
+            markup.inline_keyboard.extend(tb.get_miniapp_keyboard().inline_keyboard)
+        return markup
+
+    await preview_text_preset(tb, callback, text, keyboard_with_miniapp)
 
 
 @router.callback_query(F.data == "admin_announce_exam_updates")
