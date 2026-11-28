@@ -9,6 +9,7 @@ from aiogram.exceptions import TelegramRetryAfter
 from aiogram.methods import SendPhoto
 from aiogram.types import Message
 from services import admin_broadcast as b
+from services import study_announcements as study
 
 ADMIN = next(iter(tb.ADMIN_IDS))
 
@@ -242,6 +243,85 @@ async def main():
             assert done_preset.await_count == 1
     b.busy = False
     b.drafts.clear()
+
+    # The two new templates preview the messages and buttons only to the admin.
+    assert [row[0].callback_data for row in menu.inline_keyboard[:2]] == [
+        'admin_announce_study_offers', 'admin_announce_study_trial',
+    ]
+    exam_cb.data = 'admin_announce_study_offers'
+    await tb.admin_handlers.cb_admin_announce_study(exam_cb)
+    offers = b.drafts[ADMIN]
+    assert '<b>' in offers.text and '<i>' in offers.text
+    assert all(f'{price} ₽' in offers.text for price in (149, 449, 599, 1290))
+    assert mocked.send_message.await_args.args == (ADMIN, offers.text)
+    for price, tier_id, row in zip((149, 449, 599, 1290), study.OFFER_TIER_IDS, offers.reply_markup.inline_keyboard, strict=True):
+        button = row[0]
+        assert str(price) in button.text and button.callback_data == f'announce_offer:{tier_id}'
+        checkout = SimpleNamespace(from_user=SimpleNamespace(id=outsider), data=button.callback_data,
+                                   message=exam_preview, answer=AsyncMock())
+        with patch('services.payments.runtime.available', return_value=True), patch.object(tb.time, 'time', return_value=tb.MAR_1_2027_CUTOFF - 7200):
+            await tb.cb_sub_tier(checkout)
+        text, = exam_preview.answer.await_args.args
+        assert tb.SUBSCRIPTION_TIERS[tier_id]['title'] in text
+        payment_buttons = exam_preview.answer.await_args.kwargs['reply_markup'].inline_keyboard
+        assert {f'buy_sub_sbp:{tier_id}', f'buy_sub_stars:{tier_id}', f'buy_sub_rubles:{tier_id}'} <= {
+            item.callback_data for payment_row in payment_buttons for item in payment_row
+        }
+
+    exam_cb.data = 'admin_announce_study_trial'
+    await tb.admin_handlers.cb_admin_announce_study(exam_cb)
+    trial = b.drafts[ADMIN]
+    assert '<b>' in trial.text and '<i>' in trial.text and '12 часов' in trial.text
+    assert mocked.send_message.await_args.args == (ADMIN, trial.text)
+    trial_buttons = [row[0].callback_data for row in trial.reply_markup.inline_keyboard]
+    assert trial_buttons == ['study_trial:histology', 'study_sample:anatomy_tests:0', 'study_sample:histology:0']
+    trial_chat = SimpleNamespace(answer_photo=AsyncMock(), delete=AsyncMock())
+    trial_cb = SimpleNamespace(from_user=SimpleNamespace(id=outsider), message=trial_chat, answer=AsyncMock())
+    with patch.object(tb, 'safe_edit_text', AsyncMock()) as sample:
+        trial_cb.data = trial_buttons[1]
+        await tb.cb_study_sample(trial_cb)
+        assert 'Пример 1 из 3' in sample.await_args.args[1]
+    trial_cb.data = trial_buttons[2]
+    await tb.cb_study_sample(trial_cb)
+    assert 'Пример 1 из 1' in trial_chat.answer_photo.await_args.kwargs['caption']
+    assert str(outsider) not in tb.stats['exam_trial_access']
+    trial_cb.data = trial_buttons[0]
+    with patch.object(tb, 'save_stats', Mock()), patch.object(tb, 'cb_histology_menu', AsyncMock()) as content:
+        await tb.cb_study_trial(trial_cb)
+        expires = tb.stats['exam_trial_access'][str(outsider)]
+        await tb.cb_study_trial(trial_cb)
+        assert tb.stats['exam_trial_access'].pop(str(outsider)) == expires
+    assert content.await_count == 2 and abs(expires - tb.time.time() - 12 * 3600) < 5
+    assert not b.jobs and not b.busy and tb.stats == before_preview
+
+    # A custom photo broadcast keeps its caption and uses admin-configured actions and URLs.
+    custom = incoming(30, kind='photo')
+    tb.ADMIN_PENDING[ADMIN] = {'action': 'broadcast_content'}
+    await tb.handle_admin_broadcast_media(custom)
+    draft = b.drafts[ADMIN]
+    exam_cb.data = f'admin_broadcast_edit:text:{draft.token}'
+    await b.edit(tb, exam_cb)
+    await tb.handle_admin_pending_action(incoming(31, text='Новый анонс & фото'))
+    draft = b.drafts[ADMIN]
+    assert not draft.text and draft.media[0].caption == 'Новый анонс &amp; фото'
+    exam_cb.data = f'admin_broadcast_edit:buttons:{draft.token}'
+    await b.edit(tb, exam_cb)
+    for invalid in ('Заголовок без разделителя', 'Админ | admin_panel', 'Ссылка | https://name@vmeda.example'):
+        bad = incoming(32, text=invalid)
+        await tb.handle_admin_pending_action(bad)
+        assert bad.answer.await_count == 1 and b.drafts[ADMIN] is draft
+    await tb.handle_admin_pending_action(incoming(33, text='Оплатить тесты | тесты\nМатериалы | https://t.me/vmeda_helper'))
+    draft = b.drafts[ADMIN]
+    assert [row[0].callback_data for row in draft.reply_markup.inline_keyboard] == ['announce_offer:31', None]
+    assert draft.reply_markup.inline_keyboard[1][0].url == 'https://t.me/vmeda_helper'
+    assert mocked.send_photo.await_args.args == (ADMIN, 'photo-30')
+    assert mocked.send_photo.await_args.kwargs['reply_markup'] == draft.reply_markup
+    exam_cb.data = f'admin_broadcast_edit:buttons:{draft.token}'
+    await b.edit(tb, exam_cb)
+    await tb.handle_admin_pending_action(incoming(34, text='без кнопок'))
+    assert b.drafts[ADMIN].reply_markup is None and 'reply_markup' not in mocked.send_photo.await_args.kwargs
+    assert not b.jobs and tb.stats == before_preview
+
     # Rate limits retry the same recipient; failures never remove users/data.
     tb.stats['total_users']={111,222}; before=copy.deepcopy(tb.stats)
     attempts=[]

@@ -173,7 +173,10 @@ def get_admin_battle_text() -> str:
 def get_admin_announcements_keyboard(back_callback: str = "admin_panel"):
     """Шаблоны анонсов и создание рассылки. Кнопка «Назад» учитывает роль админа."""
     builder = InlineKeyboardBuilder()
-    builder.button(text="📝 Создать рассылку (текст, фото, видео)", callback_data="admin_broadcast_prompt")
+    builder.button(text="💎 Подписки для 2 курса", callback_data="admin_announce_study_offers")
+    builder.button(text=f"🎁 Анатомия и гистология · {tb.EXAM_TRIAL_HOURS} часов", callback_data="admin_announce_study_trial")
+    if back_callback == "admin_panel":
+        builder.button(text="📝 Создать рассылку с кнопками", callback_data="admin_broadcast_prompt")
     builder.button(text="Новое в гистологии и анатомии", callback_data="admin_announce_exam_updates")
     builder.button(text="🪪 Анонс медицинских бейджиков", callback_data="admin_announce_badges_confirm")
     builder.button(text="📣 Оповещение о подписке", callback_data="admin_announce_subscription_confirm")
@@ -623,10 +626,22 @@ async def cb_admin_announcements_menu(callback: CallbackQuery):
     back_callback = "admin_panel" if tb.is_admin(user_id) else "payment_admin_panel"
     await tb.safe_edit_text(
         callback.message,
-        f"📣 <b>Анонсы</b>\n{tb.DIVIDER}\n\nВыбери, что разослать:",
+        f"📣 <b>Анонсы</b>\n{tb.DIVIDER}\n\nВыбери шаблон или создай рассылку. Сначала откроется предпросмотр.",
         parse_mode="HTML",
         reply_markup=get_admin_announcements_keyboard(back_callback)
     )
+
+@router.callback_query(F.data.in_({"admin_announce_study_offers", "admin_announce_study_trial"}))
+async def cb_admin_announce_study(callback: CallbackQuery):
+    from services import study_announcements
+    from services.admin_broadcast import preview_text_preset
+
+    if callback.data == "admin_announce_study_offers":
+        await preview_text_preset(tb, callback, study_announcements.subscription_text,
+                                  study_announcements.subscription_keyboard)
+    else:
+        await preview_text_preset(tb, callback, study_announcements.trial_text, study_announcements.trial_keyboard)
+
 
 @router.callback_query(F.data == "admin_announce_exam_updates")
 async def cb_admin_announce_exam_updates(callback: CallbackQuery):
@@ -2072,8 +2087,9 @@ async def cb_admin_broadcast_prompt(callback: CallbackQuery):
     admin_broadcast.drafts.pop(callback.from_user.id, None)
     tb.ADMIN_PENDING[callback.from_user.id] = {"action": "broadcast_content"}
     await callback.message.answer(
-        "Пришли текст, фото, видео или альбом из фото и видео с подписью. "
-        "Сначала будет предпросмотр, затем кнопка отправки всем.\n"
+        "Пришли текст, фото, видео или альбом с подписью. "
+        "В предпросмотре можно добавить кнопки оплаты, пробного доступа и ссылки.\n"
+        "Для рассылки нажми «Отправить всем».\n"
         "Для отмены открой /admin."
     )
     await callback.answer()
